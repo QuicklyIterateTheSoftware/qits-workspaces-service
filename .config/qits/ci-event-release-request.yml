@@ -23,11 +23,14 @@
 # shows red but does not hold the fold for qits-projects' build gate. Keep it LAST: everything after
 # a failing step is SKIPPED.
 #
-# THE SHA IMAGE IS GONE. The old build step ended in `docker push
-# $QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-workspaces:$QITS_CI_SHA`, the per-push coordinate cd
-# keyed on; a fold's merged sha is not a coordinate anything could deploy. The image is still BUILT
-# here under a local tag — the gate on the fold — and the CalVer coordinate is
-# ci-event-release.yml's.
+# THE SHA IMAGE IS GONE, AND SO IS THE LOCAL TAG THAT OUTLIVED IT. The old build step ended in
+# `docker push $QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-workspaces:$QITS_CI_SHA`, the per-push
+# coordinate cd keyed on; a fold's merged sha is not a coordinate anything could deploy, so the push
+# went and a local `-t qits-workspaces:<sha>` stood in as the gate's artifact. Under the platform
+# builder there is no local image store to hold a tag either, so the build below declares no output
+# at all: it builds every layer, proves the fold, exports nothing, and leaves the layers in the
+# builder's cache. The CalVer coordinate is ci-event-release.yml's, and that file's matching build
+# is what turns this cache into a fast release.
 #
 # Loop review: this pipeline PUTs a docs bundle and pushes no commit, no tag and no image — nothing
 # the fold is made of changes, so it cannot re-trigger itself. Publish-if-absent: events redeliver
@@ -48,16 +51,47 @@ checkout:
 steps:
   # --- the GATING half: build the fold ------------------------------------------------------------
   # ci-event-build.yml's step, minus the push.
+  #
+  # TWO HALVES IN ONE STEP AND ONLY THE SECOND ONE MOVED. Half one builds the SPA bundle with npm,
+  # here in the step container on qits-net, and needs nothing from any builder; half two is the
+  # image, and it now runs on the platform's own buildkitd rather than on the host daemon's socket.
+  # `build: true` is what declares that: qits-ci hands such a step $QITS_BUILD_REGISTRY and the
+  # run's commissioned credential, qits-containers hands it $BUILDKIT_HOST, and the socket this step
+  # used to hold is not mounted at all any more. qits-buildkit-plan.md in the wrapper is the whole
+  # migration; qits-workspace-daemon's pipeline pair is the reference recipe.
+  #
+  # node-docker-base is still the right image and its name is now half a misnomer: node, npm and git
+  # for half one, buildctl (which every step image ships) for half two, and the docker CLI it
+  # advertises used by nothing below.
+  #
+  # `--network host` IS DELETED AND NOTHING REPLACES IT. It existed so a `RUN` in the builder stage
+  # could reach the platform Maven repository and the Central mirror at addresses published on the
+  # HOST's loopback. A `RUN` executes in the builder's namespace on qits-net now, so what the build
+  # dials it dials by IN-NETWORK address — $QITS_MAVEN_REGISTRY_URL and $QITS_MAVEN_PROXY_URL below,
+  # the two the step plane already carries. The Dockerfile's `FROM` lines keep their committed
+  # edge-vhost spellings: the builder's own registry config rewrites them to the platform aliases
+  # (qits-containers' buildkitd.toml carries the mapping), where the host daemon's registry-mirrors
+  # used to.
   - image: qits/build-images/node-docker-base:latest
-    docker: true
+    build: true
     timeout-seconds: 3600
     script: |
-      # The daemon runs this with `bash -c` and no -e, so without this a failed docker build is
-      # swallowed and the run reports SUCCESS — a green verdict for a fold that does not build is
-      # exactly what a release gate must never be told (the exact shape of the qits-workspaces
-      # IMAGE_MISSING incident, pointed one hop earlier). -u makes an unset registry variable stop
-      # the step too.
+      # The daemon runs this with `bash -c` and no -e, so without this a failed build is swallowed
+      # and the run reports SUCCESS — a green verdict for a fold that does not build is exactly what
+      # a release gate must never be told (the exact shape of the qits-workspaces IMAGE_MISSING
+      # incident, pointed one hop earlier). -u stops the step on an unset injected variable rather
+      # than letting a build-arg be composed out of empty strings.
       set -eu
+
+      # The builder, demanded loudly before either half runs. Unset means a qits-ci/qits-containers
+      # pair too old to inject it; EMPTY means the kill switch (qits.ci.buildkit.enabled=false
+      # spells off as empty-never-absent). Either way this step must fail here, naming the cause,
+      # rather than fall back to a socket it no longer holds — and it must fail BEFORE the npm half
+      # spends minutes producing a bundle nothing will consume. $QITS_BUILD_REGISTRY is demanded
+      # even though nothing is pushed below: it is the pair's other half and an empty one means the
+      # same switch is off.
+      : "${BUILDKIT_HOST:?the platform builder is off or not injected; this recipe builds only through it}"
+      : "${QITS_BUILD_REGISTRY:?}"
 
       # $QITS_CI_BRANCH is release/<id> and $QITS_CI_SHA is the merged sha — the fold is already
       # checked out, so nothing here fetches or switches refs.
@@ -134,28 +168,46 @@ steps:
       cd -
 
       # --- half two: the image ------------------------------------------------------------------
-      # THE CREDENTIAL IS A SECRET MOUNT AND NEVER A BUILD ARG — an arg is recorded in the image
-      # history. The launcher injects the run's commissioned idp client as
-      # $QITS_COMMISSIONED_CLIENT_ID/$QITS_COMMISSIONED_CLIENT_SECRET; these two flags hand that
-      # pair to the mounts on the Dockerfile's mvnw RUN, which is the only place it exists.
-      # Unconditional on purpose: a missing env source is NOT an error — measured on buildx v0.36.1,
-      # `--secret id=x,env=DOES_NOT_EXIST` builds green and the mounted variable is simply unset —
-      # so these lines do nothing at all until a run carries the pair.
+      # THE CREDENTIAL IS A SECRET AND NEVER A BUILD ARG — an arg is recorded in the image history.
+      # The launcher injects the run's commissioned idp client as
+      # $QITS_COMMISSIONED_CLIENT_ID/$QITS_COMMISSIONED_CLIENT_SECRET, and it reaches the
+      # Dockerfile's mvnw RUN in FILE FORM on both sides: written here under umask 077 into /tmp —
+      # outside the clone, so neither file can enter the build context — handed to buildctl as
+      # `src=`, and mounted there as a bare file under /run/secrets. Never the `env=` mount form
+      # either half of that used to use: it couples the recipe to whichever dockerfile frontend the
+      # BUILDER chooses, and under the platform builder that choice is not this file's.
       #
-      # THE TAG IS LOCAL AND NOTHING IS PUSHED. The registry-qualified `:$QITS_CI_SHA` coordinate was
-      # the per-push publication and it is retired with the push path; the CalVer one is
-      # ci-event-release.yml's. `docker: true` stays for the daemon socket the build needs and for
-      # the pull auth the mirror-fronted base images need.
-      ref="qits-workspaces:$QITS_CI_SHA"
-      docker build --network host \
-        --build-arg QITS_MAVEN_REPOSITORY_URL="http://$QITS_REGISTRY/artifacts/maven/maven" \
-        --build-arg QITS_MAVEN_CENTRAL_URL="${QITS_MAVEN_CENTRAL_MIRROR_URL:-}" \
-        --secret id=qits-client-id,env=QITS_COMMISSIONED_CLIENT_ID \
-        --secret id=qits-client-secret,env=QITS_COMMISSIONED_CLIENT_SECRET \
-        -t "$ref" -f docker/Dockerfile .
-      # NO `docker rmi "$ref"`: on a CI host it frees nothing — the layers stay in the builder's
-      # cache either way — while under the containerd image store it drops the last reference to
-      # content a concurrent build of this same Dockerfile may still be resolving.
+      # Unconditional on purpose: a run that commissioned nothing writes two empty files, and
+      # `.qits-maven-settings.xml` reads empty exactly as it reads unset — so these lines do nothing
+      # at all until a run carries the pair. That is why they are `${VAR-}` and not `$VAR`: `set -u`
+      # is above, a deployment with no oidc client sends neither variable, and the step must still
+      # build green — the property the retired `--secret …,env=` flags had for free, since a missing
+      # env source is not an error.
+      umask 077
+      printf '%s' "${QITS_COMMISSIONED_CLIENT_ID-}" > /tmp/qits-client-id
+      printf '%s' "${QITS_COMMISSIONED_CLIENT_SECRET-}" > /tmp/qits-client-secret
+
+      # NOTHING IS PUBLISHED HERE, AND NOW THERE IS NOT EVEN A TAG. The registry-qualified
+      # `:$QITS_CI_SHA` coordinate was the per-push publication and retired with the push path; the
+      # local tag that stood in for it has nowhere to live now, because `push=true` and no local
+      # image store are the two halves of one arrangement. So this build declares no `--output` at
+      # all: buildctl builds every layer, proves the fold, and exports nothing. The layers stay in
+      # the builder's cache, which is what makes ci-event-release.yml's matching build of the
+      # released tree a stack of cache hits. The CalVer coordinate is that file's.
+      #
+      # Both build-args are the IN-NETWORK routes, which is the whole of what `--network host` used
+      # to buy: $QITS_MAVEN_REGISTRY_URL is the platform Maven repository as a container on qits-net
+      # reaches it (it was `http://$QITS_REGISTRY/...`, the host-published name), and
+      # $QITS_MAVEN_PROXY_URL is Maven Central's pull-through by the same reading (it was
+      # $QITS_MAVEN_CENTRAL_MIRROR_URL, an edge vhost on the host loopback). Empty for the mirror —
+      # an older qits-ci, or the mirror plane turned off — deactivates the settings profile and
+      # Central is resolved directly, as it always was.
+      buildctl build --frontend dockerfile.v0 \
+        --local context=. --local dockerfile=docker \
+        --opt build-arg:QITS_MAVEN_REPOSITORY_URL="$QITS_MAVEN_REGISTRY_URL" \
+        --opt build-arg:QITS_MAVEN_CENTRAL_URL="${QITS_MAVEN_PROXY_URL:-}" \
+        --secret id=qits-client-id,src=/tmp/qits-client-id \
+        --secret id=qits-client-secret,src=/tmp/qits-client-secret
 
   # --- the NON-GATING half: verify the stories, and publish what the run observed -----------------
   # ci-event-userflows.yml's step, unchanged but for `gating: false`, which is the whole of what that

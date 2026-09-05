@@ -140,20 +140,24 @@ COPY . .
 # --- the three command overrides, and why the client is NOT built here ---------------------------
 #
 # service/src/main/webui is qits-spa-workspaces, and since it adopted QitsMainLayout it depends on
-# @qits/ui-components. That package exists ONLY on the platform's own npm registry (qits-artifacts).
-# A RUN step in a docker build reaches the public internet — Maven Central, npmjs.org, nodejs.org —
-# and reaches the platform registry by NO address: not the qits-net alias, not
-# registry.dev.localhost:8080, not host.docker.internal. So the install cannot happen here.
+# @qits/ui-components. That package exists ONLY on the platform's own npm registry (qits-artifacts),
+# and the SPA commits an .npmrc pointing at the edge's registry vhost — right for a developer on the
+# deployment host, and an address a build has never had. npm ranks a project .npmrc above ~/.npmrc,
+# and its answer to a registry that never connects is `Exit handler never called!`, its own
+# internal-error text, naming neither the registry nor the address. That is what an install here
+# looks like when it goes wrong; it is not a hint that anything is retryable.
 #
-# It does not merely fail, it fails unreadably. The SPA commits an .npmrc pointing at the edge's
-# registry vhost (right for a developer on the deployment host), npm ranks a project .npmrc above
-# ~/.npmrc, and npm's answer to a registry that never connects is `Exit handler never called!` —
-# its own internal-error text, naming neither the registry nor the address. That is what a build
-# here looks like; it is not a hint that something is retryable.
+# THE ADDRESS HALF OF THAT ARGUMENT CHANGED AND THE ARRANGEMENT DID NOT. It used to read "a RUN
+# reaches the platform registry by NO address" — true while a build ran on the host daemon, and no
+# longer true: under the platform builder a RUN executes on qits-net, where the aliases resolve. The
+# install still does not belong here, for the reasons that did not move — the committed .npmrc, the
+# lockfile's host-published origins that the pipeline rewrites, and a builder stage with no node in
+# it — so the bundle stays something the step container produces and this stage only packages.
 #
-# The bundle is therefore built BEFORE this image, by the pipeline step in
-# .config/qits/ci-post-receive.yml, which runs on qits-net where the registry is reachable, and
-# arrives in the build context as service/src/main/webui/dist/ (see .dockerignore, which stops
+# The bundle is therefore built BEFORE this image, by the first half of the image step in
+# .config/qits/ci-event-release-request.yml and ci-event-release.yml, which runs on qits-net where
+# the registry is reachable, and arrives in the build context as
+# service/src/main/webui/dist/ (see .dockerignore, which stops
 # excluding exactly that path for this reason). `--version` is the null command: it proves the
 # package manager is really there and does nothing else.
 #
@@ -174,6 +178,13 @@ COPY . .
 #
 # One `cp` re-materialises it in the layer that is about to move it. It has to be in THIS `RUN` and
 # not a tidier one of its own — a layer boundary is exactly what it is undoing.
+#
+# --- where the platform's own Maven artifacts come from -------------------------------------------
+# THE DEFAULT IS A HAND BUILD'S, NOT CI's. Both pipelines pass this explicitly, and since the move
+# to the platform builder they pass the registry's IN-NETWORK route ($QITS_MAVEN_REGISTRY_URL): a
+# `RUN` executes in buildkitd's namespace on qits-net, where the edge vhost below does not resolve.
+# The vhost stays the default because a developer's `docker build` on the host is the case it is
+# for.
 ARG QITS_MAVEN_REPOSITORY_URL=http://registry.dev.localhost:8080/artifacts/maven/maven
 ENV QITS_MAVEN_REPOSITORY_URL=$QITS_MAVEN_REPOSITORY_URL
 #
@@ -191,11 +202,19 @@ ENV QITS_MAVEN_CENTRAL_URL=$QITS_MAVEN_CENTRAL_URL
 # is pullable, and a build arg is recorded where anyone who pulls it can read it.
 # `.qits-maven-settings.xml` reads the two variables as the `qits-maven-network` server.
 #
-# Absent secrets leave both variables unset, which is the state every build is in today and the
-# state a host-side `docker build` is in permanently: Maven sends credentials only when a repository
-# answers 401, and the registry does not yet.
-RUN --mount=type=secret,id=qits-client-id,env=QITS_MAVEN_AUTH_USR \
-    --mount=type=secret,id=qits-client-secret,env=QITS_MAVEN_AUTH_PSW \
+# FILE FORM, NOT `env=`, AND THAT IS A CHANGE. The `env=` mount has the frontend put the value
+# straight into the instruction's environment — convenient, and coupled to a dockerfile-frontend
+# version. Under the platform builder the frontend is the BUILDER's to choose rather than this
+# file's, and the bare file mount (`/run/secrets/<id>`, read into the one command's own
+# environment) is the shape every frontend version serves identically. The variables are set on the
+# `./mvnw` invocation alone rather than exported, so their scope is the same one command it was.
+#
+# Absent secrets leave both variables empty, which is the state every build is in today and the
+# state a hand `docker build` is in permanently — and `.qits-maven-settings.xml` reads empty exactly
+# as it reads unset. Maven sends credentials only when a repository answers 401, and the registry
+# does not yet.
+RUN --mount=type=secret,id=qits-client-id \
+    --mount=type=secret,id=qits-client-secret \
     d=service/src/main/webui/dist/qits-spa-workspaces/browser; \
     test -f "$d/index.html" || { \
       echo "No built client SPA at $d." >&2; \
@@ -203,6 +222,8 @@ RUN --mount=type=secret,id=qits-client-id,env=QITS_MAVEN_AUTH_USR \
       echo "in service/src/main/webui first — this stage cannot, see the Quinoa flags above." >&2; \
       exit 1; }; \
     cp -a "$d" "$d.layer" && rm -rf "$d" && mv "$d.layer" "$d" && \
+    QITS_MAVEN_AUTH_USR="$(cat /run/secrets/qits-client-id 2>/dev/null || true)" \
+    QITS_MAVEN_AUTH_PSW="$(cat /run/secrets/qits-client-secret 2>/dev/null || true)" \
     ./mvnw -B -ntp -s .qits-maven-settings.xml -pl service -am package -Dnative -DskipTests \
       -Dqits.maven.repository.url="$QITS_MAVEN_REPOSITORY_URL" \
       -Dquarkus.native.native-image-xmx=4g \
@@ -224,8 +245,9 @@ RUN --mount=type=secret,id=qits-client-id,env=QITS_MAVEN_AUTH_USR \
 # The service module's CycloneDX document, exported so the release step can PUT it to the artifacts
 # store. A stage rather than a layer of the runtime image, and BEFORE the runtime stage on purpose:
 # the last stage is what a plain `docker build` builds, and that must stay the image. The release
-# step reaches this one with `--target sbom --output type=local` using the SAME args and secrets as
-# the image build, so every layer above is a cache hit and the export costs seconds. `makeBom` rides
+# step reaches this one with `--opt target=sbom --output type=local` using the SAME args and secrets
+# as the image build, so every layer above is a cache hit in the same builder and the export costs
+# seconds. `makeBom` rides
 # on the mvnw invocation above rather than a second one, for the same cache reason — one RUN, one
 # layer, one truth.
 FROM scratch AS sbom
