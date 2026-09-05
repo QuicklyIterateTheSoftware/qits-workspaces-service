@@ -146,6 +146,16 @@ the QA pipeline builds that fold, and a green gate stamps the manifests and crea
 `main` is finalized after the deployment. Nothing here writes a default branch — `/branches/merge`
 and `/workspaces/{id}/integrate` refuse it with `RELEASE_REQUIRED`.
 
+**One door a release calls, and it is a workspace-lifecycle door rather than a release one.**
+`POST /workspaces/api/branches/resolution?repositoryId=<id>` (`{qits:admin, qits:system}`), body
+`{branch, target?, commit?, result?}` → `{resolved, workspaceId?}`. A released branch is deleted on
+the git host by a primitive that fires no event, so the workspace standing on it stayed ACTIVE
+forever — holding a container, a volume and a commissioned credential for a branch nobody can fetch.
+This resolves that one workspace as INTEGRATED, tearing the container, the volume and the credential
+down without touching the ref (it is already gone). A branch with no workspace answers
+`resolved:false` — the ordinary case, not an error — and the repository's main workspace is refused
+on both belts. AGENTS.md, "The release door left, and what stayed", has the reasoning.
+
 One behaviour worth knowing before you debug it: **a missing repository and an unreachable
 qits-projects are different answers.** Only a 404 becomes "no such repository" (and then a 404 from
 here). A connection failure or a 5xx throws, so an outage surfaces as a 500 naming the address

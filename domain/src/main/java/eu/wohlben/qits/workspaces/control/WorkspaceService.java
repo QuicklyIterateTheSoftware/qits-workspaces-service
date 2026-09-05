@@ -2338,6 +2338,110 @@ public class WorkspaceService {
   }
 
   /**
+   * What {@link #resolveReleasedBranch} answers: whether a workspace was standing on the released
+   * branch, and the row id of the one that was. {@code resolved:false} with no id is the ordinary
+   * answer — most released branches never carried a workspace — and it is the answer a second call
+   * gets too, which is what makes a best-effort caller free to retry.
+   */
+  public record BranchResolution(boolean resolved, Long workspaceId) {}
+
+  /**
+   * Resolve the workspace standing on a branch a <b>release has just deleted</b> on the git host, as
+   * {@code INTEGRATED}.
+   *
+   * <p><b>Why this door exists.</b> qits-projects' Auto Release deletes each released branch through
+   * a qits-githost primitive that writes the ref in core and fires no event at all, so nothing here
+   * ever learns the branch is gone. The workspace standing on it therefore stays ACTIVE forever,
+   * holding a container, a volume and a commissioned credential for a branch that no longer exists,
+   * until somebody notices and abandons it by hand — measured live on 2026-09-05 on the
+   * storage-creep wrapper workspace. So the release says so, beside the deletion it just made.
+   *
+   * <p><b>This is a workspace-lifecycle door that a release happens to call, and it is deliberately
+   * not a release door.</b> The release flow left this service on 2026-09-03 and stays gone
+   * (AGENTS.md, "The release door left, and what stayed"): nothing here merges, stamps, bumps, tags,
+   * pushes or announces, and no events module comes back for it. What arrives is a fact about a
+   * <em>branch</em> — it is gone, and this version consumed it — and what happens is the resolution
+   * this service already performs whenever a workspace's branch stops existing.
+   *
+   * <p><b>No workspace is the normal answer, not an error.</b> Most released branches carry none, so
+   * an absent one answers {@code resolved:false} and touches nothing. That also makes a second call
+   * after a resolution a no-op, which the caller — best-effort, and free to retry — needs.
+   *
+   * <p><b>The main workspace is refused on both belts.</b> A row whose {@code parent} is null (what
+   * {@link #createMainWorkspace} writes, and nothing else does), and a branch equal to the
+   * repository's default branch, are two independent readings of the same fact: the first is this
+   * service's own record, the second is qits-projects'. Both are checked, because a main branch
+   * renamed between the two would leave exactly one of them right, and the cost of being wrong is
+   * the workspace a whole repository is worked in. Nothing else in this class refuses to discard a
+   * main workspace; that hole is not inherited here.
+   *
+   * <p><b>A dirty or unpushed container is LOGGED and never refused.</b> This is the one place this
+   * service knowingly discards uncommitted work, and it is still the better answer: the branch is
+   * gone, so there is nothing left to push to and no ref the work could be recovered from, while the
+   * alternative is an immortal ACTIVE workspace on a deleted branch holding a container and a
+   * credential nobody will reclaim. The WARN names the workspace and says a release consumed its
+   * branch, so the loss is at least on the record. The <em>unpushed</em> half is not probed
+   * separately for the reason it cannot be: {@link #isFullyPushed} compares the container's head
+   * against the branch's ref on the git host, and that ref is precisely what the release deleted —
+   * it would answer "gone" and be read as "unpushed" every time. The clean probe, which already
+   * treats unknown as dirty, is the whole of it.
+   *
+   * <p>The teardown is {@link #doDiscard}'s with the branch deletion skipped, and it is deliberately
+   * <b>not</b> routed through {@link #cleanupBranch}/{@link #canCleanupBranch}/{@link
+   * #sweepMergedBranches}: those decide whether a branch <em>may</em> be deleted and fail closed on
+   * a ref they cannot resolve. Here the deletion has already happened, by somebody entitled to make
+   * it, so every premise they hold is inverted.
+   *
+   * @param target the release version the branch was consumed by, recorded on the history event
+   * @param commit the released sha, recorded on the same event
+   */
+  @Transactional
+  public BranchResolution resolveReleasedBranch(
+      String repoId, String branch, String target, String commit, String result) {
+    if (branch == null || branch.isBlank()) {
+      throw new BadRequestException("A branch is required to resolve a released branch.");
+    }
+    Optional<Workspace> standing =
+        workspaceRepository.findActiveByRepositoryAndBranch(repoId, branch);
+    if (standing.isEmpty()) {
+      // The registry is not asked at all on this path, and that is deliberate: a release calls this
+      // once per branch it deletes, and the answer for most of them is "nothing here" — which must
+      // not cost a qits-projects round trip, nor fail when qits-projects is away.
+      return new BranchResolution(false, null);
+    }
+    Workspace workspace = standing.get();
+
+    // Belt one: this service's own record of what a main workspace is.
+    if (workspace.parent == null || workspace.parent.isBlank()) {
+      throw new BadRequestException(
+          "Workspace '"
+              + workspace.workspaceId
+              + "' has no parent branch, which is what makes it the repository's main workspace: a"
+              + " release does not resolve it.");
+    }
+    // Belt two: qits-projects' record of the same thing, read independently.
+    RepositoryLookup.RepositoryView repo = repositories.require(repoId);
+    if (branch.equals(defaultMainBranch(repo))) {
+      throw new BadRequestException(
+          "Branch '"
+              + branch
+              + "' is the repository's default branch, so the workspace on it is the main workspace:"
+              + " a release does not resolve it.");
+    }
+
+    if (!isWorkspaceClean(repoId, workspace)) {
+      LOG.warnf(
+          "Resolving workspace %s (row %s, branch '%s') although its container reports uncommitted"
+              + " or unreported work: a release consumed the branch, so there is nothing left to"
+              + " push to.",
+          workspace.workspaceId, workspace.id, branch);
+    }
+
+    doDiscard(repoId, workspace, WorkspaceStatus.INTEGRATED, result, target, commit, false);
+    return new BranchResolution(true, workspace.id);
+  }
+
+  /**
    * Removes a workspace from disk and deletes its branch, then <em>soft-deletes</em> the row: it is
    * marked with its {@code resolution} status ({@code INTEGRATED} for cleanup, {@code ABANDONED}
    * for discard) and kept as a persistent record (with its history events and the commands that ran
@@ -2362,6 +2466,34 @@ public class WorkspaceService {
       String result,
       String target,
       String commit) {
+    doDiscard(repoId, workspace, resolution, result, target, commit, true);
+  }
+
+  /**
+   * The teardown itself, with one thing made optional: whether the branch is <b>deleted</b> as part
+   * of it.
+   *
+   * <p>{@code deleteBranch} is false for exactly one caller — {@link #resolveReleasedBranch}, where
+   * a release has already deleted the ref on the git host — and the flag exists rather than a second
+   * copy of this sequence because the ORDER is the part worth having one of. {@code fireStopping}
+   * before {@code containers.rm} is pinned by an observer (a service settling after its container is
+   * gone reads as a crash to be resurrected), the container goes before its volume (docker refuses
+   * an in-use volume), and the credential goes back beside the {@code rm} rather than on the event
+   * this method fires. A duplicate would be free to drift on every one of them.
+   *
+   * <p>Skipping the deletion is not merely an optimisation. The push would be a wire round trip
+   * whose only possible outcome on an absent ref is the failure the catch below swallows — so the
+   * flag turns a silent no-op into a stated one, and the same reading {@link #ensureContainer}'s
+   * branch-gone abandon already makes one hop earlier.
+   */
+  private void doDiscard(
+      String repoId,
+      Workspace workspace,
+      WorkspaceStatus resolution,
+      String result,
+      String target,
+      String commit,
+      boolean deleteBranch) {
     try {
       String branch = workspace.branch;
 
@@ -2391,7 +2523,7 @@ public class WorkspaceService {
       workspace.commissionedClientId = null;
       decommission(commissioned);
 
-      if (branch != null && !branch.isBlank()) {
+      if (deleteBranch && branch != null && !branch.isBlank()) {
         try {
           mirrors.of(repoId).deleteBranch(branch);
         } catch (GitMirrorException ignored) {

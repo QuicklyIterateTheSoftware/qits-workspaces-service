@@ -201,6 +201,7 @@ ENV QITS_MAVEN_CENTRAL_URL=$QITS_MAVEN_CENTRAL_URL
 # nowhere else — not a layer, not the image history. That is why they are not build args: this image
 # is pullable, and a build arg is recorded where anyone who pulls it can read it.
 # `.qits-maven-settings.xml` reads the two variables as the `qits-maven-network` server.
+# The `RUN` reads the two mounted files itself: docker 26's BuildKit has no `env=` mount option.
 #
 # FILE FORM, NOT `env=`, AND THAT IS A CHANGE. The `env=` mount has the frontend put the value
 # straight into the instruction's environment — convenient, and coupled to a dockerfile-frontend

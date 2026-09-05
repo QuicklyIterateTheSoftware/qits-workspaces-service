@@ -401,7 +401,7 @@ host. A second root-level catch-all added here has to think about all three numb
 
 **A workspace is not a sub-resource of a repository.** This context holds a repository id as a
 string, in another database, with no FK — so collections filter by `?repositoryId=` and an item is
-`{id}` alone. `/branches/{merge,cleanup}` take `?repositoryId=` too: a branch has no id of its own,
+`{id}` alone. `/branches/{merge,cleanup,resolution}` take `?repositoryId=` too: a branch has no id of its own,
 so the repository narrows and the body names the branch. `history/{id}` carries no repository at
 all; it was decoration on the item routes and a real filter only on the collection.
 
@@ -542,6 +542,42 @@ person's door (`@RolesAllowed("qits:admin")` at class level, restated in each bo
 `BranchController`'s comment for the measurement behind the belt-and-braces). `merge` takes an
 arbitrary target and answers with conflicts rather than throwing; `cleanup` removes a branch when
 that loses no work.
+
+**`POST /workspaces/api/branches/resolution?repositoryId=<id>` is the one door a release calls, and
+it is not a release door.** Body `{branch, target?, commit?, result?}`, answering
+`{resolved, workspaceId?}`; `{qits:admin, qits:system}` on `BranchResolutionController`, a class of
+its own — `BranchController`'s class role is a person's, and a class-level `@RolesAllowed` is
+enforced on ArC's internal calls too, so widening that class is the 403 of 2026-09-03 pointed the
+other way. It exists because of an **absence**: qits-projects' Auto Release deletes each released
+branch through a githost primitive that writes the ref in core and fires no event, so the workspace
+standing on that branch stayed ACTIVE forever, holding a container, a volume and a commissioned
+credential for a ref nobody can fetch (measured live 2026-09-05, the storage-creep wrapper
+workspace). What arrives is a fact about a branch; what happens is the resolution this service
+already performs whenever a branch stops existing. `target`/`commit` are the release's version and
+sha carried onto the history event and read as nothing else — nothing here merges, stamps, tags,
+pushes or announces, and the events module does not come back for it.
+
+Four things about it are decided rather than incidental:
+
+- **No workspace is the normal answer**, `resolved:false` and not a 404 — most released branches
+  carry none — which is also what a second call answers, and the caller is best-effort and retries.
+  That path asks qits-projects nothing at all: the common answer must not cost a round trip.
+- **The main workspace is refused on BOTH belts** — `parent == null` on the row, and the branch
+  equalling the repository's default branch — because they are independent readings (ours and
+  qits-projects') and a main branch renamed between them leaves exactly one right. Nothing else here
+  refuses to discard a main workspace; that hole is deliberately not inherited.
+- **`doDiscard` gained a `deleteBranch` flag rather than a copy.** The ref is already gone, so the
+  push would be a round trip whose only outcome is the failure that method's catch swallows — a
+  stated no-op instead of a silent one, the reading `ensureContainer`'s branch-gone abandon already
+  makes. The flag and not a second sequence because the ORDER is the part worth having one of
+  (`fireStopping` before `rm` is pinned by `WorkspaceContainerStoppingRecorder`).
+- **A dirty container is LOGGED, never refused.** This is the one place this service knowingly
+  discards uncommitted work: there is nothing left to push to, and an immortal workspace on a deleted
+  branch is worse. The *unpushed* half is not probed, because it cannot be — `isFullyPushed` compares
+  the container's head against the branch's ref on the git host, which is exactly what the release
+  deleted. It is deliberately **not** routed through `cleanupBranch`/`canCleanupBranch`/
+  `sweepMergedBranches`: those decide whether a branch *may* be deleted and fail closed on a ref they
+  cannot resolve, and here the deletion already happened.
 
 **Every ref this service moves is moved by a push, and that is the point.** The bare origins used to
 be on our own disk, on the volume the git host serves, so a branch could be created, merged or

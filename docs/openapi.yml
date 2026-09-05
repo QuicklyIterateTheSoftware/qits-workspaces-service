@@ -69,6 +69,14 @@ components:
           format: int32
         ranAt:
           $ref: "#/components/schemas/Instant"
+    BranchResolution:
+      type: object
+      properties:
+        resolved:
+          type: boolean
+        workspaceId:
+          type: integer
+          format: int64
     BranchSweepReport:
       type: object
       properties:
@@ -200,6 +208,20 @@ components:
       - ALREADY_INTEGRATED
       - PUSH_REJECTED
       - RELEASE_REQUIRED
+    ResolveReleasedBranchRequest:
+      type: object
+      required:
+      - branch
+      properties:
+        branch:
+          type: string
+          pattern: \S
+        target:
+          type: string
+        commit:
+          type: string
+        result:
+          type: string
     Response:
       type: object
       properties:
@@ -731,6 +753,52 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+  /workspaces/api/branches/resolution:
+    post:
+      parameters:
+      - name: repositoryId
+        in: query
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveReleasedBranchRequest"
+        required: true
+      responses:
+        "200":
+          description: "Resolved, or `resolved:false` when no active workspace stood\
+            \ on the branch — the ordinary case, and what a repeated call answers."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchResolution"
+        "400":
+          description: "A blank branch, or the repository's main workspace — refused\
+            \ on both belts: the row has no parent, or the branch is the repository's\
+            \ default branch."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No such repository.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Resolve Released Branch
+      tags:
+      - Branch Resolution Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
   /workspaces/api/editor/ensure:
     post:
       parameters:
@@ -1648,4 +1716,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.905.5256
+  version: 2026.905.65332
