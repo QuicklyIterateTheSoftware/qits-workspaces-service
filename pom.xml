@@ -44,12 +44,12 @@
     </modules>
 
     <properties>
-        <qits.eventstream.version>2026.904.82646</qits.eventstream.version>
+        <qits.eventstream.version>2026.905.91315</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
-        <qits.db-core.version>2026.904.82648</qits.db-core.version>
-        <qits.arch-rules.version>2026.904.82648</qits.arch-rules.version>
-        <qits.auth-core.version>2026.904.82648</qits.auth-core.version>
-        <qits.containers-client.version>2026.904.210416</qits.containers-client.version>
+        <qits.db-core.version>2026.905.91442</qits.db-core.version>
+        <qits.arch-rules.version>2026.905.91442</qits.arch-rules.version>
+        <qits.auth-core.version>2026.905.91442</qits.auth-core.version>
+        <qits.containers-client.version>2026.905.201040</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
@@ -57,12 +57,12 @@
              beside the steps, OBSERVED rather than narrated. This version is the one that ships
              NetworkTaps.restAssured, which replaced the hand-copied StoryNetworkFilter this repo
              used to keep beside its IT. Nothing in src/main knows any of it exists. -->
-        <qits.userflows.version>2026.904.223009</qits.userflows.version>
+        <qits.userflows.version>2026.905.91808</qits.userflows.version>
         <!-- The recording service mocks that IT boots against (the generic MockService plus
              idp.MockIdp), released out of libs/qits-integrations-quarkus like qits-db-core and
              qits-auth-core above — the same-string policy applies the day this repo consumes a
              newer reactor of it. -->
-        <qits.service-mock.version>2026.904.82648</qits.service-mock.version>
+        <qits.service-mock.version>2026.905.91442</qits.service-mock.version>
         <qits.maven.repository.url>http://registry.dev.localhost:8080/artifacts/maven/maven</qits.maven.repository.url>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
