@@ -46,9 +46,9 @@
     <properties>
         <qits.eventstream.version>2026.906.25410</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
-        <qits.db-core.version>2026.905.91442</qits.db-core.version>
-        <qits.arch-rules.version>2026.905.91442</qits.arch-rules.version>
-        <qits.auth-core.version>2026.905.91442</qits.auth-core.version>
+        <qits.db-core.version>2026.906.171046</qits.db-core.version>
+        <qits.arch-rules.version>2026.906.171046</qits.arch-rules.version>
+        <qits.auth-core.version>2026.906.171046</qits.auth-core.version>
         <qits.containers-client.version>2026.906.23135</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
@@ -62,7 +62,7 @@
              idp.MockIdp), released out of libs/qits-integrations-quarkus like qits-db-core and
              qits-auth-core above — the same-string policy applies the day this repo consumes a
              newer reactor of it. -->
-        <qits.service-mock.version>2026.905.91442</qits.service-mock.version>
+        <qits.service-mock.version>2026.906.171046</qits.service-mock.version>
         <qits.maven.repository.url>http://registry.dev.localhost:8080/artifacts/maven/maven</qits.maven.repository.url>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
