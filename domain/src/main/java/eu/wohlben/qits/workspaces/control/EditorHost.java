@@ -18,6 +18,26 @@ import java.util.regex.Pattern;
  * state. Splitting them is what makes the parsing testable without a database and the resolution
  * testable without a header.
  *
+ * <h2>One label is read, and the environment label is deliberately not it</h2>
+ *
+ * <p><b>Position 1 is read; position 2 is not.</b> The name carries an environment label — that is
+ * what makes the editor a four-label host and what the edge matches on to pick <em>this</em>
+ * environment's processes — and reading it again here would be a second, independent routing
+ * decision made by the endpoint of the first. The request is already in this environment's
+ * qits-workspaces: there is no other environment it could have arrived at, and nothing this service
+ * could do with the answer except disagree with the edge. Worse, it is a header a client may write
+ * (see below), so an environment read off it would be a claim rather than a fact, and a claim that
+ * matched would authorise nothing while a claim that did not would 404 a working editor. One
+ * routing decision, made once, at the edge.
+ *
+ * <p><b>The minimum stays THREE labels, and it is a floor rather than a shape.</b> Four is what a
+ * deployed platform serves, but {@code editor.qits.localhost} is what a local one does, and during
+ * the edge's fallthrough removal the three-label short form is still in flight. A parser that
+ * demanded four would refuse both — so the check asks only that there is a project label with
+ * <em>something</em> behind it for an environment and a domain to be, and lets the edge decide what
+ * it is willing to route. Loosening a floor here would cost nothing anyway: a name that reaches this
+ * process reached it because the edge routed it.
+ *
  * <h2>What the header may and may not be trusted for</h2>
  *
  * <p>{@code X-Forwarded-Host} is written by the edge from the client's own authority, and it is
@@ -81,11 +101,17 @@ public final class EditorHost {
       name = name.substring(0, name.length() - 1);
     }
     String[] labels = name.split("\\.", -1);
-    // Three labels minimum: the app, the project, and something for the environment and domain to
-    // be. `editor.qits` names no project's editor — it names a host with nowhere to be served.
+    // Three labels MINIMUM, and it stays three: the app, the project, and something for the
+    // environment and domain to be. `editor.qits` names no project's editor — it names a host with
+    // nowhere to be served. A deployed platform serves four (`editor.qits.dev.wohlben.dev`), but
+    // `editor.qits.localhost` is a real local address and the three-label form is still routable
+    // while the edge's default-environment fallthrough is being removed, so the floor admits both.
     if (labels.length < 3 || !APP_LABEL.equals(labels[0])) {
       return Optional.empty();
     }
+    // Position 1 and nothing else. The environment label at position 2 is not read here: the edge
+    // routed this request to this environment's process already, and reading it again would be the
+    // same decision made twice, off a header a client may have written. See the class javadoc.
     String label = labels[1];
     return PROJECT_LABEL.matcher(label).matches() ? Optional.of(label) : Optional.empty();
   }

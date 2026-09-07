@@ -23,6 +23,35 @@ class EditorHostTest {
   }
 
   @Test
+  void aFourLabelEditorHostNamesItsProjectAtPositionOne() {
+    // The shape a deployed platform serves once the edge's default-environment fallthrough is gone:
+    // `editor.<project>.<env>.<domain>`. The env label at position 2 is present and is deliberately
+    // not read — the edge routed this request to this environment already, and this parser's answer
+    // is the same whether the name says `dev` or says nothing.
+    assertEquals(Optional.of("qits"), EditorHost.projectLabel("editor.qits.dev.wohlben.dev"));
+    assertEquals(Optional.of("qits"), EditorHost.projectLabel("editor.qits.prod.wohlben.dev"));
+  }
+
+  @Test
+  void aPortIsToleratedOnAFourLabelHostToo() {
+    // A four-label name is where a port suffix actually shows up: a local platform serves the edge
+    // on 8080, so this is the address a browser sends verbatim.
+    assertEquals(
+        Optional.of("qits"), EditorHost.projectLabel("editor.qits.dev.wohlben.dev:8080"));
+    assertEquals(Optional.of("qits"), EditorHost.projectLabel("Editor.QITS.Dev.Localhost.:8080"));
+  }
+
+  @Test
+  void theThreeLabelShortFormStillParses() {
+    // Two reasons the minimum stays three rather than moving to four. `editor.qits.localhost` is a
+    // real local address, and the short `editor.<project>.<domain>` form is still in flight while
+    // the edge's fallthrough is removed — a parser that demanded four would refuse both, and the
+    // edge is what decides which names it is willing to route here.
+    assertEquals(Optional.of("qits"), EditorHost.projectLabel("editor.qits.localhost"));
+    assertEquals(Optional.of("qits"), EditorHost.projectLabel("editor.qits.wohlben.dev"));
+  }
+
+  @Test
   void theFirstEntryWins() {
     // X-Forwarded-Host is a LIST, and only the client-facing hop's value describes the name a
     // browser asked for. A second hop appending its own must not repoint the lookup.

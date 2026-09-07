@@ -885,6 +885,13 @@ be a second way of saying the same thing.
 platform rewrites no paths anywhere — so an editor is a whole host, `editor.<project>.<env>.<domain>`,
 aliased at the edge onto this service. The project label arrives in `X-Forwarded-Host`.
 
+**One label out of that name is read: position 1.** The environment label at position 2 is the
+edge's, and reading it here would be the same routing decision made twice — the request is already
+in this environment's qits-workspaces and there is nothing to do with a second opinion but disagree.
+The parser's floor is **three** labels and not four, because `editor.qits.localhost` is a real local
+address and the three-label short form is still routable until the edge's default-environment
+fallthrough removal ships; see "What the edge does with the editor's vhost" below.
+
 `EditorHost` turns the **first entry** of that header into a label and stops; `EditorProxyTargets`
 turns a label into a workspace row and nothing else. **Nothing about the request ever selects a host
 or a port** — `DaemonProxyTargets`' posture verbatim, and for its reason. The label is validated
@@ -1083,7 +1090,7 @@ it are deliberate:
 `ContainerRuntime.touch` is best-effort and never throws, for the reason `stop` and `rm` are: a
 missed keepalive costs at worst a sweep, and a swept container is started back up in place.
 
-### What the edge does with the editor's vhost (read 2026-08-31, not run)
+### What the edge does with the editor's vhost (read 2026-08-31, host tier re-read 2026-09-07; not run)
 
 A `qits.edge.apps` entry receives **full browser-session treatment**, which is what the editor needs
 and what registry/mirror vhosts deliberately do not get. `EdgeRouter.handle:295` sends every service
@@ -1100,13 +1107,29 @@ refused into the login redirect rather than a 401 (`refuseService:521-531`), and
 same gate and the same `proxy`, so a websocket carries the identity too (`:598` runs before the
 branch at `:605`).
 
-One thing to check when the alias is written: the edge matches `$app.$env.$domain` at positions 0 and
-1 (`HostEnvironments.route:199-217`), so `editor.<slug>.<env>.<domain>` falls through to the
-`$app.$domain` reading and lands on the `editor` app in the **default** environment. That is the
-intended shape — one upstream for every project, told apart by the forwarded host — but it means the
-environment label is not read out of the name, and `X-Forwarded-Host` is `set`-if-absent at the edge
-(`EdgeHeaders.applyForwarded:193-200`), so a client-supplied value wins. Both are why the resolver
-treats the header as caller-shaped input that selects a row and never an address.
+**The editor vhost is FOUR labels, and the edge reads the environment out of position 2.** The alias
+is `editor.<slug>.<env>.<domain>`: the edge matches `$app.$env.$domain` at positions 0 and 1
+(`HostEnvironments.route`), so `editor` is the app and the label behind it is the environment whose
+processes the request is routed to. One upstream per environment, and every project on it told apart
+by the forwarded host.
+
+**The short `editor.<slug>.<domain>` form is on its way out.** It never matched that reading; it
+reached an editor by falling through to the `$app.$domain` form, which lands on the `editor` app in
+the **default** environment. That fallthrough is being removed at the edge, and when it ships the
+three-label name 404s — so an alias, a bookmark or a client that still spells it has to move to the
+four-label one. The client side moved with it: `/main-navigation` gained a top-level `projectOrigin`,
+the environment's origin with the env label **always** present even where the environment is served
+from the bare apex, and the workspaces SPA composes the hand-off against that rather than deciding an
+env label for itself (`editor-origin.ts` carries the bug history).
+
+**Nothing on this side reads that label, deliberately.** `EditorHost` takes position 1 and stops —
+the edge already decided which environment's process this is, so reading it again would be one
+routing decision made twice, by the endpoint of the first. It is also a header a client may write:
+`X-Forwarded-Host` is `set`-if-absent at the edge (`EdgeHeaders.applyForwarded:193-200`), so a
+client-supplied value wins, which is why the resolver treats it as caller-shaped input that selects a
+row and never an address. The parser's minimum stays **three** labels rather than moving to four —
+`editor.qits.localhost` is a real local address, and the short form is still routable until the
+fallthrough removal ships.
 
 ## The credential a workspace container holds
 
