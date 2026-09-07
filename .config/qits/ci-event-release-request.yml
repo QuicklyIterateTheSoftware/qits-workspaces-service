@@ -17,11 +17,17 @@
 # repository's `main` head; only the run's branch and sha come from the payload. So a release
 # request cannot alter the CI that gates it by folding in a commit that edits this file.
 #
-# ONE FILE, TWO HALVES, and "a red verify must not cost the image" still holds — bought with
-# ORDERING plus PER-STEP CLASSIFICATION rather than with two files that cannot share a verdict. The
-# gating build is FIRST; the userflow half declares `gating: false`, which still fails the run and
-# shows red but does not hold the fold for qits-projects' build gate. Keep it LAST: everything after
-# a failing step is SKIPPED.
+# ONE FILE, TWO HALVES, AND EVERY STEP GATES. "A red verify must not cost the image" used to be
+# bought with `gating: false` on the story half. That flag is gone, and with it the idea that some
+# failures here are cheaper than others: a red story run holds the fold exactly as a red build does.
+#
+# It was retired because it could not do the job it existed for. A run's announced verdict is the
+# AND of the file's flag and the FAILING step's, so a non-gating step going red ERASED the fact that
+# the gating half had passed — qits-projects was never told a gating build was green, and the
+# release request waited for a verdict nobody would ever publish. Measured 2026-09-06: a port-bind
+# flake in one story stalled a request for fourteen hours, where a plain red settles it in seconds.
+#
+# Ordering still matters. Keep the stories LAST: everything after a failing step is SKIPPED.
 #
 # THE SHA IMAGE IS GONE, AND SO IS THE LOCAL TAG THAT OUTLIVED IT. The old build step ended in
 # `docker push $QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-workspaces:$QITS_CI_SHA`, the per-push
@@ -209,9 +215,8 @@ steps:
         --secret id=qits-client-id,src=/tmp/qits-client-id \
         --secret id=qits-client-secret,src=/tmp/qits-client-secret
 
-  # --- the NON-GATING half: verify the stories, and publish what the run observed -----------------
-  # ci-event-userflows.yml's step, unchanged but for `gating: false`, which is the whole of what that
-  # separate file was.
+  # --- the stories half: verify the stories, and publish what the run observed --------------------
+  # ci-event-userflows.yml's step, which is the whole of what that separate file was.
   #
   # `mvn verify` at the fold — which regenerates service/target/userstories/ through the whole story
   # catalogue — and the reports published as one docs bundle, site @userflows/qits-workspaces,
@@ -248,7 +253,6 @@ steps:
   # step image without it would fail every release story at the first ls-remote.
   - image: qits/build-images/maven-base:latest
     user: build
-    gating: false
     timeout-seconds: 2400
     script: |
       set -eu
