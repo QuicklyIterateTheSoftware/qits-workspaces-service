@@ -32,8 +32,16 @@ application: qits-workspaces
 # means the project wrapper's own workspaces — the aggregate ones, which is what this service exists
 # for. Positions are per slot: 8 is Workspaces' place in the platform's fixed order of the
 # per-repository applications (Api Docs 1, Docs 2, Release Requests 3, Code 4, CI 5, Artifacts 6,
-# Configuration 7, Workspaces 8); under `project.detail` this application owns 2 (Workspaces) and
-# 3 (Editor).
+# Configuration 7, Workspaces 8); under `project.detail` this application owns 3 (Workspaces) and
+# 4 (Editor).
+#
+# THE PROJECT PAIR MOVED 2,3 -> 3,4 ON 2026-09-07, and nothing about this application changed
+# either time. qits-projects put a Tickets row at position 2, directly below Epics — the work items
+# the plan breaks down into, which belong next to the plan and above everything that merely acts on
+# it — so the pair below it shifted down one again: Epics 1, Tickets 2, Workspaces 3, Editor 4,
+# Release Requests 5. The reasoning for spelling the order in integers is the same one the two moves
+# below record, and it is what makes a shift like this a one-line edit per file rather than a
+# rendering surprise.
 #
 # THE PROJECT PAIR MOVED 1,2 -> 2,3 ON 2026-09-02, and nothing about this application changed.
 # qits-projects put an Epics row at position 1 — the project's plan, which is what a project is
@@ -60,7 +68,7 @@ application: qits-workspaces
 # green. All three key the claim on (slot, label) now, and the ui-components shell renders two
 # same-application rows correctly since 2026.831.134647 (row keys carry the label; the page goes to
 # the longest matching subpath). This entry therefore requires those releases deployed underneath it.
-navigation-entries: services.details.Workspaces:8, daemons.details.Workspaces:8, libs.details.Workspaces:8, frontends.details.Workspaces:8, cli.details.Workspaces:8, images.details.Workspaces:8, project.detail.Workspaces:2, project.detail.Editor:3=editor
+navigation-entries: services.details.Workspaces:8, daemons.details.Workspaces:8, libs.details.Workspaces:8, frontends.details.Workspaces:8, cli.details.Workspaces:8, images.details.Workspaces:8, project.detail.Workspaces:3, project.detail.Editor:4=editor
 
 # ONE KEY, AND IT ASKS FOR TWO DATABASES, because two jars in this deployable each own one.
 #
