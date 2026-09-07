@@ -200,10 +200,25 @@ public class ContainerProxyRouteTest {
     daemonHits.set(0);
   }
 
+  /**
+   * <b>Waits for the close, and that is the whole point.</b> {@code Vertx.close()} is asynchronous:
+   * firing it and returning left the previous method's server still holding {@link #daemonPort()}
+   * while the next {@code @BeforeEach} tried to bind it. With nine test methods cycling one latched
+   * port, that is eight chances per run to lose the race — and losing it fails the whole class with
+   * {@code java.net.BindException: Address in use} at {@code startFakeDaemon}, which reads like a
+   * machine with something else on the port rather than like this fixture racing itself.
+   *
+   * <p>It cost two release cycles on 2026-09-06/07 before it was chased down. Note the asymmetry it
+   * came from: the start already waits — {@code listen(...).get(10, SECONDS)} — so only the stop was
+   * fire-and-forget. Keep the two symmetrical; an await here is what makes the port free by the time
+   * the next bind asks for it, rather than usually free.
+   */
   @AfterEach
-  void stopFakeDaemon() {
+  void stopFakeDaemon() throws Exception {
     if (daemonVertx != null) {
-      daemonVertx.close();
+      daemonVertx.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+      daemonVertx = null;
+      daemonServer = null;
     }
   }
 
