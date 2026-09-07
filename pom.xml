@@ -31,7 +31,7 @@
          and the mandatory -Dqits.variant=oauth|forwardauth|local auth profiles. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-workspaces</artifactId>
-    <version>2026.907.202721</version>
+    <version>2026.907.235017</version>
     <packaging>pom</packaging>
     <name>qits-workspaces</name>
 
@@ -49,7 +49,7 @@
         <qits.db-core.version>2026.906.171046</qits.db-core.version>
         <qits.arch-rules.version>2026.906.171046</qits.arch-rules.version>
         <qits.auth-core.version>2026.906.171046</qits.auth-core.version>
-        <qits.containers-client.version>2026.906.23135</qits.containers-client.version>
+        <qits.containers-client.version>2026.907.94651</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
