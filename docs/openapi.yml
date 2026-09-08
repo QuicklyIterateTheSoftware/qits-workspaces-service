@@ -29,6 +29,11 @@ components:
       - BUSY
       - WAITING
       - ENDED
+    AgentLaunch:
+      type: string
+      enum:
+      - SCHEDULED
+      - SKIPPED_RUNNING
     ApiError:
       type: object
       description: "The error envelope: a message, plus a reason on a 409."
@@ -134,6 +139,35 @@ components:
       type: object
       properties:
         result:
+          type: string
+    Dispatch:
+      type: object
+      properties:
+        workspace:
+          $ref: "#/components/schemas/WorkspaceDto"
+        fresh:
+          type: boolean
+        agentLaunch:
+          $ref: "#/components/schemas/AgentLaunch"
+        technicalProcessId:
+          type: string
+    DispatchAgentRequest:
+      type: object
+      required:
+      - repositoryId
+      - branch
+      properties:
+        repositoryId:
+          type: string
+          pattern: \S
+        branch:
+          type: string
+          pattern: \S
+        branchTree:
+          type: boolean
+        preamble:
+          type: string
+        instruction:
           type: string
     Entry:
       type: object
@@ -660,6 +694,47 @@ components:
       openIdConnectUrl: http://qits-platform-idp:8080/idp/.well-known/openid-configuration
       description: Authentication
 paths:
+  /workspaces/api/agent-dispatches:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DispatchAgentRequest"
+        required: true
+      responses:
+        "200":
+          description: "Dispatched. `fresh:false` means the branch already had a workspace\
+            \ and it was answered instead — the ordinary case on a re-press, and not\
+            \ an error."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dispatch"
+        "400":
+          description: "A blank repository or branch, or a branch name git will not\
+            \ take."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No such repository. Nothing was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Dispatch
+      tags:
+      - Agent Dispatch Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
   /workspaces/api/branches/cleanup:
     post:
       parameters:
@@ -1716,4 +1791,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.905.65332
+  version: 2026.908.2642

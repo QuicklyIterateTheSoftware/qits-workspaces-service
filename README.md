@@ -82,6 +82,7 @@ the consuming application implements:
 | `WorkspaceTerminalSessions` | no | the interactive service terminal refuses the upgrade; the live log is unaffected |
 | `WorkspaceChatInbox` | no | service events are spooled instead of delivered — the same path as "no chat is running" |
 | `WorkspaceProcessTracker` | *implemented here* | `TechnicalProcessRegistry` is the default; the port stays so an application can substitute its own |
+| `WorkspaceAgentLauncher` | *implemented here* | `DaemonAgentClient` is the default; absent means the agent-dispatch door creates the workspace and starts the container but never launches an agent |
 | `CredentialCommissioner` | no | no container is given a platform credential — today's behaviour |
 
 One port points the **other way**: `LogLineClassifier` (with `LogSeverity`) is *implemented* here
@@ -155,6 +156,18 @@ This resolves that one workspace as INTEGRATED, tearing the container, the volum
 down without touching the ref (it is already gone). A branch with no workspace answers
 `resolved:false` — the ordinary case, not an error — and the repository's main workspace is refused
 on both belts. AGENTS.md, "The release door left, and what stayed", has the reasoning.
+
+**The other machine door dispatches an agent.** `POST /workspaces/api/agent-dispatches`
+(`{qits:admin, qits:system}`), body `{repositoryId, branch, branchTree, preamble, instruction}` →
+`{workspace, fresh, agentLaunch, technicalProcessId}`. qits-projects presses it to hand a ticket to a
+coding agent, and it is one call for an arc that previously had no machine entrance at all: creating
+a workspace was `qits:admin`-only and no host-side agent launch existed anywhere. It creates the
+workspace on the branch with the goal as its preamble, starts its container, and launches an agent
+seeded with the instruction once the daemon answers — which through an image pull is minutes away, so
+the launch happens long after this returns. Idempotent throughout: an existing workspace is answered
+with `fresh:false`, a running agent with `agentLaunch: SKIPPED_RUNNING`, and a re-press is how a
+caller recovers from anything, including a restart that dropped a scheduled launch. AGENTS.md,
+"Dispatching an agent onto a branch", has the reasoning.
 
 One behaviour worth knowing before you debug it: **a missing repository and an unreachable
 qits-projects are different answers.** Only a 404 becomes "no such repository" (and then a 404 from
@@ -261,7 +274,7 @@ edge or on `qits-net`.
 
 | Prefix | What | Set by |
 |---|---|---|
-| `/workspaces/api/…` | the JSON API — `workspaces`, `branches`, `history`, `events`, `service-events`, `technical-processes`, `capture`, `editor`, `gc`, `pins` | `qits.rest.path`, which `quarkus.rest.path` is derived from |
+| `/workspaces/api/…` | the JSON API — `workspaces`, `branches`, `history`, `events`, `service-events`, `technical-processes`, `capture`, `editor`, `agent-dispatches`, `gc`, `pins` | `qits.rest.path`, which `quarkus.rest.path` is derived from |
 | `/workspaces/q/…` | `openapi`, `swagger-ui` — what the framework serves, not application code | `quarkus.http.non-application-root-path` |
 | `/workspaces/daemon/{id}` | the daemon's dial-home control socket | `DaemonControlSocket`, literal |
 | `/workspaces/service/{id}/{serviceId}/*` | the dev-server reverse proxy | `ServiceProxyPath.PREFIX`, literal |

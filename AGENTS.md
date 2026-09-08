@@ -1131,6 +1131,69 @@ row and never an address. The parser's minimum stays **three** labels rather tha
 `editor.qits.localhost` is a real local address, and the short form is still routable until the
 fallthrough removal ships.
 
+## Dispatching an agent onto a branch
+
+`POST /workspaces/api/agent-dispatches` is the machine door qits-projects presses to hand a ticket to
+a coding agent. Body `{repositoryId, branch, branchTree, preamble, instruction}`, answering
+`{workspace, fresh, agentLaunch, technicalProcessId}` with `agentLaunch` ∈ `SCHEDULED` /
+`SKIPPED_RUNNING`. `AgentDispatchController` is a class of its own at `{qits:admin, qits:system}`,
+for `BranchResolutionController`'s reason — `WorkspaceController`'s class role is a person's, and a
+class-level `@RolesAllowed` is enforced on ArC's internal calls too, so a machine verb added there is
+the 403 of 2026-09-03 pointed the other way. `DispatchService` holds the semantics.
+
+**It is one call for an arc that had no machine entrance at all.** Creating a workspace was
+`qits:admin`-only, and **no host-side agent launch existed anywhere**: every agent this platform has
+ever run was started by a browser posting `POST /workspaces/container/{id}/agents` through
+`ContainerProxyRoute`. So the door does three things — find-or-create the workspace on
+`(repository, branch)`, ensure its container, launch an agent once the daemon answers — and only the
+first two are finished when it replies.
+
+Five decisions, each of which is a way to get this wrong:
+
+- **Idempotent, never 409.** A branch that already carries an ACTIVE workspace is answered *with* it
+  and `fresh:false`; a workspace whose agent is already running is answered `SKIPPED_RUNNING`. The
+  caller presses this to reach a state and will press it again, so a conflict would make its retry an
+  error and its poll impossible. The ensure is skipped when a technical process is already running
+  or the daemon already answers — `EditorService.worthStarting`'s guard, for its reason.
+- **The literal-first-segment fallback**, `CaptureService.branchPrefix`'s defense aimed at the
+  requested name: a repository holding `refs/heads/ticket` can hold no `refs/heads/ticket/*`, so
+  `ticket/fix-login` becomes `ticket-fix-login` rather than failing on a push nothing here could
+  explain. Only the first segment flips, and the workspace slug is identical either way.
+- **The scheduled launch is IN MEMORY and a restart drops it.** No queue, no row, no outbox — the
+  caller holds the intent worth persisting, and a second copy of an intent is how a ticket gets two
+  agents. Recovery is the same call the caller already knows how to make. A launch that fails is a
+  WARN and nothing else; it is deliberately not a workspace event, because `WorkspaceEventType` is a
+  five-value *lifecycle* vocabulary about the branch and an agent that did not start is not something
+  that happened to the branch.
+- **The instruction is not stored.** It rides into the launch and nowhere else. The `preamble` is the
+  durable goal and is already a column; keeping the instruction beside it would make one
+  conversation's opening turn look like the statement of the work.
+- **`deliverTaskPrompt` is false and must stay false.** True seeds the session with an instruction to
+  fetch the real prompt through an MCP tool named `taskPrompt`, which is implemented nowhere on the
+  platform. The SPA's own client carries that rule in the same words; `DaemonAgentClient` is the
+  second caller of that API and makes the same promise.
+
+**`DaemonAgentClient` (in `daemonhost/`) is the transport**, behind the `WorkspaceAgentLauncher` port
+so `domain` stays free of Vert.x. It resolves a daemon exactly as `ContainerProxyRoute` does — the
+reverse tunnel first, using *that tunnel's* client, the container's own address otherwise — sets
+qits' own bearer rather than forwarding one, and pins the authority to `localhost:<daemon port>` so
+the daemon cannot tell which road a request took. The path is the **full proxied one**
+(`ContainerProxyPath.base(rowId) + "agents"`), because that prefix is the daemon's own address; a
+bare `/agents` would 404 against every container this service ever made. Two things about it were
+paid for on 2026-09-08 and are worth not undoing: the direct client has **keep-alive off** (a pool
+keyed on a container address that gets reused can only go stale, and this client makes one call every
+couple of seconds), and each exchange is **composed and awaited once** — awaiting the response and
+then asking it for its body is two blocking steps with an event loop between them, and the body can
+already have been delivered and dropped by the time the second one is reached, so the call sits on
+its whole timeout and reports the daemon unreachable while the daemon answered.
+
+**Liveness here is the daemon's own API answering, not the control socket** — `DaemonProxyTargets`
+already records why the two are independent listeners. So the probe is the request: `GET
+/commands?status=RUNNING`, and a RUNNING command counts as an agent's when its kind is `CHAT` **or**
+it carries `agentSessions` lineage. The lineage alone would leave a window — it is populated from the
+harness's first `SessionStart`, seconds after the launch — in which a just-launched agent looks like
+nothing and a re-press puts a second one on the same checkout.
+
 ## The credential a workspace container holds
 
 A workspace container gets an **idp client of its own** — commissioned at provision, injected as
