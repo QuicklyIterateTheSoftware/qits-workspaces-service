@@ -127,6 +127,11 @@ class WorkspaceContainerFactoryTest {
     // No posture lookup either, which is the "port not installed" answer and must read as no admin
     // workspace exists — the socket is the one thing an absence may never grant.
     f.postures = StubInstance.empty();
+    // No agent configuration on the row: a container created before the document existed, which is
+    // a container on the harness library's shipped defaults. The cases that have one set it
+    // themselves.
+    f.agentConfiguration = StubInstance.empty();
+    f.agentConfigurationPath = "/tmp/qits/agent-configuration.json";
     return f;
   }
 
@@ -416,6 +421,52 @@ class WorkspaceContainerFactoryTest {
     assertEnv(c, "QITS_GIT_AUTH_AUDIENCE", "dev-qits-githost");
     assertEnv(c, "QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL", "http://qits-idp:8080/idp/token");
     assertEnv(c, "QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE", "dev-qits-workspaces");
+  }
+
+  // --- the agent configuration a container is born with -----------------------------------------
+
+  @Test
+  void aWorkspaceWhoseRowHoldsADocumentCarriesItAndThePathToWriteItAt() {
+    WorkspaceContainerFactory f = factory();
+    String document = "{\"version\":1,\"surfaces\":[{\"surface\":\"epic.chat\"}]}";
+    f.agentConfiguration = StubInstance.of(rowId -> Optional.of(document));
+
+    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
+
+    // The document byte for byte — the container is born with what qits-projects resolved, and
+    // nothing re-renders it on the way — plus the path the daemon materializes it at and hands to
+    // the shared harness library. Both or neither.
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION", document);
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION_PATH", "/tmp/qits/agent-configuration.json");
+  }
+
+  @Test
+  void noDocumentMeansNoAgentConfigurationEnvAtAll() {
+    // Every way of not having one, and they must all read the same: no lookup installed, a lookup
+    // that answers empty (a container created before this shipped, or one whose fetch failed — the
+    // row records the reason and the environment says nothing), a blank column, and a lookup that
+    // threw. The last is the one worth asserting: a database blink must cost the document and never
+    // the container, and a path naming a file nothing wrote would fail the daemon at boot.
+    for (Instance<AgentConfigurationDocuments> lookup :
+        List.of(
+            StubInstance.<AgentConfigurationDocuments>empty(),
+            StubInstance.<AgentConfigurationDocuments>of(rowId -> Optional.empty()),
+            StubInstance.<AgentConfigurationDocuments>of(rowId -> Optional.of("  ")),
+            StubInstance.<AgentConfigurationDocuments>of(
+                rowId -> {
+                  throw new IllegalStateException("the database blinked");
+                }))) {
+      WorkspaceContainerFactory f = factory();
+      f.agentConfiguration = lookup;
+
+      WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
+
+      assertFalse(
+          c.env().containsKey("QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION"), c.env().toString());
+      assertFalse(
+          c.env().containsKey("QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION_PATH"),
+          c.env().toString());
+    }
   }
 
   @Test

@@ -83,6 +83,24 @@ public final class TestWorkspaceContainerFactory {
     return f;
   }
 
+  /** Where a container's agent-configuration document lands — the shipped default. */
+  public static final String AGENT_CONFIGURATION_PATH = "/tmp/qits/agent-configuration.json";
+
+  /** The document a configured fixture's workspace was born with. Authored, and minimally one. */
+  public static final String AGENT_CONFIGURATION_DOCUMENT =
+      "{\"version\":1,\"surfaces\":[{\"surface\":\"epic.chat\"}]}";
+
+  /**
+   * A factory whose workspaces carry an agent-configuration document — the shape a deployment with
+   * qits-projects answering has. Its own builder for {@link #admin()}'s reason: the adapter's test
+   * asserts the whole spec, and the difference between two specs is the claim.
+   */
+  public static WorkspaceContainerFactory configured() {
+    WorkspaceContainerFactory f = build(true);
+    f.agentConfiguration = StubInstance.of(rowId -> Optional.of(AGENT_CONFIGURATION_DOCUMENT));
+    return f;
+  }
+
   private static WorkspaceContainerFactory build(boolean persistWorkspace) {
     WorkspaceContainerFactory f = new WorkspaceContainerFactory();
     f.imageRepo = IMAGE_REPO;
@@ -143,6 +161,11 @@ public final class TestWorkspaceContainerFactory {
     // No posture lookup — an ordinary workspace, which is what every workspace is unless somebody
     // asked otherwise at creation. `admin()` below is the other one.
     f.postures = StubInstance.empty();
+    // No agent configuration on the row — a container on the harness library's shipped defaults,
+    // which is what every container was born with before the document existed. `configured()` below
+    // is the other one, and the adapter's test asserts the whole spec both ways.
+    f.agentConfiguration = StubInstance.empty();
+    f.agentConfigurationPath = AGENT_CONFIGURATION_PATH;
     return f;
   }
 

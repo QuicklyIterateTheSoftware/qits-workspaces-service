@@ -264,6 +264,10 @@ public class EditorEnsureIT {
     // require, createMainWorkspace's, and the posture lookup that decides the editor image — all the
     // same (kind, from, to, label), and the id authored so it survives verbatim.
     to(StoryPeers.PROJECTS, StoryPeers.repositoryRead(StoryTarget.WRAPPER_REPO_ID));
+    // The agent configuration this container is born with — one read per provision, the same one
+    // WorkspaceProvisionIT records. The editor's workspace is an ordinary workspace in every way
+    // that matters here, so it is born with a document exactly as any other container is.
+    to(StoryPeers.PROJECTS, StoryPeers.read(StoryPeers.AGENT_CONFIGURATION_PATH));
 
     // The git host, and that is the whole point. The only git operation is the `ls-remote` that asks
     // whether the main branch is still there — the wire read `ensureContainer` guards on. It renders
@@ -315,12 +319,13 @@ public class EditorEnsureIT {
         StoryIdentities.DAEMON,
         "ack");
 
-    // TWELVE across four planes: two browser doors, one registry read, the ls-remote's two git
-    // arrows, one commission, two container calls, one dial and three frames. The count is what
-    // would notice a PUSH creeping in — a git-receive-pack the wrapper-main path must not make — or a
-    // second advertisement (a mirror clone of objects), or a status poll the design deliberately does
-    // not make because the wait is on the socket instead.
-    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, OPENED_SLUG, 12);
+    // THIRTEEN across four planes: two browser doors, one registry read, one agent-configuration
+    // read, the ls-remote's two git arrows, one commission, two container calls, one dial and three
+    // frames. The count is what would notice a PUSH creeping in — a git-receive-pack the
+    // wrapper-main path must not make — or a second advertisement (a mirror clone of objects), or a
+    // status poll the design deliberately does not make because the wait is on the socket instead.
+    // It moved from twelve when every container started being born with its agent configuration.
+    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, OPENED_SLUG, 13);
     ReportAssertions.assertOnlyEdgesFrom(
         CATEGORY_SLUG,
         OPENED_SLUG,

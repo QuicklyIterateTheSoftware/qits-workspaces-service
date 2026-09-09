@@ -1,0 +1,54 @@
+# What this application reads from its environment, declared where the code that reads it lives.
+#
+# The file kind, its types, its precedence and the two-step migration rule are specified in
+# docs/guides/configuration-yml.md, in qits-docs. qits-platform-deployments fetches this path at the
+# release tag and seeds it into qits-configuration before it schedules anything; a version with no
+# file here deploys exactly as it always did.
+#
+# ONE KEY, AND IT IS DELIBERATELY NOT THE WHOLE BLOCK. qits-workspaces' EXTRAS block in the
+# bootstrap's ComposeTemplate carries about thirty entries — the idp client registry, the machine
+# switches, the audiences, the mount — and §7.4 of the guide says most of them structurally stay
+# there. This file starts with the one key that had to be stated somewhere: the peer address the
+# agent-configuration fetch dials. It is declared rather than written as a literal because a literal
+# peer address resolves on no tiered estate, which is the lesson the config-declarations epic paid
+# for; the rest of the block is a later wave's, key by key, and "I'm not sure" means it stays in
+# bootstrap.
+#
+# Keys are spelled `env.<VAR>` — the store's own entry grammar (`^env\.[A-Za-z_][A-Za-z0-9_]*$`). A
+# declared key and an operator's override are two layers of one entry, so they are one spelling.
+#
+# THE KEY BELOW IS STILL SUPPLIED BY THE BOOTSTRAP'S EXTRAS BLOCK, and MUST BE until a tag carrying
+# this file is this repository's newest tag (§7.5, the two-step cold-boot rule). Landing this file
+# changes nothing observable — which is the point of step one, and why deleting the
+# `qits.platform.deployments.extras.qits-workspaces.env.QITS_PROJECTS_URL` line is a separate change
+# in a separate repository, made only once this file has shipped.
+keys:
+
+  # WHERE QITS-PROJECTS ANSWERS. This service cannot answer anything without it — a workspace is a
+  # branch of a repository and the registry lives there (`HttpRepositoryLookup`, which fails the
+  # startup closed when the key is unset) — and since the agent-configuration epic it is also where
+  # a container's agent configuration is read from at provision time
+  # (`HttpAgentConfigurationSource`, `GET /projects/api/agent-configuration`).
+  #
+  # THE ADDRESS ONLY, no path. Both readers compose qits-projects' own `/projects/api/...` segment
+  # app-side: the peer's route grammar is the peer's to change, and a path written down here would
+  # be this repository holding an opinion it cannot keep current. It also means the same value works
+  # whether the call goes direct on qits-net or through the gateway.
+  #
+  # `qits-projects` is the APPLICATION name, from that repository's own `.config/qits/deployments.yml`
+  # — not `qits-projects-service`, which is only what the repository is called. It is an environment
+  # service, so this renders `http://<env>-qits-projects:8080` in every tier, which is what the
+  # EXTRAS line spells by hand as `${ENV_NAME}-qits-projects` today.
+  #
+  # No `default:`, and none is possible: a serviceAddress is rendered by the platform per
+  # environment and refuses a stored value. `application.properties` keeps an unresolvable fallback
+  # (`http://qits-projects.unconfigured.invalid`) for the rest-client url, which is a deliberately
+  # dead value rather than a plausible default — see the comment there.
+  env.QITS_PROJECTS_URL:
+    type: serviceAddress
+    service: qits-projects
+    port: 8080
+    description: >-
+      Where qits-projects answers: the repository registry every repository-scoped route asks, and
+      the agent-configuration document a workspace container is created with. Address only; both
+      /projects/api paths are composed app-side.

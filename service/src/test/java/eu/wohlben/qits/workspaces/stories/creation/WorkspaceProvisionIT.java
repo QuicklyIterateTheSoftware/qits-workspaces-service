@@ -240,6 +240,15 @@ public class WorkspaceProvisionIT {
         spec.contains("QITS_WORKSPACE_DAEMON_PROJECT_ID")
             && spec.contains(StoryTarget.WORKSPACE_REPO),
         "the container was not told its repository's public identity");
+    // The agent configuration the container was BORN with: the document qits-projects answered a
+    // moment earlier, in the container's own environment, plus the path the daemon is to
+    // materialize it at. This is the whole of the injection — no volume, no second call, and
+    // nothing the container has to ask anyone for.
+    assertTrue(
+        spec.contains("QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION_PATH")
+            && spec.contains("QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION")
+            && spec.contains("epic.chat"),
+        "the container was not born with the agent configuration qits-projects resolved for it");
     story
         .note(
             "the spec carries the idp client commissioned for THIS workspace a moment earlier, the"
@@ -330,6 +339,12 @@ public class WorkspaceProvisionIT {
     // here, so unlike the release stories' uuid it survives into the label verbatim.
     to(StoryPeers.PROJECTS, StoryPeers.repositoryRead(StoryTarget.WORKSPACE_REPO_ID));
 
+    // The agent configuration, read ONCE at provision and never again for this container's life —
+    // a snapshot, not a subscription. What comes back is written into the container's environment
+    // (asserted off the workload spec above), so a session launched inside it renders locally with
+    // no call back to qits-projects, and an edit there reaches the NEXT container.
+    to(StoryPeers.PROJECTS, StoryPeers.read(StoryPeers.AGENT_CONFIGURATION_PATH));
+
     // The git host: the mirror's advertisement and pack read, and the branch create as a push.
     to(
         StoryGitHost.SERVICE_NAME,
@@ -385,12 +400,14 @@ public class WorkspaceProvisionIT {
         StoryIdentities.DAEMON,
         "ack");
 
-    // EIGHTEEN across four planes: four doors, one registry read, three git calls, one commission,
-    // one token, three container calls, one dial and four frames. The count is what would notice a
-    // peer call creeping into a path that is supposed to be finished — a status poll after the
-    // ensure, say, which the design deliberately does not make because the wait is on the socket
-    // instead.
-    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, PROVISIONED_SLUG, 18);
+    // NINETEEN across four planes: four doors, one registry read, one agent-configuration read,
+    // three git calls, one commission, one token, three container calls, one dial and four frames.
+    // The count is what would notice a peer call creeping into a path that is supposed to be
+    // finished — a status poll after the ensure, say, which the design deliberately does not make
+    // because the wait is on the socket instead. It moved from eighteen when the container started
+    // being born with its agent configuration, and that ONE arrow is the whole runtime cost of the
+    // feature: one read per provision, none per launch.
+    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, PROVISIONED_SLUG, 19);
     ReportAssertions.assertOnlyEdgesFrom(
         CATEGORY_SLUG,
         PROVISIONED_SLUG,

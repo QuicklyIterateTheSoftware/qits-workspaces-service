@@ -148,6 +148,13 @@ the entity. The reasoning that *is* worth knowing is in the file's header and in
 `WorkspaceCredentials` — why the secret is stored at all, and why the columns are cleared in the same
 breath as the revocation rather than after it.
 
+**`V5__agent_configuration.sql` adds two more nullable `text` columns to `workspace`** — the agent
+configuration a container was born with, and the reason it was born without one. Same reading as
+`V3`: columns on an entity that is already a `CausedRow`, so no `ArchRulesTest` decision, and the
+reasoning worth knowing is in the file's header and in `AgentConfigurationDocuments` — why a
+document is stored rather than fetched at every ensure, and why the failure is a column rather than
+only a log line.
+
 **The target is PostgreSQL 18.4** — the tag `components/qits-database/qits-database-oci` is built
 from, and the version the suites' embedded binaries are, so a migration is proved against the engine it ships on.
 Two H2 habits are gone with it: a rule that applies to some rows is a **partial unique index** now
@@ -1251,6 +1258,86 @@ rather than everything.
 implementation of `CredentialCommissioner`, or one wired against no issuer. The switch is
 `quarkus.oidc-client.client-enabled` — the extension's own, read a third time here for the reason
 `ContainersClientProducer` reads it a second time. There is no key of ours, and there must not be.
+
+## The agent configuration a container is born with
+
+Every agent session a workspace container serves — `epic.chat`, `epic.agent`, `workspace.chat`,
+`workspace.agent`, and `ticket.dispatch` where a dispatch cut the workspace — is configured by a
+document this service **fetches once, at provision, and hands to the container as it starts**. The
+store and the vocabulary are qits-projects' (`GET /projects/api/agent-configuration`, `qits:admin` +
+`qits:system`); the shared harness library inside the container reads it. What lives here is the
+fetch, the row it lands on, and the environment it rides into the container on.
+
+**It is the credential's arrangement, one step further.** `AgentConfigurationSource` is the port
+(implemented in `wiring/HttpAgentConfigurationSource`, on the `projects` oidc client the repository
+registry already uses); `WorkspaceService.fetchAgentConfigurationFor` calls it in
+`provisionContainer` beside `commissionFor` — **the single provisioning path**, so the fresh ensure,
+the recreate and the ticket dispatch are all covered with no second seam; the document goes on the
+`workspace` row (`V5`), and `AgentConfigurationDocuments` is what `WorkspaceContainerFactory` reads
+it back through.
+
+**Why it is stored rather than fetched at every ensure**, and this is the load-bearing part: the
+document rides the container's **environment**, environment is part of the spec, and a spec that
+differs from the running container's is a `Recreate.ifChanged` **replacement**. A fetch per ensure
+would replace every workspace's container whenever the store was edited — and, since the document
+carries its own `generatedAt`, on **every** ensure regardless. The row is what makes the spec
+reproducible, and it is the same sentence the epic states from the other side: a running container
+keeps the configuration it was born with, and an edit applies to the next container.
+
+**Environment, and a file the daemon writes — because a mounted file is not expressible.** The epic
+asks for a mounted JSON document, and the orchestrator's wire cannot carry one: `ContainerSpec`
+admits named volumes and the docker socket and **no host path at all** — deliberately, since "the
+shape is the security boundary" — and this service holds no docker socket to populate a volume with.
+So the bytes travel as `QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION`, the daemon materializes them at
+`QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION_PATH` before it starts anything, and the library reads a
+file exactly as specified. **Both variables or neither**, the rule the credential and editor blocks
+follow: a path naming a file nothing wrote is a daemon failing at boot over a container that was
+meant to fall back quietly.
+
+The path is `/tmp/qits/agent-configuration.json` (`qits.workspace.agent-configuration-path`), and
+the three places it is not are each a real defect avoided: `/etc/qits` is root-owned in the image
+while the container runs as the host uid, `/workspace` is the checkout volume and a file there shows
+up in `git status`, and `/claude-home` is **shared by every container on the platform**, so a
+per-container document written there would be overwritten by the next container to boot. `/tmp` is
+world-writable everywhere and dies with the container, which is exactly the document's lifetime.
+
+**The failure policy is settled, and half of it is the recording.** A container that cannot get its
+document is created **without** one and runs on the harness library's shipped defaults: refusing
+would trade a configuration outage for a work outage, and a workspace nobody can open because a
+prompt could not be read is not a trade anybody would make deliberately. The credential beside it
+fails the provision for the opposite reason — a container with no identity pulls as nobody and there
+is no defensible default. But a silent fallback nobody can see is how green-while-dead happens, so
+the reason lands on `workspace.agent_configuration_error` and is answered on
+`WorkspaceDto.agentConfigurationError` beside `runtimeError`. The pair is written **atomically at
+every provision** — a document with no error, or an error with no document — so a row never claims a
+failure its current container did not have, and never carries a previous container's document.
+
+**Absent is a supported configuration in two spellings and they behave identically**: no
+implementation of the port, or one with no `qits.projects.url` — nothing fetched, nothing recorded,
+no environment, which is what every container did before this existed. Only a wired source that
+**failed** is recorded. A body that is not a document is a failure, not a document:
+`AgentConfigurationDocument.of` checks that it parses, is an object, and carries a non-empty
+`surfaces` array — and checks **nothing else**, because qits-projects and the library release
+independently of this service and a validator here that knew less than the reader does would refuse
+configurations that work. It parses through a `JsonNode` tree, which is also the native-image answer:
+no reflection registration to be missing.
+
+**The peer address is `qits.projects.url`, declared in `.config/qits/configuration.yml`** as a
+`serviceAddress` — the first key this repository declares. A literal peer address resolves on no
+tiered estate, which is the lesson the config-declarations epic paid for. The bootstrap's EXTRAS
+block still supplies the same key and **must** until a tag carrying that file is this repository's
+newest (the guide's §7.5 two-step cold-boot rule), so deleting the
+`qits.platform.deployments.extras.qits-workspaces.env.QITS_PROJECTS_URL` line is a later, separate
+change in qits-bootstrap.
+
+**Where it is proved.** `AgentConfigurationDocumentTest` (what a fetcher may honestly check),
+`WorkspaceAgentConfigurationTest` (fetched at provision, kept across a resume, recorded when it
+fails, cleared when a later provision succeeds), `WorkspaceContainerFactoryTest` (the two variables,
+and every way of not having a document reading the same), `WorkspaceContainersTest` (the same claim
+on the wire spec, asserted as "the configured spec with the two variables taken back out is the
+plain one"), and `WorkspaceProvisionIT`, where the document is read off the workload spec
+qits-containers really received. `FakeAgentConfigurationSource` starts **unwired** for
+`FakeCredentialCommissioner`'s reason and is duplicated per module like every other double.
 
 ## Admin workspaces: the one privilege a workspace can be granted
 

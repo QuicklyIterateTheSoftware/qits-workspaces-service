@@ -84,6 +84,7 @@ the consuming application implements:
 | `WorkspaceProcessTracker` | *implemented here* | `TechnicalProcessRegistry` is the default; the port stays so an application can substitute its own |
 | `WorkspaceAgentLauncher` | *implemented here* | `DaemonAgentClient` is the default; absent means the agent-dispatch door creates the workspace and starts the container but never launches an agent |
 | `CredentialCommissioner` | no | no container is given a platform credential — today's behaviour |
+| `AgentConfigurationSource` | no | no container is born with an agent configuration; every agent session in it runs on the harness library's shipped defaults |
 
 One port points the **other way**: `LogLineClassifier` (with `LogSeverity`) is *implemented* here
 and consumed by the command context's log persister, so a workspace's `?severity=` filter and the
