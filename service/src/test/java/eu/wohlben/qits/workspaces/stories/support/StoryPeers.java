@@ -31,6 +31,7 @@ import java.util.concurrent.Executors;
  * the repository registry     qits-projects         GET  /projects/api/repositories/{id}
  *                                                   GET  /projects/api/projects/{p}/repositories
  * the agent configuration     qits-projects         GET  /projects/api/agent-configuration
+ * the capability catalogue    qits-projects         PUT  /projects/api/agent-capabilities
  * the container orchestrator  qits-containers       GET/PUT/DELETE /containers/api/containers/{owner}/workspace…
  * the identity provider       qits-platform-idp     POST /idp/token          (this service's own credentials)
  *                                                   POST /idp/api/clients    (a workspace's commissioned one)
@@ -117,6 +118,16 @@ public final class StoryPeers {
    */
   public static final String AGENT_CONFIGURATION_PATH = "/projects/api/agent-configuration";
 
+  /**
+   * {@code ProjectsAgentCapabilities}' one route: what the harnesses in a workspace container turned
+   * out to be able to do, written once per container start by {@code WorkspaceCapabilityRelay}.
+   *
+   * <p>The other direction from {@link #AGENT_CONFIGURATION_PATH}, and the two are the halves of one
+   * conversation — the document a container is born with is read at provision, and what its
+   * harnesses report is written back once the daemon inside can answer.
+   */
+  public static final String AGENT_CAPABILITIES_PATH = "/projects/api/agent-capabilities";
+
   /** {@code quarkus.oidc-client.*.token-path} joined onto the auth-server url. */
   public static final String TOKEN_PATH = "/idp/token";
 
@@ -199,6 +210,9 @@ public final class StoryPeers {
 
   /** The last workload spec qits-containers was handed — how a story reads what was launched. */
   private static final Path LAST_ENSURE = ROOT.resolve("last-ensure.json");
+
+  /** The last capability report qits-projects was handed, byte for byte as it arrived. */
+  private static final Path LAST_CAPABILITY_REPORT = ROOT.resolve("last-capability-report.json");
 
   /** Every event published to qits-events, one compact document per line. */
   private static final Path EVENTS_LOG = ROOT.resolve("events.log");
@@ -307,6 +321,17 @@ public final class StoryPeers {
       return "GET".equals(method)
           ? new Answer(200, AGENT_CONFIGURATION_DOCUMENT)
           : new Answer(405, notFound("the agent configuration is a GET"));
+    }
+    if (AGENT_CAPABILITIES_PATH.equals(path)) {
+      // The ingest door, and it is deliberately a passive one: it keeps the bytes and counts the
+      // harnesses, because the claim a story makes here is that the DAEMON'S OWN answer arrived
+      // unchanged. Anything this stub validated would be qits-projects' assertion made in the wrong
+      // repository.
+      if (!"PUT".equals(method)) {
+        return new Answer(405, notFound("the capability catalogue is written with a PUT"));
+      }
+      write(LAST_CAPABILITY_REPORT, request);
+      return new Answer(200, "{\"recorded\":1}");
     }
     if (path.startsWith(PROJECT_PATH)) {
       return projectRoute(path);
@@ -522,6 +547,17 @@ public final class StoryPeers {
   /** The last workload spec qits-containers was handed, or null when nothing was ever ensured. */
   public static String lastEnsureRequest() {
     return Files.isRegularFile(LAST_ENSURE) ? readString(LAST_ENSURE) : null;
+  }
+
+  /**
+   * The last harness capability report qits-projects was handed, or null when none ever arrived.
+   *
+   * <p>Kept unchanged on purpose: the relay's whole contract is that the daemon's {@code
+   * /agents/available} body reaches the ingest door as it was answered, so the bytes are the
+   * assertion.
+   */
+  public static String lastCapabilityReport() {
+    return Files.isRegularFile(LAST_CAPABILITY_REPORT) ? readString(LAST_CAPABILITY_REPORT) : null;
   }
 
   /** Every event published to qits-events since the run started, newest last. */

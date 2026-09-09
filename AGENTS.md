@@ -1339,6 +1339,99 @@ plain one"), and `WorkspaceProvisionIT`, where the document is read off the work
 qits-containers really received. `FakeAgentConfigurationSource` starts **unwired** for
 `FakeCredentialCommissioner`'s reason and is duplicated per module like every other double.
 
+## What a container reports back: the harness capability relay
+
+The other direction from the document above. A workspace container is *born with* a configuration;
+once it is up it **reports what its harness binaries can actually be configured with** — the models,
+the effort levels, whether effort exists at all, whether anybody is signed in — and that report is
+what fills the editor's model and effort dropdowns. The catalogue lives in qits-projects, keyed by
+**harness and image version**, and until `WorkspaceCapabilityRelay` existed it only ever held rows a
+*project's* agent container had reported. That defeats the key: a workspace container may run an
+entirely different image build, so the editor was offering what some other image could do.
+
+**`daemonhost/WorkspaceCapabilityRelay` is the carrier**, fired from `WorkspaceDaemonRegistry`'s
+`Hello` arm through an `Instance<>` (the cycle `WorkspaceTunnels` is injected through, for the same
+reason). It reads `ContainerProxyPath.base(rowId) + "agents/available"` through the reverse tunnel,
+presenting **this** container's `qits.workspace.daemon-api-token`, and PUTs the answer to
+`/projects/api/agent-capabilities` through the `AgentCapabilitySink` port
+(`wiring/HttpAgentCapabilitySink`, on the `projects` oidc client and the `qits.projects.url`
+`serviceAddress` the configuration fetch already uses). The write is an HTTP hop because the store is
+qits-projects' — that service's own relay writes in process and this one cannot.
+
+**Hello is the first moment the container is reachable, not the moment it can answer**, and how it
+says "not yet" is where this relay differs from its sibling. Read out of `ControlSocket` in
+qits-workspace-daemon: `start()` kicks the boot self-clone onto a worker and dials home in parallel,
+and it is that worker which — when the clone lands — calls `workspaceApi.start()` (the loopback
+bind), then `wireCommands` → `wireAgents`, and only then `reportHarnessCapabilities`, which probes
+the harnesses on **another** worker and assigns a volatile field. So a container walks three states,
+and all three mean *ask again*:
+
+| what the host sees | what it means | terminal? |
+| --- | --- | --- |
+| the hop fails outright | between `Hello` and the loopback bind, nothing is listening | no — retry |
+| **503** | bound, but `agentLaunch` is still null (`WorkspaceApi` 503s every agent route) | no — retry |
+| **2xx with an EMPTY BODY** | the tunnel connected before the daemon had anything behind it to pipe from | **no — retry** |
+| **200 with an empty `capabilities` array** | wired, probe not landed — `() -> harnessCapabilities` is `List.of()` | **no — retry** |
+| **200 with capabilities** | the report; PUT it, unchanged | yes |
+| **404** | a daemon that does not serve the route | yes, quiet |
+| a body that will not parse, or an ingest door that refuses (4xx) | two sides disagreeing about a contract | yes, **WARN** |
+| qits-projects unreachable or 5xx | the report is still true and the container is still there | no — retry |
+
+**Two of those rows are traps, and each has already cost a release on the sibling.** The empty body
+is the first: measured live against qits-projects on 2026-09-09, the not-ready window presents as a
+*successful* hop carrying nothing, which reaches Jackson as `MismatchedInputException: No content to
+map due to end-of-input` and lands in the terminal broken arm — one attempt, a WARN claiming the
+daemon speaks an unreadable contract, and a catalogue that stays empty for ever. So the blank check
+runs **before** Jackson, in `ingest` as well as in `read`: a body that is absent says nothing about
+capabilities and can never be the reason to stop asking, and only a body genuinely present and
+unparseable is broken. `read` classifies a non-2xx before it looks at any body, so a swallowed status
+can never be reported as an empty one.
+
+**The empty capability list is the second, and copying the sibling would be the bug.** In qits-projects the daemon
+probes *before* it binds, so an empty capability list there means "a daemon older than the feature" —
+terminal and quiet. Here it is the ordinary answer for the first seconds of **every** container, so a
+relay with that rule would record nothing on nearly every container and say nothing about it. The
+price is paid by a genuinely older daemon, which is asked the whole window and warned about once per
+container start; that is the right way round, because a window that gives up must be visible.
+
+**Twelve attempts on a backoff capped at 30s (~4 minutes), and the give-up is a WARN** naming the
+workspace, the attempt count and what the last attempt saw. That line is the whole point of bounding
+it: a relay that silently finds nothing for ever is the green-while-dead shape this feature exists to
+remove, and silence is exactly how the missing half of it went unnoticed for a release. The in-flight
+guard spans the **whole window**, so a flapping daemon cannot stack reads, and `@PreDestroy` stops a
+sleeping one at shutdown. It runs on a virtual thread off the socket's frame handler: nothing a
+person presses reaches it, no request path waits on a daemon, and no arm of it can fail a container.
+
+**The body passes through unchanged, with one exception.** The ingest door was built as a relay's
+door — its contract *is* `GET /agents/available`'s answer — so a carrier that reshaped it would be a
+third place that contract can drift. The exception is `imageVersion` when the daemon named none or
+named its own `"unknown"` fallback: that member is half the catalogue's key, this service chose the
+pin the container was created from, and a report keyed on nothing cannot be told from another build's.
+`reportedBy` is left as the daemon spelled it (`qits-workspace-daemon`, display only).
+
+**One request is composed and awaited ONCE**, `DaemonAgentClient.send`'s measured lesson: awaiting
+the response and then asking it for its body is two blocking steps with an event loop between them,
+and the body can already have been delivered and dropped by the time the second is reached — the read
+then sits on its whole timeout while the daemon has in fact answered, which under a retry reads as
+"not yet" and costs an extra attempt. It cost one here too, in the tunnel suite, before it was fixed.
+
+**Where it is proved.** `WorkspaceCapabilityRelayTest` pins the classification as outcomes rather
+than as row counts — none of the terminal arms writes a row, and what separates them is only whether
+the relay asks again. `DaemonStreamRouteTest` gains the rules against a real tunnel and a fake daemon:
+an empty capability list answered twice is read **three** times and recorded (the case the sibling's
+rule gets wrong), an **empty body** answered twice is read three times and recorded (the case that
+cost the sibling a second release), a **404** is read **once** and not retried, and an `"unknown"`
+image version is filled from the pin. `WorkspaceProvisionIT` proves the whole hop in the packaged run —
+`StoryDaemon` now serves the reverse tunnel (it dials back an `OpenStream` and pipes to a container
+API of its own, which is what makes a story's container reachable for *requests* and not only for
+frames), answers an empty body twice, an empty capability list twice and then a report — the boot
+window in the order a container really presents it — and the story waits on `StoryPeers`' own
+recording of
+`PUT /projects/api/agent-capabilities` before asserting the bytes. That is one arrow per container
+start on the provision diagram, which is why its edge count moved from nineteen to twenty.
+`FakeAgentCapabilitySink` starts wired, unlike `FakeAgentConfigurationSource`: nothing writes to it
+but the relay, which is dark under `%test` and driven explicitly by the one suite about it.
+
 ## Admin workspaces: the one privilege a workspace can be granted
 
 An **admin workspace** is an ordinary workspace whose container holds the **host's docker socket**,

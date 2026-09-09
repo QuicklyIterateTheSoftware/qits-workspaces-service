@@ -84,8 +84,16 @@ public class DaemonStreamRouteTest {
 
   @Inject WorkspaceDaemonRegistry registry;
 
+  @Inject WorkspaceCapabilityRelay relay;
+
+  @Inject eu.wohlben.qits.workspaces.control.FakeAgentCapabilitySink catalogue;
+
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
+
+  /** The workspace image pin this service creates containers from — the relay's fallback key. */
+  @ConfigProperty(name = "qits.workspace.image-version")
+  String imageVersion;
 
   private Vertx vertx;
   private HttpServer daemonApi;
@@ -99,6 +107,53 @@ public class DaemonStreamRouteTest {
   /** Set when the fake daemon should ignore an OpenStream instead of dialling back. */
   private volatile boolean deaf;
 
+  // --- the capability relay's half of this fixture -------------------------------------------------
+
+  /** A complete report, of the shape {@code AgentJson.available} builds in qits-workspace-daemon. */
+  private static final String REPORT =
+      """
+      {"agents":["CLAUDE","KIMI"],"defaultAgent":"CLAUDE",\
+      "imageVersion":"2026.909.tunnelrelay","reportedBy":"qits-workspace-daemon",\
+      "capabilities":[{"harness":"CLAUDE","harnessVersion":"2.1.226",\
+      "models":["opus","sonnet"],"modelsEnumerated":false,\
+      "effortSupported":true,"effortLevels":["low","high"],\
+      "authenticated":true,"authDetail":"","probeFailed":false,"probeDetail":""}]}""";
+
+  /**
+   * What the daemon answers before its probe has landed: the route is served the moment the agent
+   * surface is wired, from a supplier over a volatile field that is {@code List.of()} until a second
+   * worker assigns it. Byte for byte a real one, minus the reports.
+   */
+  private static final String NOT_PROBED_YET =
+      "{\"agents\":[\"CLAUDE\"],\"defaultAgent\":\"CLAUDE\","
+          + "\"imageVersion\":\"2026.909.tunnelrelay\",\"reportedBy\":\"qits-workspace-daemon\","
+          + "\"capabilities\":[]}";
+
+  /** How many times {@code /agents/available} has been asked, so a retry is counted not inferred. */
+  private final java.util.concurrent.atomic.AtomicInteger availableReads =
+      new java.util.concurrent.atomic.AtomicInteger();
+
+  /**
+   * How many more times it answers <b>200 with nothing in it</b> before it answers anything else.
+   *
+   * <p>The shape qits-projects' relay was measured taking, and the one that cost it a second
+   * release: the tunnel connects, the daemon has nothing to pipe from yet, and what comes back is a
+   * successful hop with an empty body. Handed straight to Jackson that is a parse failure, and a
+   * parse failure is terminal.
+   */
+  private final java.util.concurrent.atomic.AtomicInteger emptyBodyAnswersRemaining =
+      new java.util.concurrent.atomic.AtomicInteger();
+
+  /** How many more times it answers {@link #NOT_PROBED_YET} before answering {@link #REPORT}. */
+  private final java.util.concurrent.atomic.AtomicInteger emptyAnswersRemaining =
+      new java.util.concurrent.atomic.AtomicInteger();
+
+  /** The status it answers with; 404 is the daemon that does not serve the route at all. */
+  private volatile int availableStatus = 200;
+
+  /** What a 200 carries once {@link #emptyAnswersRemaining} is exhausted. */
+  private volatile String availableBody = REPORT;
+
   @BeforeEach
   void setUp() throws Exception {
     vertx = Vertx.vertx();
@@ -106,13 +161,25 @@ public class DaemonStreamRouteTest {
     netClient = vertx.createNetClient();
     daemonApi = vertx.createHttpServer();
     daemonApi.requestHandler(
-        req -> req.response().end("daemon:" + req.uri() + ":" + req.getHeader("Authorization")));
+        req -> {
+          if (req.uri().endsWith("/" + WorkspaceCapabilityRelay.AVAILABLE_PATH)) {
+            answerAvailable(req);
+            return;
+          }
+          req.response().end("daemon:" + req.uri() + ":" + req.getHeader("Authorization"));
+        });
     daemonApi.webSocketHandler(
         (ServerWebSocket socket) ->
             socket.textMessageHandler(text -> socket.writeTextMessage("ws-daemon:" + text)));
     await(daemonApi.listen(0, "127.0.0.1"));
     asked.clear();
     deaf = false;
+    availableReads.set(0);
+    emptyAnswersRemaining.set(0);
+    emptyBodyAnswersRemaining.set(0);
+    availableStatus = 200;
+    availableBody = REPORT;
+    catalogue.reset();
   }
 
   @AfterEach
@@ -325,7 +392,118 @@ public class DaemonStreamRouteTest {
         "a pending nonce must not outlive the daemon it was minted for");
   }
 
+  /**
+   * <b>The regression this relay exists as it does because of.</b> A container that has said {@code
+   * Hello} cannot answer this yet, and the way it says so is <em>an empty capabilities array</em> —
+   * not a 503 and not a failed hop, which is what qits-projects' sibling relay treats as "not yet".
+   *
+   * <p>Read from {@code ControlSocket} in qits-workspace-daemon: the clone's worker binds the
+   * loopback API, wires the agent surface — from which moment {@code GET /agents/available} answers
+   * <b>200</b>, out of {@code () -> harnessCapabilities} — and only then probes the harnesses on a
+   * second worker, which is what finally assigns that volatile field. So an empty list is the
+   * ordinary answer for the first seconds of every container, and a relay that read it as "an older
+   * daemon, terminal" (which is exactly what it means over in qits-projects, where the probe runs
+   * before the bind) would record nothing on nearly every container and say nothing about it.
+   */
+  @Test
+  public void aProbeThatHasNotLandedIsAskedAgainUntilTheReportArrives() throws Exception {
+    Long id = workspace();
+    connectFakeDaemon(id, DaemonProtocol.TUNNEL_CAPABILITY_VERSION);
+    emptyAnswersRemaining.set(2);
+
+    relay.relay(id);
+
+    assertEquals(
+        3,
+        availableReads.get(),
+        "an empty capabilities array is not an answer: the relay asks again until the probe lands");
+    assertEquals(1, catalogue.recorded().size(), "the report reached the catalogue exactly once");
+    assertEquals(
+        REPORT,
+        catalogue.recorded().getFirst(),
+        "the daemon's body must reach the ingest door unchanged — the relay has no opinion on it");
+  }
+
+  /**
+   * <b>The same rule one layer earlier, and the arm that cost the sibling relay a second release.</b>
+   * The not-ready window does not only present as a 503 or a failed hop: it presents as a
+   * <em>successful</em> hop carrying an empty body, because the tunnel connects before the daemon
+   * has anything behind it to pipe from. Measured live against qits-projects on 2026-09-09, where
+   * that body reached Jackson as "No content to map due to end-of-input" and landed in the terminal
+   * broken arm — one attempt, a WARN saying the daemon spoke an unreadable contract, and a
+   * catalogue that stayed empty for ever.
+   *
+   * <p>A body that is absent says nothing about capabilities and can never be the reason to stop
+   * asking. Only a body genuinely present and unparseable is broken.
+   */
+  @Test
+  public void anEmptyBodyIsAskedAgainRatherThanReadAsABrokenContract() throws Exception {
+    Long id = workspace();
+    connectFakeDaemon(id, DaemonProtocol.TUNNEL_CAPABILITY_VERSION);
+    emptyBodyAnswersRemaining.set(2);
+
+    relay.relay(id);
+
+    assertEquals(
+        3, availableReads.get(), "an empty body is not an answer: the relay asks again");
+    assertEquals(1, catalogue.recorded().size(), "and the report it finally got was recorded");
+    assertEquals(REPORT, catalogue.recorded().getFirst());
+  }
+
+  /**
+   * The other half of the rule, and the one that keeps the retry from being unbounded in disguise: a
+   * daemon that does not serve the route at all is <b>absence</b>, terminal and quiet. Asking a
+   * second time gets the same 404 for ever.
+   */
+  @Test
+  public void aDaemonThatDoesNotServeTheRouteIsReadOnceAndNotRetried() throws Exception {
+    Long id = workspace();
+    connectFakeDaemon(id, DaemonProtocol.TUNNEL_CAPABILITY_VERSION);
+    availableStatus = 404;
+
+    relay.relay(id);
+
+    assertEquals(1, availableReads.get(), "a 404 is absence, and absence is terminal");
+    assertTrue(catalogue.recorded().isEmpty(), "nothing was reported, so nothing is recorded");
+  }
+
+  /**
+   * The one edit the relay makes, and the only one: {@code imageVersion} is half the key the
+   * catalogue stores under, and {@code "unknown"} is what the daemon answers when it could not name
+   * its own build. This service chose the pin the container was created from, so it fills that blank
+   * rather than letting every unnamed build share one row.
+   */
+  @Test
+  public void anUnnamedImageBuildIsFilledFromThePinThisServiceCreatedTheContainerFrom()
+      throws Exception {
+    Long id = workspace();
+    connectFakeDaemon(id, DaemonProtocol.TUNNEL_CAPABILITY_VERSION);
+    availableBody = REPORT.replace("2026.909.tunnelrelay", "unknown");
+
+    relay.relay(id);
+
+    assertEquals(1, catalogue.recorded().size());
+    assertTrue(
+        catalogue.recorded().getFirst().contains("\"imageVersion\":\"" + imageVersion + "\""),
+        catalogue.recorded().getFirst());
+  }
+
   // --- helpers ------------------------------------------------------------------------------------
+
+  /** The fake daemon's {@code /agents/available}: a scripted boot window, then the report. */
+  private void answerAvailable(io.vertx.core.http.HttpServerRequest request) {
+    availableReads.incrementAndGet();
+    if (availableStatus != 200) {
+      request.response().setStatusCode(availableStatus).end("{\"error\":\"no such route\"}");
+      return;
+    }
+    if (emptyBodyAnswersRemaining.getAndDecrement() > 0) {
+      request.response().end();
+      return;
+    }
+    String body = emptyAnswersRemaining.getAndDecrement() > 0 ? NOT_PROBED_YET : availableBody;
+    request.response().putHeader("Content-Type", "application/json").end(body);
+  }
 
   /** The HTTP status a WebSocket upgrade to {@code path} was refused with. */
   private int upgradeStatus(String path) throws Exception {

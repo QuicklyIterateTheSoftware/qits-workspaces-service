@@ -96,6 +96,26 @@ public class WorkspaceProvisionIT {
   /** How long the story is willing to play the container before calling the provision broken. */
   private static final Duration PATIENCE = Duration.ofSeconds(90);
 
+  /**
+   * What this container answers on {@code GET /agents/available} before its harness probe has
+   * landed: the agent surface is wired — so the route answers 200 — and the capability list it is
+   * served from is still empty. The ordinary state of a container's first seconds.
+   */
+  private static final String NOT_PROBED_YET =
+      "{\"agents\":[\"CLAUDE\"],\"defaultAgent\":\"CLAUDE\","
+          + "\"imageVersion\":\"story-image\",\"reportedBy\":\"qits-workspace-daemon\","
+          + "\"capabilities\":[]}";
+
+  /** …and what it answers once the probe has: the report the catalogue is filled from. */
+  private static final String CAPABILITY_REPORT =
+      "{\"agents\":[\"CLAUDE\"],\"defaultAgent\":\"CLAUDE\","
+          + "\"imageVersion\":\"story-image\",\"reportedBy\":\"qits-workspace-daemon\","
+          + "\"capabilities\":[{\"harness\":\"CLAUDE\",\"harnessVersion\":\"2.1.226\","
+          + "\"models\":[\"opus\",\"sonnet\"],\"modelsEnumerated\":false,"
+          + "\"effortSupported\":true,\"effortLevels\":[\"low\",\"high\"],"
+          + "\"authenticated\":true,\"authDetail\":\"\",\"probeFailed\":false,"
+          + "\"probeDetail\":\"\"}]}";
+
   /** Every credential a story here minted, so the reports can be searched for all of them. */
   private static final List<String> MINTED = new ArrayList<>();
 
@@ -262,6 +282,16 @@ public class WorkspaceProvisionIT {
         StoryIdentities.machineToken("workspace-" + rowId, StoryIdentities.SYSTEM_ROLE);
     MINTED.add(daemonBearer);
     try (StoryDaemon daemon = StoryDaemon.dial(baseUrl, rowId, daemonBearer)) {
+      // What this container will say when the host asks what its harnesses can do — installed
+      // BEFORE the Hello, because Hello is when the host starts asking. The first four answers are
+      // the two shapes a real container's boot window presents, in the order it presents them:
+      // an EMPTY BODY while the tunnel connects but the daemon has nothing behind it yet, then a
+      // 200 whose capability list is empty because the agent surface is wired and the boot probe
+      // has not landed. Both mean "not yet" and both are answers a relay can mistake for a
+      // terminal one — the first reads as an unparseable contract, the second as an older daemon,
+      // and each of those mistakes has cost a release on the sibling relay in qits-projects.
+      daemon.serveHarnessCapabilities(
+          attempt -> attempt <= 2 ? "" : attempt <= 4 ? NOT_PROBED_YET : CAPABILITY_REPORT);
       daemon.hello(StoryTarget.WORKSPACE_LABEL, StoryTarget.WORKSPACE_REPO_ID,
           StoryTarget.WORKSPACE_LABEL);
       assertNotNull(daemon.awaitAck(), "the host did not acknowledge the daemon's Hello");
@@ -301,6 +331,34 @@ public class WorkspaceProvisionIT {
                   + " daemon announced about itself — which is how the surface can say a workspace"
                   + " is on an outdated daemon build without asking the container")
           .as("workspace-running");
+
+      // The last thing the container's start owes anybody, and the only outbound call this whole
+      // flow makes AFTER the provision is over. Awaited on the peer's own recording rather than
+      // hoped for: it happens on a background thread, and an edge that landed after the drain would
+      // be an arrow in the next story's diagram.
+      assertTrue(
+          StoryPeers.awaitCall("PUT " + StoryPeers.AGENT_CAPABILITIES_PATH, PATIENCE),
+          "the harness capability report never reached qits-projects' catalogue");
+      String report = StoryPeers.lastCapabilityReport();
+      assertNotNull(report, "no capability report reached qits-projects");
+      assertTrue(
+          report.contains("\"harness\":\"CLAUDE\"") && report.contains("2.1.226"),
+          "the report qits-projects recorded is not the one the daemon answered: " + report);
+      assertEquals(
+          5,
+          daemon.capabilityReads(),
+          "neither an empty body nor an empty capability list is an answer: the host must ask"
+              + " again until the container's boot probe has landed");
+      story
+          .note(
+              "and the container reports back what its harnesses can be configured with. The host"
+                  + " asks the moment the daemon says hello, keeps asking while the answer is an"
+                  + " empty body or an empty capability list — the container's API binds before its"
+                  + " harness probe runs, so those are what 'not yet' looks like from outside — and"
+                  + " writes the daemon's own answer, unchanged, into qits-projects' catalogue. That catalogue is what"
+                  + " fills the model and effort dropdowns for a session on THIS image build, and"
+                  + " nothing on a request path ever waits on a container for it")
+          .as("capabilities-reported");
     }
   }
 
@@ -315,7 +373,8 @@ public class WorkspaceProvisionIT {
             "container-requested",
             "daemon-dialled-home",
             "provisioned",
-            "workspace-running")) {
+            "workspace-running",
+            "capabilities-reported")) {
       ReportAssertions.assertStepId(CATEGORY_SLUG, PROVISIONED_SLUG, step);
     }
 
@@ -344,6 +403,13 @@ public class WorkspaceProvisionIT {
     // (asserted off the workload spec above), so a session launched inside it renders locally with
     // no call back to qits-projects, and an edit there reaches the NEXT container.
     to(StoryPeers.PROJECTS, StoryPeers.read(StoryPeers.AGENT_CONFIGURATION_PATH));
+
+    // …and the answer that comes back the other way once the container is up: what its harnesses
+    // can be configured with, written into the catalogue the editor's dropdowns read. ONE arrow for
+    // a window that asked the container three times — the retries are inside the container's own
+    // tunnel and never touch a peer, so what the diagram says is that a container start costs
+    // qits-projects exactly one write.
+    to(StoryPeers.PROJECTS, StoryPeers.label("PUT", StoryPeers.AGENT_CAPABILITIES_PATH, 200));
 
     // The git host: the mirror's advertisement and pack read, and the branch create as a push.
     to(
@@ -400,14 +466,15 @@ public class WorkspaceProvisionIT {
         StoryIdentities.DAEMON,
         "ack");
 
-    // NINETEEN across four planes: four doors, one registry read, one agent-configuration read,
-    // three git calls, one commission, one token, three container calls, one dial and four frames.
-    // The count is what would notice a peer call creeping into a path that is supposed to be
-    // finished — a status poll after the ensure, say, which the design deliberately does not make
-    // because the wait is on the socket instead. It moved from eighteen when the container started
-    // being born with its agent configuration, and that ONE arrow is the whole runtime cost of the
-    // feature: one read per provision, none per launch.
-    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, PROVISIONED_SLUG, 19);
+    // TWENTY across four planes: four doors, one registry read, one agent-configuration read, one
+    // capability write, three git calls, one commission, one token, three container calls, one dial
+    // and four frames. The count is what would notice a peer call creeping into a path that is
+    // supposed to be finished — a status poll after the ensure, say, which the design deliberately
+    // does not make because the wait is on the socket instead. It moved from eighteen when the
+    // container started being born with its agent configuration, and to twenty when it started
+    // reporting back what its harnesses can do: one read per provision and one write per container
+    // start, and nothing per launch.
+    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, PROVISIONED_SLUG, 20);
     ReportAssertions.assertOnlyEdgesFrom(
         CATEGORY_SLUG,
         PROVISIONED_SLUG,

@@ -168,6 +168,16 @@ public class StoryProfile implements QuarkusTestProfile {
     config.put("qits.workspaces.data-dir", "target/story-workspaces-data");
     config.put("qits.workspace.git.mirror-freshness-ms", "0");
 
+    // --- the harness capability relay, awake and impatient ------------------------------------------
+    // It is ON here — the packaged run takes no %test profile, so the shipped `true` applies — and
+    // the story catalogue is where its outbound half is proved end to end: a real daemon frame, a
+    // real tunnel, a real PUT at a real qits-projects. What is compressed is only the WAIT: the
+    // shipped backoff is 2s doubling to 30s across twelve attempts, and a story that watched a
+    // container's probe land would otherwise spend minutes doing it. The retry itself is the
+    // subject, so the attempt count is left alone.
+    config.put("qits.workspace.agent-capabilities.relay-retry-initial-ms", "100");
+    config.put("qits.workspace.agent-capabilities.relay-retry-max-ms", "300");
+
     // --- what does not start -------------------------------------------------------------------------
     config.put("qits.services.autostart-enabled", "false");
     config.put("qits.bootstrap.autorun-enabled", "false");

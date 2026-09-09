@@ -132,6 +132,14 @@ public class WorkspaceDaemonRegistry
   @Inject Instance<WorkspaceTunnels> tunnels;
 
   /**
+   * What carries this container's harness capability report to qits-projects' catalogue, fired on
+   * {@link Hello} below. An {@code Instance<>} for the same reason {@link #tunnels} is one — the
+   * relay reads through the tunnel, which reads this registry — and because it must be possible for
+   * it to be absent without this class caring: nothing on the control plane depends on it.
+   */
+  @Inject Instance<WorkspaceCapabilityRelay> capabilityRelay;
+
+  /**
    * The editor's keepalive. A coding agent working in a workspace is that workspace being used, and
    * the editor's container is the one with an idle-stop lifetime — so an unattended agent session
    * must hold it open exactly as a person's open tab does. Reporting here rather than from a timer
@@ -385,6 +393,15 @@ public class WorkspaceDaemonRegistry
           client.capabilityVersion = hello.capabilityVersion();
         }
         connection.sendTextAndAwait(codec.encode(new Ack()));
+        // …and, off this thread entirely, go and ask that container what its harnesses can be
+        // configured with. Hello is the first moment anything in the container is reachable, and
+        // this is the only trigger there is: nothing on the wire announces the daemon's loopback
+        // bind or its capability probe, so the relay asks and keeps asking while the answer says
+        // "not yet". It returns immediately, it cannot throw into this frame handler, and nothing
+        // about a workspace depends on it — see WorkspaceCapabilityRelay.
+        if (capabilityRelay.isResolvable()) {
+          capabilityRelay.get().onDaemonHello(workspaceId);
+        }
       }
       case Heartbeat ignored -> {
         /* liveness only — the open socket is the signal */

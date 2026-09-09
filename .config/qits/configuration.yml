@@ -28,9 +28,11 @@ keys:
   # branch of a repository and the registry lives there (`HttpRepositoryLookup`, which fails the
   # startup closed when the key is unset) — and since the agent-configuration epic it is also where
   # a container's agent configuration is read from at provision time
-  # (`HttpAgentConfigurationSource`, `GET /projects/api/agent-configuration`).
+  # (`HttpAgentConfigurationSource`, `GET /projects/api/agent-configuration`) — and, in the other
+  # direction, where a container's harness capability report is written once its daemon can answer
+  # (`HttpAgentCapabilitySink`, `PUT /projects/api/agent-capabilities`). One address, three readers.
   #
-  # THE ADDRESS ONLY, no path. Both readers compose qits-projects' own `/projects/api/...` segment
+  # THE ADDRESS ONLY, no path. Every reader composes qits-projects' own `/projects/api/...` segment
   # app-side: the peer's route grammar is the peer's to change, and a path written down here would
   # be this repository holding an opinion it cannot keep current. It also means the same value works
   # whether the call goes direct on qits-net or through the gateway.
@@ -49,6 +51,7 @@ keys:
     service: qits-projects
     port: 8080
     description: >-
-      Where qits-projects answers: the repository registry every repository-scoped route asks, and
-      the agent-configuration document a workspace container is created with. Address only; both
-      /projects/api paths are composed app-side.
+      Where qits-projects answers: the repository registry every repository-scoped route asks, the
+      agent-configuration document a workspace container is created with, and the capability
+      catalogue that container's harness report is written to. Address only; every /projects/api
+      path is composed app-side.

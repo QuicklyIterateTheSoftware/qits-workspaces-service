@@ -13,8 +13,14 @@ import eu.wohlben.qits.workspacedaemon.protocol.DaemonMessage;
 import eu.wohlben.qits.workspacedaemon.protocol.DaemonProtocol;
 import eu.wohlben.qits.workspacedaemon.protocol.Heartbeat;
 import eu.wohlben.qits.workspacedaemon.protocol.Hello;
+import eu.wohlben.qits.workspacedaemon.protocol.OpenStream;
 import eu.wohlben.qits.workspacedaemon.protocol.Provisioned;
 import eu.wohlben.qits.workspacedaemon.protocol.Stream;
+import io.vertx.core.Vertx;
+import io.vertx.core.http.HttpServer;
+import io.vertx.core.http.WebSocketClient;
+import io.vertx.core.net.NetClient;
+import io.vertx.core.net.NetSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
@@ -24,6 +30,8 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 /**
  * The workspace container's own {@code workspace-daemon}, as a story plays it — and the tap for the
@@ -89,9 +97,38 @@ public final class StoryDaemon implements AutoCloseable {
 
   private final BlockingQueue<DaemonMessage> inbound;
 
-  private StoryDaemon(WebSocket socket, BlockingQueue<DaemonMessage> inbound) {
+  /** Where the host answers, so an {@code OpenStream} can be dialled back. */
+  private final String baseUrl;
+
+  // --- the reverse tunnel, which a container really does serve -------------------------------------
+  //
+  // The host cannot dial a container: a daemon binds loopback and qits-workspaces reaches it by
+  // ASKING it to dial back (OpenStream → a WebSocket to /workspaces/daemon/stream/<nonce>, piped
+  // to its own API). Everything below is that, in the story's own words — the same three moves
+  // DaemonStreamTunnel makes in the real daemon and DaemonStreamRouteTest makes in the unit suite.
+  // Without it a story's container is reachable for frames and unreachable for requests, which is
+  // half a container.
+
+  private Vertx vertx;
+  private HttpServer api;
+  private WebSocketClient wsClient;
+  private NetClient netClient;
+
+  /** How many times the host has read {@code /agents/available} through the tunnel. */
+  private final AtomicInteger capabilityReads = new AtomicInteger();
+
+  /**
+   * What that route answers, given the attempt number (1 for the first read). {@code null} means a
+   * 404 — a daemon that does not serve the route at all — which is what every container in this
+   * catalogue answers unless its story says otherwise, and is deliberately the cheapest honest
+   * answer: the host's relay reads it once, records nothing and asks no more.
+   */
+  private volatile java.util.function.IntFunction<String> capabilityAnswers = attempt -> null;
+
+  private StoryDaemon(WebSocket socket, BlockingQueue<DaemonMessage> inbound, String baseUrl) {
     this.socket = socket;
     this.inbound = inbound;
+    this.baseUrl = baseUrl;
   }
 
   /**
@@ -103,19 +140,36 @@ public final class StoryDaemon implements AutoCloseable {
    */
   public static StoryDaemon dial(String baseUrl, long workspaceId, String bearer) throws Exception {
     BlockingQueue<DaemonMessage> inbound = new LinkedBlockingQueue<>();
+    // The frame handler is installed before the socket exists, so it is handed the daemon through a
+    // holder: an OpenStream must be served the moment it arrives, and the host asks for one as soon
+    // as anything on its side wants to reach this container.
+    java.util.concurrent.atomic.AtomicReference<StoryDaemon> self =
+        new java.util.concurrent.atomic.AtomicReference<>();
     WebSocket socket =
         HttpClient.newHttpClient()
             .newWebSocketBuilder()
             .header("Authorization", "Bearer " + bearer)
             .connectTimeout(SOON)
-            .buildAsync(URI.create(endpoint(baseUrl, workspaceId)), new Listener(inbound))
+            .buildAsync(
+                URI.create(endpoint(baseUrl, workspaceId)),
+                new Listener(
+                    inbound,
+                    message -> {
+                      StoryDaemon daemon = self.get();
+                      if (message instanceof OpenStream open && daemon != null) {
+                        daemon.serveStream(open);
+                      }
+                    }))
             .get(SOON.toSeconds(), TimeUnit.SECONDS);
+    StoryDaemon daemon = new StoryDaemon(socket, inbound, baseUrl);
+    daemon.startContainerApi();
+    self.set(daemon);
     pushed(
         StoryIdentities.DAEMON,
         StoryTarget.SERVICE,
         NetworkEdge.SOCKET,
         "CONNECT " + StoryTarget.DAEMON_LABEL_PATH);
-    return new StoryDaemon(socket, inbound);
+    return daemon;
   }
 
   /**
@@ -131,7 +185,7 @@ public final class StoryDaemon implements AutoCloseable {
     builder
         .buildAsync(
             URI.create(endpoint(baseUrl, workspaceId)),
-            new Listener(new LinkedBlockingQueue<>()))
+            new Listener(new LinkedBlockingQueue<>(), message -> {}))
         .get(SOON.toSeconds(), TimeUnit.SECONDS);
   }
 
@@ -197,6 +251,104 @@ public final class StoryDaemon implements AutoCloseable {
     } catch (Exception ignored) {
       socket.abort();
     }
+    // The container's own listeners go with it. A tunnel that outlived the story would leave the
+    // host holding a NetServer wired to a Vert.x that is about to close.
+    closeQuietly(api == null ? null : api::close);
+    closeQuietly(wsClient == null ? null : wsClient::close);
+    closeQuietly(netClient == null ? null : netClient::close);
+    closeQuietly(vertx == null ? null : vertx::close);
+  }
+
+  private static void closeQuietly(Runnable close) {
+    if (close == null) {
+      return;
+    }
+    try {
+      close.run();
+    } catch (RuntimeException ignored) {
+      // A story that is over cannot be failed by a listener that was already gone.
+    }
+  }
+
+  // --- what the container answers when the host reaches into it -----------------------------------
+
+  /**
+   * Serve {@code GET /agents/available} from {@code answers}, which is handed the attempt number
+   * (1 for the first read); {@code null} from it is a 404. The container's API is already bound —
+   * {@link #dial} binds it — so this only says what it answers.
+   *
+   * <p><b>Called before {@code Hello}</b>, because {@code Hello} is exactly when the host starts
+   * asking: {@code WorkspaceCapabilityRelay} fires on that frame and reads through the tunnel.
+   */
+  public void serveHarnessCapabilities(java.util.function.IntFunction<String> answers) {
+    capabilityAnswers = answers;
+  }
+
+  /** Bind this container's loopback API, which the tunnel above is the only way into. */
+  private void startContainerApi() {
+    vertx = Vertx.vertx();
+    wsClient = vertx.createWebSocketClient();
+    netClient = vertx.createNetClient();
+    api = vertx.createHttpServer();
+    api.requestHandler(
+        request -> {
+          if (!request.uri().endsWith("/agents/available")) {
+            request.response().setStatusCode(404).end("{\"message\":\"no such route\"}");
+            return;
+          }
+          String body = capabilityAnswers.apply(capabilityReads.incrementAndGet());
+          if (body == null) {
+            request.response().setStatusCode(404).end("{\"message\":\"no such route\"}");
+            return;
+          }
+          request.response().putHeader("Content-Type", "application/json").end(body);
+        });
+    try {
+      api.listen(0, "127.0.0.1").toCompletionStage().toCompletableFuture().get(20, TimeUnit.SECONDS);
+    } catch (Exception e) {
+      throw new IllegalStateException("the story container's API would not bind", e);
+    }
+  }
+
+  /** How many times the host has read {@code /agents/available} from this container. */
+  public int capabilityReads() {
+    return capabilityReads.get();
+  }
+
+  /**
+   * Serve one {@code OpenStream}: dial the host's stream route and pipe it to this container's own
+   * API, exactly as {@code DaemonStreamTunnel} does.
+   *
+   * <p>Both ends are paused until the handlers exist — the host writes the moment its upgrade
+   * completes, and a request line read before there is a handler to take it is a request that never
+   * answers.
+   */
+  private void serveStream(OpenStream open) {
+    if (api == null) {
+      return; // this story's container serves nothing; the host's read fails, which is honest
+    }
+    URI host = URI.create(baseUrl);
+    netClient
+        .connect(api.actualPort(), "127.0.0.1")
+        .onSuccess(
+            local ->
+                wsClient
+                    .connect(host.getPort(), host.getHost(), open.path())
+                    .onSuccess(remote -> pipe(remote, local))
+                    .onFailure(failure -> local.close()));
+  }
+
+  private static void pipe(io.vertx.core.http.WebSocket remote, NetSocket local) {
+    remote.pause();
+    local.pause();
+    remote.handler(local::write);
+    local.handler(remote::writeBinaryMessage);
+    remote.endHandler(v -> local.close());
+    local.endHandler(v -> remote.close());
+    remote.closeHandler(v -> local.close());
+    local.closeHandler(v -> remote.close());
+    remote.resume();
+    local.resume();
   }
 
   // --- the wire ---------------------------------------------------------------------------------
@@ -240,10 +392,14 @@ public final class StoryDaemon implements AutoCloseable {
 
     private final BlockingQueue<DaemonMessage> inbound;
 
+    /** Frames the container must ACT on rather than queue — today, {@code OpenStream}. */
+    private final Consumer<DaemonMessage> handler;
+
     private final StringBuilder parts = new StringBuilder();
 
-    private Listener(BlockingQueue<DaemonMessage> inbound) {
+    private Listener(BlockingQueue<DaemonMessage> inbound, Consumer<DaemonMessage> handler) {
       this.inbound = inbound;
+      this.handler = handler;
     }
 
     @Override
@@ -259,7 +415,9 @@ public final class StoryDaemon implements AutoCloseable {
         String whole = parts.toString();
         parts.setLength(0);
         try {
-          inbound.add(DaemonCodec.decode(JSON.readValue(whole, Map.class)));
+          DaemonMessage message = DaemonCodec.decode(JSON.readValue(whole, Map.class));
+          handler.accept(message);
+          inbound.add(message);
         } catch (Exception undecodable) {
           // A frame this story does not model is not a failure of the story; the assertions name
           // what was expected.
