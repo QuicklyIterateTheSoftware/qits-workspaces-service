@@ -44,12 +44,12 @@
     </modules>
 
     <properties>
-        <qits.eventstream.version>2026.906.25410</qits.eventstream.version>
+        <qits.eventstream.version>2026.910.64632</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.906.171046</qits.db-core.version>
         <qits.arch-rules.version>2026.906.171046</qits.arch-rules.version>
         <qits.auth-core.version>2026.906.171046</qits.auth-core.version>
-        <qits.containers-client.version>2026.907.94651</qits.containers-client.version>
+        <qits.containers-client.version>2026.910.71635</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
