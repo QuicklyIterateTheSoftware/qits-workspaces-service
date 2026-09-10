@@ -304,13 +304,22 @@ public class AgentDispatchControllerTest {
   /**
    * The request that leaves this process, in full.
    *
-   * <p>{@code deliverTaskPrompt} is the one that is worth a test of its own: true seeds the session
+   * <p>{@code surface} is the one that is worth a test of its own for a reason the other fields are
+   * not: the daemon <b>requires</b> it, so an omission is not a shape that degrades — it is a 400
+   * and a dispatch that cut a workspace, started a container and launched nothing. That is what
+   * shipped between qits-workspace-daemon 2026.909.125238 (which removed the shape-based guess) and
+   * this assertion. The value has to be {@code ticket.dispatch} rather than the SPA's
+   * {@code workspace.chat}: the surface is what a session is *for*, and per-surface agent
+   * configuration reads it.
+   *
+   * <p>{@code deliverTaskPrompt} is worth one too: true seeds the session
    * with an instruction to fetch the real prompt through an MCP tool named {@code taskPrompt}, and
    * that tool is implemented nowhere on the platform. An agent launched that way sits there waiting
    * for a tool that will never exist, and nothing in this service would say so.
    */
   @Test
-  public void theLaunchCarriesChatModeTheInstructionAndNeverTheTaskPrompt() throws Exception {
+  public void theLaunchCarriesItsSurfaceChatModeTheInstructionAndNeverTheTaskPrompt()
+      throws Exception {
     String repoId = seedRepository();
     Long rowId = workspaceWithContainer(repoId, "ticket-wired", "ticket/wired");
 
@@ -324,6 +333,10 @@ public class AgentDispatchControllerTest {
 
     JsonObject launch = awaitLaunch(rowId);
     assertEquals("REPOSITORY", launch.getString("scope"), "ACTIONS is served by nothing today");
+    assertEquals(
+        "ticket.dispatch",
+        launch.getString("surface"),
+        "the daemon 400s a launch with no surface, and this caller is a ticket dispatch");
     assertEquals("CHAT", launch.getString("mode"), "a headless dispatch cannot drive a PTY");
     assertEquals("read the failing test first", launch.getString("initialContext"));
     assertEquals(

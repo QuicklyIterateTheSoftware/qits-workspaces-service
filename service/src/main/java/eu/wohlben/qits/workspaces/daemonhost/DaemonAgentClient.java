@@ -67,6 +67,26 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
   /** Chat mode: the stream-json conversation, which is what a headless dispatch can drive. */
   private static final String MODE = "CHAT";
 
+  /**
+   * Which surface asked, and the daemon <b>requires</b> it — a launch body without one is a 400.
+   *
+   * <p><b>It is a literal, and the value is not `workspace.chat`.</b> The vocabulary lives in the
+   * harness library the daemon carries (`AgentSurface`) and nothing on this classpath declares it,
+   * so the string is spelled here; the key is the one written for exactly this caller — "the agent a
+   * ticket dispatch starts in a freshly cut workspace". Sending `workspace.chat` instead would work
+   * and would be a lie: it is the SPA's chat tab's key, and a configuration given to one surface
+   * would then be given to the other.
+   *
+   * <p><b>This client sent no surface at all for one release, and every launch it made was a 400.</b>
+   * qits-workspace-daemon 2026.909.125238 removed the guess that had been inferring a surface from
+   * the request's shape — the crutch that let the daemons ship before their callers — and this
+   * caller predated the removal, so ticket dispatch cut a workspace, brought a container up and
+   * launched nothing. A refused launch is never retried, so nothing recovered it. There is no
+   * absent-is-supported reading available here: the field is mandatory, and the whole point of it
+   * being mandatory is that a launch site cannot quietly omit it.
+   */
+  private static final String SURFACE = "ticket.dispatch";
+
   @Inject Vertx vertx;
 
   @Inject DaemonProxyTargets targets;
@@ -145,6 +165,9 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
   /**
    * {@code POST /agents} — the launch, with the instruction as the seed turn.
    *
+   * <p><b>The body names its {@link #SURFACE} and the daemon refuses one that does not.</b> See that
+   * constant for why the value is {@code ticket.dispatch} and what a release without it cost.
+   *
    * <p><b>{@code deliverTaskPrompt} is false and must stay false.</b> True seeds the session with an
    * instruction to fetch the real prompt through an MCP tool named {@code taskPrompt}, and that tool
    * is implemented nowhere on the platform — the agent would be told to call something that does not
@@ -160,6 +183,7 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
     JsonObject body =
         new JsonObject()
             .put("scope", SCOPE)
+            .put("surface", SURFACE)
             .put("mode", MODE)
             .put("initialContext", instruction == null ? "" : instruction)
             .put("deliverTaskPrompt", false);
