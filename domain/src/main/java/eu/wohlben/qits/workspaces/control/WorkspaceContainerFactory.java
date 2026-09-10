@@ -110,6 +110,29 @@ public class WorkspaceContainerFactory {
   String claudeMount;
 
   /**
+   * Where the agent-configuration document lands inside the container — the path the daemon
+   * materializes it at and hands to the shared harness library, told outright the same way the
+   * daemon is told its API base path and the claude mount.
+   *
+   * <p><b>Why {@code /tmp} and not {@code /etc/qits}.</b> The image's {@code /etc/qits} is
+   * root-owned and the container runs as the host uid, so nothing in the container may write there;
+   * {@code /workspace} is the checkout volume and a file in it would show up in {@code git status};
+   * {@code /claude-home} is a volume <em>shared by every container on the platform</em>, so a
+   * per-container document written there would be overwritten by the next container to boot. {@code
+   * /tmp} is world-writable in every image and dies with the container, which is exactly the
+   * document's lifetime.
+   *
+   * <p>A config key rather than a constant so a deployment can move it if an image ever grows a
+   * better place, and because the daemon and the library learn it from this value rather than from a
+   * literal of their own — the same told-never-derived arrangement {@code
+   * QITS_WORKSPACE_DAEMON_API_BASE_PATH} has.
+   */
+  @ConfigProperty(
+      name = "qits.workspace.agent-configuration-path",
+      defaultValue = "/tmp/qits/agent-configuration.json")
+  String agentConfigurationPath;
+
+  /**
    * Shared build caches mounted into every workspace container (and qits' own devcontainer), so a
    * dependency downloaded by one build is reused by all — the Maven local repo and the pnpm store.
    * Blank disables the mount. Mount points are fixed ({@code /caches/m2}, {@code /caches/pnpm},
@@ -323,6 +346,14 @@ public class WorkspaceContainerFactory {
    */
   @Inject Instance<WorkspacePostures> postures;
 
+  /**
+   * The agent-configuration document this workspace's container was born with. A lookup rather than
+   * an argument, and for a sharper version of {@link WorkspaceCredentials}' reason — see {@link
+   * AgentConfigurationDocuments}. Optional: absent means no document environment, which is a
+   * container on the harness library's shipped defaults.
+   */
+  @Inject Instance<AgentConfigurationDocuments> agentConfiguration;
+
   /** The repo's project-scoped name, from an override resolver or the repository registry. */
   private Optional<RepositoryAddressResolver.ProjectScopedName> scopedName(String repoId) {
     if (nameResolver.isResolvable()) {
@@ -400,6 +431,33 @@ public class WorkspaceContainerFactory {
               + " editor",
           rowId);
       return false;
+    }
+  }
+
+  /**
+   * The document on this workspace's row, or none. <b>A read that stumbles costs the document and
+   * never the container</b> — the same direction {@link #workspaceCredential} falls in and for the
+   * same reason: by the time this runs the provision has already decided what the container is
+   * getting, and a database blink must not turn a resume into a failed launch. What it costs is a
+   * container on the harness library's shipped defaults, which is the same thing the recorded
+   * fallback costs — and, unlike the posture lookup, nothing is granted by an absence here.
+   */
+  private Optional<String> agentConfigurationDocument(Long rowId) {
+    if (rowId == null || !agentConfiguration.isResolvable()) {
+      return Optional.empty();
+    }
+    try {
+      return agentConfiguration
+          .get()
+          .forWorkspace(rowId)
+          .filter(document -> document != null && !document.isBlank());
+    } catch (RuntimeException e) {
+      LOG.warnf(
+          e,
+          "could not read the agent configuration of workspace %s; its container starts on the"
+              + " harness library's shipped defaults",
+          rowId);
+      return Optional.empty();
     }
   }
 
@@ -728,6 +786,41 @@ public class WorkspaceContainerFactory {
     // One shared value with a default, so a deployment needs no configuration. See the config key's
     // own comment for what it is NOT: it is a handshake constant, not a boundary.
     container.env("QITS_WORKSPACE_DAEMON_API_TOKEN", daemonApiToken);
+    // THE AGENT CONFIGURATION DOCUMENT — what every session this container serves is configured by
+    // (epic: Agent Configuration System). qits-projects resolves every surface a workspace container
+    // may serve — epic.chat, epic.agent, workspace.chat, workspace.agent, and ticket.dispatch where
+    // that is what cut the workspace — into one document; WorkspaceService fetches it once when the
+    // container is provisioned and puts it on the row, and this is where the container is handed it.
+    //
+    // TWO VARIABLES, BOTH OR NEITHER, the same rule the credential and editor blocks follow: the
+    // document and the path it is to be read at are one arrangement, and a path naming a file
+    // nothing wrote is a daemon failing at boot over a container that was meant to fall back
+    // quietly. Absent is a supported configuration and means the container runs on the harness
+    // library's shipped constants — a container created before this shipped, a deployment with no
+    // source wired, or a fetch that failed (which is RECORDED on the workspace row rather than only
+    // logged: see Workspace.agentConfigurationError).
+    //
+    // ENVIRONMENT CARRYING THE BYTES, AND THE DAEMON WRITING THE FILE. The epic asks for a mounted
+    // file, and the container spec cannot express one: qits-containers admits named volumes and the
+    // docker socket and NO host path — deliberately, as its ContainerSpec javadoc says, because the
+    // shape is the security boundary — and this service holds no docker socket to write into a
+    // volume with. So the host hands over the document the one way it can, the daemon materializes
+    // it at the path below before it starts anything, and the library reads a file exactly as the
+    // epic specifies. The daemon learns the path the same way it learns its API base path and the
+    // claude mount: told outright, never derived.
+    //
+    // IT RIDES THE SPEC, so it obeys the spec-hash rule the editor, credential and maven-central
+    // blocks carry: environment is part of the spec and a spec that differs from the running
+    // container's is a Recreate.ifChanged REPLACEMENT. That is the whole reason the document is read
+    // off the ROW here rather than fetched — a document fetched per call carries a fresh generatedAt
+    // and would replace every workspace's container at every ensure. Adding it replaces each
+    // existing workspace container once, on its next ensure; /workspace is a volume and survives it.
+    agentConfigurationDocument(rowId)
+        .ifPresent(
+            document -> {
+              container.env("QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION_PATH", agentConfigurationPath);
+              container.env("QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION", document);
+            });
     // The credential this container holds toward the PLATFORM — the other direction from the token
     // above, which is what the host presents to the daemon. It is an idp client id and secret
     // commissioned for this container alone (WorkspaceService provisions it, CredentialCommissioner

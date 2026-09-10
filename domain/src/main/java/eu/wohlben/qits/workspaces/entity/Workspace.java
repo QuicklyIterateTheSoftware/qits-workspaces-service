@@ -155,6 +155,41 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public String commissionedClientSecret;
 
   /**
+   * The resolved agent-configuration document this workspace's <em>current container</em> was born
+   * with — what qits-projects answered at provision time, and what the container carries in its own
+   * environment for as long as it runs. Null whenever no container holds one: before the first
+   * provision, and whenever the fetch could not be made (in which case {@link
+   * #agentConfigurationError} says why).
+   *
+   * <p><b>A column for the reason the commissioned pair is one.</b> The document rides the
+   * container's environment, the orchestrator has no start verb, and a spec whose environment
+   * differs from the running container's is a {@code Recreate.ifChanged} <em>replacement</em>. A
+   * document re-fetched at every ensure would therefore replace a container on every edit — and, on
+   * its own {@code generatedAt} alone, on every ensure. The row is what makes the spec reproducible,
+   * and it is the same rule the epic states from the other side: a running container keeps the
+   * configuration it was created with, and an edit applies to the next one.
+   *
+   * <p>{@code text} rather than {@code @Lob}, like every other unbounded string on this entity. The
+   * bytes are qits-projects' and are stored exactly as they arrived — see {@link
+   * eu.wohlben.qits.workspaces.control.AgentConfigurationDocument}.
+   */
+  @Column(name = "agent_configuration", columnDefinition = "text")
+  public String agentConfiguration;
+
+  /**
+   * Why this workspace's current container was created <b>without</b> a document, or null when it
+   * holds one.
+   *
+   * <p><b>The fallback is recorded, not merely logged.</b> A container that cannot get its document
+   * is created anyway and runs on the harness library's shipped defaults, because refusing to create
+   * the workspace would trade a configuration outage for a work outage. That trade is only safe
+   * while the fallback is visible, so it is written here beside the container's other state and
+   * answered on {@link eu.wohlben.qits.workspaces.dto.WorkspaceDto#agentConfigurationError()}.
+   */
+  @Column(name = "agent_configuration_error", columnDefinition = "text")
+  public String agentConfigurationError;
+
+  /**
    * Whether this workspace runs in <b>admin mode</b>: its container is started with the host's
    * docker socket bound into it, so platform administration can be done from inside a workspace.
    *

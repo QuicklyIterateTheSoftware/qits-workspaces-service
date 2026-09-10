@@ -70,6 +70,13 @@ import java.time.Instant;
  *     current container. It is on the read model because a client that cannot see which workspaces
  *     are privileged cannot say so, and "which ones have the socket" is the question this whole
  *     posture exists to keep answerable
+ * @param agentConfigurationError why this workspace's current container was created <b>without</b>
+ *     an agent-configuration document, or {@code null} when it holds the one it asked for. A
+ *     container that cannot get its document is created anyway and runs on the harness library's
+ *     shipped defaults — refusing to create it would trade a configuration outage for a work outage
+ *     — and this field is what stops that fallback from being invisible. It is a fact about the
+ *     current container, like {@code runtimeError} beside it, and it clears on the next successful
+ *     provision
  */
 public record WorkspaceDto(
     Long id,
@@ -93,4 +100,5 @@ public record WorkspaceDto(
     String daemonVersion,
     Instant daemonBuildTime,
     Boolean daemonOutdated,
-    boolean admin) {}
+    boolean admin,
+    String agentConfigurationError) {}

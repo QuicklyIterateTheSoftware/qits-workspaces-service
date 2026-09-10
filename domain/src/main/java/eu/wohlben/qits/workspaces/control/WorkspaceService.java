@@ -77,6 +77,14 @@ public class WorkspaceService {
    */
   @Inject Instance<CredentialCommissioner> commissioner;
 
+  /**
+   * Optional: where the agent-configuration document a container is born with is fetched from —
+   * qits-projects. Absent means no document is fetched and every container runs on the harness
+   * library's shipped constants, which is what every workspace container did before this port
+   * existed. See {@link AgentConfigurationSource}.
+   */
+  @Inject Instance<AgentConfigurationSource> agentConfiguration;
+
   @Inject WorkspaceContainerEventPublisher containerEvents;
 
   /**
@@ -270,6 +278,10 @@ public class WorkspaceService {
     // running with no identity. This is also the one place a recreate is covered — recreate rm's the
     // container and comes back through here — so no second seam has to remember.
     commissionFor(repoId, workspaceId, rowId);
+    // And what the agents in it will be configured by, fetched from qits-projects and put on the row
+    // beside the credential — same seam, same reason, and the same one place a recreate is covered.
+    // Unlike the commission, this one never fails the provision: see the method.
+    fetchAgentConfigurationFor(repoId, workspaceId, rowId);
     if (process != null) {
       process.openSegment("container");
     }
@@ -383,6 +395,76 @@ public class WorkspaceService {
                         }));
     LOG.debugf(
         "Commissioned %s for workspace %s/%s", credential.clientId(), repoId, workspaceId);
+  }
+
+  /**
+   * Fetch the agent-configuration document this workspace's next container will be born with, and
+   * put it on the row so every later ensure composes the same container spec.
+   *
+   * <p><b>It never fails the provision, and that is the settled decision rather than a leniency.</b>
+   * A container that cannot get its document is created without one and runs on the harness
+   * library's shipped defaults: refusing to create the workspace would trade a configuration outage
+   * for a work outage, which is the worse of the two — a workspace nobody can open because a
+   * <em>prompt</em> could not be read is not a trade anybody would make deliberately. The credential
+   * beside it fails the provision for the opposite reason: a container with no identity pulls and
+   * pushes as nobody, and there is no defensible default for that.
+   *
+   * <p><b>So the fallback is RECORDED, not merely logged.</b> A silent fallback nobody can see is
+   * how green-while-dead happens, so the reason lands on {@code Workspace.agentConfigurationError}
+   * and is answered on {@link WorkspaceDto#agentConfigurationError()} beside {@code runtimeError} —
+   * the workspace's other "what is wrong with this container" field. Every provision writes the pair
+   * atomically: a document with no error, or an error with no document. A row that kept a previous
+   * container's document while claiming this one has none would be the worst of both.
+   *
+   * <p><b>Every creation path is covered by being here.</b> This is {@code provisionContainer}, the
+   * single provisioning path — the fresh arm of {@link #ensureContainer}, recreate through it, and
+   * the agent dispatch a ticket triggers, which cuts a workspace and ensures its container like
+   * anything else. No caller threads a document through its body and no second seam has to remember.
+   *
+   * <p>Its own transaction, and not the caller's, for {@link #commissionFor}'s reason: {@code
+   * provisionContainer} runs outside one, and the write has to be committed before {@code
+   * containers.run} asks the factory to read it back.
+   */
+  private void fetchAgentConfigurationFor(String repoId, String workspaceId, Long rowId) {
+    if (!agentConfiguration.isResolvable() || rowId == null) {
+      // No source wired. A supported configuration — the container runs on the shipped defaults —
+      // and NOT a failure, so nothing is recorded on the row: there was nowhere to ask.
+      return;
+    }
+    String document = null;
+    String failure = null;
+    try {
+      Optional<AgentConfigurationDocument> fetched = agentConfiguration.get().fetch();
+      if (fetched.isEmpty()) {
+        // Nowhere to ask. Supported, and the same as no implementation at all — so the row is left
+        // exactly as it is rather than being told a story about a failure that did not happen.
+        return;
+      }
+      document = fetched.get().json();
+      LOG.debugf(
+          "Agent configuration v%d for workspace %s/%s: %s",
+          fetched.get().version(), repoId, workspaceId, fetched.get().surfaces());
+    } catch (RuntimeException couldNotAsk) {
+      failure = couldNotAsk.getMessage() == null ? couldNotAsk.toString() : couldNotAsk.getMessage();
+      LOG.warnf(
+          couldNotAsk,
+          "Could not fetch the agent configuration for workspace %s/%s; its container starts on the"
+              + " harness library's shipped defaults",
+          repoId,
+          workspaceId);
+    }
+    String documentToStore = document;
+    String failureToStore = failure;
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaceRepository
+                    .findActiveById(rowId)
+                    .ifPresent(
+                        wt -> {
+                          wt.agentConfiguration = documentToStore;
+                          wt.agentConfigurationError = failureToStore;
+                        }));
   }
 
   /**
@@ -567,7 +649,8 @@ public class WorkspaceService {
                   info != null ? info.version() : null,
                   info != null ? info.buildTime() : null,
                   daemonOutdated(info, latestDaemon),
-                  wt.admin);
+                  wt.admin,
+                  wt.agentConfigurationError);
             })
         .toList();
   }

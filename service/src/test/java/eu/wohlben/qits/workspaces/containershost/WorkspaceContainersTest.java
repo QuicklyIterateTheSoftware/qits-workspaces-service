@@ -164,6 +164,60 @@ class WorkspaceContainersTest {
   }
 
   @Test
+  void aWorkspaceWithADocumentCarriesItOnTheSpecAndChangesNothingElse() {
+    Spec none = adapter().ensureRequest(REPO, "work", 1L, "main", "0parent").spec();
+    Spec configured =
+        adapter(TestWorkspaceContainerFactory.configured())
+            .ensureRequest(REPO, "work", 1L, "main", "0parent")
+            .spec();
+
+    // Nothing where there is no document: a container created before this shipped, or one whose
+    // fetch failed, is told nothing at all and runs on the harness library's shipped constants.
+    // Silence is what the library reads as "no document"; an empty value would be a second way of
+    // saying it and a path naming a file nothing wrote would fail the daemon at boot.
+    assertNull(none.env().get("QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION"));
+    assertNull(none.env().get("QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION_PATH"));
+
+    // And the document byte for byte where there is one, beside the path the daemon materializes it
+    // at. It travels on the SPEC — the only channel the orchestrator's wire has, which admits named
+    // volumes and the docker socket and no host path at all — so it obeys the spec-hash rule: this
+    // is a Recreate.ifChanged replacement for every container already running, which is why the
+    // value is read off the row rather than fetched per call. A fetch here would carry a fresh
+    // generatedAt and replace every workspace's container at every ensure.
+    assertEquals(
+        TestWorkspaceContainerFactory.AGENT_CONFIGURATION_DOCUMENT,
+        configured.env().get("QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION"));
+    assertEquals(
+        TestWorkspaceContainerFactory.AGENT_CONFIGURATION_PATH,
+        configured.env().get("QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION_PATH"));
+
+    // …and that is the WHOLE difference, asserted the way the two postures' are: the configured
+    // spec with the two variables taken back out is the plain one.
+    java.util.Map<String, String> env = new java.util.LinkedHashMap<>(configured.env());
+    env.remove("QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION");
+    env.remove("QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION_PATH");
+    assertEquals(
+        none,
+        new Spec(
+            configured.image(),
+            configured.entrypoint(),
+            configured.args(),
+            env,
+            configured.extraLabels(),
+            configured.network(),
+            configured.aliases(),
+            configured.addHosts(),
+            configured.volumeMounts(),
+            configured.sharedMounts(),
+            configured.hostDockerSocket(),
+            configured.security(),
+            configured.pullPolicy(),
+            configured.explicitName(),
+            configured.user(),
+            configured.init()));
+  }
+
+  @Test
   void theAdminPostureAddsTheSocketAndChangesNothingElse() {
     Spec ordinary = adapter().ensureRequest(REPO, "work", 1L, "main", "0parent").spec();
     Spec admin =

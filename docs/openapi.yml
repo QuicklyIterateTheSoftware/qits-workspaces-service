@@ -572,6 +572,8 @@ components:
           type: boolean
         admin:
           type: boolean
+        agentConfigurationError:
+          type: string
     WorkspaceEventDto:
       type: object
       properties:
@@ -1791,4 +1793,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.908.2642
+  version: 2026.908.82007

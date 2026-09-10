@@ -148,6 +148,13 @@ the entity. The reasoning that *is* worth knowing is in the file's header and in
 `WorkspaceCredentials` — why the secret is stored at all, and why the columns are cleared in the same
 breath as the revocation rather than after it.
 
+**`V5__agent_configuration.sql` adds two more nullable `text` columns to `workspace`** — the agent
+configuration a container was born with, and the reason it was born without one. Same reading as
+`V3`: columns on an entity that is already a `CausedRow`, so no `ArchRulesTest` decision, and the
+reasoning worth knowing is in the file's header and in `AgentConfigurationDocuments` — why a
+document is stored rather than fetched at every ensure, and why the failure is a column rather than
+only a log line.
+
 **The target is PostgreSQL 18.4** — the tag `components/qits-database/qits-database-oci` is built
 from, and the version the suites' embedded binaries are, so a migration is proved against the engine it ships on.
 Two H2 habits are gone with it: a rule that applies to some rows is a **partial unique index** now
@@ -1251,6 +1258,179 @@ rather than everything.
 implementation of `CredentialCommissioner`, or one wired against no issuer. The switch is
 `quarkus.oidc-client.client-enabled` — the extension's own, read a third time here for the reason
 `ContainersClientProducer` reads it a second time. There is no key of ours, and there must not be.
+
+## The agent configuration a container is born with
+
+Every agent session a workspace container serves — `epic.chat`, `epic.agent`, `workspace.chat`,
+`workspace.agent`, and `ticket.dispatch` where a dispatch cut the workspace — is configured by a
+document this service **fetches once, at provision, and hands to the container as it starts**. The
+store and the vocabulary are qits-projects' (`GET /projects/api/agent-configuration`, `qits:admin` +
+`qits:system`); the shared harness library inside the container reads it. What lives here is the
+fetch, the row it lands on, and the environment it rides into the container on.
+
+**It is the credential's arrangement, one step further.** `AgentConfigurationSource` is the port
+(implemented in `wiring/HttpAgentConfigurationSource`, on the `projects` oidc client the repository
+registry already uses); `WorkspaceService.fetchAgentConfigurationFor` calls it in
+`provisionContainer` beside `commissionFor` — **the single provisioning path**, so the fresh ensure,
+the recreate and the ticket dispatch are all covered with no second seam; the document goes on the
+`workspace` row (`V5`), and `AgentConfigurationDocuments` is what `WorkspaceContainerFactory` reads
+it back through.
+
+**Why it is stored rather than fetched at every ensure**, and this is the load-bearing part: the
+document rides the container's **environment**, environment is part of the spec, and a spec that
+differs from the running container's is a `Recreate.ifChanged` **replacement**. A fetch per ensure
+would replace every workspace's container whenever the store was edited — and, since the document
+carries its own `generatedAt`, on **every** ensure regardless. The row is what makes the spec
+reproducible, and it is the same sentence the epic states from the other side: a running container
+keeps the configuration it was born with, and an edit applies to the next container.
+
+**Environment, and a file the daemon writes — because a mounted file is not expressible.** The epic
+asks for a mounted JSON document, and the orchestrator's wire cannot carry one: `ContainerSpec`
+admits named volumes and the docker socket and **no host path at all** — deliberately, since "the
+shape is the security boundary" — and this service holds no docker socket to populate a volume with.
+So the bytes travel as `QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION`, the daemon materializes them at
+`QITS_WORKSPACE_DAEMON_AGENT_CONFIGURATION_PATH` before it starts anything, and the library reads a
+file exactly as specified. **Both variables or neither**, the rule the credential and editor blocks
+follow: a path naming a file nothing wrote is a daemon failing at boot over a container that was
+meant to fall back quietly.
+
+The path is `/tmp/qits/agent-configuration.json` (`qits.workspace.agent-configuration-path`), and
+the three places it is not are each a real defect avoided: `/etc/qits` is root-owned in the image
+while the container runs as the host uid, `/workspace` is the checkout volume and a file there shows
+up in `git status`, and `/claude-home` is **shared by every container on the platform**, so a
+per-container document written there would be overwritten by the next container to boot. `/tmp` is
+world-writable everywhere and dies with the container, which is exactly the document's lifetime.
+
+**The failure policy is settled, and half of it is the recording.** A container that cannot get its
+document is created **without** one and runs on the harness library's shipped defaults: refusing
+would trade a configuration outage for a work outage, and a workspace nobody can open because a
+prompt could not be read is not a trade anybody would make deliberately. The credential beside it
+fails the provision for the opposite reason — a container with no identity pulls as nobody and there
+is no defensible default. But a silent fallback nobody can see is how green-while-dead happens, so
+the reason lands on `workspace.agent_configuration_error` and is answered on
+`WorkspaceDto.agentConfigurationError` beside `runtimeError`. The pair is written **atomically at
+every provision** — a document with no error, or an error with no document — so a row never claims a
+failure its current container did not have, and never carries a previous container's document.
+
+**Absent is a supported configuration in two spellings and they behave identically**: no
+implementation of the port, or one with no `qits.projects.url` — nothing fetched, nothing recorded,
+no environment, which is what every container did before this existed. Only a wired source that
+**failed** is recorded. A body that is not a document is a failure, not a document:
+`AgentConfigurationDocument.of` checks that it parses, is an object, and carries a non-empty
+`surfaces` array — and checks **nothing else**, because qits-projects and the library release
+independently of this service and a validator here that knew less than the reader does would refuse
+configurations that work. It parses through a `JsonNode` tree, which is also the native-image answer:
+no reflection registration to be missing.
+
+**The peer address is `qits.projects.url`, declared in `.config/qits/configuration.yml`** as a
+`serviceAddress` — the first key this repository declares. A literal peer address resolves on no
+tiered estate, which is the lesson the config-declarations epic paid for. The bootstrap's EXTRAS
+block still supplies the same key and **must** until a tag carrying that file is this repository's
+newest (the guide's §7.5 two-step cold-boot rule), so deleting the
+`qits.platform.deployments.extras.qits-workspaces.env.QITS_PROJECTS_URL` line is a later, separate
+change in qits-bootstrap.
+
+**Where it is proved.** `AgentConfigurationDocumentTest` (what a fetcher may honestly check),
+`WorkspaceAgentConfigurationTest` (fetched at provision, kept across a resume, recorded when it
+fails, cleared when a later provision succeeds), `WorkspaceContainerFactoryTest` (the two variables,
+and every way of not having a document reading the same), `WorkspaceContainersTest` (the same claim
+on the wire spec, asserted as "the configured spec with the two variables taken back out is the
+plain one"), and `WorkspaceProvisionIT`, where the document is read off the workload spec
+qits-containers really received. `FakeAgentConfigurationSource` starts **unwired** for
+`FakeCredentialCommissioner`'s reason and is duplicated per module like every other double.
+
+## What a container reports back: the harness capability relay
+
+The other direction from the document above. A workspace container is *born with* a configuration;
+once it is up it **reports what its harness binaries can actually be configured with** — the models,
+the effort levels, whether effort exists at all, whether anybody is signed in — and that report is
+what fills the editor's model and effort dropdowns. The catalogue lives in qits-projects, keyed by
+**harness and image version**, and until `WorkspaceCapabilityRelay` existed it only ever held rows a
+*project's* agent container had reported. That defeats the key: a workspace container may run an
+entirely different image build, so the editor was offering what some other image could do.
+
+**`daemonhost/WorkspaceCapabilityRelay` is the carrier**, fired from `WorkspaceDaemonRegistry`'s
+`Hello` arm through an `Instance<>` (the cycle `WorkspaceTunnels` is injected through, for the same
+reason). It reads `ContainerProxyPath.base(rowId) + "agents/available"` through the reverse tunnel,
+presenting **this** container's `qits.workspace.daemon-api-token`, and PUTs the answer to
+`/projects/api/agent-capabilities` through the `AgentCapabilitySink` port
+(`wiring/HttpAgentCapabilitySink`, on the `projects` oidc client and the `qits.projects.url`
+`serviceAddress` the configuration fetch already uses). The write is an HTTP hop because the store is
+qits-projects' — that service's own relay writes in process and this one cannot.
+
+**Hello is the first moment the container is reachable, not the moment it can answer**, and how it
+says "not yet" is where this relay differs from its sibling. Read out of `ControlSocket` in
+qits-workspace-daemon: `start()` kicks the boot self-clone onto a worker and dials home in parallel,
+and it is that worker which — when the clone lands — calls `workspaceApi.start()` (the loopback
+bind), then `wireCommands` → `wireAgents`, and only then `reportHarnessCapabilities`, which probes
+the harnesses on **another** worker and assigns a volatile field. So a container walks three states,
+and all three mean *ask again*:
+
+| what the host sees | what it means | terminal? |
+| --- | --- | --- |
+| the hop fails outright | between `Hello` and the loopback bind, nothing is listening | no — retry |
+| **503** | bound, but `agentLaunch` is still null (`WorkspaceApi` 503s every agent route) | no — retry |
+| **2xx with an EMPTY BODY** | the tunnel connected before the daemon had anything behind it to pipe from | **no — retry** |
+| **200 with an empty `capabilities` array** | wired, probe not landed — `() -> harnessCapabilities` is `List.of()` | **no — retry** |
+| **200 with capabilities** | the report; PUT it, unchanged | yes |
+| **404** | a daemon that does not serve the route | yes, quiet |
+| a body that will not parse, or an ingest door that refuses (4xx) | two sides disagreeing about a contract | yes, **WARN** |
+| qits-projects unreachable or 5xx | the report is still true and the container is still there | no — retry |
+
+**Two of those rows are traps, and each has already cost a release on the sibling.** The empty body
+is the first: measured live against qits-projects on 2026-09-09, the not-ready window presents as a
+*successful* hop carrying nothing, which reaches Jackson as `MismatchedInputException: No content to
+map due to end-of-input` and lands in the terminal broken arm — one attempt, a WARN claiming the
+daemon speaks an unreadable contract, and a catalogue that stays empty for ever. So the blank check
+runs **before** Jackson, in `ingest` as well as in `read`: a body that is absent says nothing about
+capabilities and can never be the reason to stop asking, and only a body genuinely present and
+unparseable is broken. `read` classifies a non-2xx before it looks at any body, so a swallowed status
+can never be reported as an empty one.
+
+**The empty capability list is the second, and copying the sibling would be the bug.** In qits-projects the daemon
+probes *before* it binds, so an empty capability list there means "a daemon older than the feature" —
+terminal and quiet. Here it is the ordinary answer for the first seconds of **every** container, so a
+relay with that rule would record nothing on nearly every container and say nothing about it. The
+price is paid by a genuinely older daemon, which is asked the whole window and warned about once per
+container start; that is the right way round, because a window that gives up must be visible.
+
+**Twelve attempts on a backoff capped at 30s (~4 minutes), and the give-up is a WARN** naming the
+workspace, the attempt count and what the last attempt saw. That line is the whole point of bounding
+it: a relay that silently finds nothing for ever is the green-while-dead shape this feature exists to
+remove, and silence is exactly how the missing half of it went unnoticed for a release. The in-flight
+guard spans the **whole window**, so a flapping daemon cannot stack reads, and `@PreDestroy` stops a
+sleeping one at shutdown. It runs on a virtual thread off the socket's frame handler: nothing a
+person presses reaches it, no request path waits on a daemon, and no arm of it can fail a container.
+
+**The body passes through unchanged, with one exception.** The ingest door was built as a relay's
+door — its contract *is* `GET /agents/available`'s answer — so a carrier that reshaped it would be a
+third place that contract can drift. The exception is `imageVersion` when the daemon named none or
+named its own `"unknown"` fallback: that member is half the catalogue's key, this service chose the
+pin the container was created from, and a report keyed on nothing cannot be told from another build's.
+`reportedBy` is left as the daemon spelled it (`qits-workspace-daemon`, display only).
+
+**One request is composed and awaited ONCE**, `DaemonAgentClient.send`'s measured lesson: awaiting
+the response and then asking it for its body is two blocking steps with an event loop between them,
+and the body can already have been delivered and dropped by the time the second is reached — the read
+then sits on its whole timeout while the daemon has in fact answered, which under a retry reads as
+"not yet" and costs an extra attempt. It cost one here too, in the tunnel suite, before it was fixed.
+
+**Where it is proved.** `WorkspaceCapabilityRelayTest` pins the classification as outcomes rather
+than as row counts — none of the terminal arms writes a row, and what separates them is only whether
+the relay asks again. `DaemonStreamRouteTest` gains the rules against a real tunnel and a fake daemon:
+an empty capability list answered twice is read **three** times and recorded (the case the sibling's
+rule gets wrong), an **empty body** answered twice is read three times and recorded (the case that
+cost the sibling a second release), a **404** is read **once** and not retried, and an `"unknown"`
+image version is filled from the pin. `WorkspaceProvisionIT` proves the whole hop in the packaged run —
+`StoryDaemon` now serves the reverse tunnel (it dials back an `OpenStream` and pipes to a container
+API of its own, which is what makes a story's container reachable for *requests* and not only for
+frames), answers an empty body twice, an empty capability list twice and then a report — the boot
+window in the order a container really presents it — and the story waits on `StoryPeers`' own
+recording of
+`PUT /projects/api/agent-capabilities` before asserting the bytes. That is one arrow per container
+start on the provision diagram, which is why its edge count moved from nineteen to twenty.
+`FakeAgentCapabilitySink` starts wired, unlike `FakeAgentConfigurationSource`: nothing writes to it
+but the relay, which is dark under `%test` and driven explicitly by the one suite about it.
 
 ## Admin workspaces: the one privilege a workspace can be granted
 
