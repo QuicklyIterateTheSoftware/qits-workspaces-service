@@ -1,15 +1,20 @@
 package eu.wohlben.qits.workspaces.api;
 
 import eu.wohlben.qits.workspaces.control.DispatchService;
+import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.control.WorkspaceSubject;
+import eu.wohlben.qits.workspaces.dto.WorkspaceSubjectRefDto;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
+import java.util.List;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -55,6 +60,8 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 public class AgentDispatchController {
 
   @Inject DispatchService dispatches;
+
+  @Inject WorkspaceService workspaces;
 
   /**
    * @param repositoryId the catalog id of the repository to work in — resolved through {@code
@@ -117,5 +124,49 @@ public class AgentDispatchController {
         request.preamble(),
         new WorkspaceSubject(request.ticketId(), request.epicId()),
         request.instruction());
+  }
+
+  public static record ListSubjectRefsRequest() {
+    public record Response(List<Entry> entries) {
+      public record Entry(WorkspaceSubjectRefDto workspace) {}
+    }
+  }
+
+  /**
+   * Which live workspaces are working on these qits-projects rows — the reference this door writes
+   * on a dispatch, read back.
+   *
+   * <p><b>It is on THIS class and not on {@code WorkspaceController}, and that is the whole of why
+   * the read exists here.</b> It shipped there once (2026.911.151414) and was dead on arrival: that
+   * class is {@code @RolesAllowed("qits:admin")}, a person's door, and its caller is qits-projects
+   * holding a machine credential — so every lookup was a 403, the caller's never-throw contract read
+   * it as "no workspaces are on this row", and the feature was deployed and inert with nothing
+   * saying so. That is the 403 of 2026-09-03 for the third time, and it is exactly what this class's
+   * own javadoc already warned about. A machine read belongs on a class that states {@code
+   * qits:system}, and this one is the class that does.
+   *
+   * <p><b>Both parameters repeat, and that is the point of the route.</b> The caller is a project's
+   * tickets panel with a screenful of rows, and asking once per row would be a round trip per
+   * ticket. Either may be omitted; neither given answers an empty list rather than the whole table,
+   * because "tell me about no rows" has exactly one honest answer.
+   *
+   * <p><b>A thin shape, not the listing's.</b> {@code GET /workspaces} is scoped to one repository
+   * and pays a mirror refresh, a container listing and an ahead/behind computation per row, because
+   * it draws a branch tree. This question crosses repositories and wants none of it — see {@link
+   * WorkspaceSubjectRefDto}, and see {@code WorkspaceRepository.findActiveBySubjects} for what
+   * "live" means here.
+   *
+   * <p>Rows the caller did not ask about never appear, and a row whose workspace has been integrated
+   * or abandoned stops appearing the moment it resolves — nothing over there has to clear anything.
+   */
+  @GET
+  @Path("/references")
+  public ListSubjectRefsRequest.Response references(
+      @QueryParam("ticketId") List<String> ticketIds, @QueryParam("epicId") List<String> epicIds) {
+    var entries =
+        workspaces.workspacesReferencing(ticketIds, epicIds).stream()
+            .map(ListSubjectRefsRequest.Response.Entry::new)
+            .toList();
+    return new ListSubjectRefsRequest.Response(entries);
   }
 }

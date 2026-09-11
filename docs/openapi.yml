@@ -268,6 +268,13 @@ components:
     Response:
       type: object
       properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/Entry"
+    Response1:
+      type: object
+      properties:
         commitHash:
           type: string
         hasConflicts:
@@ -275,11 +282,6 @@ components:
         output:
           type: string
         cleanedUp:
-          type: boolean
-    Response1:
-      type: object
-      properties:
-        success:
           type: boolean
     Response10:
       type: object
@@ -348,10 +350,8 @@ components:
     Response2:
       type: object
       properties:
-        events:
-          type: array
-          items:
-            $ref: "#/components/schemas/ServiceEventDto"
+        success:
+          type: boolean
     Response20:
       type: object
       properties:
@@ -360,17 +360,17 @@ components:
     Response3:
       type: object
       properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceEventDto"
+    Response4:
+      type: object
+      properties:
         runs:
           type: array
           items:
             $ref: "#/components/schemas/BootstrapRunDto"
-    Response4:
-      type: object
-      properties:
-        entries:
-          type: array
-          items:
-            $ref: "#/components/schemas/Entry"
     Response5:
       type: object
       properties:
@@ -771,6 +771,39 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:system
+  /workspaces/api/agent-dispatches/references:
+    get:
+      parameters:
+      - name: epicId
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+      - name: ticketId
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: References
+      tags:
+      - Agent Dispatch Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
   /workspaces/api/branches/cleanup:
     post:
       parameters:
@@ -790,7 +823,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response1"
+                $ref: "#/components/schemas/Response2"
         "400":
           description: "The branch is not eligible: uncommitted changes, unmerged\
             \ commits, or dependents."
@@ -833,7 +866,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response"
+                $ref: "#/components/schemas/Response1"
         "400":
           description: "A blank, dash-leading or self-referential branch name."
           content:
@@ -1120,7 +1153,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response2"
+                $ref: "#/components/schemas/Response3"
         "401":
           description: Not Authorized
         "403":
@@ -1176,38 +1209,6 @@ paths:
         "400":
           description: Bad Request
       summary: Create
-      tags:
-      - Workspace Controller
-      security:
-      - SecurityScheme:
-        - qits:admin
-  /workspaces/api/workspaces/references:
-    get:
-      parameters:
-      - name: epicId
-        in: query
-        schema:
-          type: array
-          items:
-            type: string
-      - name: ticketId
-        in: query
-        schema:
-          type: array
-          items:
-            type: string
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Response4"
-        "401":
-          description: Not Authorized
-        "403":
-          description: Not Allowed
-      summary: References
       tags:
       - Workspace Controller
       security:
@@ -1286,7 +1287,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response3"
+                $ref: "#/components/schemas/Response4"
         "404":
           description: No such ACTIVE workspace.
           content:
@@ -1859,4 +1860,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.911.121150
+  version: 2026.911.151414

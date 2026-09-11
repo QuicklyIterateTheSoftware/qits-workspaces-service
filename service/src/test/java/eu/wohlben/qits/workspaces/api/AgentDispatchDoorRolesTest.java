@@ -93,4 +93,43 @@ class AgentDispatchDoorRolesTest {
         .then()
         .statusCode(403);
   }
+
+  /**
+   * The read back, and the case that was missing when it first shipped on {@code
+   * WorkspaceController}: a machine caller gets a 200 and an answer, not a 403. Nothing about the
+   * caller's own never-throw contract can tell those apart, which is how the feature shipped inert.
+   */
+  @Test
+  void theSystemRoleMayReadTheReferences() {
+    given()
+        .header("X-Qits-User", "qits-projects")
+        .header("X-Qits-Roles", "qits:system")
+        .when()
+        .get("/workspaces/api/agent-dispatches/references?ticketId=t-1")
+        .then()
+        .statusCode(200);
+  }
+
+  /** A person reads it too — the browser half of the same field. */
+  @Test
+  void theAdminRoleMayReadTheReferences() {
+    given()
+        .header("X-Qits-User", "alice")
+        .header("X-Qits-Roles", "qits:admin")
+        .when()
+        .get("/workspaces/api/agent-dispatches/references?ticketId=t-1")
+        .then()
+        .statusCode(200);
+  }
+
+  @Test
+  void anUnprivilegedRoleMayNotReadTheReferences() {
+    given()
+        .header("X-Qits-User", "bob")
+        .header("X-Qits-Roles", "qits:reader")
+        .when()
+        .get("/workspaces/api/agent-dispatches/references?ticketId=t-1")
+        .then()
+        .statusCode(403);
+  }
 }

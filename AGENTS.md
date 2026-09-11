@@ -1149,6 +1149,19 @@ for `BranchResolutionController`'s reason — `WorkspaceController`'s class role
 class-level `@RolesAllowed` is enforced on ArC's internal calls too, so a machine verb added there is
 the 403 of 2026-09-03 pointed the other way. `DispatchService` holds the semantics.
 
+**`GET /workspaces/api/agent-dispatches/references?ticketId=…&epicId=…` is the reference read back**,
+both parameters repeating, one call per caller's listing, answering `{workspaceRowId, repositoryId,
+workspaceId, branch, ticketId, epicId}` per live workspace. It is on **this** class and the reason is
+the warning above being ignored once: it shipped on `WorkspaceController` in 2026.911.151414 and was
+**dead on arrival** — qits-projects holds a machine credential, that class is `qits:admin`, so every
+lookup was a 403, and the caller's port contract turns a failed lookup into an empty list on purpose,
+so the field was always empty and nothing anywhere said why. **A machine read goes on a class that
+states `qits:system`, and a door whose caller cannot tell a refusal from an empty answer needs a role
+test, not only a behaviour test** — `AgentDispatchDoorRolesTest` pins all three outcomes now.
+`WorkspaceRepository.findActiveBySubjects` is where "live" is defined, once: an ACTIVE row, whatever
+its container is doing, so a stopped workspace stays reported and navigable and only resolution ends
+the reference.
+
 **It is one call for an arc that had no machine entrance at all.** Creating a workspace was
 `qits:admin`-only, and **no host-side agent launch existed anywhere**: every agent this platform has
 ever run was started by a browser posting `POST /workspaces/container/{id}/agents` through

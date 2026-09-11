@@ -3,7 +3,6 @@ package eu.wohlben.qits.workspaces.api;
 import eu.wohlben.qits.workspaces.control.WorkspaceProcessTracker;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
-import eu.wohlben.qits.workspaces.dto.WorkspaceSubjectRefDto;
 import eu.wohlben.qits.workspaces.mapper.WorkspaceMapper;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -70,41 +69,6 @@ public class WorkspaceController {
             .map(ListWorkspacesRequest.Response.Entry::new)
             .toList();
     return new ListWorkspacesRequest.Response(entries);
-  }
-
-  public static record ListSubjectRefsRequest() {
-    public record Response(List<Entry> entries) {
-      public record Entry(WorkspaceSubjectRefDto workspace) {}
-    }
-  }
-
-  /**
-   * Which live workspaces are working on these qits-projects rows — the read behind "Assign agent"
-   * knowing it has already been pressed.
-   *
-   * <p><b>Both parameters repeat, and that is the point of the route.</b> The caller is a project's
-   * tickets panel with a screenful of rows, and asking once per row would be a round trip per
-   * ticket. Either may be omitted; neither given answers an empty list rather than the whole table,
-   * because "tell me about no rows" has exactly one honest answer.
-   *
-   * <p><b>A sibling of the listing, not a mode of it.</b> {@link #list} is scoped to one repository
-   * and pays a mirror refresh, a container listing and an ahead/behind computation per row, because
-   * it draws a branch tree. This question crosses repositories and wants none of that, so it answers
-   * a thin shape of its own — see {@link WorkspaceSubjectRefDto}, and see {@code
-   * WorkspaceRepository.findActiveBySubjects} for what "live" means here.
-   *
-   * <p>Rows the caller did not ask about never appear, and a row whose workspace has been integrated
-   * or abandoned stops appearing the moment it resolves — nothing over there has to clear anything.
-   */
-  @GET
-  @Path("/references")
-  public ListSubjectRefsRequest.Response references(
-      @QueryParam("ticketId") List<String> ticketIds, @QueryParam("epicId") List<String> epicIds) {
-    var entries =
-        workspaceService.workspacesReferencing(ticketIds, epicIds).stream()
-            .map(ListSubjectRefsRequest.Response.Entry::new)
-            .toList();
-    return new ListSubjectRefsRequest.Response(entries);
   }
 
   public static record GetWorkspaceRequest() {

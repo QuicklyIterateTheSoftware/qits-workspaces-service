@@ -346,7 +346,7 @@ public class AgentDispatchControllerTest {
 
   private JsonPath references(String query) {
     return given()
-        .get("/workspaces/api/workspaces/references" + query)
+        .get("/workspaces/api/agent-dispatches/references" + query)
         .then()
         .statusCode(200)
         .extract()
