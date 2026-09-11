@@ -6,6 +6,7 @@ import eu.wohlben.qits.workspaces.error.IntegrateConflictException;
 import eu.wohlben.qits.workspaces.error.InternalServerErrorException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
+import eu.wohlben.qits.workspaces.dto.WorkspaceSubjectRefDto;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspaceEvent;
 import eu.wohlben.qits.workspaces.entity.WorkspaceEventType;
@@ -571,6 +572,29 @@ public class WorkspaceService {
                   daemonOutdated(info, latestDaemon),
                   wt.admin);
             })
+        .toList();
+  }
+
+  /**
+   * The live workspaces that name one of these qits-projects tickets or epics — what a ticket panel
+   * over there asks so it can say "an agent is already on this one, here is the way in".
+   *
+   * <p><b>Not {@link #listWorkspaces} with a filter, and the difference is the cost.</b> That
+   * listing exists to draw the branch tree of <em>one</em> repository: it refreshes the mirror,
+   * lists containers and computes ahead/behind per row. This question spans every repository, is
+   * asked about a page full of rows at once, and needs none of that — a link and the row it belongs
+   * to is the whole answer. So it is a straight query and a thin shape, and it costs one statement.
+   *
+   * <p>What counts as live is {@code WorkspaceRepository.findActiveBySubjects}' to say, and it says
+   * it there rather than here: ACTIVE, container state irrelevant.
+   */
+  public List<WorkspaceSubjectRefDto> workspacesReferencing(
+      Collection<String> ticketIds, Collection<String> epicIds) {
+    return workspaceRepository.findActiveBySubjects(ticketIds, epicIds).stream()
+        .map(
+            w ->
+                new WorkspaceSubjectRefDto(
+                    w.id, w.repositoryId, w.workspaceId, w.branch, w.ticketId, w.epicId))
         .toList();
   }
 

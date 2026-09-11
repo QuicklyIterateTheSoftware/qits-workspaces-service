@@ -4,7 +4,9 @@ import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import io.quarkus.hibernate.orm.panache.PanacheRepository;
 import jakarta.enterprise.context.ApplicationScoped;
+import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 @ApplicationScoped
@@ -111,6 +113,46 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
         .map(w -> w.repositoryId)
         .distinct()
         .toList();
+  }
+
+  /**
+   * The live workspaces that name one of these qits-projects rows as their subject — {@code
+   * ticket_id} or {@code epic_id}, the two columns a dispatch writes. Batched on purpose: the caller
+   * is a whole tickets panel asking one question about thirty rows, not thirty callers.
+   *
+   * <p><b>Live means {@code ACTIVE}, and nothing about the container.</b> This is the rule for the
+   * whole feature and it is written here, once, so no client decides it a second time. An ACTIVE row
+   * is a workspace that still exists and still owns its branch — a stopped one included, because a
+   * container is a recreatable cache of the branch and a second dispatch onto that branch would
+   * adopt the workspace rather than make another. So a stopped workspace is still the one working on
+   * the ticket, and it stays reported and stays navigable. What ends the reference is resolution:
+   * integrating or abandoning the workspace moves the row out of ACTIVE, it stops being reported
+   * from that moment, and nothing had to remember to clear a pointer — which is the whole reason the
+   * reference lives on the workspace and not on the ticket.
+   *
+   * <p>Either collection may be empty; both empty answers empty without touching the database. Null
+   * ids are dropped rather than matched — a {@code ticket_id is null} row is every hand-made
+   * workspace on the platform, and returning those would be the opposite of the question.
+   */
+  public List<Workspace> findActiveBySubjects(
+      Collection<String> ticketIds, Collection<String> epicIds) {
+    List<String> tickets = nonNull(ticketIds);
+    List<String> epics = nonNull(epicIds);
+    if (tickets.isEmpty() && epics.isEmpty()) {
+      return List.of();
+    }
+    if (epics.isEmpty()) {
+      return list("status = ?1 and ticketId in ?2", WorkspaceStatus.ACTIVE, tickets);
+    }
+    if (tickets.isEmpty()) {
+      return list("status = ?1 and epicId in ?2", WorkspaceStatus.ACTIVE, epics);
+    }
+    return list(
+        "status = ?1 and (ticketId in ?2 or epicId in ?3)", WorkspaceStatus.ACTIVE, tickets, epics);
+  }
+
+  private static List<String> nonNull(Collection<String> ids) {
+    return ids == null ? List.of() : ids.stream().filter(Objects::nonNull).distinct().toList();
   }
 
   // --- Any-status (history / discovery) ----------------------------------------------------------

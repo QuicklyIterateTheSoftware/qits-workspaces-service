@@ -293,6 +293,67 @@ public class AgentDispatchControllerTest {
   }
 
   /**
+   * The read back: qits-projects asks which live workspaces name its rows, for a screenful of rows
+   * at once. Both parameters repeat and both are optional, and an id nothing was dispatched onto
+   * answers nothing rather than everything.
+   */
+  @Test
+  public void theReferencesDoorAnswersTheLiveWorkspacesForTheRowsAskedAbout() throws Exception {
+    String repoId = seedRepository();
+    dispatch(bodyForTicket(repoId, "ticket/referenced", "t-99", "go"), 200);
+    Map<String, Object> epicDispatch = body(repoId, "epic/referenced", null, "go");
+    epicDispatch.put("epicId", "e-7");
+    dispatch(epicDispatch, 200);
+
+    JsonPath one = references("?ticketId=t-99");
+    assertThat(one.getList("entries").size(), is(1));
+    assertThat(one.getString("entries[0].workspace.ticketId"), is("t-99"));
+    assertThat(one.getString("entries[0].workspace.branch"), is("ticket/referenced"));
+    assertThat(one.getString("entries[0].workspace.repositoryId"), is(repoId));
+    assertThat(one.getString("entries[0].workspace.workspaceId"), is("ticket-referenced"));
+    assertThat(one.getLong("entries[0].workspace.workspaceRowId"), is(notNullValue()));
+    assertNull(one.getString("entries[0].workspace.epicId"));
+
+    // Batched, and across both kinds in one call — the whole reason the parameters repeat.
+    JsonPath both = references("?ticketId=t-99&ticketId=t-nothing&epicId=e-7");
+    assertThat(both.getList("entries").size(), is(2));
+    assertThat(both.getList("entries.workspace.branch", String.class), hasItem("epic/referenced"));
+
+    assertTrue(references("?ticketId=t-nothing").getList("entries").isEmpty());
+    // Asked about no rows: an empty answer, never the whole table.
+    assertTrue(references("").getList("entries").isEmpty());
+  }
+
+  /**
+   * What ends a reference is the workspace resolving, and nothing else — which is why the ticket
+   * side stores no pointer it would have to clear. Discarding the workspace takes it out of the
+   * answer with nobody over there having done anything.
+   */
+  @Test
+  public void aResolvedWorkspaceStopsBeingReferenced() throws Exception {
+    String repoId = seedRepository();
+    dispatch(bodyForTicket(repoId, "ticket/short-lived", "t-77", "go"), 200);
+    assertThat(references("?ticketId=t-77").getList("entries").size(), is(1));
+
+    // Forced, because the fixture's fake container reports a dirty tree; what is under test is the
+    // resolution, not the guard in front of it.
+    workspaceService.discardWorkspace(workspaceIds.of(repoId, "ticket-short-lived"), null, true);
+
+    assertTrue(
+        references("?ticketId=t-77").getList("entries").isEmpty(),
+        "a discarded workspace was still reported as working on the ticket");
+  }
+
+  private JsonPath references(String query) {
+    return given()
+        .get("/workspaces/api/workspaces/references" + query)
+        .then()
+        .statusCode(200)
+        .extract()
+        .jsonPath();
+  }
+
+  /**
    * The ad-hoc half of the same rule: a caller that names no subject gets a row with neither field
    * set, and a blank one is not a subject either.
    */
