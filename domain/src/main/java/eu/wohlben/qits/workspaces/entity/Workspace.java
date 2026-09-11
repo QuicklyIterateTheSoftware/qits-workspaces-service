@@ -173,6 +173,32 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   @Column(name = "admin", nullable = false)
   public boolean admin = false;
 
+  /**
+   * What a <b>dispatched</b> workspace is for: the qits-projects ticket, or the epic, the dispatch
+   * was about. Both null for every workspace a person created by hand, and for every workspace that
+   * predates {@code V5}.
+   *
+   * <p><b>A field, not prose.</b> A dispatch's {@link #preamble} used to be the whole ticket — its
+   * title, its status line and its full description — rendered over there and frozen here, while the
+   * agent was told in the same breath to read the ticket live over MCP. So the copy was stale by
+   * construction and buried the one fact a person scanning the workspace list wants. The reference
+   * is that fact; the preamble goes back to being what it is, a person's prose.
+   *
+   * <p><b>Carried, never resolved.</b> Nothing in this context reads a ticket or an epic, and there
+   * is no port that could: they live in another context's store, which is also why neither is a
+   * foreign key. The <em>client</em> turns one into a link, because composing it needs this
+   * platform's public origin — something the browser is told by the navigation document and this
+   * service is not told at all.
+   *
+   * <p>Two independent fields rather than a {@code (kind, id)} pair: a workspace names at most one
+   * in practice, and the schema does not need to enforce that.
+   */
+  @Column(name = "ticket_id", columnDefinition = "text")
+  public String ticketId;
+
+  @Column(name = "epic_id", columnDefinition = "text")
+  public String epicId;
+
   /** When the workspace was resolved (integrated/abandoned); null while ACTIVE. */
   @Column(name = "resolved_at")
   public Instant resolvedAt;

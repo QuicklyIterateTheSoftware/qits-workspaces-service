@@ -148,6 +148,13 @@ the entity. The reasoning that *is* worth knowing is in the file's header and in
 `WorkspaceCredentials` — why the secret is stored at all, and why the columns are cleared in the same
 breath as the revocation rather than after it.
 
+**`V5__workspace_subject.sql` adds two more**, `ticket_id` and `epic_id` — what a *dispatched*
+workspace is for, where qits-projects said so. Same shape and same non-decision: columns on an entity
+that is already a `CausedRow`, nullable, no backfill, part of no constraint, and **not** foreign keys,
+because both name rows in another context's database exactly as `repository_id` does. Two independent
+columns rather than a `(kind, id)` pair: a workspace names at most one in practice and the schema does
+not need to enforce that. See "Dispatching an agent onto a branch" for why it is a field at all.
+
 **The target is PostgreSQL 18.4** — the tag `components/qits-database/qits-database-oci` is built
 from, and the version the suites' embedded binaries are, so a migration is proved against the engine it ships on.
 Two H2 habits are gone with it: a rule that applies to some rows is a **partial unique index** now
@@ -1134,7 +1141,8 @@ fallthrough removal ships.
 ## Dispatching an agent onto a branch
 
 `POST /workspaces/api/agent-dispatches` is the machine door qits-projects presses to hand a ticket to
-a coding agent. Body `{repositoryId, branch, branchTree, preamble, instruction}`, answering
+a coding agent. Body `{repositoryId, branch, branchTree, preamble, ticketId, epicId, instruction}`,
+answering
 `{workspace, fresh, agentLaunch, technicalProcessId}` with `agentLaunch` ∈ `SCHEDULED` /
 `SKIPPED_RUNNING`. `AgentDispatchController` is a class of its own at `{qits:admin, qits:system}`,
 for `BranchResolutionController`'s reason — `WorkspaceController`'s class role is a person's, and a
@@ -1165,9 +1173,18 @@ Five decisions, each of which is a way to get this wrong:
   WARN and nothing else; it is deliberately not a workspace event, because `WorkspaceEventType` is a
   five-value *lifecycle* vocabulary about the branch and an agent that did not start is not something
   that happened to the branch.
-- **The instruction is not stored.** It rides into the launch and nowhere else. The `preamble` is the
-  durable goal and is already a column; keeping the instruction beside it would make one
-  conversation's opening turn look like the statement of the work.
+- **The instruction is not stored.** It rides into the launch and nowhere else; keeping it beside
+  the goal would make one conversation's opening turn look like the statement of the work.
+- **What a dispatched workspace is for is a FIELD, not the preamble.** `ticketId`/`epicId` are two
+  nullable `text` columns on `workspace` (`V5`), carried on `WorkspaceDto` and written once, by
+  `recordWorkspace`, out of a `WorkspaceSubject` — a record rather than two adjacent strings, for the
+  reason `admin` is kept off the positional forms. qits-projects used to render the whole ticket (or
+  the epic's outline) into the `preamble`, which was a stale copy of something the instruction sends
+  the agent to read live, and it buried the one fact a person scanning the workspace list wants. Both
+  its doors now send **no preamble at all**. Nothing here resolves either id and nothing here renders
+  one: the SPA composes the link, because that needs this platform's public origin — which the
+  browser is told by `/main-navigation` and this service is not told at all. The ad-hoc create keeps
+  its hand-written goal, and a workspace from before `V5` keeps its prose, which stays readable.
 - **`deliverTaskPrompt` is false and must stay false.** True seeds the session with an instruction to
   fetch the real prompt through an MCP tool named `taskPrompt`, which is implemented nowhere on the
   platform. The SPA's own client carries that rule in the same words; `DaemonAgentClient` is the

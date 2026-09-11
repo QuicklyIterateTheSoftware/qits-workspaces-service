@@ -167,6 +167,10 @@ components:
           type: boolean
         preamble:
           type: string
+        ticketId:
+          type: string
+        epicId:
+          type: string
         instruction:
           type: string
     Entry:
@@ -555,6 +559,10 @@ components:
         agentActivity:
           $ref: "#/components/schemas/AgentActivityState"
         preamble:
+          type: string
+        ticketId:
+          type: string
+        epicId:
           type: string
         result:
           type: string
@@ -1791,4 +1799,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.908.2642
+  version: 2026.911.23454

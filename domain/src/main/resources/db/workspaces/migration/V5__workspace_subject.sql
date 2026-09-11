@@ -1,0 +1,28 @@
+-- What a DISPATCHED workspace is for, named as a field instead of pasted into its goal.
+--
+-- A dispatch's `preamble` used to carry the whole pitch — a ticket's title, its status line and its
+-- full description, or an epic's outline — rendered by qits-projects and frozen here at creation.
+-- That copy served no reader well: the dispatched agent is told to read the source live over MCP, so
+-- the prose was a stale second copy of something one tool call away, and it buried the one fact a
+-- person scanning the workspace list wants, which is what this workspace is FOR. A reference is that
+-- fact, and a reference is a field.
+--
+-- Nullable, no backfill, no default, part of no constraint. A workspace created by a person through
+-- the ad-hoc door names neither and keeps its hand-written goal — a person stating scope in prose is
+-- exactly what a preamble is for — and every workspace that existed before this file has both empty
+-- and its old prose, which stays readable. Nothing derives a reference from text.
+--
+-- NOT foreign keys, and there is nothing they could point at: a ticket and an epic live in
+-- qits-projects' own store, the same reason `repository_id` beside them is a bare string. This
+-- context resolves neither and renders neither — it carries the id, and the SPA composes the link to
+-- qits-projects from it against the origin the platform's own navigation document states.
+--
+-- Two independent columns rather than one `(kind, id)` pair: they are two different contexts'
+-- identifiers, a workspace names at most one of them in practice, and a schema that enforced
+-- "at most one" would be a constraint bought with a check nothing today would ever violate. A third
+-- subject one day is a third column, not a widened vocabulary.
+--
+-- text, not varchar(n): both are qits-projects' identifiers to shape, and a length guessed here
+-- would be a constraint on another service's format. Postgres stores both identically.
+alter table workspace add column ticket_id text;
+alter table workspace add column epic_id text;

@@ -158,11 +158,14 @@ down without touching the ref (it is already gone). A branch with no workspace a
 on both belts. AGENTS.md, "The release door left, and what stayed", has the reasoning.
 
 **The other machine door dispatches an agent.** `POST /workspaces/api/agent-dispatches`
-(`{qits:admin, qits:system}`), body `{repositoryId, branch, branchTree, preamble, instruction}` →
+(`{qits:admin, qits:system}`), body
+`{repositoryId, branch, branchTree, preamble, ticketId, epicId, instruction}` →
 `{workspace, fresh, agentLaunch, technicalProcessId}`. qits-projects presses it to hand a ticket to a
 coding agent, and it is one call for an arc that previously had no machine entrance at all: creating
 a workspace was `qits:admin`-only and no host-side agent launch existed anywhere. It creates the
-workspace on the branch with the goal as its preamble, starts its container, and launches an agent
+workspace on the branch — naming its **subject** in `ticketId`/`epicId` rather than rendering the
+whole row into the preamble, which is why both dispatch doors at qits-projects now send no preamble
+at all — starts its container, and launches an agent
 seeded with the instruction once the daemon answers — which through an image pull is minutes away, so
 the launch happens long after this returns. Idempotent throughout: an existing workspace is answered
 with `fresh:false`, a running agent with `agentLaunch: SKIPPED_RUNNING`, and a re-press is how a

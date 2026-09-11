@@ -2,6 +2,7 @@ package eu.wohlben.qits.workspaces.api;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -189,6 +190,17 @@ public class AgentDispatchControllerTest {
     return body;
   }
 
+  /**
+   * The shape qits-projects actually sends since the preamble left it: no goal at all, and a
+   * reference naming what the workspace is for.
+   */
+  private static Map<String, Object> bodyForTicket(
+      String repositoryId, String branch, String ticketId, String instruction) {
+    Map<String, Object> body = body(repositoryId, branch, null, instruction);
+    body.put("ticketId", ticketId);
+    return body;
+  }
+
   private JsonPath dispatch(Map<String, Object> body, int expectedStatus) {
     return given()
         .contentType(ContentType.JSON)
@@ -248,6 +260,53 @@ public class AgentDispatchControllerTest {
 
     Long rowId = workspaceIds.of(repoId, "ticket-fix-login");
     assertThat(awaitLaunch(rowId).getString("initialContext"), is("start with the test"));
+  }
+
+  /**
+   * The dispatch qits-projects makes today: a reference and no prose. The id is carried onto the
+   * row and back out of the listing — this service resolves nothing with it, so being able to read
+   * it back is the whole of the contract.
+   */
+  @Test
+  public void aDispatchNamesItsTicketInAFieldAndLeavesTheGoalEmpty() throws Exception {
+    String repoId = seedRepository();
+
+    JsonPath answer =
+        dispatch(
+            bodyForTicket(repoId, "ticket/name-the-subject", "  t-42  ", "read it first"), 200);
+
+    assertNull(answer.getString("workspace.preamble"), "a dispatch wrote a goal nobody authored");
+    // Trimmed on the way in: a padded id would compose a link to nothing.
+    assertThat(answer.getString("workspace.ticketId"), is("t-42"));
+    assertNull(answer.getString("workspace.epicId"));
+
+    JsonPath listing =
+        given()
+            .get("/workspaces/api/workspaces?repositoryId=" + repoId)
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath();
+    // By branch, not by position: the fixture's own main workspace is in this listing too.
+    assertThat(
+        listing.getList("entries.workspace.ticketId", String.class), hasItem("t-42"));
+  }
+
+  /**
+   * The ad-hoc half of the same rule: a caller that names no subject gets a row with neither field
+   * set, and a blank one is not a subject either.
+   */
+  @Test
+  public void aDispatchWithNoReferenceLeavesBothFieldsEmpty() throws Exception {
+    String repoId = seedRepository();
+    Map<String, Object> request = body(repoId, "ticket/no-subject", "hand-written goal", "go");
+    request.put("ticketId", "   ");
+
+    JsonPath answer = dispatch(request, 200);
+
+    assertNull(answer.getString("workspace.ticketId"), "a blank id was stored as a subject");
+    assertNull(answer.getString("workspace.epicId"));
+    assertThat(answer.getString("workspace.preamble"), is("hand-written goal"));
   }
 
   /**

@@ -560,6 +560,8 @@ public class WorkspaceService {
                   clean,
                   activity,
                   wt.preamble,
+                  wt.ticketId,
+                  wt.epicId,
                   wt.result,
                   wt.createdAt,
                   wt.resolvedAt,
@@ -947,7 +949,8 @@ public class WorkspaceService {
       String branch,
       String preamble,
       boolean adoptExisting) {
-    return recordWorkspace(repoId, workspaceId, parent, branch, preamble, adoptExisting, false);
+    return recordWorkspace(
+        repoId, workspaceId, parent, branch, preamble, adoptExisting, false, WorkspaceSubject.none());
   }
 
   /**
@@ -957,6 +960,10 @@ public class WorkspaceService {
    * <p>Private, and it is the only writer of {@code Workspace.admin}. A public overload carrying the
    * flag would be one whose call sites are read positionally; keeping it here means the two callers
    * that can set it are both in this file and both visible in one screen.
+   *
+   * <p>It is also the only writer of the {@link WorkspaceSubject}, for the milder version of the
+   * same reason: the two ids are same-typed and adjacent, so they travel as a record rather than as
+   * a pair of positional strings.
    */
   private Workspace recordWorkspace(
       String repoId,
@@ -965,7 +972,8 @@ public class WorkspaceService {
       String branch,
       String preamble,
       boolean adoptExisting,
-      boolean admin) {
+      boolean admin,
+      WorkspaceSubject subject) {
     var repo = repositories.require(repoId);
 
     // `workspaceId` becomes a path segment under the repo's workspaces dir, so it must be a strict
@@ -1031,6 +1039,11 @@ public class WorkspaceService {
     // the socket a container gets is the one the request that created it asked for. See
     // Workspace.admin.
     workspace.admin = admin;
+    // What this workspace is for, where a dispatch said so. Blanks normalise to null: an empty id
+    // is not a subject, and a row claiming one would render a link to nothing.
+    WorkspaceSubject named = subject == null ? WorkspaceSubject.none() : subject.normalized();
+    workspace.ticketId = named.ticketId();
+    workspace.epicId = named.epicId();
     workspaceRepository.persist(workspace);
     recordEvent(workspace, WorkspaceEventType.CREATED, newBranch, parentBranch, null);
 
@@ -1066,6 +1079,28 @@ public class WorkspaceService {
   }
 
   /**
+   * The same create, told what the workspace is <b>for</b> — the ticket or epic an agent dispatch
+   * was about ({@link WorkspaceSubject}).
+   *
+   * <p>An overload of its own rather than a ninth positional argument on the admin form below, and
+   * the two do not meet: a dispatch never asks for the docker socket, and the record's type is what
+   * keeps this signature apart from the {@code boolean}-tailed one at every call site. The subject
+   * is written once, by {@link #recordWorkspace}, exactly as the posture is.
+   */
+  public Workspace createWorkspace(
+      String repoId,
+      String workspaceId,
+      String parent,
+      String branch,
+      String preamble,
+      boolean adoptExisting,
+      boolean branchTree,
+      WorkspaceSubject subject) {
+    return createWorkspace(
+        repoId, workspaceId, parent, branch, preamble, adoptExisting, branchTree, false, subject);
+  }
+
+  /**
    * The same create, told the <b>posture</b> the workspace is to run in.
    *
    * <p>{@code admin} is the request to bind the host's docker socket into this workspace's
@@ -1089,6 +1124,29 @@ public class WorkspaceService {
       boolean adoptExisting,
       boolean branchTree,
       boolean admin) {
+    return createWorkspace(
+        repoId,
+        workspaceId,
+        parent,
+        branch,
+        preamble,
+        adoptExisting,
+        branchTree,
+        admin,
+        WorkspaceSubject.none());
+  }
+
+  /** The widest form: the posture and the subject together. Every other overload delegates here. */
+  public Workspace createWorkspace(
+      String repoId,
+      String workspaceId,
+      String parent,
+      String branch,
+      String preamble,
+      boolean adoptExisting,
+      boolean branchTree,
+      boolean admin,
+      WorkspaceSubject subject) {
     // A call on `this` never reaches the interceptor, so each delegation below opens its own
     // transaction explicitly rather than relying on the annotation of the method it calls.
     if (!branchTree) {
@@ -1096,7 +1154,7 @@ public class WorkspaceService {
           .call(
               () ->
                   recordWorkspace(
-                      repoId, workspaceId, parent, branch, preamble, adoptExisting, admin));
+                      repoId, workspaceId, parent, branch, preamble, adoptExisting, admin, subject));
     }
     if (adoptExisting) {
       throw new BadRequestException("A branch-tree workspace cannot adopt an existing branch");
@@ -1130,7 +1188,7 @@ public class WorkspaceService {
         .call(
             () ->
                 recordWorkspace(
-                    repoId, workspaceId, parentBranch, newBranch, preamble, true, admin));
+                    repoId, workspaceId, parentBranch, newBranch, preamble, true, admin, subject));
   }
 
   /**

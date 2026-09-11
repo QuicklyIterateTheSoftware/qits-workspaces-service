@@ -54,9 +54,16 @@ import org.jboss.logging.Logger;
  * intent, and two copies of an intent is how a ticket gets two agents.
  *
  * <p><b>The instruction is not stored.</b> It rides into the launch and nowhere else — not a column,
- * not an event, not the workspace. The durable statement of what the work is is the {@code
- * preamble}, which is a column already and is what a person reads on the workspace page. An
- * instruction is the first turn of one conversation; keeping it would make it look like the goal.
+ * not an event, not the workspace. An instruction is the first turn of one conversation; keeping it
+ * would make it look like the statement of the work.
+ *
+ * <h2>What a dispatched workspace says it is for</h2>
+ *
+ * <p>Its {@link WorkspaceSubject} — the ticket or epic id the caller named — and <b>not</b> a
+ * preamble. qits-projects used to render the whole ticket into the goal, which was a stale copy of
+ * something the agent is told in the same breath to read live, and it buried the one fact a person
+ * scanning the workspace list wants. The caller may still send a preamble and it is still written
+ * where it does; the dispatch doors at qits-projects send none.
  *
  * <h2>A failed launch is a warning, and never anything else</h2>
  *
@@ -151,7 +158,8 @@ public class DispatchService {
    *     have a workspace; that is the idempotent case, not a conflict
    * @param branchTree whether the workspace forks the whole submodule tree (an aggregate wrapper),
    *     passed through to the ordinary create
-   * @param preamble the workspace's goal, in markdown — the durable statement of the work
+   * @param preamble the workspace's goal, in markdown — a person's prose, and normally absent here
+   * @param subject what the workspace is for: the ticket or epic this dispatch is about
    * @param instruction the agent's first turn. Carried into the launch and stored nowhere
    * @throws eu.wohlben.qits.workspaces.error.NotFoundException no such repository — nothing is
    *     created, the same fail-closed answer {@link CaptureService} gives
@@ -161,6 +169,7 @@ public class DispatchService {
       String branch,
       boolean branchTree,
       String preamble,
+      WorkspaceSubject subject,
       String instruction) {
     RepositoryLookup.RepositoryView repository = repositories.require(repositoryId);
 
@@ -188,7 +197,8 @@ public class DispatchService {
               target,
               preamble,
               false,
-              branchTree);
+              branchTree,
+              subject == null ? WorkspaceSubject.none() : subject);
       rowId = created.id;
     }
 

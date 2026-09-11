@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.api;
 
 import eu.wohlben.qits.workspaces.control.DispatchService;
+import eu.wohlben.qits.workspaces.control.WorkspaceSubject;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -63,15 +64,23 @@ public class AgentDispatchController {
    * @param branchTree whether to fork the whole submodule tree (an aggregate wrapper workspace),
    *     the same flag {@code POST /workspaces} carries
    * @param preamble the workspace's goal, in markdown. Durable — it is the workspace's own column
-   *     and what a person reads on its page
-   * @param instruction the agent's first turn. It rides into the launch and is stored nowhere: the
-   *     preamble is the statement of the work, this is the opening of one conversation
+   *     and what a person reads on its page. A dispatch normally sends none: what a dispatched
+   *     workspace is for is the reference below, not a copy of the row it was dispatched from
+   * @param ticketId the caller's ticket this dispatch is about, carried onto the workspace as a
+   *     field. Optional, and resolved by nothing here — the client composes the link to it
+   * @param epicId the caller's epic this dispatch is about, the same way. Both are independent and
+   *     both may be absent; a caller naming both is not refused, because "at most one" is a fact
+   *     about the callers and not a rule this schema enforces
+   * @param instruction the agent's first turn. It rides into the launch and is stored nowhere: this
+   *     is the opening of one conversation, not the statement of the work
    */
   public static record DispatchAgentRequest(
       @NotBlank String repositoryId,
       @NotBlank String branch,
       boolean branchTree,
       String preamble,
+      String ticketId,
+      String epicId,
       String instruction) {}
 
   /**
@@ -106,6 +115,7 @@ public class AgentDispatchController {
         request.branch(),
         request.branchTree(),
         request.preamble(),
+        new WorkspaceSubject(request.ticketId(), request.epicId()),
         request.instruction());
   }
 }

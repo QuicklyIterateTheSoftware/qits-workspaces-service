@@ -42,7 +42,13 @@ import java.time.Instant;
  *     and then lets it fall back to {@code null}. It is a real value and not a transient — the
  *     agent-activity bar sorts on it, because a workspace whose agent just stopped is the one
  *     waiting for the next prompt
- * @param preamble markdown: the reason/goal authored at creation
+ * @param preamble markdown: the reason/goal authored at creation. A person's prose, and only that —
+ *     a dispatched workspace names its subject in {@code ticketId}/{@code epicId} and leaves this
+ *     empty, so nothing here is a second copy of a ticket that has moved on since
+ * @param ticketId the qits-projects ticket this workspace was dispatched for, or {@code null}
+ * @param epicId the qits-projects epic this workspace was dispatched for, or {@code null}. Both are
+ *     carried and neither is resolved: the client turns one into a link, because composing that link
+ *     needs the platform's public origin, which the browser is told and this service is not
  * @param result markdown: the outcome authored at resolution
  * @param createdAt when the workspace row was created. It is today's approximation of "last
  *     touched" — the overview sorts on it — and stays that until the row carries a real touch
@@ -86,6 +92,8 @@ public record WorkspaceDto(
     Boolean clean,
     AgentActivityState agentActivity,
     String preamble,
+    String ticketId,
+    String epicId,
     String result,
     Instant createdAt,
     Instant resolvedAt,
