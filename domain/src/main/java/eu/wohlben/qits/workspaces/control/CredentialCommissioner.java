@@ -85,9 +85,11 @@ public interface CredentialCommissioner {
    * <p><b>Null states nothing</b> — no {@code gitRefs} member, the commission as it was before C2.
    * An empty list states "may push nothing".
    *
-   * <p><b>An issuer without C2 may refuse a stated list with 400.</b> An implementation then
-   * commissions again without the list, warns once, and returns that credential: an older idp must
-   * cost the scope, not the launch.
+   * <p><b>A refused list fails closed.</b> An issuer without C2 ignores the member, so a 400 to a
+   * stated list means the issuer refused the list itself. An implementation then commissions again
+   * with an empty list (may push nothing), logs an ERROR naming the workspace and the issuer's
+   * reason, and returns that credential. It never commissions again without the list: that would
+   * let the credential push every ref.
    */
   Optional<WorkspaceCredential> commission(Long rowId, String projectId, List<String> gitRefs);
 

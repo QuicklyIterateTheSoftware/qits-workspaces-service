@@ -83,7 +83,9 @@ public class AgentDispatchController {
    * @param gitRefs the Git refs the workspace's container may push (contract C4): exact refs such
    *     as {@code refs/heads/ticket/fix-login} and trailing {@code /*} patterns, every entry under
    *     {@code refs/heads/}. Optional; absent means the workspace's own branch. Only a fresh
-   *     workspace takes it — a re-press keeps the list the workspace already has
+   *     workspace takes it — a re-press keeps the list the workspace already has. An entry that
+   *     covers the repository's default branch is dropped: that branch moves only through a
+   *     release request
    */
   public static record DispatchAgentRequest(
       @NotBlank String repositoryId,

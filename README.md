@@ -255,13 +255,19 @@ trailing `/*` patterns under `refs/heads/`. qits-idp stamps the list into every 
   `gitRefs`. Without it, and for every other way a workspace is made, the list is the workspace's
   own branch. A bad list is a 400 and nothing is created. A re-press keeps the list the workspace
   already has.
+- **Never the default branch.** The repository's default branch moves only through a release
+  request, never by an agent's push. A workspace on the default branch (the main workspace) may push
+  nothing (`[]`). An entry in a stated list that covers the default branch is dropped and logged.
+  Older rows get the same answer when their container is commissioned.
 - **It narrows.** When a workspace is made on a branch that another open workspace in the same
   project may push, that exact ref leaves the other list, and the other container's commission is
   updated with `PUT /idp/api/clients/{clientId}/git-refs`. Patterns and a workspace's own branch are
   never removed. Nothing widens again when the new workspace closes.
-- **It never blocks a workspace.** An idp that answers a commission with Git refs with 400 is asked
-  again without them (one warning per process). An update that fails is logged and sent again by
-  the hourly commission reconcile.
+- **It fails closed.** An idp without C2 ignores `gitRefs`, so a 400 to a commission with Git refs
+  means the idp refused the list (for example, more than 500 entries). The workspace is then
+  commissioned with `gitRefs: []`: it starts, and may push nothing. An ERROR names the workspace and
+  the idp's reason. It is never commissioned without `gitRefs`. An update that fails is logged and
+  sent again by the hourly commission reconcile.
 
 **It mirrors the container's lifetime, not the row's.** A provision commissions, a recreate
 commissions afresh and hands the old one back, `deleteContainer` hands it back while the workspace

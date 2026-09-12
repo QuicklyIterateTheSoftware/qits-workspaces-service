@@ -14,7 +14,6 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
@@ -81,19 +80,19 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
 
   @Inject @RestClient IdpClients clients;
 
-  /**
-   * Whether the "this idp refuses Git refs" warning was logged. Once per process: every launch
-   * would repeat it until the idp is upgraded, and one line says all there is to say.
-   */
-  private final AtomicBoolean warnedGitRefsRefused = new AtomicBoolean();
+  /** The most of the idp's answer an ERROR line carries. */
+  private static final int MAX_REASON = 500;
 
   /**
    * {@inheritDoc}
    *
-   * <p><b>A 400 to a commission that states Git refs is read as an idp without C2</b>, and the
-   * commission is asked again without them: the credential is then unscoped for Git, as every
-   * workspace credential was before, and the workspace still launches. A 400 to a commission that
-   * states none stays an answer about the request.
+   * <p><b>A 400 to a commission that states Git refs fails closed.</b> An idp without C2 ignores the
+   * {@code gitRefs} member and answers 201, so a 400 means an idp with C2 refused the list itself —
+   * an epic list over 500 entries, say. The commission is asked again with {@code gitRefs: []}, so
+   * the workspace launches and may push nothing, and an ERROR names the workspace and the idp's
+   * reason. It is never asked again without the member: that would let the credential push every
+   * ref. A 400 to a commission that states no list, or an empty one, stays an answer about the
+   * request and fails the launch.
    */
   @Override
   public Optional<WorkspaceCredential> commission(
@@ -125,9 +124,15 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
         }
         return Optional.of(new WorkspaceCredential(issued.clientId(), issued.secret()));
       } catch (RuntimeException failure) {
-        if (request.gitRefs() != null && status(failure) == 400) {
-          warnGitRefsRefused(rowId, failure);
-          request = request.withoutGitRefs();
+        if (request.gitRefs() != null && !request.gitRefs().isEmpty() && status(failure) == 400) {
+          LOG.error(
+              "qits-idp refused the Git refs of workspace "
+                  + rowId
+                  + " ("
+                  + reasonOf(failure)
+                  + "). Commissioning it with gitRefs [] instead: its container may push nothing"
+                  + " until the list is one qits-idp accepts.");
+          request = request.pushingNothing();
           continue;
         }
         if (!holdThrough(failure) || !Instant.now().isBefore(giveUpAt) || !sleep(pause)) {
@@ -199,16 +204,26 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
     return failure instanceof WebApplicationException http ? http.getResponse().getStatus() : -1;
   }
 
-  private void warnGitRefsRefused(Long rowId, RuntimeException failure) {
-    if (warnedGitRefsRefused.compareAndSet(false, true)) {
-      LOG.warnf(
-          "qits-idp refused a commission that states Git refs (%s). Commissioning without them:"
-              + " workspace credentials are not limited to their Git refs until qits-idp accepts"
-              + " the gitRefs member. This is logged once.",
-          failure.toString());
-    } else {
-      LOG.debugf("Commissioning workspace %s without Git refs: qits-idp refused them", rowId);
+  /**
+   * What the idp said about a refused call: the status and its answer's body, cut to {@link
+   * #MAX_REASON} characters, else the failure itself.
+   */
+  private static String reasonOf(RuntimeException failure) {
+    if (failure instanceof WebApplicationException http) {
+      try {
+        String body = http.getResponse().readEntity(String.class);
+        if (body != null && !body.isBlank()) {
+          String reason = body.strip();
+          if (reason.length() > MAX_REASON) {
+            reason = reason.substring(0, MAX_REASON) + "…";
+          }
+          return "HTTP " + http.getResponse().getStatus() + ": " + reason;
+        }
+      } catch (RuntimeException unreadable) {
+        // No body to read; the failure below still names the status.
+      }
     }
+    return failure.toString();
   }
 
   @Override

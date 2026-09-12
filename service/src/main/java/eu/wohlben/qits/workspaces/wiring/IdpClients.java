@@ -95,9 +95,12 @@ public interface IdpClients {
       this(contextKind, contextId, claims, null);
     }
 
-    /** The same request with no Git refs stated — the fallback for an idp that refused them. */
-    CommissionRequest withoutGitRefs() {
-      return new CommissionRequest(contextKind, contextId, claims, null);
+    /**
+     * The same request stating {@code gitRefs: []} — may push nothing. The fallback for an idp that
+     * refused the stated list: it fails closed, never open.
+     */
+    CommissionRequest pushingNothing() {
+      return new CommissionRequest(contextKind, contextId, claims, List.of());
     }
   }
 
