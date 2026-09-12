@@ -73,7 +73,34 @@ public interface CredentialCommissioner {
    *
    * @throws RuntimeException when an issuer is configured and the call did not succeed
    */
-  Optional<WorkspaceCredential> commission(Long rowId, String projectId);
+  default Optional<WorkspaceCredential> commission(Long rowId, String projectId) {
+    return commission(rowId, projectId, null);
+  }
+
+  /**
+   * The same commission, also stating the Git refs the credential may push ({@code gitRefs}, contract
+   * C2). The issuer stamps the list onto every token as {@code git_refs}, and the git host enforces
+   * it.
+   *
+   * <p><b>Null states nothing</b> — no {@code gitRefs} member, the commission as it was before C2.
+   * An empty list states "may push nothing".
+   *
+   * <p><b>An issuer without C2 may refuse a stated list with 400.</b> An implementation then
+   * commissions again without the list, warns once, and returns that credential: an older idp must
+   * cost the scope, not the launch.
+   */
+  Optional<WorkspaceCredential> commission(Long rowId, String projectId, List<String> gitRefs);
+
+  /**
+   * Replace the Git refs a live commission states — the narrowing (contract C5), sent as {@code PUT
+   * /idp/api/clients/{clientId}/git-refs}. The next token of that client carries the new list.
+   *
+   * <p>Does nothing when this deployment has no issuer. Unlike {@link #decommission}, a failure
+   * <b>throws</b>: the caller keeps the narrowing pending and the reconcile sends it again.
+   *
+   * @throws RuntimeException when an issuer is configured and the update did not land
+   */
+  void updateGitRefs(String clientId, List<String> gitRefs);
 
   /**
    * Give a credential back — the container it belonged to is gone.

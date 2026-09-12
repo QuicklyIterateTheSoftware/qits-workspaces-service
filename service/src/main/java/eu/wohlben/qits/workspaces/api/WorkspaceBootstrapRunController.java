@@ -49,6 +49,8 @@ public class WorkspaceBootstrapRunController {
    * Empty rather than 404 when the chain has never run here: a freshly created workspace has no
    * rows yet, and that is a state the Actions panel renders, not an error.
    */
+  // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
   @GET
   @APIResponse(responseCode = "200", description = "The last run of each bootstrap step.")
   @APIResponse(

@@ -34,6 +34,8 @@ public class WorkspaceHistoryController {
   }
 
   /** The repository is a real filter here — the collection is "what flowed through this repo". */
+  // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
   @GET
   public ListHistoryRequest.Response list(@QueryParam("repositoryId") String repositoryId) {
     var entries =
@@ -51,6 +53,7 @@ public class WorkspaceHistoryController {
    * A history row was always addressed by the surrogate id; the repository segment was decoration on
    * the item routes and only ever a filter on the collection above.
    */
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
   @GET
   @Path("/{id}")
   public GetHistoryRequest.Response get(@PathParam("id") Long id) {

@@ -8,6 +8,7 @@ import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -171,6 +172,28 @@ public class DispatchService {
       String preamble,
       WorkspaceSubject subject,
       String instruction) {
+    return dispatch(repositoryId, branch, branchTree, preamble, subject, instruction, null);
+  }
+
+  /**
+   * The same dispatch, stating the Git refs the workspace's container may push (contract C4).
+   *
+   * @param gitRefs exact refs and trailing {@code /*} patterns; null means the workspace's own
+   *     branch. <b>Only a fresh workspace takes it.</b> A re-press onto an existing workspace keeps
+   *     the list that workspace has — it may have been narrowed since, and a re-press must not undo
+   *     that
+   * @throws eu.wohlben.qits.workspaces.error.BadRequestException a list that breaks the C1 rules,
+   *     on every press, before anything is created
+   */
+  public Dispatch dispatch(
+      String repositoryId,
+      String branch,
+      boolean branchTree,
+      String preamble,
+      WorkspaceSubject subject,
+      String instruction,
+      List<String> gitRefs) {
+    List<String> stated = gitRefs == null ? null : GitRefs.validated(gitRefs);
     RepositoryLookup.RepositoryView repository = repositories.require(repositoryId);
 
     // Idempotence is checked on the branch the caller ASKED for before the fallback shape is even
@@ -198,7 +221,9 @@ public class DispatchService {
               preamble,
               false,
               branchTree,
-              subject == null ? WorkspaceSubject.none() : subject);
+              false,
+              subject == null ? WorkspaceSubject.none() : subject,
+              stated);
       rowId = created.id;
     }
 

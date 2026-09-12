@@ -57,6 +57,8 @@ public class WorkspacePromptDraftController {
    * state to the server, and inventing a row for either would give the client a {@code updatedAt}
    * to dedup against that no save ever produced.
    */
+  // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
   @GET
   @APIResponse(responseCode = "200", description = "The saved draft.")
   @APIResponse(

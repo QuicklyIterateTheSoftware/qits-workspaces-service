@@ -65,6 +65,8 @@ public class PinsController {
   /** The pins, with the instant they were read — nothing here is cached or stored. */
   public record LaunchPins(Instant generatedAt, List<LaunchPin> pins) {}
 
+  // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
+  @RolesAllowed({"qits:admin", "qits:system", "qits:agent"})
   @GET
   @Operation(summary = "The container images a launch by this service would pull right now")
   @APIResponse(responseCode = "200", description = "The effective launch pins, image order")

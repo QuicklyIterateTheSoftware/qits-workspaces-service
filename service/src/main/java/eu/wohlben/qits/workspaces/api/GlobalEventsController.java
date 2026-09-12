@@ -30,6 +30,8 @@ public class GlobalEventsController {
 
   @Inject WorkspaceEventBroadcaster broadcaster;
 
+  // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
   @GET
   @Produces(MediaType.SERVER_SENT_EVENTS)
   @RestStreamElementType(MediaType.TEXT_PLAIN)

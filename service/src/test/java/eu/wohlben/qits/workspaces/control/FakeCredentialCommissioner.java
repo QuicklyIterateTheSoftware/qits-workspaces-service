@@ -54,6 +54,9 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     contexts.clear();
     commissionedFor.clear();
     decommissioned.clear();
+    gitRefs.clear();
+    gitRefUpdates.clear();
+    failGitRefUpdates = false;
   }
 
   /** Make the next and every following commission fail the way an unreachable issuer does. */
@@ -94,9 +97,53 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     return scopes.get(rowId);
   }
 
+  /** The Git refs each commission stated, by row id. Absent is "stated nothing". */
+  private final Map<Long, List<String>> gitRefs = new java.util.concurrent.ConcurrentHashMap<>();
+
+  /** One Git ref update as the service sent it. */
+  public record GitRefUpdate(String clientId, List<String> gitRefs) {}
+
+  private final List<GitRefUpdate> gitRefUpdates = new CopyOnWriteArrayList<>();
+
+  private volatile boolean failGitRefUpdates;
+
+  /** The Git refs the last commission for {@code rowId} stated, or null when it stated none. */
+  public List<String> gitRefsFor(Long rowId) {
+    return gitRefs.get(rowId);
+  }
+
+  /** Every Git ref update that reached this issuer, in order — the failed ones included. */
+  public List<GitRefUpdate> gitRefUpdates() {
+    return List.copyOf(gitRefUpdates);
+  }
+
+  /** Make every following Git ref update fail the way an unreachable issuer does, or stop that. */
+  public void failGitRefUpdates(boolean fail) {
+    failGitRefUpdates = fail;
+  }
+
   @Override
-  public Optional<WorkspaceCredential> commission(Long rowId, String projectId) {
+  public void updateGitRefs(String clientId, List<String> refs) {
+    if (!wired) {
+      return;
+    }
+    // Decided before the update is recorded, so a test that sees the record knows its outcome.
+    boolean fail = failGitRefUpdates;
+    gitRefUpdates.add(new GitRefUpdate(clientId, List.copyOf(refs)));
+    if (fail) {
+      throw new IllegalStateException("qits-idp is unreachable (fake)");
+    }
+  }
+
+  @Override
+  public Optional<WorkspaceCredential> commission(
+      Long rowId, String projectId, List<String> statedGitRefs) {
     commissionedFor.add(rowId);
+    if (statedGitRefs != null) {
+      gitRefs.put(rowId, List.copyOf(statedGitRefs));
+    } else {
+      gitRefs.remove(rowId);
+    }
     // Recorded before the wiring and failure arms, so a test can assert the scope a launch asked for
     // even on the paths where nothing is issued.
     if (projectId != null) {

@@ -173,6 +173,10 @@ components:
           type: string
         instruction:
           type: string
+        gitRefs:
+          type: array
+          items:
+            type: string
     Entry:
       type: object
       properties:
@@ -748,8 +752,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/Dispatch"
         "400":
-          description: "A blank repository or branch, or a branch name git will not\
-            \ take."
+          description: "A blank repository or branch, a branch name git will not take,\
+            \ or a `gitRefs` list that breaks the rules (every entry under `refs/heads/`,\
+            \ `*` only as a trailing `/*`, at most 500 entries of at most 255 characters,\
+            \ no duplicates)."
           content:
             application/json:
               schema:
@@ -804,6 +810,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:system
+        - qits:agent
   /workspaces/api/branches/cleanup:
     post:
       parameters:
@@ -1032,6 +1039,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/history/{id}:
     patch:
       parameters:
@@ -1089,6 +1097,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/pins:
     get:
       summary: The container images a launch by this service would pull right now
@@ -1109,6 +1118,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:system
+        - qits:agent
   /workspaces/api/service-events:
     get:
       parameters:
@@ -1164,6 +1174,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/workspaces:
     get:
       parameters:
@@ -1188,6 +1199,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
     post:
       requestBody:
         content:
@@ -1246,6 +1258,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/workspaces/{id}/active-process:
     get:
       parameters:
@@ -1272,6 +1285,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/workspaces/{id}/bootstrap-runs:
     get:
       parameters:
@@ -1304,6 +1318,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/workspaces/{id}/delete-container:
     post:
       parameters:
@@ -1527,6 +1542,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
     post:
       parameters:
       - name: id
@@ -1698,6 +1714,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/workspaces/{id}/prompt-draft:
     put:
       parameters:
@@ -1779,6 +1796,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
     delete:
       parameters:
       - name: id
@@ -1860,4 +1878,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.911.151414
+  version: 2026.912.170300

@@ -40,6 +40,22 @@ public class FakeRepositoryLookup implements RepositoryLookup {
   private final Map<String, String> archetypes = new ConcurrentHashMap<>();
 
   /**
+   * Projects other than {@link #PROJECT_ID}, by repository. Only a test about two projects — the
+   * Git ref narrowing, which must stop at a project's edge — sets one.
+   */
+  private final Map<String, String> projects = new ConcurrentHashMap<>();
+
+  private String projectOf(String repoId) {
+    return projects.getOrDefault(repoId, PROJECT_ID);
+  }
+
+  /** Register {@code repoId} with {@code master} as its main branch, in another project. */
+  public void registerInProject(String repoId, String projectId) {
+    register(repoId);
+    projects.put(repoId, projectId);
+  }
+
+  /**
    * Explicit names, overriding {@link #nameOf}. The derived name is enough wherever a test only
    * needs "the name is not the id"; a test about a name's SHAPE — a wrapper is {@code
    * <slug>-<slug>} — has to be able to say what it is.
@@ -84,21 +100,23 @@ public class FakeRepositoryLookup implements RepositoryLookup {
         ? Optional.empty()
         : Optional.of(
             new RepositoryView(
-                repoId, registeredName(repoId), PROJECT_ID, mainBranch, archetypes.get(repoId)));
+                repoId,
+                registeredName(repoId),
+                projectOf(repoId),
+                mainBranch,
+                archetypes.get(repoId)));
   }
 
   @Override
   public List<RepositoryView> listByProject(String projectId) {
-    if (!PROJECT_ID.equals(projectId)) {
-      return List.of();
-    }
     return mainBranches.entrySet().stream()
+        .filter(entry -> projectOf(entry.getKey()).equals(projectId))
         .map(
             entry ->
                 new RepositoryView(
                     entry.getKey(),
                     registeredName(entry.getKey()),
-                    PROJECT_ID,
+                    projectId,
                     entry.getValue(),
                     archetypes.get(entry.getKey())))
         .toList();
@@ -155,6 +173,7 @@ public class FakeRepositoryLookup implements RepositoryLookup {
     mainBranches.clear();
     archetypes.clear();
     names.clear();
+    projects.clear();
     findOutage = false;
     findCalls.set(0);
   }

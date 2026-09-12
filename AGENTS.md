@@ -155,6 +155,11 @@ because both name rows in another context's database exactly as `repository_id` 
 columns rather than a `(kind, id)` pair: a workspace names at most one in practice and the schema does
 not need to enforce that. See "Dispatching an agent onto a branch" for why it is a field at all.
 
+**`V6__workspace_git_refs.sql` adds `git_refs` and `git_refs_pending`** — what the container may
+push, and whether a narrowing has still to reach qits-idp. Columns on a `CausedRow` again, so no
+`ArchRulesTest` decision; no backfill, because null reads as the workspace's own branch. See "The Git
+refs a workspace may push".
+
 **The target is PostgreSQL 18.4** — the tag `components/qits-database/qits-database-oci` is built
 from, and the version the suites' embedded binaries are, so a migration is proved against the engine it ships on.
 Two H2 habits are gone with it: a rule that applies to some rows is a **partial unique index** now
@@ -328,7 +333,12 @@ the sixth raw route and carries no path at all — see below):
   `WorkspaceContainerFactory` injects `ws://<host>:<port>/workspaces/daemon/<id>` as
   `QITS_WORKSPACE_DAEMON_URL` and qits-workspace-daemon dials exactly that. Change both together.
   A commissioned daemon exchanges its own client pair for a qits-workspaces-audience bearer and
-  presents it on every upgrade; the endpoint requires `qits:system`. The local/no-IdP topology
+  presents it on every upgrade; the endpoint requires `qits:system` or `qits:agent`. A caller with
+  `qits:agent` and not `qits:system` may open only its own workspace's socket: `DaemonAgentBindingCheck`
+  (an `HttpUpgradeCheck`, so the refusal is a real 403 before the upgrade) compares the token's `sub`
+  with the row's `commissioned_client_id`, on this path and on the legacy label path alike.
+  `qits:system` is not bound until agents switch to their own role (phase 4 of the superproject's
+  `principal-bound-git-refs-plan.md`). The local/no-IdP topology
   stays anonymous only while the machine-auth rollout gate is off. Do not make this path public to
   repair a failed dial-home: a missing bearer is an integration failure, not a routing exception.
 - `ServiceProxyRoute` — `ServiceProxyPath.PREFIX`, `/workspaces/service/`, which is also baked into
@@ -765,6 +775,13 @@ There is no auth variant to select in this service. The shared `qits-auth-core` 
 `X-Qits-User` and `X-Qits-Roles`; human-facing REST boundaries use Jakarta
 `@RolesAllowed("qits:admin")`. Machine-facing boundaries require an authenticated identity and
 retain their narrower `MachineAuth` audience/scope checks.
+
+**Every read also takes `qits:agent`; no write does** (phase 4 of the superproject's
+`principal-bound-git-refs-plan.md`: agents keep every read and lose only writes). It is stated on
+each read METHOD — every `GET`, the three event streams — and never on a class, so a write added to
+a class later does not inherit the agent role. A method-level list replaces the class's, so each one
+repeats the class's roles beside `qits:agent`. `AgentReadAccessTest` has one test per class. The
+raw Vert.x proxy routes carry no role list here and are not part of this rule.
 **`X-Qits-*` is the gateway's reserved namespace, stripped from every inbound request
 unconditionally**, so a client cannot forge one. That strip rule is the entire reason the header can
 be trusted here — and it is why `ForwardAuthTest` sets the real header rather than reaching for
@@ -1281,6 +1298,36 @@ rather than everything.
 implementation of `CredentialCommissioner`, or one wired against no issuer. The switch is
 `quarkus.oidc-client.client-enabled` — the extension's own, read a third time here for the reason
 `ContainersClientProducer` reads it a second time. There is no key of ours, and there must not be.
+
+## The Git refs a workspace may push
+
+Contracts C4 and C5 of the superproject's `principal-bound-git-refs-plan.md`. The commission states
+`gitRefs` beside the `project` claim; qits-idp stamps it into every token as `git_refs`, and
+qits-githost enforces it. Roles stay the owner's until phase 4.
+
+- **Stored on the row** (`workspace.git_refs`, a JSON array, `V6`), for the credential's reason: the
+  commission must be reproducible at every ensure. `GitRefs` is the one reader, writer and validator.
+  A null column (a row older than `V6`) means the workspace's own branch, the same default a new row
+  stores.
+- **Written once, then only narrowed.** `recordWorkspace` stores the dispatch's list or
+  `["refs/heads/<branch>"]`, and in the same transaction `GitRefScopes.narrowFor` removes the new
+  branch's exact ref from every other ACTIVE workspace of the same project. A re-dispatch ignores
+  `gitRefs`: a wider list on a re-press would undo a narrowing.
+- **Three limits on the narrowing.** Only exact refs go; `/*` patterns stay. A workspace never loses
+  its own branch. The project is the same repository, or the registry's answer for another one —
+  a registry that cannot answer leaves the list as it is.
+- **No widening on close.** When the narrowing workspace resolves, nothing is given back. Its branch
+  is normally merged and deleted by then, and a list that grew again unasked would undo the
+  separation for the next workspace on that branch.
+- **The update is after the commit and off the thread.** A narrowed row with a live commission gets
+  `git_refs_pending = true`; an `AFTER_SUCCESS` observer sends the `PUT` on its own thread, and a
+  landed `PUT` clears the flag only if the row still holds the same client and list. A failed `PUT`
+  stays pending, and `CommissionReconciler` sends it again (`GitRefScopes.pushPending`). A new
+  commission states the current list, so it clears the flag — and sets it again if a narrowing
+  landed while the commission was in flight.
+- **The 400 fallback is in `IdpCredentialCommissioner`.** A 400 to a commission that states
+  `gitRefs` is asked again without them, with one WARN per process. A 400 to a commission without
+  them is still a failed launch.
 
 ## Admin workspaces: the one privilege a workspace can be granted
 

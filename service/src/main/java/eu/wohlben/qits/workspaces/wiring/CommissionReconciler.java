@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.wiring;
 
 import eu.wohlben.qits.workspaces.control.CredentialCommissioner;
+import eu.wohlben.qits.workspaces.control.GitRefScopes;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.runtime.StartupEvent;
@@ -49,6 +50,9 @@ public class CommissionReconciler {
 
   @Inject WorkspaceRepository workspaces;
 
+  /** Sends the Git ref narrowings whose first update did not reach qits-idp. */
+  @Inject GitRefScopes gitRefScopes;
+
   void reconcileAtBoot(@Observes StartupEvent event) {
     reconcile();
   }
@@ -60,11 +64,17 @@ public class CommissionReconciler {
     reconcile();
   }
 
-  /** One pass. Returns how many credentials it gave back — the number the tests read. */
+  /**
+   * One pass. Returns how many credentials it gave back — the number the tests read.
+   *
+   * <p>It first sends again every narrowed Git ref list that did not reach qits-idp when the
+   * narrowing happened ({@link GitRefScopes#pushPending}). That half never throws either.
+   */
   int reconcile() {
     if (!commissioner.isResolvable()) {
       return 0;
     }
+    gitRefScopes.pushPending();
     try {
       List<CredentialCommissioner.Commission> held = commissioner.get().list();
       if (held.isEmpty()) {

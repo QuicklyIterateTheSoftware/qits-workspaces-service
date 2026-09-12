@@ -33,6 +33,8 @@ public class ServiceEventController {
     public record Response(List<ServiceEventDto> events) {}
   }
 
+  // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
   @GET
   public ListServiceEventsRequest.Response list(
       @QueryParam("repoId") String repoId,

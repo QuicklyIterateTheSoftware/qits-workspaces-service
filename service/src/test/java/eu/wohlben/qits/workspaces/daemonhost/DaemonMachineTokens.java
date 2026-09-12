@@ -15,10 +15,15 @@ final class DaemonMachineTokens {
   static final String ISSUER = "http://qits-platform-idp:8080/idp";
 
   static String token(String clientId, String... audiences) {
+    return tokenWithRoles(clientId, Set.of("qits:system"), audiences);
+  }
+
+  /** A bearer for {@code clientId} carrying exactly {@code roles} — an agent's, for instance. */
+  static String tokenWithRoles(String clientId, Set<String> roles, String... audiences) {
     return Jwt.claims()
         .issuer(ISSUER)
         .subject(clientId)
-        .groups(Set.of("qits:system"))
+        .groups(roles)
         .audience(Set.of(audiences))
         .expiresIn(Duration.ofMinutes(5))
         .jws()

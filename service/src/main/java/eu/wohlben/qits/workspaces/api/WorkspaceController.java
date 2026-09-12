@@ -62,6 +62,9 @@ public class WorkspaceController {
   }
 
   /** The repository is a filter on the collection, not a parent segment. */
+  // The three reads here also take qits:agent (phase 4: agents keep every read, lose writes). A
+  // method-level list replaces the class's, so each read states the admin role again.
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
   @GET
   public ListWorkspacesRequest.Response list(@QueryParam("repositoryId") String repositoryId) {
     var entries =
@@ -94,6 +97,7 @@ public class WorkspaceController {
    * against the mirror), which is why it is a read and not a poll — the workspace's SSE channel is
    * what says when to call it again.
    */
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
   @GET
   @Path("/{id}")
   @APIResponse(responseCode = "200", description = "The workspace.")
@@ -223,6 +227,7 @@ public class WorkspaceController {
    * workspace's payload-free SSE channel as a {@code process} hint, so clients re-fetch this
    * instead of polling.
    */
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
   @GET
   @Path("/{id}/active-process")
   public ActiveProcessRequest.Response activeProcess(

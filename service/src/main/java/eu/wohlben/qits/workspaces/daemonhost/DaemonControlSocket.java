@@ -34,7 +34,9 @@ import org.jboss.logging.Logger;
  * untouched.
  */
 @WebSocket(path = "/workspaces/daemon/{id}")
-@jakarta.annotation.security.RolesAllowed("qits:system")
+// qits:agent too, for the day agents stop presenting the owner's roles. An agent may open only its
+// own workspace's socket: DaemonAgentBindingCheck refuses any other path with 403.
+@jakarta.annotation.security.RolesAllowed({"qits:system", "qits:agent"})
 public class DaemonControlSocket {
 
   private static final Logger LOG = Logger.getLogger(DaemonControlSocket.class);
