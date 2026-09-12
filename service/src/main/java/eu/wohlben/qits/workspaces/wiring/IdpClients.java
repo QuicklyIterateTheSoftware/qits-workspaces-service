@@ -1,11 +1,13 @@
 package eu.wohlben.qits.workspaces.wiring;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -55,6 +57,21 @@ public interface IdpClients {
       @PathParam("clientId") String clientId);
 
   /**
+   * Replace the Git refs one of this caller's commissions states (contract C2). Only the owner may
+   * ask; 404 for a foreign or unknown client. The next token of that client carries the new list.
+   */
+  @PUT
+  @Path("/{clientId}/git-refs")
+  @Consumes(MediaType.APPLICATION_JSON)
+  void updateGitRefs(
+      @HeaderParam(HttpHeaders.AUTHORIZATION) String authorization,
+      @PathParam("clientId") String clientId,
+      GitRefsRequest request);
+
+  /** The body of {@link #updateGitRefs}: the whole new list. */
+  record GitRefsRequest(List<String> gitRefs) {}
+
+  /**
    * What a caller asks for: which context this credential is being commissioned for, and what that
    * context is about.
    *
@@ -67,7 +84,22 @@ public interface IdpClients {
    * commission API tolerates unknown members, measured against the live one — which is what lets
    * this service ship before the issuer does. What that costs is the scope, not the workspace.
    */
-  record CommissionRequest(String contextKind, String contextId, Map<String, String> claims) {}
+  record CommissionRequest(
+      String contextKind,
+      String contextId,
+      Map<String, String> claims,
+      @JsonInclude(JsonInclude.Include.NON_NULL) List<String> gitRefs) {
+
+    /** The commission as it was before C2: no {@code gitRefs} member at all. */
+    CommissionRequest(String contextKind, String contextId, Map<String, String> claims) {
+      this(contextKind, contextId, claims, null);
+    }
+
+    /** The same request with no Git refs stated — the fallback for an idp that refused them. */
+    CommissionRequest withoutGitRefs() {
+      return new CommissionRequest(contextKind, contextId, claims, null);
+    }
+  }
 
   /**
    * qits-idp's {@code IdpClientsController.CommissionResponse}, narrowed to the two fields this

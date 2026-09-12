@@ -199,6 +199,25 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   @Column(name = "epic_id", columnDefinition = "text")
   public String epicId;
 
+  /**
+   * The Git refs this workspace's container may push, as a JSON array ({@code V6}). Read and written
+   * through {@link eu.wohlben.qits.workspaces.control.GitRefs}, never by hand.
+   *
+   * <p>Written at creation — the list a dispatch sent, or the workspace's own branch — and after
+   * that it only narrows. Null on rows that predate {@code V6}; those are commissioned with their
+   * own branch, the same default a new row stores.
+   */
+  @Column(name = "git_refs", columnDefinition = "text")
+  public String gitRefs;
+
+  /**
+   * True while {@link #gitRefs} is narrower than what qits-idp holds for {@link
+   * #commissionedClientId} — a narrowing whose update has not reached the idp yet. The commission
+   * reconcile retries it; a new commission clears it.
+   */
+  @Column(name = "git_refs_pending", nullable = false)
+  public boolean gitRefsPending = false;
+
   /** When the workspace was resolved (integrated/abandoned); null while ACTIVE. */
   @Column(name = "resolved_at")
   public Instant resolvedAt;

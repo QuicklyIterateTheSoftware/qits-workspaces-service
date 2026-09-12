@@ -11,9 +11,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.GitRefs;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -26,6 +29,7 @@ import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -97,6 +101,7 @@ public class AgentDispatchControllerTest {
   @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceIds workspaceIds;
   @Inject WorkspaceService workspaceService;
+  @Inject WorkspaceRepository workspaceRepository;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -211,6 +216,69 @@ public class AgentDispatchControllerTest {
         .statusCode(expectedStatus)
         .extract()
         .jsonPath();
+  }
+
+  /** The Git ref list stored on a workspace row, read in a transaction of its own. */
+  private List<String> storedGitRefs(Long rowId) {
+    return GitRefs.read(
+        QuarkusTransaction.requiringNew()
+            .call(() -> workspaceRepository.findActiveById(rowId).orElseThrow().gitRefs));
+  }
+
+  /** Contract C4: the list qits-projects computed at dispatch is the list the workspace keeps. */
+  @Test
+  public void aDispatchStoresTheGitRefsItWasGiven() throws Exception {
+    String repoId = seedRepository();
+    Map<String, Object> body = bodyForTicket(repoId, "ticket/scoped", "t-1", "go");
+    body.put("gitRefs", List.of("refs/heads/ticket/scoped", "refs/heads/ticket/scoped-docs"));
+
+    dispatch(body, 200);
+
+    assertEquals(
+        List.of("refs/heads/ticket/scoped", "refs/heads/ticket/scoped-docs"),
+        storedGitRefs(workspaceIds.of(repoId, "ticket-scoped")));
+  }
+
+  @Test
+  public void aDispatchWithoutGitRefsMayPushItsOwnBranch() throws Exception {
+    String repoId = seedRepository();
+
+    dispatch(bodyForTicket(repoId, "ticket/unscoped", "t-2", "go"), 200);
+
+    assertEquals(
+        List.of("refs/heads/ticket/unscoped"),
+        storedGitRefs(workspaceIds.of(repoId, "ticket-unscoped")));
+  }
+
+  @Test
+  public void aBadGitRefsListIsRefusedBeforeAnythingIsCreated() throws Exception {
+    String repoId = seedRepository();
+    Map<String, Object> body = bodyForTicket(repoId, "ticket/bad-refs", "t-3", "go");
+    body.put("gitRefs", List.of("refs/tags/v1"));
+
+    dispatch(body, 400);
+
+    assertFalse(
+        workspaceService.branchExists(repoId, "ticket/bad-refs"),
+        "a refused list must cost nothing: no branch was pushed");
+  }
+
+  @Test
+  public void aRePressKeepsTheListTheWorkspaceHas() throws Exception {
+    String repoId = seedRepository();
+    Map<String, Object> first = bodyForTicket(repoId, "ticket/repress", "t-4", "go");
+    first.put("gitRefs", List.of("refs/heads/ticket/repress"));
+    dispatch(first, 200);
+
+    // A second press with a wider list must not widen a list that may have been narrowed since.
+    Map<String, Object> second = bodyForTicket(repoId, "ticket/repress", "t-4", "go");
+    second.put("gitRefs", List.of("refs/heads/ticket/repress", "refs/heads/epic/*"));
+    JsonPath answer = dispatch(second, 200);
+
+    assertThat(answer.getBoolean("fresh"), is(false));
+    assertEquals(
+        List.of("refs/heads/ticket/repress"),
+        storedGitRefs(workspaceIds.of(repoId, "ticket-repress")));
   }
 
   private JsonObject awaitLaunch(Long workspaceRowId) {

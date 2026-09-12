@@ -78,6 +78,9 @@ public class WorkspaceService {
    */
   @Inject Instance<CredentialCommissioner> commissioner;
 
+  /** The Git refs a workspace may push, and their narrowing when another workspace takes a branch. */
+  @Inject GitRefScopes gitRefScopes;
+
   @Inject WorkspaceContainerEventPublisher containerEvents;
 
   /**
@@ -366,22 +369,48 @@ public class WorkspaceService {
       return;
     }
     decommissionFor(rowId);
-    Optional<WorkspaceCredential> issued = commissioner.get().commission(rowId, projectOf(repoId));
+    // The Git refs this container may push (contract C5): the row's list, or its own branch for a
+    // row that predates the column. Read as the stored form so the check below compares like with
+    // like.
+    String statedRefs =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () ->
+                    workspaceRepository
+                        .findActiveById(rowId)
+                        .map(wt -> GitRefs.write(GitRefs.effective(wt)))
+                        .orElse(null));
+    Optional<WorkspaceCredential> issued =
+        commissioner
+            .get()
+            .commission(
+                rowId, projectOf(repoId), statedRefs == null ? null : GitRefs.read(statedRefs));
     if (issued.isEmpty()) {
       // No issuer wired. Supported, and the same as no implementation at all.
       return;
     }
     WorkspaceCredential credential = issued.get();
-    QuarkusTransaction.requiringNew()
-        .run(
-            () ->
-                workspaceRepository
-                    .findActiveById(rowId)
-                    .ifPresent(
-                        wt -> {
-                          wt.commissionedClientId = credential.clientId();
-                          wt.commissionedClientSecret = credential.secret();
-                        }));
+    boolean narrowedMeanwhile =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () ->
+                    workspaceRepository
+                        .findActiveById(rowId)
+                        .map(
+                            wt -> {
+                              wt.commissionedClientId = credential.clientId();
+                              wt.commissionedClientSecret = credential.secret();
+                              // The commission stated `statedRefs`. A narrowing that landed while it
+                              // was being made found no client to update, so the list it left is
+                              // still to be sent.
+                              wt.gitRefsPending =
+                                  !GitRefs.write(GitRefs.effective(wt)).equals(statedRefs);
+                              return wt.gitRefsPending;
+                            })
+                        .orElse(false));
+    if (narrowedMeanwhile) {
+      gitRefScopes.push(rowId);
+    }
     LOG.debugf(
         "Commissioned %s for workspace %s/%s", credential.clientId(), repoId, workspaceId);
   }
@@ -974,7 +1003,15 @@ public class WorkspaceService {
       String preamble,
       boolean adoptExisting) {
     return recordWorkspace(
-        repoId, workspaceId, parent, branch, preamble, adoptExisting, false, WorkspaceSubject.none());
+        repoId,
+        workspaceId,
+        parent,
+        branch,
+        preamble,
+        adoptExisting,
+        false,
+        WorkspaceSubject.none(),
+        null);
   }
 
   /**
@@ -988,6 +1025,10 @@ public class WorkspaceService {
    * <p>It is also the only writer of the {@link WorkspaceSubject}, for the milder version of the
    * same reason: the two ids are same-typed and adjacent, so they travel as a record rather than as
    * a pair of positional strings.
+   *
+   * <p>And the only writer of the Git ref list a new workspace starts with: {@code gitRefs} as
+   * stated (already validated), or the workspace's own branch when null. Writing the row is also
+   * what narrows every other open workspace that could push this branch ({@link GitRefScopes}).
    */
   private Workspace recordWorkspace(
       String repoId,
@@ -997,7 +1038,8 @@ public class WorkspaceService {
       String preamble,
       boolean adoptExisting,
       boolean admin,
-      WorkspaceSubject subject) {
+      WorkspaceSubject subject,
+      List<String> gitRefs) {
     var repo = repositories.require(repoId);
 
     // `workspaceId` becomes a path segment under the repo's workspaces dir, so it must be a strict
@@ -1068,8 +1110,13 @@ public class WorkspaceService {
     WorkspaceSubject named = subject == null ? WorkspaceSubject.none() : subject.normalized();
     workspace.ticketId = named.ticketId();
     workspace.epicId = named.epicId();
+    // What the container may push (contract C4): the stated list, or its own branch.
+    workspace.gitRefs =
+        GitRefs.write(gitRefs == null ? GitRefs.defaultFor(newBranch) : gitRefs);
     workspaceRepository.persist(workspace);
     recordEvent(workspace, WorkspaceEventType.CREATED, newBranch, parentBranch, null);
+    // The branch is this workspace's now, so no other open workspace in the project may push it.
+    gitRefScopes.narrowFor(workspace, repo);
 
     WorkspaceMetadata metadata = new WorkspaceMetadata();
     metadata.workspaceId = workspaceId;
@@ -1160,7 +1207,7 @@ public class WorkspaceService {
         WorkspaceSubject.none());
   }
 
-  /** The widest form: the posture and the subject together. Every other overload delegates here. */
+  /** The posture and the subject together, with the default Git refs (the workspace's branch). */
   public Workspace createWorkspace(
       String repoId,
       String workspaceId,
@@ -1171,6 +1218,39 @@ public class WorkspaceService {
       boolean branchTree,
       boolean admin,
       WorkspaceSubject subject) {
+    return createWorkspace(
+        repoId,
+        workspaceId,
+        parent,
+        branch,
+        preamble,
+        adoptExisting,
+        branchTree,
+        admin,
+        subject,
+        null);
+  }
+
+  /**
+   * The widest form: the posture, the subject and the Git refs together. Every other overload
+   * delegates here.
+   *
+   * <p>{@code gitRefs} is what the workspace's container may push (contract C4) — exact refs and
+   * trailing {@code /*} patterns. Null means the workspace's own branch. It is checked before any
+   * ref is pushed, so a bad list costs nothing.
+   */
+  public Workspace createWorkspace(
+      String repoId,
+      String workspaceId,
+      String parent,
+      String branch,
+      String preamble,
+      boolean adoptExisting,
+      boolean branchTree,
+      boolean admin,
+      WorkspaceSubject subject,
+      List<String> gitRefs) {
+    List<String> stated = gitRefs == null ? null : GitRefs.validated(gitRefs);
     // A call on `this` never reaches the interceptor, so each delegation below opens its own
     // transaction explicitly rather than relying on the annotation of the method it calls.
     if (!branchTree) {
@@ -1178,7 +1258,15 @@ public class WorkspaceService {
           .call(
               () ->
                   recordWorkspace(
-                      repoId, workspaceId, parent, branch, preamble, adoptExisting, admin, subject));
+                      repoId,
+                      workspaceId,
+                      parent,
+                      branch,
+                      preamble,
+                      adoptExisting,
+                      admin,
+                      subject,
+                      stated));
     }
     if (adoptExisting) {
       throw new BadRequestException("A branch-tree workspace cannot adopt an existing branch");
@@ -1212,7 +1300,15 @@ public class WorkspaceService {
         .call(
             () ->
                 recordWorkspace(
-                    repoId, workspaceId, parentBranch, newBranch, preamble, true, admin, subject));
+                    repoId,
+                    workspaceId,
+                    parentBranch,
+                    newBranch,
+                    preamble,
+                    true,
+                    admin,
+                    subject,
+                    stated));
   }
 
   /**

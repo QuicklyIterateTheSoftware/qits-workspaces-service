@@ -14,6 +14,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
@@ -80,14 +81,33 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
 
   @Inject @RestClient IdpClients clients;
 
+  /**
+   * Whether the "this idp refuses Git refs" warning was logged. Once per process: every launch
+   * would repeat it until the idp is upgraded, and one line says all there is to say.
+   */
+  private final AtomicBoolean warnedGitRefsRefused = new AtomicBoolean();
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p><b>A 400 to a commission that states Git refs is read as an idp without C2</b>, and the
+   * commission is asked again without them: the credential is then unscoped for Git, as every
+   * workspace credential was before, and the workspace still launches. A 400 to a commission that
+   * states none stays an answer about the request.
+   */
   @Override
-  public Optional<WorkspaceCredential> commission(Long rowId, String projectId) {
+  public Optional<WorkspaceCredential> commission(
+      Long rowId, String projectId, List<String> gitRefs) {
     String authorization = authorization();
     if (authorization == null || rowId == null) {
       return Optional.empty();
     }
     IdpClients.CommissionRequest request =
-        new IdpClients.CommissionRequest(CONTEXT_KIND, Long.toString(rowId), claims(projectId));
+        new IdpClients.CommissionRequest(
+            CONTEXT_KIND,
+            Long.toString(rowId),
+            claims(projectId),
+            gitRefs == null ? null : List.copyOf(gitRefs));
     Instant giveUpAt = Instant.now().plus(patience);
     // Never pause past the window itself: a pause longer than the patience would make a short
     // patience mean one attempt while looking like a window.
@@ -105,6 +125,11 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
         }
         return Optional.of(new WorkspaceCredential(issued.clientId(), issued.secret()));
       } catch (RuntimeException failure) {
+        if (request.gitRefs() != null && status(failure) == 400) {
+          warnGitRefsRefused(rowId, failure);
+          request = request.withoutGitRefs();
+          continue;
+        }
         if (!holdThrough(failure) || !Instant.now().isBefore(giveUpAt) || !sleep(pause)) {
           throw new IllegalStateException(
               "Could not commission a credential for workspace "
@@ -143,6 +168,46 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
       LOG.warnf(
           "Could not reach qits-idp to decommission %s; the reconcile will reap it: %s",
           clientId, transportFailure.toString());
+    }
+  }
+
+  /**
+   * One attempt, and a failure throws: the caller keeps the narrowing pending and the reconcile
+   * sends it again, so there is no window to hold through here.
+   */
+  @Override
+  public void updateGitRefs(String clientId, List<String> gitRefs) {
+    String authorization = authorization();
+    if (authorization == null || blank(clientId)) {
+      return;
+    }
+    try {
+      clients.updateGitRefs(
+          authorization, clientId, new IdpClients.GitRefsRequest(List.copyOf(gitRefs)));
+    } catch (WebApplicationException http) {
+      throw new IllegalStateException(
+          "qits-idp answered "
+              + http.getResponse().getStatus()
+              + " to the Git ref update of "
+              + clientId,
+          http);
+    }
+  }
+
+  /** The HTTP status of a failed call, or -1 when nothing answered. */
+  private static int status(RuntimeException failure) {
+    return failure instanceof WebApplicationException http ? http.getResponse().getStatus() : -1;
+  }
+
+  private void warnGitRefsRefused(Long rowId, RuntimeException failure) {
+    if (warnedGitRefsRefused.compareAndSet(false, true)) {
+      LOG.warnf(
+          "qits-idp refused a commission that states Git refs (%s). Commissioning without them:"
+              + " workspace credentials are not limited to their Git refs until qits-idp accepts"
+              + " the gitRefs member. This is logged once.",
+          failure.toString());
+    } else {
+      LOG.debugf("Commissioning workspace %s without Git refs: qits-idp refused them", rowId);
     }
   }
 

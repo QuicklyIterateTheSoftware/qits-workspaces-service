@@ -173,6 +173,10 @@ components:
           type: string
         instruction:
           type: string
+        gitRefs:
+          type: array
+          items:
+            type: string
     Entry:
       type: object
       properties:
@@ -748,8 +752,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/Dispatch"
         "400":
-          description: "A blank repository or branch, or a branch name git will not\
-            \ take."
+          description: "A blank repository or branch, a branch name git will not take,\
+            \ or a `gitRefs` list that breaks the rules (every entry under `refs/heads/`,\
+            \ `*` only as a trailing `/*`, at most 500 entries of at most 255 characters,\
+            \ no duplicates)."
           content:
             application/json:
               schema:
@@ -1860,4 +1866,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.911.151414
+  version: 2026.912.170300

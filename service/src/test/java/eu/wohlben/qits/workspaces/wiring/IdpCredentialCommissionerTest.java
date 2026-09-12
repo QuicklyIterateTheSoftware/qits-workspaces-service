@@ -246,4 +246,88 @@ public class IdpCredentialCommissionerTest {
     // that is not a workspace is not the workspace rule's to sweep.
     assertFalse(held.get(1).contextKind().equals(CredentialCommissioner.CONTEXT_KIND));
   }
+
+  @Test
+  public void aCommissionStatesTheGitRefsItWasGiven() throws Exception {
+    String url =
+        serve(List.of(new Answer(201, "{\"clientId\":\"ws-7-a\",\"secret\":\"s3cr3t\"}")));
+
+    commissionerAgainst(url)
+        .commission(7L, A_PROJECT, List.of("refs/heads/epic/e", "refs/heads/task/e/*"));
+
+    // Contract C2: `gitRefs` beside `contextKind`, `contextId` and the claims.
+    assertTrue(
+        bodies.get(0).contains("\"gitRefs\":[\"refs/heads/epic/e\",\"refs/heads/task/e/*\"]"),
+        bodies.get(0));
+    assertTrue(bodies.get(0).contains("\"contextKind\":\"workspace\""), bodies.get(0));
+  }
+
+  @Test
+  public void aCommissionThatStatesNoGitRefsSendsNoMember() throws Exception {
+    String url =
+        serve(List.of(new Answer(201, "{\"clientId\":\"ws-7-a\",\"secret\":\"s3cr3t\"}")));
+
+    commissionerAgainst(url).commission(7L, A_PROJECT);
+
+    // Not stated means no git_refs claim at all — not an explicit null for the idp to read.
+    assertFalse(bodies.get(0).contains("gitRefs"), bodies.get(0));
+  }
+
+  @Test
+  public void anIdpThatRefusesGitRefsIsAskedAgainWithoutThem() throws Exception {
+    // An idp without C2 that refuses the member: the scope costs, the launch does not.
+    String url =
+        serve(
+            List.of(
+                new Answer(400, "{\"error\":\"invalid_request\"}"),
+                new Answer(201, "{\"clientId\":\"ws-7-b\",\"secret\":\"s3cr3t\"}")));
+    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
+
+    Optional<WorkspaceCredential> issued =
+        commissioner.commission(7L, A_PROJECT, List.of("refs/heads/ticket/x"));
+
+    assertEquals(Optional.of(new WorkspaceCredential("ws-7-b", "s3cr3t")), issued);
+    assertEquals(List.of("POST /api/clients", "POST /api/clients"), requests);
+    assertTrue(bodies.get(0).contains("\"gitRefs\""), bodies.get(0));
+    assertFalse(bodies.get(1).contains("gitRefs"), bodies.get(1));
+    assertTrue(
+        bodies.get(1).contains("\"claims\":{\"project\":\"" + A_PROJECT + "\"}"),
+        "the fallback keeps everything but the Git refs: " + bodies.get(1));
+  }
+
+  @Test
+  public void aNarrowingIsAPutOfTheWholeListAsThisService() throws Exception {
+    String url = serve(List.of(new Answer(204, null)));
+
+    commissionerAgainst(url).updateGitRefs("ws-7-a", List.of("refs/heads/epic/e"));
+
+    assertEquals(List.of("PUT /api/clients/ws-7-a/git-refs"), requests);
+    assertEquals(
+        List.of(IdpCredentialCommissioner.basic("dev-qits-workspaces", "service-secret")),
+        authorizations);
+    assertEquals("{\"gitRefs\":[\"refs/heads/epic/e\"]}", bodies.get(0));
+  }
+
+  @Test
+  public void aRefusedNarrowingThrowsSoTheCallerKeepsItPending() throws Exception {
+    String url = serve(List.of(new Answer(404, "{\"error\":\"not_found\"}")));
+
+    RuntimeException failure =
+        assertThrows(
+            RuntimeException.class,
+            () -> commissionerAgainst(url).updateGitRefs("ws-7-a", List.of()));
+    assertTrue(failure.getMessage().contains("404"), failure.getMessage());
+    assertEquals(1, requests.size(), "one attempt; the reconcile is the retry");
+  }
+
+  @Test
+  public void withTheSwitchOffANarrowingDialsNothing() throws Exception {
+    String url = serve(List.of(new Answer(500, null)));
+    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
+    commissioner.enabled = false;
+
+    commissioner.updateGitRefs("ws-7-a", List.of("refs/heads/epic/e"));
+
+    assertEquals(List.of(), requests);
+  }
 }

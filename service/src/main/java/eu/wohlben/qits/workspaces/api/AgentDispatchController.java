@@ -80,6 +80,10 @@ public class AgentDispatchController {
    *     about the callers and not a rule this schema enforces
    * @param instruction the agent's first turn. It rides into the launch and is stored nowhere: this
    *     is the opening of one conversation, not the statement of the work
+   * @param gitRefs the Git refs the workspace's container may push (contract C4): exact refs such
+   *     as {@code refs/heads/ticket/fix-login} and trailing {@code /*} patterns, every entry under
+   *     {@code refs/heads/}. Optional; absent means the workspace's own branch. Only a fresh
+   *     workspace takes it — a re-press keeps the list the workspace already has
    */
   public static record DispatchAgentRequest(
       @NotBlank String repositoryId,
@@ -88,7 +92,8 @@ public class AgentDispatchController {
       String preamble,
       String ticketId,
       String epicId,
-      String instruction) {}
+      String instruction,
+      List<String> gitRefs) {}
 
   /**
    * Dispatch an agent, or join the dispatch that is already under way.
@@ -110,7 +115,10 @@ public class AgentDispatchController {
               + " instead — the ordinary case on a re-press, and not an error.")
   @APIResponse(
       responseCode = "400",
-      description = "A blank repository or branch, or a branch name git will not take.",
+      description =
+          "A blank repository or branch, a branch name git will not take, or a `gitRefs` list that"
+              + " breaks the rules (every entry under `refs/heads/`, `*` only as a trailing `/*`,"
+              + " at most 500 entries of at most 255 characters, no duplicates).",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @APIResponse(
       responseCode = "404",
@@ -123,7 +131,8 @@ public class AgentDispatchController {
         request.branchTree(),
         request.preamble(),
         new WorkspaceSubject(request.ticketId(), request.epicId()),
-        request.instruction());
+        request.instruction(),
+        request.gitRefs());
   }
 
   public static record ListSubjectRefsRequest() {
