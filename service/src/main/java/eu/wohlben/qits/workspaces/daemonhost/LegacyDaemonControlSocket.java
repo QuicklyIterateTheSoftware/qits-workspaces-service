@@ -43,7 +43,9 @@ import org.jboss.logging.Logger;
  * <p>Delete this once no container provisioned against the old URL can still be running.
  */
 @WebSocket(path = "/api/workspace-daemon/{workspaceId}")
-@jakarta.annotation.security.RolesAllowed("qits:system")
+// As DaemonControlSocket: qits:agent may open only the socket of the workspace it was commissioned
+// for, which DaemonAgentBindingCheck resolves from this label.
+@jakarta.annotation.security.RolesAllowed({"qits:system", "qits:agent"})
 public class LegacyDaemonControlSocket {
 
   private static final Logger LOG = Logger.getLogger(LegacyDaemonControlSocket.class);

@@ -228,7 +228,9 @@ partial set cannot authenticate and is never a valid container specification. Th
 `QITS_WORKSPACE_DAEMON_API_TOKEN`, which points the **other** way — that one is the host proving
 itself to the in-container API, this set is the container proving itself to the platform. The daemon
 uses the token URL and audience with its client pair to authenticate its dial-home control socket;
-Git still asks for its own qits-githost-audience bearer.
+Git still asks for its own qits-githost-audience bearer. The socket takes `qits:system` or
+`qits:agent`; a token with `qits:agent` alone opens only the socket of the workspace whose
+commissioned client is its `sub`, and any other path is a 403.
 
 **It is scoped to the repository's project.** The commission states
 `{"claims":{"project":"<projectId>"}}`, resolved from the repository the workspace branches, and

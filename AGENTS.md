@@ -333,7 +333,12 @@ the sixth raw route and carries no path at all — see below):
   `WorkspaceContainerFactory` injects `ws://<host>:<port>/workspaces/daemon/<id>` as
   `QITS_WORKSPACE_DAEMON_URL` and qits-workspace-daemon dials exactly that. Change both together.
   A commissioned daemon exchanges its own client pair for a qits-workspaces-audience bearer and
-  presents it on every upgrade; the endpoint requires `qits:system`. The local/no-IdP topology
+  presents it on every upgrade; the endpoint requires `qits:system` or `qits:agent`. A caller with
+  `qits:agent` and not `qits:system` may open only its own workspace's socket: `DaemonAgentBindingCheck`
+  (an `HttpUpgradeCheck`, so the refusal is a real 403 before the upgrade) compares the token's `sub`
+  with the row's `commissioned_client_id`, on this path and on the legacy label path alike.
+  `qits:system` is not bound until agents switch to their own role (phase 4 of the superproject's
+  `principal-bound-git-refs-plan.md`). The local/no-IdP topology
   stays anonymous only while the machine-auth rollout gate is off. Do not make this path public to
   repair a failed dial-home: a missing bearer is an integration failure, not a routing exception.
 - `ServiceProxyRoute` — `ServiceProxyPath.PREFIX`, `/workspaces/service/`, which is also baked into
