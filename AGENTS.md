@@ -157,8 +157,8 @@ not need to enforce that. See "Dispatching an agent onto a branch" for why it is
 
 **`V6__workspace_git_refs.sql` adds `git_refs` and `git_refs_pending`** — what the container may
 push, and whether a narrowing has still to reach qits-idp. Columns on a `CausedRow` again, so no
-`ArchRulesTest` decision; no backfill, because null reads as the workspace's own branch. See "The Git
-refs a workspace may push".
+`ArchRulesTest` decision; no backfill, because null reads as the workspace's own branch (none for a
+main workspace). See "The Git refs a workspace may push".
 
 **The target is PostgreSQL 18.4** — the tag `components/qits-database/qits-database-oci` is built
 from, and the version the suites' embedded binaries are, so a migration is proved against the engine it ships on.
@@ -1313,6 +1313,15 @@ qits-githost enforces it. Roles stay the owner's until phase 4.
   `["refs/heads/<branch>"]`, and in the same transaction `GitRefScopes.narrowFor` removes the new
   branch's exact ref from every other ACTIVE workspace of the same project. A re-dispatch ignores
   `gitRefs`: a wider list on a re-press would undo a narrowing.
+- **Never the default branch.** Agents push only their own domain branches; the repository's
+  default branch (`RepositoryView.mainBranch`, read as `defaultMainBranch` reads it) moves only
+  through a release request. So a workspace on the default branch — the main workspace — stores
+  `[]`, and a stated entry that covers the default branch (its exact ref, or a `/*` pattern over it)
+  is dropped with a WARN. Rows stored before this rule get the same answer at commission:
+  `GitRefs.effective` leaves the default branch out, so a null main row is commissioned with `[]`,
+  and a stored list that names it is rewritten without it, so a later narrowing `PUT` cannot send
+  it back. A registry that cannot answer at commission drops nothing, the same way it costs the
+  project scope and not the launch.
 - **Three limits on the narrowing.** Only exact refs go; `/*` patterns stay. A workspace never loses
   its own branch. The project is the same repository, or the registry's answer for another one —
   a registry that cannot answer leaves the list as it is.
@@ -1325,9 +1334,13 @@ qits-githost enforces it. Roles stay the owner's until phase 4.
   stays pending, and `CommissionReconciler` sends it again (`GitRefScopes.pushPending`). A new
   commission states the current list, so it clears the flag — and sets it again if a narrowing
   landed while the commission was in flight.
-- **The 400 fallback is in `IdpCredentialCommissioner`.** A 400 to a commission that states
-  `gitRefs` is asked again without them, with one WARN per process. A 400 to a commission without
-  them is still a failed launch.
+- **The 400 fallback is in `IdpCredentialCommissioner`, and it fails closed.** An idp without C2
+  ignores the `gitRefs` member and answers 201, so a 400 to a commission that states a list means a
+  C2 idp refused that list (an epic list over 500 entries, say). The commission is asked again with
+  `gitRefs: []` — the workspace launches and may push nothing — and an ERROR names the workspace and
+  the idp's reason, every time. It is never asked again without `gitRefs`: that would let the
+  credential push every ref. A 400 to a commission that states no list, or `[]`, is still a failed
+  launch. A narrowing `PUT` that fails stays pending and is sent again, as before.
 
 ## Admin workspaces: the one privilege a workspace can be granted
 

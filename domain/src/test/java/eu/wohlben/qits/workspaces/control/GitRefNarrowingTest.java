@@ -151,6 +151,75 @@ public class GitRefNarrowingTest {
   }
 
   @Test
+  public void aMainWorkspaceMayPushNothing() throws Exception {
+    String repoId = repository();
+    Long main = workspaceIds.of(repoId, "master");
+
+    assertEquals(List.of(), refsOf(main), "the default branch moves only through a release request");
+
+    workspaceService.ensureContainer(main);
+    assertEquals(List.of(), commissioner.gitRefsFor(main));
+    assertFalse(pendingOf(main));
+  }
+
+  @Test
+  public void aStatedListLosesTheDefaultBranchAndKeepsTheRest() throws Exception {
+    String repoId = repository();
+    workspaceService.createWorkspace(
+        repoId,
+        "epic-m",
+        "master",
+        "epic/m",
+        null,
+        false,
+        false,
+        false,
+        WorkspaceSubject.none(),
+        List.of("refs/heads/epic/m", "refs/heads/master", "refs/heads/task/m/*"));
+    Long epic = workspaceIds.of(repoId, "epic-m");
+
+    assertEquals(List.of("refs/heads/epic/m", "refs/heads/task/m/*"), refsOf(epic));
+
+    workspaceService.ensureContainer(epic);
+    assertEquals(List.of("refs/heads/epic/m", "refs/heads/task/m/*"), commissioner.gitRefsFor(epic));
+  }
+
+  @Test
+  public void aMainRowFromBeforeTheColumnIsCommissionedWithNothing() throws Exception {
+    String repoId = repository();
+    Long main = workspaceIds.of(repoId, "master");
+    QuarkusTransaction.requiringNew()
+        .run(() -> workspaceRepository.findActiveById(main).orElseThrow().gitRefs = null);
+
+    workspaceService.ensureContainer(main);
+
+    assertEquals(List.of(), commissioner.gitRefsFor(main));
+    assertFalse(pendingOf(main));
+  }
+
+  @Test
+  public void aStoredListThatNamesTheDefaultBranchIsCommissionedWithoutIt() throws Exception {
+    String repoId = repository();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat");
+    Long feat = workspaceIds.of(repoId, "feat");
+    // A list stored before the default-branch rule.
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaceRepository.findActiveById(feat).orElseThrow().gitRefs =
+                    GitRefs.write(List.of("refs/heads/feat", "refs/heads/master")));
+
+    workspaceService.ensureContainer(feat);
+
+    assertEquals(List.of("refs/heads/feat"), commissioner.gitRefsFor(feat));
+    assertEquals(
+        List.of("refs/heads/feat"),
+        refsOf(feat),
+        "the row no longer names it, so a later narrowing cannot send it back");
+    assertFalse(pendingOf(feat));
+  }
+
+  @Test
   public void aTaskWorkspaceTakesItsBranchOutOfTheEpicsListAndTellsTheIdp() throws Exception {
     String repoId = repository();
     Long epic = epicWorkspace(repoId);

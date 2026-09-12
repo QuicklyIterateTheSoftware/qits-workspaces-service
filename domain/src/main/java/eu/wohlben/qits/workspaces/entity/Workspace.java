@@ -205,7 +205,8 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
    *
    * <p>Written at creation — the list a dispatch sent, or the workspace's own branch — and after
    * that it only narrows. Null on rows that predate {@code V6}; those are commissioned with their
-   * own branch, the same default a new row stores.
+   * own branch, the same default a new row stores. Never the repository's default branch: a main
+   * workspace stores (or, when null, is commissioned with) an empty list.
    */
   @Column(name = "git_refs", columnDefinition = "text")
   public String gitRefs;

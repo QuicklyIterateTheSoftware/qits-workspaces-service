@@ -59,6 +59,29 @@ class GitRefsTest {
   }
 
   @Test
+  void aMainWorkspaceMayPushNothingAndAnyOtherItsOwnBranch() {
+    assertEquals(List.of(), GitRefs.defaultFor("main", "main"));
+    assertEquals(List.of("refs/heads/ticket/x"), GitRefs.defaultFor("ticket/x", "main"));
+    assertEquals(
+        List.of("refs/heads/main"),
+        GitRefs.defaultFor("main", null),
+        "a default branch that is not known drops nothing");
+  }
+
+  @Test
+  void everyEntryThatCoversTheDefaultBranchIsDropped() {
+    List<String> stated =
+        List.of("refs/heads/epic/e", "refs/heads/main", "refs/heads/*", "refs/heads/epic/*");
+    assertEquals(
+        List.of("refs/heads/epic/e", "refs/heads/epic/*"),
+        GitRefs.withoutDefaultBranch(stated, "main"));
+    assertEquals(
+        List.of("refs/heads/mainline", "refs/heads/main/*"),
+        GitRefs.withoutDefaultBranch(List.of("refs/heads/mainline", "refs/heads/main/*"), "main"),
+        "only entries that let a push to the default branch itself through");
+  }
+
+  @Test
   void theStoredFormReadsBackAndNarrowsInOrder() {
     List<String> refs = List.of("refs/heads/epic/e", "refs/heads/task/e/a", "refs/heads/task/e/b");
     String stored = GitRefs.write(refs);

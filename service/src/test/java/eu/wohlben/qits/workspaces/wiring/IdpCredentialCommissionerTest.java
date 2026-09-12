@@ -19,6 +19,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -274,25 +277,66 @@ public class IdpCredentialCommissionerTest {
   }
 
   @Test
-  public void anIdpThatRefusesGitRefsIsAskedAgainWithoutThem() throws Exception {
-    // An idp without C2 that refuses the member: the scope costs, the launch does not.
+  public void aRefusedGitRefListIsCommissionedAgainPushingNothing() throws Exception {
+    // An idp without C2 ignores the member, so a 400 is a C2 idp refusing the list. Fail closed:
+    // the workspace launches with [] and never without the member.
     String url =
         serve(
             List.of(
-                new Answer(400, "{\"error\":\"invalid_request\"}"),
+                new Answer(
+                    400,
+                    "{\"error\":\"invalid_request\",\"error_description\":\"gitRefs has 501"
+                        + " entries\"}"),
                 new Answer(201, "{\"clientId\":\"ws-7-b\",\"secret\":\"s3cr3t\"}")));
     IdpCredentialCommissioner commissioner = commissionerAgainst(url);
+    List<LogRecord> errors = new CopyOnWriteArrayList<>();
+    Handler capture =
+        new Handler() {
+          @Override
+          public void publish(LogRecord logged) {
+            if (logged.getLevel().intValue() >= Level.SEVERE.intValue()) {
+              errors.add(logged);
+            }
+          }
 
-    Optional<WorkspaceCredential> issued =
-        commissioner.commission(7L, A_PROJECT, List.of("refs/heads/ticket/x"));
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger(IdpCredentialCommissioner.class.getName());
+    logger.addHandler(capture);
+    Optional<WorkspaceCredential> issued;
+    try {
+      issued = commissioner.commission(7L, A_PROJECT, List.of("refs/heads/ticket/x"));
+    } finally {
+      logger.removeHandler(capture);
+    }
 
     assertEquals(Optional.of(new WorkspaceCredential("ws-7-b", "s3cr3t")), issued);
     assertEquals(List.of("POST /api/clients", "POST /api/clients"), requests);
-    assertTrue(bodies.get(0).contains("\"gitRefs\""), bodies.get(0));
-    assertFalse(bodies.get(1).contains("gitRefs"), bodies.get(1));
+    assertTrue(bodies.get(0).contains("\"gitRefs\":[\"refs/heads/ticket/x\"]"), bodies.get(0));
+    assertTrue(bodies.get(1).contains("\"gitRefs\":[]"), "may push nothing: " + bodies.get(1));
     assertTrue(
         bodies.get(1).contains("\"claims\":{\"project\":\"" + A_PROJECT + "\"}"),
         "the fallback keeps everything but the Git refs: " + bodies.get(1));
+    assertEquals(1, errors.size(), "one ERROR per refused list");
+    String logged = errors.get(0).getMessage();
+    assertTrue(logged.contains("workspace 7"), logged);
+    assertTrue(logged.contains("gitRefs has 501 entries"), "names the idp's reason: " + logged);
+  }
+
+  @Test
+  public void aRefusedEmptyListIsAFailedLaunch() throws Exception {
+    String url = serve(List.of(new Answer(400, "{\"error\":\"invalid_request\"}")));
+
+    // There is nothing narrower to ask for, so the refusal is an answer about the request.
+    assertThrows(
+        RuntimeException.class,
+        () -> commissionerAgainst(url).commission(7L, A_PROJECT, List.of()));
+    assertEquals(1, requests.size());
   }
 
   @Test

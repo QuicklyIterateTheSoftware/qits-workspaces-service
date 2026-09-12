@@ -369,6 +369,11 @@ public class WorkspaceService {
       return;
     }
     decommissionFor(rowId);
+    RepositoryLookup.RepositoryView repository = repositoryOf(repoId);
+    // The default branch, read the way a create reads it. An agent never pushes it, so it leaves
+    // every list below. A registry that did not answer drops nothing: like the project scope, it
+    // costs the scope and not the launch.
+    String defaultBranch = repository == null ? null : defaultMainBranch(repository);
     // The Git refs this container may push (contract C5): the row's list, or its own branch for a
     // row that predates the column. Read as the stored form so the check below compares like with
     // like.
@@ -378,13 +383,15 @@ public class WorkspaceService {
                 () ->
                     workspaceRepository
                         .findActiveById(rowId)
-                        .map(wt -> GitRefs.write(GitRefs.effective(wt)))
+                        .map(wt -> GitRefs.write(GitRefs.effective(wt, defaultBranch)))
                         .orElse(null));
     Optional<WorkspaceCredential> issued =
         commissioner
             .get()
             .commission(
-                rowId, projectOf(repoId), statedRefs == null ? null : GitRefs.read(statedRefs));
+                rowId,
+                projectOf(repository),
+                statedRefs == null ? null : GitRefs.read(statedRefs));
     if (issued.isEmpty()) {
       // No issuer wired. Supported, and the same as no implementation at all.
       return;
@@ -400,11 +407,22 @@ public class WorkspaceService {
                             wt -> {
                               wt.commissionedClientId = credential.clientId();
                               wt.commissionedClientSecret = credential.secret();
+                              // A list stored before the default-branch rule may still name the
+                              // default branch. Store it without, so a later narrowing sends what
+                              // the commission stated and does not put the branch back.
+                              List<String> allowed = GitRefs.effective(wt, defaultBranch);
+                              if (wt.gitRefs != null
+                                  && !GitRefs.read(wt.gitRefs).equals(allowed)) {
+                                LOG.infof(
+                                    "Workspace %s may not push the default branch %s; its stored"
+                                        + " Git refs no longer name it",
+                                    rowId, defaultBranch);
+                                wt.gitRefs = GitRefs.write(allowed);
+                              }
                               // The commission stated `statedRefs`. A narrowing that landed while it
                               // was being made found no client to update, so the list it left is
                               // still to be sent.
-                              wt.gitRefsPending =
-                                  !GitRefs.write(GitRefs.effective(wt)).equals(statedRefs);
+                              wt.gitRefsPending = !GitRefs.write(allowed).equals(statedRefs);
                               return wt.gitRefsPending;
                             })
                         .orElse(false));
@@ -425,19 +443,27 @@ public class WorkspaceService {
    * commissioned exactly as workspace credentials were before scoping existed, which is wider than
    * intended and still narrower than not starting.
    */
-  private String projectOf(String repoId) {
+  private static String projectOf(RepositoryLookup.RepositoryView repository) {
+    if (repository == null || repository.projectId() == null || repository.projectId().isBlank()) {
+      return null;
+    }
+    return repository.projectId();
+  }
+
+  /**
+   * The registry's view of a repository for a commission, or null when it cannot say — one lookup
+   * for both the project scope and the default branch. Null for the reason {@link #projectOf}
+   * gives.
+   */
+  private RepositoryLookup.RepositoryView repositoryOf(String repoId) {
     if (repoId == null || repoId.isBlank()) {
       return null;
     }
     try {
-      return repositories
-          .find(repoId)
-          .map(RepositoryLookup.RepositoryView::projectId)
-          .filter(project -> !project.isBlank())
-          .orElse(null);
+      return repositories.find(repoId).orElse(null);
     } catch (RuntimeException registryDidNotAnswer) {
       LOG.debugf(
-          "Could not resolve the project of %s to scope its workspace credential: %s",
+          "Could not resolve repository %s to scope its workspace credential: %s",
           repoId, registryDidNotAnswer.toString());
       return null;
     }
@@ -1027,8 +1053,10 @@ public class WorkspaceService {
    * a pair of positional strings.
    *
    * <p>And the only writer of the Git ref list a new workspace starts with: {@code gitRefs} as
-   * stated (already validated), or the workspace's own branch when null. Writing the row is also
-   * what narrows every other open workspace that could push this branch ({@link GitRefScopes}).
+   * stated (already validated), or the workspace's own branch when null. Never the repository's
+   * default branch: a stated entry that covers it is dropped and logged, and a workspace on the
+   * default branch gets an empty list. Writing the row is also what narrows every other open
+   * workspace that could push this branch ({@link GitRefScopes}).
    */
   private Workspace recordWorkspace(
       String repoId,
@@ -1110,9 +1138,23 @@ public class WorkspaceService {
     WorkspaceSubject named = subject == null ? WorkspaceSubject.none() : subject.normalized();
     workspace.ticketId = named.ticketId();
     workspace.epicId = named.epicId();
-    // What the container may push (contract C4): the stated list, or its own branch.
-    workspace.gitRefs =
-        GitRefs.write(gitRefs == null ? GitRefs.defaultFor(newBranch) : gitRefs);
+    // What the container may push (contract C4): the stated list, or its own branch. Never the
+    // default branch: it moves only through a release request, never by an agent's push.
+    String defaultBranch = defaultMainBranch(repo);
+    List<String> allowed;
+    if (gitRefs == null) {
+      allowed = GitRefs.defaultFor(newBranch, defaultBranch);
+    } else {
+      allowed = GitRefs.withoutDefaultBranch(gitRefs, defaultBranch);
+      if (allowed.size() < gitRefs.size()) {
+        List<String> dropped = new ArrayList<>(gitRefs);
+        dropped.removeAll(allowed);
+        LOG.warnf(
+            "Workspace %s/%s may not push the default branch %s; dropped %s from the stated Git refs",
+            repoId, workspaceId, defaultBranch, dropped);
+      }
+    }
+    workspace.gitRefs = GitRefs.write(allowed);
     workspaceRepository.persist(workspace);
     recordEvent(workspace, WorkspaceEventType.CREATED, newBranch, parentBranch, null);
     // The branch is this workspace's now, so no other open workspace in the project may push it.
@@ -1556,6 +1598,9 @@ public class WorkspaceService {
     workspace.branch = branch;
     workspace.status = WorkspaceStatus.ACTIVE;
     workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+    // A main workspace's agent pushes nothing: the default branch moves only through a release
+    // request. Any other branch keeps the ordinary default, its own branch.
+    workspace.gitRefs = GitRefs.write(GitRefs.defaultFor(branch, defaultMainBranch(repo)));
     workspaceRepository.persist(workspace);
     recordEvent(workspace, WorkspaceEventType.CREATED, branch, null, null);
 

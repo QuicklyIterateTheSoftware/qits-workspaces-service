@@ -250,6 +250,20 @@ public class AgentDispatchControllerTest {
         storedGitRefs(workspaceIds.of(repoId, "ticket-unscoped")));
   }
 
+  /** An agent never pushes the default branch: a stated entry for it is dropped, the rest kept. */
+  @Test
+  public void aDispatchListNamingTheDefaultBranchLosesThatEntry() throws Exception {
+    String repoId = seedRepository();
+    Map<String, Object> body = bodyForTicket(repoId, "ticket/with-main", "t-main", "go");
+    body.put("gitRefs", List.of("refs/heads/ticket/with-main", "refs/heads/master"));
+
+    dispatch(body, 200);
+
+    assertEquals(
+        List.of("refs/heads/ticket/with-main"),
+        storedGitRefs(workspaceIds.of(repoId, "ticket-with-main")));
+  }
+
   @Test
   public void aBadGitRefsListIsRefusedBeforeAnythingIsCreated() throws Exception {
     String repoId = seedRepository();

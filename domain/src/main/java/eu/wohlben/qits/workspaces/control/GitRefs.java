@@ -21,6 +21,10 @@ import java.util.Set;
  *
  * <p>Stored on {@link Workspace#gitRefs} as a JSON array of strings. {@code String[]} crosses the
  * mapper, so no class needs native-image registration.
+ *
+ * <p><b>A list never lets an agent push the repository's default branch.</b> That branch moves only
+ * through a release request. So a workspace on the default branch (a main workspace) gets an empty
+ * list, and an entry that covers the default branch is dropped ({@link #withoutDefaultBranch}).
  */
 public final class GitRefs {
 
@@ -45,6 +49,42 @@ public final class GitRefs {
   /** The list a workspace gets when the creation stated none: its own branch, and nothing else. */
   public static List<String> defaultFor(String branch) {
     return List.of(of(branch));
+  }
+
+  /**
+   * The list a workspace gets when the creation stated none, with the default-branch rule: its own
+   * branch, or nothing when its branch is the repository's default branch.
+   *
+   * @param defaultBranch the repository's default branch; null or blank when not known, which drops
+   *     nothing
+   */
+  public static List<String> defaultFor(String branch, String defaultBranch) {
+    return withoutDefaultBranch(defaultFor(branch), defaultBranch);
+  }
+
+  /**
+   * {@code refs} without every entry that lets a push to the default branch through: its exact ref,
+   * and a {@code /*} pattern that covers it (the githost's matching rule, C3). Order kept.
+   *
+   * @param defaultBranch the repository's default branch; null or blank when not known, which drops
+   *     nothing
+   */
+  public static List<String> withoutDefaultBranch(List<String> refs, String defaultBranch) {
+    if (defaultBranch == null || defaultBranch.isBlank()) {
+      return List.copyOf(refs);
+    }
+    String ref = of(defaultBranch);
+    List<String> kept = new ArrayList<>(refs);
+    kept.removeIf(entry -> covers(entry, ref));
+    return List.copyOf(kept);
+  }
+
+  /** Whether {@code entry} lets a push to {@code ref} through: the same ref, or a {@code /*} over it. */
+  static boolean covers(String entry, String ref) {
+    if (entry.endsWith("/*")) {
+      return ref.startsWith(entry.substring(0, entry.length() - 1));
+    }
+    return entry.equals(ref);
   }
 
   /**
@@ -81,13 +121,17 @@ public final class GitRefs {
 
   /**
    * The list a workspace's commission states: what the row stores, or its own branch when the row
-   * predates the column. Never null for a row with a branch.
+   * predates the column — in both cases without the default branch. So a main workspace from
+   * before this rule is commissioned with an empty list. Never null.
+   *
+   * @param defaultBranch the repository's default branch; null or blank when not known, which drops
+   *     nothing
    */
-  public static List<String> effective(Workspace workspace) {
+  public static List<String> effective(Workspace workspace, String defaultBranch) {
     if (workspace.gitRefs != null) {
-      return read(workspace.gitRefs);
+      return withoutDefaultBranch(read(workspace.gitRefs), defaultBranch);
     }
-    return workspace.branch == null ? List.of() : defaultFor(workspace.branch);
+    return workspace.branch == null ? List.of() : defaultFor(workspace.branch, defaultBranch);
   }
 
   /** The stored form: a JSON array of strings. */

@@ -181,7 +181,8 @@ public class DispatchService {
    * @param gitRefs exact refs and trailing {@code /*} patterns; null means the workspace's own
    *     branch. <b>Only a fresh workspace takes it.</b> A re-press onto an existing workspace keeps
    *     the list that workspace has — it may have been narrowed since, and a re-press must not undo
-   *     that
+   *     that. An entry that covers the repository's default branch is dropped and logged: that
+   *     branch moves only through a release request
    * @throws eu.wohlben.qits.workspaces.error.BadRequestException a list that breaks the C1 rules,
    *     on every press, before anything is created
    */
