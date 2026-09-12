@@ -775,6 +775,13 @@ There is no auth variant to select in this service. The shared `qits-auth-core` 
 `X-Qits-User` and `X-Qits-Roles`; human-facing REST boundaries use Jakarta
 `@RolesAllowed("qits:admin")`. Machine-facing boundaries require an authenticated identity and
 retain their narrower `MachineAuth` audience/scope checks.
+
+**Every read also takes `qits:agent`; no write does** (phase 4 of the superproject's
+`principal-bound-git-refs-plan.md`: agents keep every read and lose only writes). It is stated on
+each read METHOD — every `GET`, the three event streams — and never on a class, so a write added to
+a class later does not inherit the agent role. A method-level list replaces the class's, so each one
+repeats the class's roles beside `qits:agent`. `AgentReadAccessTest` has one test per class. The
+raw Vert.x proxy routes carry no role list here and are not part of this rule.
 **`X-Qits-*` is the gateway's reserved namespace, stripped from every inbound request
 unconditionally**, so a client cannot forge one. That strip rule is the entire reason the header can
 be trusted here — and it is why `ForwardAuthTest` sets the real header rather than reaching for

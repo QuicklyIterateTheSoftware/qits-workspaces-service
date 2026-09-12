@@ -168,6 +168,9 @@ public class AgentDispatchController {
    * <p>Rows the caller did not ask about never appear, and a row whose workspace has been integrated
    * or abandoned stops appearing the moment it resolves — nothing over there has to clear anything.
    */
+  // A read, so an agent may make it too (phase 4: agents keep every read, lose writes). It
+  // replaces the class's list, so the class's two roles are stated again.
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:system", "qits:agent"})
   @GET
   @Path("/references")
   public ListSubjectRefsRequest.Response references(

@@ -810,6 +810,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:system
+        - qits:agent
   /workspaces/api/branches/cleanup:
     post:
       parameters:
@@ -1038,6 +1039,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/history/{id}:
     patch:
       parameters:
@@ -1095,6 +1097,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/pins:
     get:
       summary: The container images a launch by this service would pull right now
@@ -1115,6 +1118,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:system
+        - qits:agent
   /workspaces/api/service-events:
     get:
       parameters:
@@ -1170,6 +1174,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/workspaces:
     get:
       parameters:
@@ -1194,6 +1199,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
     post:
       requestBody:
         content:
@@ -1252,6 +1258,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/workspaces/{id}/active-process:
     get:
       parameters:
@@ -1278,6 +1285,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/workspaces/{id}/bootstrap-runs:
     get:
       parameters:
@@ -1310,6 +1318,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/workspaces/{id}/delete-container:
     post:
       parameters:
@@ -1533,6 +1542,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
     post:
       parameters:
       - name: id
@@ -1704,6 +1714,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
   /workspaces/api/workspaces/{id}/prompt-draft:
     put:
       parameters:
@@ -1785,6 +1796,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
     delete:
       parameters:
       - name: id

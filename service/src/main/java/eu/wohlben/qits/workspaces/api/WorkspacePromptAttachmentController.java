@@ -59,6 +59,8 @@ public class WorkspacePromptAttachmentController {
    * <p>An empty list, not a 404, when there are none: a workspace with no images is an ordinary
    * state rather than a missing resource.
    */
+  // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
   @GET
   @APIResponse(responseCode = "200", description = "The attachments, oldest first.")
   @APIResponse(
@@ -166,6 +168,7 @@ public class WorkspacePromptAttachmentController {
   }
 
   /** Raw image bytes for normal browser and markdown image URLs. */
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
   @GET
   @Path("/{attachmentId}/content")
   @Produces({"image/png", "image/jpeg"})
