@@ -1,0 +1,129 @@
+# What qits-workspaces declares about its own configuration.
+#
+# The deployer reads this file from the git host at the RELEASED TAG, beside
+# `.config/qits/deployments.yml`, and POSTs it verbatim to qits-configuration before anything is
+# scheduled:
+#
+#     POST /configuration/api/applications/qits-workspaces/declarations/<version>
+#          ?deploymentTarget=environment
+#
+# The store parses it with the estate's ONE strict parser (qits-configuration's `DeclarationParser`).
+# Nothing on this side parses it.
+#
+# WHY THIS FILE EXISTS. qits-configuration marks a stored entry `orphaned` only when the application
+# has a declaration that does not list the key. With no file, nothing of qits-workspaces' is ever
+# marked, so the keys the one-client change (service-client-identity-plan.md, C4) left unused cannot
+# be found or removed. With this file, every stored entry it does not list shows as `orphaned`, and a
+# person can remove it in the configuration UI.
+#
+# SO THE LIST MUST BE COMPLETE. Every key the service still reads is here — env keys and the /data
+# mount alike. A key left out is a key the UI invites somebody to delete. Add a key here in the
+# commit that starts reading it; remove it only in the commit that stops.
+#
+# NO DEFAULTS, AND THAT IS WHAT MAKES THIS FILE SAFE TODAY. Every key states a name and a type and
+# nothing else. A declared default sits UNDER the imported and stored values, so on this platform,
+# where the bootstrap sets all of them, it would change nothing — and written blind, it is how a
+# fresh install boots against an address nobody meant. This is step one of the two-step rule
+# (docs guide `configuration-yml.md`, §7.5): the file lands, nothing observable changes.
+#
+# NO serviceAddress. The peer URLs are `string` on purpose: a serviceAddress is rendered by the
+# platform and refuses a stored value, so declaring one would turn every hand-set address into an
+# ignored row. That change belongs to the config-declarations work, one application at a time.
+#
+# THE `qits` CLIENT'S FALLBACK KEYS. `QUARKUS_OIDC_CLIENT_CLIENT_ID`, `_CREDENTIALS_SECRET`,
+# `_AUTH_SERVER_URL` and `_CLIENT_ENABLED` are the old unnamed client's env names, and the `qits`
+# client reads them as its fallback (`application.properties`). They stay declared until this
+# repository's `idp:client` cutover (service-client-identity-plan.md, C5) retires the fallback.
+#
+# WHAT IS DELIBERATELY NOT HERE, and therefore shows as `orphaned`:
+#   * QUARKUS_OIDC_CLIENT_GRANT_OPTIONS_CLIENT_AUDIENCE. The `qits` client asks for the fixed
+#     audience `qits-platform`; nothing reads this name.
+#   * QUARKUS_OIDC_CLIENT_GITHOST_* and QUARKUS_OIDC_CLIENT_PROJECTS_* (five each). The two old named
+#     clients. No code uses them; Quarkus still binds their disabled blocks, which is not a read.
+#   * QITS_GITHOST_AUDIENCE. The audience a workspace container asks for is the constant
+#     `WorkspaceContainerFactory.CONTAINER_TOKEN_AUDIENCE` now; the `qits.githost.audience` key is gone.
+#   * QITS_RESOURCE_*. The deployer injects those from its own resource registry, the one authority
+#     for a provisioned credential. Configuration must not be able to state or delete one.
+
+keys:
+  # --- the volume --------------------------------------------------------------------------------
+
+  mounts[0]:
+    type: string
+    description: "The volume at /data: this service's per-repository git mirrors, merge worktrees and workspace metadata (QITS_WORKSPACES_DATA_DIR=/data/workspaces)."
+
+  # --- peers this service calls ------------------------------------------------------------------
+
+  env.QITS_PROJECTS_URL:
+    type: string
+    description: "Where qits-projects answers: scheme, host and port, no path. The service refuses to start without it."
+
+  env.QITS_GITHOST_URL:
+    type: string
+    description: "Where qits-githost answers: scheme, host and port, no path. Every branch create, merge and cleanup is a push here."
+
+  env.QITS_CONTAINERS_URL:
+    type: string
+    description: "Where qits-containers answers. Every workspace container and volume is started and removed there."
+
+  env.QITS_EVENTS_URL:
+    type: string
+    description: "The event bus the qits-eventstream jar connects to."
+
+  env.QITS_OBSERVABILITY_URL:
+    type: string
+    description: "Where this service's OTLP telemetry goes, and the address handed to workspace containers for theirs."
+
+  # --- what each workspace container is handed ---------------------------------------------------
+
+  env.QITS_WORKSPACE_CONTAINER_GIT_URL:
+    type: string
+    description: "The git host address a workspace container clones and pushes through."
+
+  env.QITS_WORKSPACE_MAVEN_REPOSITORY_URL:
+    type: string
+    description: "The platform Maven repository handed to each workspace container."
+
+  env.QITS_WORKSPACE_NPM_REGISTRY_URL:
+    type: string
+    description: "The platform npm registry (the @qits scope) handed to each workspace container."
+
+  env.QITS_WORKSPACE_NPM_PROXY_URL:
+    type: string
+    description: "The npm proxy for public packages handed to each workspace container."
+
+  env.QITS_WORKSPACE_GIT_HOST:
+    type: string
+    description: "The host name workspace daemons dial back on for the control socket. It must name qits-workspaces itself; the default `auto` is wrong in a container."
+
+  # --- the identity inbound calls are checked against --------------------------------------------
+
+  env.QITS_AUTH_MACHINE_REQUIRED:
+    type: boolean
+    description: "The machine gate. On, an inbound machine token is validated; off, there is no OIDC tenant at all."
+
+  env.QITS_AUTH_MACHINE_AUDIENCE:
+    type: string
+    description: "The audience an inbound machine token must carry, beside qits-platform."
+
+  env.QUARKUS_OIDC_AUTH_SERVER_URL:
+    type: string
+    description: "The issuer whose JWKS validates inbound tokens."
+
+  # --- the `qits` client's fallback: the old unnamed client's env names, until the C5 cutover ---
+
+  env.QUARKUS_OIDC_CLIENT_CLIENT_ENABLED:
+    type: boolean
+    description: "The switch for the `qits` client. Off, the service holds no secret, sends no bearer and commissions no container credential."
+
+  env.QUARKUS_OIDC_CLIENT_AUTH_SERVER_URL:
+    type: string
+    description: "The idp the `qits` client mints its bearer at, and the base of the commission API. QITS_RESOURCE_IDP_URL wins when set."
+
+  env.QUARKUS_OIDC_CLIENT_CLIENT_ID:
+    type: string
+    description: "The `qits` client's id, and the owner name on every container this service starts. QITS_RESOURCE_IDP_CLIENT_ID wins when set."
+
+  env.QUARKUS_OIDC_CLIENT_CREDENTIALS_SECRET:
+    type: string
+    description: "The `qits` client's secret. A secret: never written here, never logged. QITS_RESOURCE_IDP_CLIENT_SECRET wins when set."
