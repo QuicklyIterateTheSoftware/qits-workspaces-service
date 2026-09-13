@@ -23,9 +23,9 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
  *
  * <p><b>The path is a cross-repo contract.</b> {@code /api/clients} is served under qits-idp's own
  * {@code /idp} segment, which is what the configured base url carries — and that base is {@code
- * quarkus.oidc-client.auth-server-url}, the address this service already holds because it fetches
- * tokens from the same place. Deriving it means there is no second address to configure and no way
- * for the two to disagree about which idp this is.
+ * quarkus.oidc-client.qits.auth-server-url} (service-client-identity-plan.md, C4), the address this
+ * service already holds because it fetches tokens from the same place. Deriving it means there is no
+ * second address to configure and no way for the two to disagree about which idp this is.
  *
  * <p><b>Authorization is HTTP Basic, and the credential is this service's own idp client.</b> That
  * is the whole mechanism qits-idp offers here and it adds nothing to configure: a caller already

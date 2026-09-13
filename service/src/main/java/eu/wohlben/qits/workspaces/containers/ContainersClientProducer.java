@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.containers;
 
 import eu.wohlben.qits.containers.client.ContainersClient;
+import io.quarkus.oidc.client.NamedOidcClient;
 import io.quarkus.oidc.client.OidcClient;
 import io.quarkus.oidc.client.runtime.TokensHelper;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -29,8 +30,8 @@ import org.jboss.logging.Logger;
  * {@code TokenSource} contract: a source that throws is a source that returned nothing, so a broken
  * or unreachable qits-idp turns into a 401 from qits-containers — reportable, one of the four
  * answers — rather than an exception on the thread that asked for a workspace. Empty is the shipped
- * posture: {@code quarkus.oidc-client.client-enabled} is {@code false} and the owner in the path is
- * trusted on network trust exactly as every sibling hop is today.
+ * posture: {@code quarkus.oidc-client.qits.client-enabled} is {@code false} and the owner in the
+ * path is trusted on network trust exactly as every sibling hop is today.
  *
  * <p><b>The wait is bounded, and that is this package's standing rule rather than a preference.</b>
  * Several callers are HTTP worker threads inside {@code WorkspaceService}'s {@code synchronized}
@@ -70,11 +71,15 @@ public class ContainersClientProducer {
    * same value decides whether quarkus-oidc-client builds a real client and whether this class asks
    * it for anything. Deliberately required — a deployment that deletes the shipped line fails to
    * start instead of quietly dropping the credential off every outbound call.
+   *
+   * <p>{@code qits}, the one named client every outbound identity this service has now shares
+   * (service-client-identity-plan.md, C4) — not the unnamed default client, which stays disabled and
+   * exists only so {@code qits}'s own keys have an old env name to fall back to.
    */
-  @ConfigProperty(name = "quarkus.oidc-client.client-enabled")
+  @ConfigProperty(name = "quarkus.oidc-client.qits.client-enabled")
   boolean tokensEnabled;
 
-  @Inject OidcClient oidcClient;
+  @Inject @NamedOidcClient("qits") OidcClient oidcClient;
 
   private final TokensHelper tokens = new TokensHelper();
 

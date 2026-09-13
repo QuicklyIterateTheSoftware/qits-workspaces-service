@@ -11,17 +11,23 @@ import java.util.Optional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-/** qits-workspaces' separately audience-bound credential for qits-githost. */
+/**
+ * qits-workspaces' credential for reads from qits-githost.
+ *
+ * <p>The same {@code qits} named client every outbound call this service makes now shares
+ * (service-client-identity-plan.md, C4), asking one audience — {@code qits-platform} — rather than a
+ * git-host-specific one.
+ */
 @ApplicationScoped
 public class IdpGitHostBearer implements GitHostBearer {
 
   private static final Logger LOG = Logger.getLogger(IdpGitHostBearer.class);
   private static final Duration TOKEN_TIMEOUT = Duration.ofSeconds(5);
 
-  @ConfigProperty(name = "quarkus.oidc-client.githost.client-enabled")
+  @ConfigProperty(name = "quarkus.oidc-client.qits.client-enabled")
   boolean enabled;
 
-  @Inject @NamedOidcClient("githost") OidcClient oidcClient;
+  @Inject @NamedOidcClient("qits") OidcClient oidcClient;
 
   private final TokensHelper tokens = new TokensHelper();
 

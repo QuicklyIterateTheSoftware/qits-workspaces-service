@@ -23,12 +23,12 @@ import org.jboss.logging.Logger;
  * authenticated with this service's own idp client id and secret.
  *
  * <p><b>One switch decides whether this is wired, and it is the extension's own.</b> {@code
- * quarkus.oidc-client.client-enabled} already governs whether a token is fetched for qits-containers
- * ({@code containers/ContainersClientProducer} reads the same key for the same reason) — off, there
- * is no secret in this process to authenticate with and there is nothing to commission against. So
- * off means {@link #commission} answers empty, no container carries a credential, and every
- * workspace behaves exactly as it did before this class existed. A key of our own would be a second
- * thing to get wrong.
+ * quarkus.oidc-client.qits.client-enabled} already governs whether a token is fetched for
+ * qits-containers ({@code containers/ContainersClientProducer} reads the same key for the same
+ * reason) — off, there is no secret in this process to authenticate with and there is nothing to
+ * commission against. So off means {@link #commission} answers empty, no container carries a
+ * credential, and every workspace behaves exactly as it did before this class existed. A key of our
+ * own would be a second thing to get wrong.
  *
  * <p><b>{@code @DefaultBean}, and keep it.</b> A test-scoped double must win, and two unqualified
  * beans of one type fail the build at {@code ArcProcessor#validate} — for every test at once. Same
@@ -59,16 +59,21 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
    * The single switch, read from the extension's own key rather than shadowed by one of ours — see
    * the class javadoc. Required: a deployment that deletes the shipped line should fail to start
    * rather than quietly stop commissioning.
+   *
+   * <p>{@code qits}, the one named client every outbound identity this service has now shares
+   * (service-client-identity-plan.md, C4). This class never asks {@code quarkus-oidc-client} for a
+   * token on that client — the idp's commissioning door takes HTTP Basic, not a bearer — so it reads
+   * the client's id and secret directly rather than injecting the client bean itself.
    */
-  @ConfigProperty(name = "quarkus.oidc-client.client-enabled")
+  @ConfigProperty(name = "quarkus.oidc-client.qits.client-enabled")
   boolean enabled;
 
   /** This service's own idp client — the {@code owner} every commission is recorded under. */
-  @ConfigProperty(name = "quarkus.oidc-client.client-id")
+  @ConfigProperty(name = "quarkus.oidc-client.qits.client-id")
   Optional<String> clientId;
 
   /** Its secret. Absent whenever the switch above is off, which is the shipped posture. */
-  @ConfigProperty(name = "quarkus.oidc-client.credentials.secret")
+  @ConfigProperty(name = "quarkus.oidc-client.qits.credentials.secret")
   Optional<String> clientSecret;
 
   /**

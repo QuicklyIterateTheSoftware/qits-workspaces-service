@@ -51,12 +51,13 @@ import java.util.Map;
  *       or it is not about this service's git at all.
  *   <li><b>{@code qits.projects.url} / {@code qits.containers.url} / {@code qits.events.url}</b> —
  *       {@link StoryPeers}, one stub answering as all three.
- *   <li><b>the three named oidc clients, ENABLED</b> — shipped off, because a platform running its
- *       peers open on qits-net behind forward-auth is a supported posture. Turning them on is what
- *       puts this service's own machine credential in the diagram, and for {@code githost} it is
+ *   <li><b>the one named oidc client, {@code qits}, ENABLED</b> — shipped off, because a platform
+ *       running its peers open on qits-net behind forward-auth is a supported posture. Turning it on
+ *       is what puts this service's own machine credential in the diagram — the bearer sent to
+ *       qits-containers, to qits-githost and to qits-projects, and the Basic pair the commission call
+ *       presents to qits-idp, all one client now (service-client-identity-plan.md, C4). For git it is
  *       not optional at all: {@code RepoMirror.platformArgv} <b>refuses to run any http(s) git
- *       argv</b> without a bearer to hang on {@code -c http.extraHeader}. It is also what enables
- *       the commission call, which is gated on the default client's switch.
+ *       argv</b> without a bearer to hang on {@code -c http.extraHeader}.
  *   <li><b>{@code qits.eventstream.enabled=true}</b> — the bus, which {@code %dev} and {@code %test}
  *       both keep dark. Nothing here publishes any more (the {@code SCMRelease} the release door
  *       announced left with the door), so what this proves is the boot: the jar's datasource, its
@@ -95,10 +96,10 @@ import java.util.Map;
 public class StoryProfile implements QuarkusTestProfile {
 
   /**
-   * The secret each of the three named clients presents with its {@code client_credentials} grant.
-   * It is a fixture rather than a credential — {@link StoryPeers} mints for anybody — and it is here
-   * because the extension refuses to start a client that has no way to authenticate. Every story
-   * asserts it never reached a report.
+   * The secret the one named client presents with its {@code client_credentials} grant. It is a
+   * fixture rather than a credential — {@link StoryPeers} mints for anybody — and it is here because
+   * the extension refuses to start a client that has no way to authenticate. Every story asserts it
+   * never reached a report.
    */
   public static final String CLIENT_SECRET = "story-workspaces-client-secret";
 
@@ -107,9 +108,6 @@ public class StoryProfile implements QuarkusTestProfile {
 
   /** …and its own outbox, which the bus needs whether or not anything is published. */
   private static final String EVENTSTREAM_DATABASE = "workspaces_stories_eventstream_it";
-
-  /** The three named oidc clients, which are also the three peers this service holds one for. */
-  private static final String[] CLIENTS = {"", "githost.", "projects."};
 
   @Override
   public Map<String, String> getConfigOverrides() {
@@ -151,12 +149,10 @@ public class StoryProfile implements QuarkusTestProfile {
     config.put("qits.events.url", peers);
     config.put("qits.githost.url", gitHost);
 
-    // --- this service's own credentials, all three ---------------------------------------------------
-    for (String client : CLIENTS) {
-      config.put("quarkus.oidc-client." + client + "client-enabled", "true");
-      config.put("quarkus.oidc-client." + client + "auth-server-url", peers + "/idp");
-      config.put("quarkus.oidc-client." + client + "credentials.secret", CLIENT_SECRET);
-    }
+    // --- this service's own credential, the one named client `qits` -----------------------------
+    config.put("quarkus.oidc-client.qits.client-enabled", "true");
+    config.put("quarkus.oidc-client.qits.auth-server-url", peers + "/idp");
+    config.put("quarkus.oidc-client.qits.credentials.secret", CLIENT_SECRET);
 
     // --- the bus, on, against a stub that accepts ----------------------------------------------------
     config.put("qits.eventstream.enabled", "true");

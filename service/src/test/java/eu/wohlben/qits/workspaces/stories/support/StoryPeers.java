@@ -72,10 +72,12 @@ import java.util.concurrent.Executors;
  * <h2>The credential is minted ONCE, and that is why one diagram carries it</h2>
  *
  * <p>quarkus-oidc-client caches the token it acquires and re-mints only when it expires, and this
- * service has <b>three</b> named clients ({@code default} for qits-containers, {@code githost},
- * {@code projects}). The token here says {@code expires_in: 3600}, so all three mints land in the
- * first story that needs any of them and never again — and they draw as ONE arrow, because an edge
- * is {@code (kind, from, to, label)} and the three agree in all four.
+ * service has <b>one</b> named client, {@code qits} (service-client-identity-plan.md, C4) — the
+ * bearer sent to qits-containers, to qits-githost and to qits-projects, and the Basic pair the
+ * commission call presents to qits-idp, all sharing the one credential. The token here says {@code
+ * expires_in: 3600}, so the one mint lands in the first story that needs it and never again — and
+ * every bearer call draws as ONE arrow, because an edge is {@code (kind, from, to, label)} and every
+ * call agrees in all four.
  *
  * <p>The corollary to know when running one class alone: the first workspace story claims that
  * arrow, and any other story class run on its own inherits it and fails its own edge
@@ -108,7 +110,7 @@ public final class StoryPeers {
   /** {@code ProjectsProjectRepositories}' alias route — the public identity pair. */
   public static final String PROJECT_PATH = "/projects/api/projects/";
 
-  /** {@code quarkus.oidc-client.*.token-path} joined onto the auth-server url. */
+  /** {@code quarkus.oidc-client.qits.token-path} joined onto the auth-server url. */
   public static final String TOKEN_PATH = "/idp/token";
 
   /** {@code IdpClients}' commission API, under the idp's own segment. */
@@ -123,7 +125,7 @@ public final class StoryPeers {
   /** {@code EventsPublisher.EVENTS_PATH} — one PUT per published event, keyed by its id. */
   public static final String EVENTS_PATH = "/events/api/events/";
 
-  /** The owner every container call is scoped by: {@code quarkus.oidc-client.client-id}. */
+  /** The owner every container call is scoped by: {@code quarkus.oidc-client.qits.client-id}. */
   public static final String OWNER = "qits-workspaces";
 
   /** The workload segment a workspace container lives under. */
@@ -131,7 +133,7 @@ public final class StoryPeers {
 
   // --- the constants a story reads back ----------------------------------------------------------
 
-  /** The opaque machine token this service's three oidc clients receive. Never a real JWT. */
+  /** The opaque machine token this service's one named oidc client receives. Never a real JWT. */
   public static final String MACHINE_TOKEN = "story-workspaces-machine-token";
 
   /** The client id qits-platform-idp commissions for a workspace. */
@@ -281,7 +283,7 @@ public final class StoryPeers {
       return projectRoute(path);
     }
     if (TOKEN_PATH.equals(path)) {
-      // An hour, so the three named clients' mints land in exactly one story — see the class javadoc.
+      // An hour, so the one named client's mint lands in exactly one story — see the class javadoc.
       return "POST".equals(method)
           ? new Answer(
               200,

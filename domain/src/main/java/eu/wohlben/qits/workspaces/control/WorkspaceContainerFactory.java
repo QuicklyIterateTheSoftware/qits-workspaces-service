@@ -461,16 +461,20 @@ public class WorkspaceContainerFactory {
   @ConfigProperty(name = "qits.workspace.container-git-url", defaultValue = "http://qits-platform-edge:8080")
   String containerGitUrl;
 
-  @ConfigProperty(name = "qits.githost.audience", defaultValue = "qits-githost")
-  String gitHostAudience;
+  /**
+   * The audience a container's Git helper AND the daemon's dial-home control socket bearer both
+   * request: one platform-wide value now (service-client-identity-plan.md, C4), not a
+   * qits-githost-specific or an environment-qualified qits-workspaces one. The receiving side
+   * accepts it because C1 (qits-auth-core) widened its inbound audience check fleet-wide. A literal
+   * rather than a config key: {@code qits.githost.audience} and the daemon's own audience key used
+   * to carry environment-qualified values (still injected by old deployment extras, now inert — C9),
+   * and there is nothing left to configure once every receiver takes the one platform audience.
+   */
+  static final String CONTAINER_TOKEN_AUDIENCE = "qits-platform";
 
   /** Reuse the one IdP authority this service already uses for its own machine client. */
-  @ConfigProperty(name = "quarkus.oidc-client.auth-server-url")
+  @ConfigProperty(name = "quarkus.oidc-client.qits.auth-server-url")
   String idpUrl;
-
-  /** The environment-qualified qits-workspaces audience the daemon's control socket requires. */
-  @ConfigProperty(name = "qits.auth.machine.audience", defaultValue = "qits-workspaces")
-  String machineAudience;
 
   /**
    * The bearer every container's {@code WorkspaceApi} requires — injected as the fifteenth {@code
@@ -749,13 +753,13 @@ public class WorkspaceContainerFactory {
               container.env("GIT_CONFIG_GLOBAL", "/etc/qits-gitconfig");
               container.env("QITS_GIT_AUTH_HOST", gitAuthority(containerGitUrl));
               container.env("QITS_GIT_AUTH_TOKEN_URL", tokenUrl(idpUrl));
-              container.env("QITS_GIT_AUTH_AUDIENCE", gitHostAudience);
-              // The same short-lived credential authenticates the daemon's dial-home socket, but
-              // its audience is qits-workspaces rather than qits-githost. Keep the token endpoint
-              // and target explicit: deriving either from the Git endpoint would silently put a
-              // workspace's control plane behind a different service's policy.
+              container.env("QITS_GIT_AUTH_AUDIENCE", CONTAINER_TOKEN_AUDIENCE);
+              // The same short-lived credential authenticates the daemon's dial-home socket, and —
+              // since C4 — asks for the same one platform audience the Git helper above does. Keep
+              // the token endpoint and target explicit: deriving either from the Git endpoint would
+              // silently put a workspace's control plane behind a different service's policy.
               container.env("QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL", tokenUrl(idpUrl));
-              container.env("QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE", machineAudience);
+              container.env("QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE", CONTAINER_TOKEN_AUDIENCE);
             });
     // THE WEB EDITOR, and only for the project wrapper's main workspace. The daemon supervises
     // openvscode-server when it is told to; every other workspace is told nothing and behaves

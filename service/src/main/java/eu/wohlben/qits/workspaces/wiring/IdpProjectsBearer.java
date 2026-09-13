@@ -9,16 +9,22 @@ import java.time.Duration;
 import java.util.Optional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-/** Supplies the separately audience-bound bearer for Workspaces' qits-projects REST client. */
+/**
+ * Supplies the bearer for Workspaces' qits-projects REST client.
+ *
+ * <p>The same {@code qits} named client every outbound call this service makes now shares
+ * (service-client-identity-plan.md, C4), asking one audience — {@code qits-platform} — rather than a
+ * qits-projects-specific one.
+ */
 @ApplicationScoped
 public class IdpProjectsBearer {
 
   private static final Duration TOKEN_TIMEOUT = Duration.ofSeconds(5);
 
-  @ConfigProperty(name = "quarkus.oidc-client.projects.client-enabled")
+  @ConfigProperty(name = "quarkus.oidc-client.qits.client-enabled")
   boolean enabled;
 
-  @Inject @NamedOidcClient("projects") OidcClient oidcClient;
+  @Inject @NamedOidcClient("qits") OidcClient oidcClient;
 
   private final TokensHelper tokens = new TokensHelper();
 

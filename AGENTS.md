@@ -1296,8 +1296,9 @@ rather than everything.
 
 **Absent is a supported configuration in two spellings and they behave identically**: no
 implementation of `CredentialCommissioner`, or one wired against no issuer. The switch is
-`quarkus.oidc-client.client-enabled` — the extension's own, read a third time here for the reason
-`ContainersClientProducer` reads it a second time. There is no key of ours, and there must not be.
+`quarkus.oidc-client.qits.client-enabled` — the extension's own, read a third time here for the
+reason `ContainersClientProducer` reads it a second time (service-client-identity-plan.md, C4).
+There is no key of ours, and there must not be.
 
 ## The Git refs a workspace may push
 
@@ -1583,9 +1584,9 @@ socket by hand, because the framework ships no socket tap and a frame is not a r
    PUT reuses is first minted there.
 2. **A cached fetch belongs to whichever story paid for it.** quarkus-oidc-client caches its mint
    for an hour (`StoryPeers` answers `expires_in: 3600` on purpose), so `POST /idp/token` lands in
-   the first story that needs each of the three named clients — today the workspace provision for
-   all of them — and in no story after. Running one class alone inherits the arrow and fails
-   its own edge count, loudly, which is the right way for that assumption to break.
+   the first story that needs the one named client `qits` (service-client-identity-plan.md, C4) —
+   today the workspace provision — and in no story after. Running one class alone inherits the arrow
+   and fails its own edge count, loudly, which is the right way for that assumption to break.
 3. **An id that reaches a label inside a segment has to be AUTHORED.** `Labels` rewrites whole
    segments it can tell were generated, so a uuid row id scrubs to `{id}` in
    `/projects/api/repositories/{id}` — but the workspace fixture's id also travels *inside* a

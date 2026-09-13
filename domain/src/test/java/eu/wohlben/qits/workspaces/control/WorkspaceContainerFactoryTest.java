@@ -102,9 +102,7 @@ class WorkspaceContainerFactoryTest {
     f.qitsHostResolver = resolver("qits");
     f.qitsPort = "8080";
     f.containerGitUrl = "http://qits-platform-edge:8080";
-    f.gitHostAudience = "dev-qits-githost";
     f.idpUrl = "http://qits-idp:8080/idp";
-    f.machineAudience = "dev-qits-workspaces";
     // Mirrors the shipped default (qits.bootstrap.autorun-enabled): the daemon self-runs bootstrap.
     f.bootstrapAutorunEnabled = true;
     // Mirrors the shipped qits.services.* defaults, forwarded to the daemon's in-container
@@ -413,9 +411,11 @@ class WorkspaceContainerFactoryTest {
     assertEnv(c, "GIT_CONFIG_GLOBAL", "/etc/qits-gitconfig");
     assertEnv(c, "QITS_GIT_AUTH_HOST", "qits-platform-edge:8080");
     assertEnv(c, "QITS_GIT_AUTH_TOKEN_URL", "http://qits-idp:8080/idp/token");
-    assertEnv(c, "QITS_GIT_AUTH_AUDIENCE", "dev-qits-githost");
+    // One platform-wide audience for both (service-client-identity-plan.md, C4) — no longer
+    // qits-githost-specific or environment-qualified.
+    assertEnv(c, "QITS_GIT_AUTH_AUDIENCE", "qits-platform");
     assertEnv(c, "QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL", "http://qits-idp:8080/idp/token");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE", "dev-qits-workspaces");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE", "qits-platform");
   }
 
   @Test

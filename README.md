@@ -221,16 +221,17 @@ the superproject's `authenticated-reads-plan.md`.
     QITS_COMMISSIONED_CLIENT_ID       the commissioned idp client
     QITS_COMMISSIONED_CLIENT_SECRET   its secret
     QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL  its token endpoint
-    QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE   the qits-workspaces audience
+    QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE   the platform audience, qits-platform (C4)
 
 The client pair and its control-socket token coordinates are injected together or not at all; a
 partial set cannot authenticate and is never a valid container specification. They sit beside
 `QITS_WORKSPACE_DAEMON_API_TOKEN`, which points the **other** way — that one is the host proving
 itself to the in-container API, this set is the container proving itself to the platform. The daemon
 uses the token URL and audience with its client pair to authenticate its dial-home control socket;
-Git still asks for its own qits-githost-audience bearer. The socket takes `qits:system` or
-`qits:agent`; a token with `qits:agent` alone opens only the socket of the workspace whose
-commissioned client is its `sub`, and any other path is a 403.
+Git asks for the same one platform audience now (service-client-identity-plan.md, C4) rather than a
+qits-githost-specific one. The socket takes `qits:system` or `qits:agent`; a token with `qits:agent`
+alone opens only the socket of the workspace whose commissioned client is its `sub`, and any other
+path is a 403.
 
 **It is scoped to the repository's project.** The commission states
 `{"claims":{"project":"<projectId>"}}`, resolved from the repository the workspace branches, and
@@ -278,13 +279,17 @@ spec whose environment moved is a *replaced* container. That is also why the pai
 workspace row rather than being handed in at provision time.
 
 **It is off unless this service holds its own idp credential.** There is no key of ours:
-`quarkus.oidc-client.client-enabled` decides it, the same switch that decides whether a machine token
-is fetched for qits-containers. Off, nothing is commissioned and no container carries the two
+`quarkus.oidc-client.qits.client-enabled` decides it, the same switch that decides whether a machine
+token is fetched for qits-containers. Off, nothing is commissioned and no container carries the two
 variables — exactly what every workspace did before. Where the commission API answers is derived from
-`quarkus.oidc-client.auth-server-url`, so the two can never name different idps.
+`quarkus.oidc-client.qits.auth-server-url`, so the two can never name different idps.
 
     QUARKUS_OIDC_CLIENT_CLIENT_ENABLED=true
     QUARKUS_OIDC_CLIENT_CREDENTIALS_SECRET=<the secret qits-idp holds for this environment>
+
+(Or, once this repository declares `resources: idp:client` — service-client-identity-plan.md, C5 —
+`QITS_RESOURCE_IDP_CLIENT_ID`/`_SECRET`/`_URL`, which qits-deployments injects and which the `qits`
+client's keys read first.)
 
 **A commissioning failure fails the launch**, after holding through
 `qits.workspace.commission.patience` (30s, for an idp mid-redeploy). A workspace is never launched

@@ -106,10 +106,10 @@ public class WorkspaceContainers implements ContainerRuntime {
    *
    * <p>It must equal the {@code sub} of the machine token this service presents once the gate is on,
    * because the orchestrator's {@code OwnerGuard} compares them — so the shipped default reads
-   * {@code quarkus.oidc-client.client-id} and the coupling lives in one place, the key's own comment
-   * in {@code application.properties}. It is also the scope: two environments sharing one docker
-   * daemon are {@code dev-qits-workspaces} and {@code prod-qits-workspaces}, and neither one's rows
-   * name the other's containers.
+   * {@code quarkus.oidc-client.qits.client-id} (service-client-identity-plan.md, C4) and the coupling
+   * lives in one place, the key's own comment in {@code application.properties}. It is also the
+   * scope: two environments sharing one docker daemon are {@code dev-qits-workspaces} and {@code
+   * prod-qits-workspaces}, and neither one's rows name the other's containers.
    */
   @ConfigProperty(name = "qits.workspace.containers.owner")
   String owner;
