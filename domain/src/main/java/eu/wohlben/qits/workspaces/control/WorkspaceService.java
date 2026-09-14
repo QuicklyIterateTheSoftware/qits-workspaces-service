@@ -1542,11 +1542,25 @@ public class WorkspaceService {
 
           curl -sS -X POST -H "Authorization: Bearer $(token <tier>-qits-projects)" -H 'Content-Type: application/json' "$PROJECTS/repositories/<repository>/release-requests" -d '{"branch":"<your branch>","summary":"<what this release is>"}'
 
+      `qits release-request create --project <project> --repository <repository> --branch <your branch> --summary '<what this release is>'` is the same door with the token handled for you (next section). The `curl` above stays the fallback: the CLI reaches a container only from the workspace base image that carries it.
+
       Nothing has merged when that answers. The request folds `main`, your branch and every released tag still in flight onto its own `release/<id>` branch, the QA pipeline builds that fold, and a green gate releases it: the manifests are stamped, the fold is tagged with the version, and the source branches are deleted. Poll the request (`GET $PROJECTS/repositories/<repository>/release-requests/<id>`) until it reads `RELEASED` — `CONFLICTED` means the fold does not merge and is yours to resolve, `FAILED` and `REJECTED` say why in `detail`. Watch the build behind it: `curl -sS -H "Authorization: Bearer $(token <tier>-qits-ci)" http://<tier>-qits-ci:8080/ci/api/runs/active` (and `/ci/api/runs/finished?limit=10`).
 
       **Trains.** Releasing an SPA or a library deploys nothing by itself: the service that embeds or depends on it follows by event — CI commits a `bump(...)` onto that service's `maintenance/<dependency>` branch and releases it on its own. To ship a service change together with its SPA, release the SPA first and the service once the bump has reached the service's `main`; the service branch then merges cleanly on top of the new pin. Never move a submodule gitlink (`service/src/main/webui`) by hand to follow a release you made — the train owns that pin, and `git add -A` would stage it silently (`.gitmodules` says `ignore = all`); confirm with `git ls-tree HEAD <path>` before committing.
 
       **After a release the source branch is gone in that repository** (the release deletes it). Your local checkout still holds it; `git fetch && git switch main` there before the next change. Note `main` catches up only after the deployment, so a freshly released repository can sit at the tag for a while. The wrapper's branch and this workspace are untouched by a submodule's release.
+
+      ## The qits CLI
+
+      `qits` is on PATH and already signed in: both `QITS_COMMISSIONED_CLIENT_ID` and `QITS_COMMISSIONED_CLIENT_SECRET` being set is the signal, so there is no `qits login` to run in here — the credential is minted once per process with `client_credentials` and kept in memory, never written to disk. It dials a service by its wire alias (`http://dev-qits-projects:8080`) itself, so none of the addressing above has to be composed by hand.
+
+          qits ticket list --project qits
+          qits ci runs --project qits --repository <repository> --limit 3
+          qits release-request --project qits --repository <repository> list
+
+      `qits events` and `qits observe` are the other two an agent reaches for; `qits --help` lists everything, and `qits help skill` prints the whole surface as a SKILL.md. The credential is `qits:agent`: reads answer, and an operator write comes back `403 - this credential is qits:agent, which reads but does not write`. That is the credential doing its job, not a misconfiguration — a write that matters goes through the release request above, or through a person.
+
+      The three shell helpers keep their jobs: `qits-git-credential` is git's credential helper, `qits-token <audience>` mints the bearer for a hand-written `curl`, and `qits-npm-ci` is the lockfile-safe `npm ci`.
 
       ## Toolchain notes
 
