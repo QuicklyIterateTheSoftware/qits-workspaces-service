@@ -6,7 +6,9 @@ import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import eu.wohlben.qits.workspaces.control.AgentActivityState;
 import eu.wohlben.qits.workspaces.control.DispatchService;
+import eu.wohlben.qits.workspaces.control.FakeAgentActivity;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
@@ -36,14 +38,21 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The two halves of a delivery that need config the shipped defaults deliberately do not have: the
- * compaction knob turned <b>on</b>, and a launch window short enough that giving up is a thing a
- * test can watch happen.
+ * The half of a delivery that needs config and collaborators the shipped defaults deliberately do
+ * not have: the compaction knob turned <b>on</b>, a launch window short enough that giving up is a
+ * thing a test can watch happen, and the turn-boundary rollup driven by hand instead of by a
+ * daemon's lifecycle hooks.
  *
- * <p>A profile of its own, and therefore a Quarkus restart, because both values are read by a
- * {@code @ConfigProperty} field on an application-scoped bean — there is no per-test way to move
- * one. It is one restart for both cases rather than one each, which is why an idle wait expiring and
- * a slash command are in the same class despite having nothing else to do with each other.
+ * <p>A profile of its own, and therefore a Quarkus restart, because the two knobs are {@code
+ * @ConfigProperty} fields on an application-scoped bean and the rollup is an enabled alternative —
+ * there is no per-test way to move any of them. It is one restart for all of it rather than one
+ * each, which is why waiting out a turn and a slash command share a class.
+ *
+ * <p><b>The wait is what the epic is about.</b> A phase prompt is produced by the agent's own last
+ * act of a turn, so a delivery aimed at it arrives while that turn is still running unless something
+ * stands in between. {@code WorkspaceAgentActivity}'s rollup is what says which: BUSY is generating,
+ * IDLE is a turn finished and control yielded back, WAITING is blocked on the user. The cases below
+ * pin all four of its values plus the absence.
  *
  * <p>It stubs the daemon on {@link AgentDispatchControllerTest#latchedPort()} — the same latch, so
  * the whole module still uses one port for this fake and two classes can never be bound to different
@@ -77,9 +86,17 @@ public class AgentTurnCompactionAndWindowTest {
         throw new RuntimeException(e);
       }
     }
+
+    @Override
+    public java.util.Set<Class<?>> getEnabledAlternatives() {
+      // Opt into driving the turn-boundary rollup by hand without disturbing the real
+      // WorkspaceDaemonRegistry the other service tests and the daemon ITs rely on.
+      return java.util.Set.of(FakeAgentActivity.class);
+    }
   }
 
   @Inject FakeRepositoryLookup repositories;
+  @Inject FakeAgentActivity agentActivity;
   @Inject WorkspaceIds workspaceIds;
   @Inject WorkspaceService workspaceService;
 
@@ -229,6 +246,95 @@ public class AgentTurnCompactionAndWindowTest {
   }
 
   /**
+   * <b>The wait the epic is actually about.</b> The phase prompt is produced by the agent's own last
+   * act of a turn, so at the instant a delivery is made the agent is typically still generating —
+   * BUSY. Saying it then is an interruption of the work it is meant to follow, so nothing is said
+   * until the turn ends and control is back with the user.
+   */
+  @Test
+  public void aBusyAgentIsNotSpokenToUntilItsTurnEnds() throws Exception {
+    String repoId = seedRepository();
+    Long rowId = aWorkspaceWithAContainer(repoId, "ticket-mid-turn", "ticket/mid-turn");
+    agentActivity.report(rowId, AgentActivityState.BUSY);
+
+    JsonPath answer = deliver(repoId, "ticket/mid-turn", "the ticket moved to VERIFY", false);
+    assertThat(answer.getBoolean("delivered"), is(true));
+
+    // Long enough for many poll ticks at 50 ms: a delivery that ignored the rollup would be here.
+    Thread.sleep(500);
+    assertTrue(turnTexts.isEmpty(), "the turn was delivered while the agent was mid-turn");
+
+    // The hook the harness fires when it yields control back.
+    agentActivity.report(rowId, AgentActivityState.IDLE);
+
+    awaitTurns(1);
+    assertEquals(List.of("the ticket moved to VERIFY"), turnTexts);
+  }
+
+  /**
+   * WAITING is control being with the user too — a permission prompt, or an idle input box. It is
+   * not a turn in flight, so there is nothing to wait out and delivering is what a person at that
+   * keyboard would do.
+   */
+  @Test
+  public void anAgentWaitingOnTheUserIsSpokenToAtOnce() throws Exception {
+    String repoId = seedRepository();
+    Long rowId = aWorkspaceWithAContainer(repoId, "ticket-blocked", "ticket/blocked");
+    agentActivity.report(rowId, AgentActivityState.WAITING);
+
+    deliver(repoId, "ticket/blocked", "here is the answer", false);
+
+    awaitTurns(1);
+    assertEquals(List.of("here is the answer"), turnTexts);
+  }
+
+  /**
+   * A session reported as over has nobody to interrupt and nobody to hear it: the text becomes a new
+   * session's first turn instead. The rollup keeps ENDED for half an hour after the fact, so this is
+   * the ordinary shape of a ticket whose agent finished a phase and stopped.
+   */
+  @Test
+  public void aSessionReportedAsEndedIsRelaunchedRatherThanInterrupted() throws Exception {
+    String repoId = seedRepository();
+    Long rowId = aWorkspaceWithAContainer(repoId, "ticket-finished", "ticket/finished");
+    agentActivity.report(rowId, AgentActivityState.ENDED);
+
+    deliver(repoId, "ticket/finished", "next phase, please", false);
+
+    long deadline = System.currentTimeMillis() + 30_000;
+    while (System.currentTimeMillis() < deadline && launchContexts.isEmpty()) {
+      Thread.sleep(20);
+    }
+    assertEquals(List.of("next phase, please"), launchContexts);
+    assertTrue(turnTexts.isEmpty(), "an ended session was spoken to");
+  }
+
+  /**
+   * <b>An absent tracker is not a busy agent.</b> A rollup is empty when the daemon has not reported
+   * since its socket came back and when the session was launched with {@code activityTracking} off —
+   * a per-launch knob, so a live agent can be untracked for its whole life. Blocking on a signal
+   * that is never coming would turn every one of those into a delivery dropped a quarter of an hour
+   * later, so absence delivers. This is also the shape of an app with no activity backend at all
+   * (cli), where the port is unsatisfied and takes the same branch one step earlier.
+   */
+  @Test
+  public void aWorkspaceWithNoReportedActivityIsSpokenToWithoutWaiting() throws Exception {
+    String repoId = seedRepository();
+    Long rowId = aWorkspaceWithAContainer(repoId, "ticket-untracked", "ticket/untracked");
+    agentActivity.forget(rowId);
+
+    long before = System.currentTimeMillis();
+    deliver(repoId, "ticket/untracked", "nobody is tracking this one", false);
+
+    awaitTurns(1);
+    assertEquals(List.of("nobody is tracking this one"), turnTexts);
+    // Well inside the 1500 ms window: it delivered rather than waiting the window out.
+    assertTrue(
+        System.currentTimeMillis() - before < 1_200,
+        "an untracked workspace was made to wait for a signal that is never coming");
+  }
+
+  /**
    * A container that never answers inside the window: the wait gives up, says so at WARN, and
    * delivers nothing. The alternative — a thread that waits forever, or a delivery fired at a daemon
    * that is not there — is how a text is lost with nothing in the log about it.
@@ -242,6 +348,51 @@ public class AgentTurnCompactionAndWindowTest {
     // container that died out of band looks like from here.
     closeDaemon();
 
+    List<LogRecord> warnings =
+        warningsWhile(
+            () -> {
+              JsonPath answer = deliver(repoId, "ticket/deaf", "anybody there?", false);
+              assertThat(answer.getBoolean("delivered"), is(false));
+              assertThat(answer.getBoolean("launched"), is(false));
+            });
+
+    assertTrue(
+        warnings.stream()
+            .anyMatch(record -> String.valueOf(record.getMessage()).contains("never got a daemon")),
+        "giving up must be loud: " + warnings.stream().map(LogRecord::getMessage).toList());
+    assertTrue(turnTexts.isEmpty(), "a turn was delivered to a daemon that never answered");
+    assertTrue(launchContexts.isEmpty(), "an agent was launched in a container that never answered");
+  }
+
+  /**
+   * The same give-up one wire over: the daemon answers fine and the agent simply never stops
+   * generating. Bounded by the same window, because a wait for a turn that does not end and a wait
+   * for a container that does not come up cost the caller the same thing.
+   */
+  @Test
+  public void anAgentThatNeverLeavesBusyGivesUpWithAWarnAndNoDelivery() throws Exception {
+    String repoId = seedRepository();
+    Long rowId = aWorkspaceWithAContainer(repoId, "ticket-endless", "ticket/endless");
+    agentActivity.report(rowId, AgentActivityState.BUSY);
+
+    List<LogRecord> warnings =
+        warningsWhile(() -> deliver(repoId, "ticket/endless", "are you done yet?", false));
+
+    assertTrue(
+        warnings.stream()
+            .anyMatch(record -> String.valueOf(record.getMessage()).contains("still mid-turn")),
+        "giving up must be loud: " + warnings.stream().map(LogRecord::getMessage).toList());
+    assertTrue(turnTexts.isEmpty(), "a turn was delivered to an agent that never stopped");
+    assertTrue(launchContexts.isEmpty(), "a second agent was started beside a busy one");
+  }
+
+  /**
+   * Run {@code action} with a handler on {@link DispatchService}'s logger and wait for the wait
+   * thread's WARN. The give-up is the only thing either caller can observe — it happens after the
+   * response, on a thread of the service's own — so the log line is the assertion, which is also why
+   * it has to be a WARN and not a debug.
+   */
+  private List<LogRecord> warningsWhile(Runnable action) throws Exception {
     List<LogRecord> warnings = new CopyOnWriteArrayList<>();
     Handler capture =
         new Handler() {
@@ -262,10 +413,7 @@ public class AgentTurnCompactionAndWindowTest {
         java.util.logging.Logger.getLogger(DispatchService.class.getName());
     logger.addHandler(capture);
     try {
-      JsonPath answer = deliver(repoId, "ticket/deaf", "anybody there?", false);
-      assertThat(answer.getBoolean("delivered"), is(false));
-      assertThat(answer.getBoolean("launched"), is(false));
-
+      action.run();
       long deadline = System.currentTimeMillis() + 20_000;
       while (System.currentTimeMillis() < deadline && warnings.isEmpty()) {
         Thread.sleep(50);
@@ -273,12 +421,6 @@ public class AgentTurnCompactionAndWindowTest {
     } finally {
       logger.removeHandler(capture);
     }
-
-    assertTrue(
-        warnings.stream()
-            .anyMatch(record -> String.valueOf(record.getMessage()).contains("never got a daemon")),
-        "giving up must be loud: " + warnings.stream().map(LogRecord::getMessage).toList());
-    assertTrue(turnTexts.isEmpty(), "a turn was delivered to a daemon that never answered");
-    assertTrue(launchContexts.isEmpty(), "an agent was launched in a container that never answered");
+    return warnings;
   }
 }

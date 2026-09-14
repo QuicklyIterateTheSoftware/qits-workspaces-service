@@ -158,6 +158,14 @@ public class DispatchService {
   @Inject Instance<WorkspaceProcessTracker> processes;
 
   /**
+   * The daemon-reported turn boundary a delivery waits for. {@code Instance<>} for {@link
+   * WorkspaceService#agentActivity}'s reason and read through its precedent: apps without the
+   * backend (cli, tests) have no bean and simply see nothing. What "nothing" means to a delivery is
+   * {@link #awaitTurnBoundary}'s decision.
+   */
+  @Inject Instance<WorkspaceAgentActivity> agentActivity;
+
+  /**
    * How long a scheduled launch keeps waiting for the daemon to answer. Generous because the thing
    * being waited on is an image pull, which is measured in minutes on a cold host; bounded because a
    * container that is never coming up must not hold a thread forever.
@@ -353,14 +361,22 @@ public class DispatchService {
    * bounded by the launch window and ticks at the poll interval, so a container that is never coming
    * back costs one thread for that window and then a WARN.
    *
-   * <p><b>What the wait can and cannot see, which is worth knowing before trusting it.</b> The only
-   * idleness the daemon exposes is command-level: {@link WorkspaceAgentLauncher#agentState} reads
-   * {@code GET /commands?status=RUNNING}, and a chat-mode agent's command stays RUNNING for the
-   * whole session — between turns as much as during one. So this waits for a daemon that answers,
-   * and it cannot wait out a turn already in flight; there is no field on that wire that would let
-   * it. Closing that gap means a per-session busy/idle signal from the daemon, and until one exists
-   * the honest statement is that the turn is delivered to a live session and the harness queues it.
-   * Do not read the wait below as more than it is.
+   * <p><b>What the wait watches, and it is deliberately not {@link
+   * WorkspaceAgentLauncher#agentState}.</b> That one is command-level — {@code GET
+   * /commands?status=RUNNING} — and a chat-mode agent's command stays RUNNING for the whole session,
+   * between turns as much as during one, so it can say whether there is an agent and never whether
+   * it is mid-turn. The turn boundary is on the other wire: the daemon relays the harness's own
+   * lifecycle hooks over its dial-home socket and this service caches them as {@link
+   * WorkspaceAgentActivity}'s rollup. BUSY is a prompt being answered; IDLE is a turn finished and
+   * control yielded back to the user; WAITING is the agent blocked on the user. <b>The predicate is
+   * therefore "control is with the user" — IDLE or WAITING — and BUSY is the one state that keeps
+   * waiting.</b> So the two ports answer two different questions and the delivery needs both: is
+   * there an agent at all, and is it between turns.
+   *
+   * <p><b>The one honest limit.</b> That rollup is an in-memory cache that exists only while the
+   * daemon's socket is connected, and activity tracking is a per-launch knob ({@code
+   * activityTracking}) that can be off — so a live agent can be running with nothing reported about
+   * it. {@link #awaitTurnBoundary} says what is done about that and why.
    *
    * @param text the turn, verbatim. Blank is refused at the door before this is called
    * @param compactFirst whether to say {@code /compact} ahead of it. A request, not an instruction:
@@ -593,12 +609,24 @@ public class DispatchService {
 
     if (state == WorkspaceAgentLauncher.AgentState.IDLE) {
       // Nobody to say it to, so it is said first instead: the launch path, with the caller's text
-      // as the seed turn. No compaction here — there is nothing to compact in a session that is
-      // about to begin.
-      if (!launch(rowId, text)) {
-        LOG.warnf("workspace %s's daemon refused the agent launch; nothing was delivered", rowId);
-      }
+      // as the seed turn. No waiting and no compaction: there is no turn in flight to wait out and
+      // nothing to compact in a session that is about to begin.
+      launchWithTheText(rowId, text);
       return;
+    }
+
+    // There is an agent. Now wait for it to be between turns.
+    switch (awaitTurnBoundary(rowId, deadline)) {
+      case GAVE_UP -> {
+        return;
+      }
+      case LAUNCH_INSTEAD -> {
+        launchWithTheText(rowId, text);
+        return;
+      }
+      case DELIVER_NOW -> {
+        // fall through to the delivery
+      }
     }
 
     if (compactFirst && compactBeforeTurn) {
@@ -619,14 +647,100 @@ public class DispatchService {
     // window minutes wide. A daemon that now says nothing is running gets the fallback arm rather
     // than a warning about a turn nobody could have heard.
     if (agentState(rowId) == WorkspaceAgentLauncher.AgentState.IDLE) {
-      if (!launch(rowId, text)) {
-        LOG.warnf(
-            "workspace %s's agent went away and its daemon refused a launch; nothing was delivered",
-            rowId);
-      }
+      launchWithTheText(rowId, text);
       return;
     }
     LOG.warnf("workspace %s's daemon would not take the turn; nothing was delivered to it", rowId);
+  }
+
+  /** The fallback arm, in one place because three paths reach it. */
+  private void launchWithTheText(Long rowId, String text) {
+    if (!launch(rowId, text)) {
+      LOG.warnf("workspace %s's daemon refused the agent launch; nothing was delivered", rowId);
+    }
+  }
+
+  /** What the turn-boundary wait decided. */
+  private enum TurnBoundary {
+    /** Control is with the user (or nothing says otherwise): say it now. */
+    DELIVER_NOW,
+    /** The tracked session is over: what was to be said becomes a new session's first turn. */
+    LAUNCH_INSTEAD,
+    /** Still mid-turn when the window closed. Already logged. */
+    GAVE_UP
+  }
+
+  /**
+   * Wait until the agent in {@code rowId} is <b>between turns</b>, which is the whole reason a
+   * delivery is not just a POST.
+   *
+   * <p>The first caller transitions a ticket as the last act of a turn, so at the instant this runs
+   * the agent is typically still finishing the turn that asked for the transition. The predicate is
+   * <b>control is with the user</b>: {@link AgentActivityState#IDLE} ("a turn finished and control
+   * yielded back to the user") and {@link AgentActivityState#WAITING} ("blocked on the user") both
+   * say the agent is not generating, and only {@link AgentActivityState#BUSY} — "a prompt was
+   * submitted, the agent is generating a response" — keeps this waiting. {@link
+   * AgentActivityState#ENDED} is not a wait at all: the session is over, so there is nobody to
+   * interrupt and nobody to hear it either, and the caller launches instead.
+   *
+   * <p><b>No signal is DELIVER_NOW, and that is a decision rather than a fallthrough.</b> The rollup
+   * is empty when the port has no backend in this app (cli, some tests), when the daemon's socket
+   * has not reported yet after a reconnect, and when the session was launched with {@code
+   * activityTracking} off — a per-launch knob, so a perfectly live agent can be untracked forever.
+   * <b>An absent tracker is not a busy agent.</b> Blocking on a signal that is never coming would
+   * turn every one of those into a delivery silently dropped a quarter of an hour later, which is
+   * strictly worse than the thing the wait exists to prevent: delivering mid-turn costs an
+   * interruption, while waiting out the window costs the message. So absence delivers, and the
+   * daemon's own {@code delivered:false} is what catches the case where there really was nobody —
+   * {@link #awaitAndDeliver} turns that into the launch arm.
+   *
+   * @param deadline the launch window's, shared with the wait for the daemon in front of this one:
+   *     the two are halves of one bounded wait, and a container that took ten minutes to come up has
+   *     already spent the patience this call was given
+   */
+  private TurnBoundary awaitTurnBoundary(Long rowId, long deadline) {
+    if (!agentActivity.isResolvable()) {
+      LOG.debugf("no agent-activity backend; delivering to workspace %s without waiting", rowId);
+      return TurnBoundary.DELIVER_NOW;
+    }
+    while (true) {
+      Optional<AgentActivityState> reported = activityOf(rowId);
+      if (reported.isEmpty()) {
+        LOG.debugf(
+            "workspace %s reports no agent activity; delivering without waiting for a turn to end",
+            rowId);
+        return TurnBoundary.DELIVER_NOW;
+      }
+      AgentActivityState activity = reported.get();
+      if (activity != AgentActivityState.BUSY) {
+        return activity == AgentActivityState.ENDED
+            ? TurnBoundary.LAUNCH_INSTEAD
+            : TurnBoundary.DELIVER_NOW;
+      }
+      if (System.currentTimeMillis() >= deadline) {
+        LOG.warnf(
+            "workspace %s's agent was still mid-turn when the %s ms window closed; nothing was"
+                + " delivered to it",
+            rowId, Long.valueOf(launchWindowMs));
+        return TurnBoundary.GAVE_UP;
+      }
+      try {
+        Thread.sleep(pollIntervalMs);
+      } catch (InterruptedException stopping) {
+        Thread.currentThread().interrupt();
+        return TurnBoundary.GAVE_UP;
+      }
+    }
+  }
+
+  /** The rollup, or empty — a port that throws is a port that reported nothing. */
+  private Optional<AgentActivityState> activityOf(Long rowId) {
+    try {
+      return agentActivity.get().activityFor(rowId);
+    } catch (RuntimeException e) {
+      LOG.debugf(e, "could not read workspace %s's agent activity", rowId);
+      return Optional.empty();
+    }
   }
 
   /** The port's answer, or UNREACHABLE — an absent port and a broken one deserve the same one. */

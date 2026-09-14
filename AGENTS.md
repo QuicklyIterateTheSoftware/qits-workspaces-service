@@ -1279,12 +1279,24 @@ Five things are decided rather than incidental:
   a launch, so two waits on one workspace is exactly the "two agents on one checkout" that set
   exists to stop. The cost — a second delivery arriving inside the milliseconds a first one takes is
   dropped rather than queued — is stated in the answer and never silent.
-- **The wait cannot see a turn in flight, and the javadoc says so rather than implying otherwise.**
-  The only idleness on the wire is command-level: `agentState` reads `GET /commands?status=RUNNING`
-  and a chat-mode agent's command stays RUNNING for the whole session, between turns as much as
-  during one. So the wait is for a daemon that *answers*, and the epic's "wait for the session to be
-  idle" is not implementable beyond that until the daemon grows a per-session busy signal. The turn
-  is delivered to a live session and the harness queues it.
+- **It waits for the turn to END before speaking, and the signal is the activity rollup — not
+  `agentState`.** That one is command-level (`GET /commands?status=RUNNING`) and a chat-mode agent's
+  command stays RUNNING for the whole session, between turns as much as during one, so it answers
+  "is there an agent" and can never answer "is it mid-turn". The turn boundary is on the *other*
+  wire: the daemon relays the harness's lifecycle hooks over its dial-home socket and
+  `WorkspaceDaemonRegistry` caches them as `WorkspaceAgentActivity`'s per-workspace rollup. **The
+  predicate is "control is with the user" — IDLE or WAITING — and BUSY is the only state that keeps
+  waiting**; ENDED is the launch arm, because a finished session has nobody to interrupt and nobody
+  to hear it. The two ports answer two different questions and a delivery needs both. Without this
+  the feature is pointless for its first caller: the phase prompt is produced by the agent's own last
+  act of a turn, so it would always land mid-turn.
+- **An absent rollup DELIVERS, and that is a decision.** The rollup is in-memory and exists only
+  while the daemon's socket is connected, and activity tracking is a per-launch knob
+  (`activityTracking`) that can be off — so a live agent can be untracked. Blocking on a signal that
+  is never coming would turn each of those into a delivery silently dropped a quarter of an hour
+  later, which is worse than the thing the wait prevents: delivering mid-turn costs an interruption,
+  waiting out the window costs the message. An absent tracker is not a busy agent. The same branch
+  covers an app with no activity backend at all (cli), where the port is simply unsatisfied.
 
 **`qits.workspace.agent-dispatch.compact-before-turn` is `false` and stays false until somebody reads
 a transcript.** Whether Claude Code in ACP/chat mode honours a *delivered* `/compact` as the slash
