@@ -15,7 +15,6 @@ import eu.wohlben.qits.workspacedaemon.protocol.DaemonProtocol;
 import eu.wohlben.qits.workspacedaemon.protocol.Hello;
 import eu.wohlben.qits.workspacedaemon.protocol.OpenStream;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.RestAssured;
 import io.vertx.core.Future;
@@ -28,9 +27,6 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.NetClient;
 import io.vertx.core.net.NetSocket;
 import jakarta.inject.Inject;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -55,24 +51,8 @@ import org.junit.jupiter.api.Test;
  * still listening on {@code qits-net} and one at 4 is not.
  */
 @QuarkusTest
-@TestProfile(DaemonStreamRouteTest.TestProfile.class)
+@TestProfile(TunnelNonceProfile.class)
 public class DaemonStreamRouteTest {
-
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-daemon-stream-test-repos");
-        return Map.of(
-            "qits.test.origins-dir", tempDir.toString(),
-            // Short enough that the expiry test does not dominate the run, long enough that a
-            // loopback dial-back never loses the race.
-            "qits.workspace.daemon-tunnel.nonce-ttl-ms", "8000");
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-  }
 
   @Inject FakeRepositoryLookup repositories;
 

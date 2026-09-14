@@ -299,7 +299,43 @@
                      the container cannot see. Harmless for everything else here — the Quarkus test
                      server is reached over loopback. -->
                 <configuration>
-                    <argLine>-Djava.net.preferIPv4Stack=true</argLine>
+                    <!-- ONE JVM PER TEST CLASS, and it is the only thing that works here.
+                         Surefire's default reuses a single fork for the whole module, which means
+                         this module's FOURTEEN distinct @TestProfiles augment fourteen Quarkus
+                         applications in one process. A restart abandons an application's
+                         classloader and that classloader is RETAINED, not merely uncollected:
+                         measured 2026-09-14 at ~125 MB of metaspace apiece, 1.71 GiB committed by
+                         the end of a run, and -XX:MaxMetaspaceSize=512m did not reclaim any of it
+                         — it turned the SIGKILL into "OutOfMemoryError: Metaspace". So no JVM flag
+                         reaches this; the fork peaked at 3.23 GiB even with -Xmx1024m, against
+                         qits-ci's hard 4 g step limit. Bug e6f0bdfa, which is four killed release
+                         requests.
+
+                         Not reusing the fork makes the peak one application's rather than
+                         fourteen's: VmHWM 0.77 GiB, polled once a second out of
+                         /proc/<pid>/status. `domain` does NOT do this — eight applications fit its
+                         reused fork at 1.44 GiB — so the slow answer is bought only where the
+                         cheap one fails.
+
+                         THE COST IS REAL AND THE GATE HAS A TIMEOUT: this module goes from 4:07 to
+                         13:33 (the whole `-pl service -am test` from 6:27 to about 16 min), because
+                         every class now pays a JVM start, a Quarkus augmentation and an embedded
+                         postgres cluster of its own. That is the price of a suite that finishes at
+                         all. What would buy it back is fewer distinct profiles — merging two is
+                         merging one restart, and this fix already merged what could be merged
+                         (see daemonhost/TunnelNonceProfile) — or splitting this into two surefire
+                         executions, a reused fork for the classes with no @TestProfile and a
+                         non-reused one for the rest. Both need the profile inventory to stay
+                         honest, which is why neither is done by guessing. -->
+                    <reuseForks>false</reuseForks>
+                    <!-- test-jvm-memory.argLine is the root pom's bound and is restated here rather
+                         than inherited: surefire's <argLine> is a single element, so this one
+                         REPLACES the managed one instead of appending to it, and the module it
+                         would go missing in is this one. It still matters with a fork per class —
+                         a default MaxHeapSize is a quarter of the HOST's RAM, which on a 15 GB
+                         developer container is 3.75 GB of heap G1 will grow into rather than
+                         collect, and the gate must measure what a workstation measures. -->
+                    <argLine>${test-jvm-memory.argLine} -Djava.net.preferIPv4Stack=true</argLine>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                     </systemPropertyVariables>

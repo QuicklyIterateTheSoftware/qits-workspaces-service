@@ -12,12 +12,7 @@ import eu.wohlben.qits.workspaces.daemonhost.WorkspaceDaemonRegistry;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspacedaemon.protocol.EditorState;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Map;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
@@ -39,20 +34,12 @@ import org.junit.jupiter.api.Test;
  * production never takes. The arm is gone and so is the fake editor.
  */
 @QuarkusTest
-@TestProfile(EditorProxyRouteTest.TestProfile.class)
+// NO @TestProfile: it overrode qits.test.origins-dir with a fresh temp directory and nothing else,
+// so it was a whole second Quarkus application bought for an isolation TestOrigin already gives —
+// every origin goes under a UUID of its own, which is why the default profile's thirty-odd classes
+// share the shipped target/workspaces-test-data without colliding. See
+// daemonhost/TunnelNonceProfile for what a restart costs in metaspace; bug e6f0bdfa.
 public class EditorProxyRouteTest {
-
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-editor-proxy-test-repos");
-        return Map.of("qits.test.origins-dir", tempDir.toString());
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-  }
 
   @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceService workspaceService;

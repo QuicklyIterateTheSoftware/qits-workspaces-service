@@ -6,14 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import eu.wohlben.qits.workspaces.dto.TechnicalProcessFrame;
 import eu.wohlben.qits.workspaces.entity.ServiceStatus;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
@@ -26,25 +21,12 @@ import org.junit.jupiter.api.Test;
  * lifecycle; a {@link FakeWorkspaceServiceDriver} plays its streamed line + READY. The auto-start
  * definition is config-declared, staged into the {@link FakeWorkspaceConfigReader}.
  */
+// NO @TestProfile: its two overrides were a fresh temp origins-dir (TestOrigin already keys every
+// origin by a UUID, so the shipped one is enough) and qits.services.autostart-enabled=true, which
+// is ServiceLifecycleCoupler's own defaultValue. Neither was a difference, and the profile cost a
+// Quarkus restart — see AutoStartOffProfile for why that is measured in metaspace. Bug e6f0bdfa.
 @QuarkusTest
-@TestProfile(ServiceProcessCorrelationTest.TestProfile.class)
 public class ServiceProcessCorrelationTest {
-
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-service-process-test-repos");
-        return Map.of(
-            "qits.test.origins-dir",
-            tempDir.toString(),
-            "qits.services.autostart-enabled",
-            "true");
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-  }
 
   private static final long AWAIT_MILLIS = 15_000;
 

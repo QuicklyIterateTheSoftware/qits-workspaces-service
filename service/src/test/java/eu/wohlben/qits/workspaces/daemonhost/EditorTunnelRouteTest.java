@@ -20,7 +20,6 @@ import eu.wohlben.qits.workspacedaemon.protocol.Hello;
 import eu.wohlben.qits.workspacedaemon.protocol.OpenStream;
 import eu.wohlben.qits.workspacedaemon.protocol.StreamTarget;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.RestAssured;
 import io.vertx.core.Future;
@@ -36,10 +35,7 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.NetClient;
 import io.vertx.core.net.NetSocket;
 import jakarta.inject.Inject;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Locale;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -80,24 +76,8 @@ import org.junit.jupiter.api.Test;
  * fail on the fixture rather than on the route.
  */
 @QuarkusTest
-@TestProfile(EditorTunnelRouteTest.TestProfile.class)
+@TestProfile(TunnelNonceProfile.class)
 public class EditorTunnelRouteTest {
-
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-editor-tunnel-test-repos");
-        return Map.of(
-            "qits.test.origins-dir", tempDir.toString(),
-            // Short enough not to dominate the run, long enough that a loopback dial-back never
-            // loses the race.
-            "qits.workspace.daemon-tunnel.nonce-ttl-ms", "8000");
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-  }
 
   @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceService workspaceService;

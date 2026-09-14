@@ -119,6 +119,56 @@
         <skipITs>true</skipITs>
         <!-- Surefire's @{argLine} has no value unless something (jacoco/quarkus) sets it. -->
         <argLine/>
+
+        <!-- THE TEST JVM IS BOUNDED, because an unbounded one does not fit the gate's container.
+             qits-ci runs every CI step under a hard `QITS_CI_MEMORY_LIMIT=4g` (memory AND
+             memorySwap, so there is no swap to spill into), and this repository's gate died there
+             four times on 2026-09-14 — runs 2bb4d72e, 7b1c5320, cbe5e418, 9b6a42d2 — with
+             surefire's "Process Exit Code: 137", the OOM killer's SIGKILL, at a passing count that
+             moved between runs (281, 296) because no particular test was ever at fault. Bug
+             e6f0bdfa.
+
+             MEASURED in a 15 GB workspace container with no cap, by polling the surefire fork's
+             /proc/<pid>/status VmHWM once a second. VmHWM and not VmRSS deliberately: it is
+             monotonic, so a cheap poll reports the TRUE peak rather than whatever a sample happened
+             to catch — sampling RSS with jcmd beside it reported 2.98 GB for a fork whose real high
+             water mark was 3.41 GiB, and it is the peak the OOM killer acts on.
+
+               fork VmHWM     3.41 GiB   (`service`; `domain`'s own fork peaked at 2.12 GiB)
+               maven's JVM    0.50 GiB
+               embedded pg    0.19 GiB   (zonky spawns a REAL postgres per fork, in the same cgroup)
+               ====================================
+               total          4.10 GiB   against a 4 g limit. It does not fit, and never did.
+
+             WHERE IT GOES IS METASPACE, and every plausible first guess was wrong. Bounding the
+             heap alone changes almost nothing: with -Xmx1024m the same fork still peaked at
+             3.23 GiB, while `jcmd VM.metaspace` read 1.71 GiB COMMITTED. Each distinct
+             @TestProfile is a Quarkus restart, `service` has fourteen applications across its
+             suite, and that is ~125 MB of metaspace apiece which is never given back: a restart
+             abandons an augmented application's classloader, and setting -XX:MaxMetaspaceSize=512m
+             did not make a full GC reclaim it, it made the run die with "OutOfMemoryError:
+             Metaspace" instead. The classloader is retained, not merely uncollected, so no JVM flag
+             can fix `service` — only not accumulating the applications in one process can, which is
+             what <reuseForks>false</reuseForks> in that module's pom does. See there.
+
+             `domain` is a different size and takes the cheaper answer. Its suite is eight
+             applications after the profile merges that came with this fix, which measures at 604 MB
+             of metaspace used / 618 MB committed and a fork VmHWM of 1.44 GiB — comfortably inside
+             the limit beside maven and postgres — so it keeps surefire's reused fork and this bound
+             holds it there. 768 MB leaves that headroom without being room for another four
+             restarts; if a profile added later exceeds it, the run says "OutOfMemoryError:
+             Metaspace" and names the cause, which is the failure a 137 could never be.
+
+             ReservedCodeCacheSize is here for the reason it is usually forgotten: the default
+             240 MB is address space a suite running dozens of augmentations does commit a large
+             part of, and none of it is heap, so it is invisible to any -Xmx anybody reaches for
+             first.
+
+             It is a PROPERTY rather than a literal in each surefire block because `service` declares
+             an <argLine> of its own (preferIPv4Stack, which has to be an argLine) and a child
+             <argLine> element REPLACES the managed one wholesale rather than appending to it — so
+             the bound has to be named somewhere both can spell it. -->
+        <test-jvm-memory.argLine>-Xmx1024m -XX:MaxMetaspaceSize=768m -XX:ReservedCodeCacheSize=192m</test-jvm-memory.argLine>
     </properties>
 
     <dependencyManagement>
@@ -275,6 +325,13 @@
                          Quarkus modules set it themselves. -->
                     <artifactId>maven-surefire-plugin</artifactId>
                     <version>${surefire-plugin.version}</version>
+                    <configuration>
+                        <!-- The bound above. Managed here so `domain` and `gitmirror` inherit it
+                             without repeating it; `service` restates it beside its own flag,
+                             because a child <argLine> replaces this element rather than adding to
+                             it. -->
+                        <argLine>${test-jvm-memory.argLine}</argLine>
+                    </configuration>
                 </plugin>
                 <plugin>
                     <artifactId>maven-failsafe-plugin</artifactId>

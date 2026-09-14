@@ -5,11 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Map;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
@@ -25,21 +21,12 @@ import org.junit.jupiter.api.Test;
  * (docs/issues/2026-07-25_integrate-branch-skips-behind-and-unpushed-checks.md). Runs against a
  * real cloned fixture through {@link FakeContainerRuntime}.
  */
+// NO @TestProfile: it overrode qits.test.origins-dir with a fresh temp directory and nothing else,
+// which is a Quarkus restart bought for an isolation TestOrigin already provides — every origin
+// goes under a UUID of its own, which is why thirty-odd classes share the shipped
+// target/workspaces-test-data without colliding. See AutoStartOffProfile; bug e6f0bdfa.
 @QuarkusTest
-@TestProfile(IntegrateSyncsSourceContainerTest.TestProfile.class)
 public class IntegrateSyncsSourceContainerTest {
-
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-integrate-sync-test-repos");
-        return Map.of("qits.test.origins-dir", tempDir.toString());
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-  }
 
   @Inject FakeRepositoryLookup repositories;
 

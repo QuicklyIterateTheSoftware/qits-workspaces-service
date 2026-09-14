@@ -9,13 +9,9 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.dto.ServiceInstanceDto;
 import eu.wohlben.qits.workspaces.entity.ServiceStatus;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
@@ -30,24 +26,12 @@ import org.junit.jupiter.api.Test;
  * config-declared, staged into the {@link FakeWorkspaceConfigReader}.
  */
 @QuarkusTest
-@TestProfile(ServiceLifecycleCouplerSettleTest.TestProfile.class)
+// Auto-start OFF so these tests isolate the settle direction; services are started by hand below.
+// Auto-STOP is what they are about and is left at its shipped default of on — it used to be stated
+// here as `true`, which is the same value and cost a Quarkus restart of its own (see
+// AutoStartOffProfile).
+@TestProfile(AutoStartOffProfile.class)
 public class ServiceLifecycleCouplerSettleTest {
-
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-daemon-settle-test-repos");
-        return Map.of(
-            "qits.test.origins-dir", tempDir.toString(),
-            "qits.services.autostop-enabled", "true",
-            // Keep auto-start OFF so these tests isolate the settle direction; start manually.
-            "qits.services.autostart-enabled", "false");
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-  }
 
   private static final long AWAIT_MILLIS = 15_000;
 

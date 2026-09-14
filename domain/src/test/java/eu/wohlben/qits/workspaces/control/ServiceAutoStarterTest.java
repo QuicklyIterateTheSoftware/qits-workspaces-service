@@ -6,14 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import eu.wohlben.qits.workspaces.dto.ServiceInstanceDto;
 import eu.wohlben.qits.workspaces.entity.ServiceStatus;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
@@ -24,31 +19,21 @@ import org.junit.jupiter.api.Test;
  * (via the bootstrap pass-through to {@code WorkspaceReadyForServices}) registers a projection for
  * the workspace config's auto-start services and asks the daemon to start them, leaves the opt-out
  * ones untouched, tolerates an already-running instance without blocking the rest, and is gated by
- * the kill switch (off by default in tests — this class re-enables it via its profile; the
- * kill-switch case is {@link ServiceAutoStartKillSwitchTest}). The daemon then owns the lifecycle;
+ * the kill switch (ON by default, here and in a deployment; the kill-switch case is {@link
+ * ServiceAutoStartKillSwitchTest}). The daemon then owns the lifecycle;
  * a {@link FakeWorkspaceServiceDriver} records the host's start requests and plays the lifecycle
  * events back. Auto-start flags are config-declared, staged into the {@link
  * FakeWorkspaceConfigReader}.
  */
+// NO @TestProfile, and the javadoc above used to say this class "re-enables" auto-start via one.
+// It never did: ServiceLifecycleCoupler's qits.services.autostart-enabled has defaultValue "true"
+// and nothing in domain's test properties turns it off, so the profile's only real content was a
+// fresh temp origins-dir — which TestOrigin does not need, since it puts every origin under a UUID
+// of its own under the shipped target/workspaces-test-data. A profile is a Quarkus restart and a
+// restart leaks an augmented classloader's metaspace into the same JVM; removing this one puts the
+// class on the default application with thirty others. Measured while fixing bug e6f0bdfa.
 @QuarkusTest
-@TestProfile(ServiceAutoStarterTest.TestProfile.class)
 public class ServiceAutoStarterTest {
-
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-service-autostart-test-repos");
-        return Map.of(
-            "qits.test.origins-dir",
-            tempDir.toString(),
-            "qits.services.autostart-enabled",
-            "true");
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-  }
 
   private static final long AWAIT_MILLIS = 15_000;
 
@@ -99,7 +84,8 @@ public class ServiceAutoStarterTest {
             null,
             null,
             null));
-    configReader.setConfig(workspaceIds.of(repoId, "work"), new QitsConfig(null, null, null, staged, null));
+    configReader.setConfig(
+        workspaceIds.of(repoId, "work"), new QitsConfig(null, null, null, staged, null));
     return name;
   }
 
