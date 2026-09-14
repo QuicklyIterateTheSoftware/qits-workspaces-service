@@ -1241,6 +1241,63 @@ it carries `agentSessions` lineage. The lineage alone would leave a window — i
 harness's first `SessionStart`, seconds after the launch — in which a just-launched agent looks like
 nothing and a re-press puts a second one on the same checkout.
 
+## Saying something to the agent already on a branch
+
+`POST /workspaces/api/agent-dispatches/delivery` — **"say this to the workspace's agent"**, the same
+thing a person types into its chat tab. Body `{repositoryId, branch, text, compactFirst}`, answering
+`{delivered, launched, workspaceId, detail}`, on the dispatch class and therefore at
+`{qits:admin, qits:system}`. `DispatchService.deliver` holds the semantics.
+
+**It exists because a user turn had exactly one entrance and no machine holds it.** Every turn this
+platform has ever delivered came from a browser on the daemon's command websocket, which is the whole
+reason the dispatch door's answer has a `SKIPPED_RUNNING` in it: an agent already at work could be
+left alone and nothing else. The first caller is the ticket phase machinery — a status transition
+that should reach the agent working on the ticket — but **nothing in the feature knows what a ticket
+is**, deliberately.
+
+Five things are decided rather than incidental:
+
+- **It NEVER creates a workspace, and that is the one way it differs from a dispatch.** Find-only on
+  `(repository, branch)`: an ACTIVE workspace or nothing. A ticket nobody dispatched has no
+  workspace, and a status a person dragged across a board must not conjure a branch, a container and
+  an agent as a side effect of being dragged. The branch lookup tries the requested name and then the
+  dash shape a dispatch would have fallen back to — as a **string**, never by asking the git host
+  whether the literal first segment exists, because that read is a network call that throws and this
+  verb answers "nobody to tell" for a branch it cannot find.
+- **A branch with no workspace is a 200 with `workspaceId: null` and a sentence, not a 404.** The
+  caller is a machine reacting to a status change and "there was nobody to tell" is the ordinary
+  outcome for most tickets. A 404 would make it a stack trace per transition at the far end, a retry
+  loop over a condition no retry can change, and an alert channel somebody eventually mutes.
+- **Three arms, chosen by what is there.** Agent running → the text is delivered as a user turn
+  (`POST /agents/turn` on the daemon, `{"text": …}` → `{"delivered", "commandId", "kind"}`). No agent
+  running → `launch` with the text as the seed turn, the path that already existed. Container not
+  answering → ensured behind `EditorService.worthStarting`'s guard (an idle-stopped container is the
+  ordinary between-phase state), and the arm is chosen on the wait thread once the daemon answers.
+  `delivered`/`launched` report the arm the **call** took from the state it read; the round trip is
+  later, on the launch-wait thread, for the reason a dispatch's launch is.
+- **A delivery claims the same one-wait-per-workspace slot a launch does.** Its own fallback arm *is*
+  a launch, so two waits on one workspace is exactly the "two agents on one checkout" that set
+  exists to stop. The cost — a second delivery arriving inside the milliseconds a first one takes is
+  dropped rather than queued — is stated in the answer and never silent.
+- **The wait cannot see a turn in flight, and the javadoc says so rather than implying otherwise.**
+  The only idleness on the wire is command-level: `agentState` reads `GET /commands?status=RUNNING`
+  and a chat-mode agent's command stays RUNNING for the whole session, between turns as much as
+  during one. So the wait is for a daemon that *answers*, and the epic's "wait for the session to be
+  idle" is not implementable beyond that until the daemon grows a per-session busy signal. The turn
+  is delivered to a live session and the harness queues it.
+
+**`qits.workspace.agent-dispatch.compact-before-turn` is `false` and stays false until somebody reads
+a transcript.** Whether Claude Code in ACP/chat mode honours a *delivered* `/compact` as the slash
+command or echoes it back as ordinary text is **not established** — the daemon-side spike is recorded
+as unrun in that route's javadoc — and this side cannot tell the two apart, because both answer
+`delivered: true`. Off means the phase prompt is simply the first turn after a reset, which the epic
+calls an acceptable substitute for compaction. What would justify `true` is one observation: a
+transcript showing a compaction boundary in the harness's own log and the next turn answering with
+the summarised context, rather than an assistant turn quoting the word back. The caller's
+`compactFirst` is a request, not an instruction; with the knob on it is exactly one turn ahead of the
+prompt and never a gate — a compaction that did not land is a longer context, while refusing the turn
+over it would lose the phase prompt entirely.
+
 ## The credential a workspace container holds
 
 A workspace container gets an **idp client of its own** — commissioned at provision, injected as

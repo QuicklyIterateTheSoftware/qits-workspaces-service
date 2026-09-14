@@ -137,6 +137,64 @@ public class AgentDispatchController {
         request.gitRefs());
   }
 
+  /**
+   * @param repositoryId the catalog id of the repository the branch is in. Resolved by nothing here:
+   *     this verb creates no workspace, so there is no repository to require and an id naming
+   *     nothing simply finds no workspace — which is the same 200 as a branch with none
+   * @param branch the branch whose workspace is to be spoken to. A branch with no ACTIVE workspace
+   *     is answered, not refused
+   * @param text the turn, exactly as it should be said. Blank is a 400 — an empty turn is a request
+   *     that cannot have been meant
+   * @param compactFirst ask for a {@code /compact} turn ahead of it. Honoured only when {@code
+   *     qits.workspace.agent-dispatch.compact-before-turn} is on, which it is not by default
+   */
+  public static record DeliverTurnRequest(
+      @NotBlank String repositoryId,
+      @NotBlank String branch,
+      @NotBlank String text,
+      boolean compactFirst) {}
+
+  /**
+   * <b>Say this to the workspace's agent</b> — the same thing a person would type into its chat tab.
+   *
+   * <p><b>The verb the platform was missing.</b> The dispatch above can only start a conversation,
+   * which is why its answer has a {@code SKIPPED_RUNNING} in it: an agent that was already working
+   * could be left alone and nothing else, because a user turn had exactly one entrance — a browser
+   * on the daemon's command websocket — and no machine holds one. This is the host-side entrance.
+   *
+   * <p>One call, three arms, and <b>the caller does not choose</b>: an agent is running, so the text
+   * is delivered to it; no agent is running, so it is launched with the text as its seed turn; no
+   * workspace stands on the branch, so nothing happens. {@link DispatchService#deliver} holds the
+   * semantics and the reason the third one never creates anything.
+   *
+   * <p><b>A branch with no workspace is a 200 with a null {@code workspaceId} and a sentence, and
+   * that is a decision rather than laziness.</b> The caller is a machine reacting to a status
+   * change, and "there was nobody to tell" is the ordinary outcome for a ticket nobody ever
+   * dispatched — most of them. A 404 would make it an error at the far end: a stack trace per
+   * transition, a retry loop over a condition no retry can change, and an alert channel that
+   * eventually gets muted for the one case that matters.
+   *
+   * <p>{@code delivered} and {@code launched} report the arm this call took, read from the
+   * workspace's state as it answered; the daemon round trip happens afterwards on a thread of this
+   * service's own, for the reason the dispatch's launch does. Both false with a workspace id means
+   * the container is still coming up and the arm is chosen when it answers.
+   */
+  @POST
+  @Path("/delivery")
+  @APIResponse(
+      responseCode = "200",
+      description =
+          "Answered. `workspaceId: null` means no workspace stands on that branch — nothing was"
+              + " said and nothing was created, which is a normal outcome and not an error.")
+  @APIResponse(
+      responseCode = "400",
+      description = "A blank repository, branch or text.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
+  public DispatchService.Delivery deliver(@Valid DeliverTurnRequest request) {
+    return dispatches.deliver(
+        request.repositoryId(), request.branch(), request.text(), request.compactFirst());
+  }
+
   public static record ListSubjectRefsRequest() {
     public record Response(List<Entry> entries) {
       public record Entry(WorkspaceSubjectRefDto workspace) {}

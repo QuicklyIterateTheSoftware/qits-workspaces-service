@@ -82,7 +82,7 @@ the consuming application implements:
 | `WorkspaceTerminalSessions` | no | the interactive service terminal refuses the upgrade; the live log is unaffected |
 | `WorkspaceChatInbox` | no | service events are spooled instead of delivered — the same path as "no chat is running" |
 | `WorkspaceProcessTracker` | *implemented here* | `TechnicalProcessRegistry` is the default; the port stays so an application can substitute its own |
-| `WorkspaceAgentLauncher` | *implemented here* | `DaemonAgentClient` is the default; absent means the agent-dispatch door creates the workspace and starts the container but never launches an agent |
+| `WorkspaceAgentLauncher` | *implemented here* | `DaemonAgentClient` is the default; absent means the agent-dispatch door creates the workspace and starts the container but never launches an agent, and the delivery door says nothing to anybody |
 | `CredentialCommissioner` | no | no container is given a platform credential — today's behaviour |
 
 One port points the **other way**: `LogLineClassifier` (with `LogSeverity`) is *implemented* here
@@ -171,6 +171,18 @@ the launch happens long after this returns. Idempotent throughout: an existing w
 with `fresh:false`, a running agent with `agentLaunch: SKIPPED_RUNNING`, and a re-press is how a
 caller recovers from anything, including a restart that dropped a scheduled launch. AGENTS.md,
 "Dispatching an agent onto a branch", has the reasoning.
+
+**Beside it, one door SAYS something to the agent that is already there.**
+`POST /workspaces/api/agent-dispatches/delivery` (`{qits:admin, qits:system}`), body
+`{repositoryId, branch, text, compactFirst}` → `{delivered, launched, workspaceId, detail}`. It is
+the user turn a host could not originate: until it existed, the only entrance for one was a browser
+on the daemon's command websocket, which is why the dispatch above can answer nothing better than
+`SKIPPED_RUNNING` about an agent already at work. One call, three arms, and the caller chooses none
+of them — an agent is running, so it is told; none is, so one is launched with the text as its seed
+turn; **no workspace stands on the branch, so nothing happens and the answer says so** with
+`workspaceId: null` and a 200. That last one is the only way it differs from a dispatch: **it never
+creates a workspace**, because a ticket nobody put an agent on has none and a status moved by hand
+must not conjure one. AGENTS.md, "Saying something to the agent already on a branch", has the rest.
 
 One behaviour worth knowing before you debug it: **a missing repository and an unreachable
 qits-projects are different answers.** Only a 404 becomes "no such repository" (and then a 404 from

@@ -63,8 +63,14 @@ public class AgentDispatchControllerTest {
   /** Its own key, so this class and {@link ContainerProxyRouteTest} never contend for one port. */
   private static final String PORT_PROPERTY = "qits.test.agent-dispatch.daemon-port";
 
-  /** See {@link ContainerProxyRouteTest}'s twin for why the first caller has to win. */
-  private static synchronized int latchedPort() {
+  /**
+   * See {@link ContainerProxyRouteTest}'s twin for why the first caller has to win.
+   *
+   * <p>Package-private rather than private because {@link AgentTurnDeliveryTest} stubs the same
+   * daemon on the same port under this class's own profile — the latch is what makes that one port
+   * rather than two, and copying the method would be a second latch and therefore a second port.
+   */
+  static synchronized int latchedPort() {
     String existing = System.getProperty(PORT_PROPERTY);
     if (existing != null) {
       return Integer.parseInt(existing);

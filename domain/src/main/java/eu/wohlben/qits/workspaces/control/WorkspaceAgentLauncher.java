@@ -1,9 +1,9 @@
 package eu.wohlben.qits.workspaces.control;
 
 /**
- * The host's one verb against a running workspace-daemon's coding-agent surface: <b>start an agent
- * in this workspace</b>, and the one question that has to be asked before it — <b>is one already
- * going?</b>
+ * The host's verbs against a running workspace-daemon's coding-agent surface: <b>start an agent in
+ * this workspace</b>, <b>say something to the one that is already going</b>, and the question that
+ * has to be asked before either — <b>is one going?</b>
  *
  * <p><b>Why this is a port at all, when the daemon is already reachable.</b> Everything that has
  * ever called a daemon's HTTP API did so on a browser's behalf: {@code ContainerProxyRoute}
@@ -48,6 +48,24 @@ public interface WorkspaceAgentLauncher {
   AgentState agentState(Long workspaceRowId);
 
   /**
+   * What became of a turn this host tried to say to a workspace's agent.
+   *
+   * <p>Three values and not a boolean, for {@link AgentState}'s reason turned around: the caller
+   * acts differently on each. {@link #UNREACHABLE} is a container that is not answering yet, which
+   * is a wait; {@link #NOT_DELIVERED} is a daemon that answered and had nobody to tell, which is a
+   * launch; {@link #DELIVERED} is done. Collapsing the middle two is how a text meant for an agent
+   * is dropped while the container it was for finishes starting.
+   */
+  enum DeliveryOutcome {
+    /** The daemon did not answer: no container, no route to it, or an error status. */
+    UNREACHABLE,
+    /** The daemon answered and said no agent was running to say it to. */
+    NOT_DELIVERED,
+    /** The daemon took the text and gave it to a running agent as a user turn. */
+    DELIVERED
+  }
+
+  /**
    * Start a chat-mode agent seeded with {@code instruction}.
    *
    * @return whether the daemon accepted the launch. False rather than an exception: the caller runs
@@ -55,4 +73,19 @@ public interface WorkspaceAgentLauncher {
    *     something to unwind.
    */
   boolean launch(Long workspaceRowId, String instruction);
+
+  /**
+   * Say {@code text} to the agent running in {@code workspaceRowId} — the same thing a person types
+   * into the chat tab, originated by this host instead of by a browser.
+   *
+   * <p><b>This is the verb the platform was missing.</b> {@link #launch} can only open a
+   * conversation, so the only thing the dispatch door could do about an agent that was already
+   * working was leave it alone ({@code DispatchService.AgentLaunch#SKIPPED_RUNNING}). A user turn
+   * had exactly one entrance — a browser on the daemon's command websocket — and no machine holds
+   * one. See {@link DispatchService#deliver} for the three arms this is the middle of.
+   *
+   * <p>Never throws for absence, like everything else here: a daemon that is not there is {@link
+   * DeliveryOutcome#UNREACHABLE}, which is an answer.
+   */
+  DeliveryOutcome deliver(Long workspaceRowId, String text);
 }

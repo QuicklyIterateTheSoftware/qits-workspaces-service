@@ -135,6 +135,36 @@ components:
           type: boolean
         admin:
           type: boolean
+    DeliverTurnRequest:
+      type: object
+      required:
+      - repositoryId
+      - branch
+      - text
+      properties:
+        repositoryId:
+          type: string
+          pattern: \S
+        branch:
+          type: string
+          pattern: \S
+        text:
+          type: string
+          pattern: \S
+        compactFirst:
+          type: boolean
+    Delivery:
+      type: object
+      properties:
+        workspaceId:
+          type: integer
+          format: int64
+        delivered:
+          type: boolean
+        launched:
+          type: boolean
+        detail:
+          type: string
     DiscardWorkspaceRequest:
       type: object
       properties:
@@ -771,6 +801,40 @@ paths:
         "403":
           description: Not Allowed
       summary: Dispatch
+      tags:
+      - Agent Dispatch Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
+  /workspaces/api/agent-dispatches/delivery:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliverTurnRequest"
+        required: true
+      responses:
+        "200":
+          description: "Answered. `workspaceId: null` means no workspace stands on\
+            \ that branch — nothing was said and nothing was created, which is a normal\
+            \ outcome and not an error."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "400":
+          description: "A blank repository, branch or text."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Deliver
       tags:
       - Agent Dispatch Controller
       security:
@@ -1878,4 +1942,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.912.170300
+  version: 2026.913.215159

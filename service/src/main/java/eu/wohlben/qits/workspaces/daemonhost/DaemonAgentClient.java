@@ -200,6 +200,61 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
     return true;
   }
 
+  /**
+   * {@code POST /agents/turn} — <b>say this to whoever is running</b>, the same thing a person types
+   * into the chat tab.
+   *
+   * <p><b>The body is one key and the answer is read for one.</b> {@code {"text": …}} out; {@code
+   * {"delivered": <bool>, "commandId": …, "kind": …}} back, and only {@code delivered} is acted on —
+   * the command id and the kind are there for a reader, and this caller has nobody to show them to.
+   * A daemon with nothing running answers 200 and {@code delivered:false} with a reason, which is
+   * why the status alone is not the answer.
+   *
+   * <p><b>A non-2xx is NOT_DELIVERED and not UNREACHABLE, and the distinction is the caller's whole
+   * retry story.</b> {@link DeliveryOutcome#UNREACHABLE} means "ask again in a moment" — a container
+   * still starting — so a daemon that answered 404 (an image older than this route) or 400 would be
+   * polled until the launch window closed, every couple of seconds, for nothing. A daemon that
+   * answered has said what it has to say.
+   *
+   * <p>Blank text is refused here rather than at the daemon: it is a 400 there, and there is no
+   * reason to spend a round trip discovering that the host built an empty turn.
+   */
+  @Override
+  public DeliveryOutcome deliver(Long workspaceRowId, String text) {
+    if (text == null || text.isBlank()) {
+      LOG.warnf("refusing to deliver a blank turn to workspace %s", workspaceRowId);
+      return DeliveryOutcome.NOT_DELIVERED;
+    }
+    Route route = route(workspaceRowId);
+    if (route == null) {
+      return DeliveryOutcome.UNREACHABLE;
+    }
+    Answer answer = send(route, HttpMethod.POST, "agents/turn", new JsonObject().put("text", text));
+    if (answer == null) {
+      return DeliveryOutcome.UNREACHABLE;
+    }
+    if (answer.status() != 200) {
+      LOG.warnf(
+          "workspace %s's daemon answered %s to a delivered turn",
+          workspaceRowId, Integer.valueOf(answer.status()));
+      return DeliveryOutcome.NOT_DELIVERED;
+    }
+    return delivered(answer.body()) ? DeliveryOutcome.DELIVERED : DeliveryOutcome.NOT_DELIVERED;
+  }
+
+  /**
+   * Whether the daemon said it gave the turn to an agent. An unparseable body reads as not
+   * delivered: the only honest answer about a body nobody can read is that nothing is known to have
+   * happened, and this caller's fallback for that is a launch, not a retry.
+   */
+  private static boolean delivered(String body) {
+    try {
+      return Boolean.TRUE.equals(new JsonObject(body).getBoolean("delivered"));
+    } catch (RuntimeException notJson) {
+      return false;
+    }
+  }
+
   /** Where a daemon is and which client may target it. Null when it is not reachable at all. */
   private record Route(Long workspaceRowId, HttpClient client, String host, int port) {}
 

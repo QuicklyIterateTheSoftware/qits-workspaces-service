@@ -66,6 +66,26 @@ import org.jboss.logging.Logger;
  * scanning the workspace list wants. The caller may still send a preamble and it is still written
  * where it does; the dispatch doors at qits-projects send none.
  *
+ * <h2>{@link #dispatch} puts an agent on a branch; {@link #deliver} talks to the one that is there</h2>
+ *
+ * <p>They are the same three steps with one difference, and the difference is the whole of it:
+ * <b>{@code deliver} never creates a workspace.</b> A dispatch is "there should be a workspace on
+ * this branch with an agent working in it", so a branch with none is a branch to make one on. A
+ * delivery is "say this to the workspace's agent" — a sentence about a workspace that exists — so a
+ * branch with none is answered with the fact and nothing happens. The first caller is a ticket whose
+ * status moved: a ticket nobody ever dispatched has no workspace, and a status a person dragged
+ * across a board must not conjure a container, a branch and an agent as a side effect of being
+ * dragged.
+ *
+ * <p>The other difference is what a workspace with no agent running means. To {@code dispatch} it is
+ * the ordinary case — launch. To {@code deliver} it is a <em>fallback</em>, and the same one:
+ * whatever was to be said becomes the seed turn of a new session, because a text nobody hears is
+ * worth less than a session that starts by hearing it. Which of the two happened is what the answer
+ * reports; the caller does not choose.
+ *
+ * <p>Nothing here knows what a ticket is, deliberately. The phase machinery in qits-projects is this
+ * verb's first caller and not its definition.
+ *
  * <h2>A failed launch is a warning, and never anything else</h2>
  *
  * <p>By the time a launch can fail the response has been sent, so there is nothing to fail. It is
@@ -103,6 +123,28 @@ public class DispatchService {
   public record Dispatch(
       WorkspaceDto workspace, boolean fresh, AgentLaunch agentLaunch, String technicalProcessId) {}
 
+  /**
+   * What {@link #deliver} answers: which workspace was spoken to, what was done about it, and a
+   * sentence a machine caller can log verbatim.
+   *
+   * <p><b>Both booleans are about the arm this call TOOK, read from the workspace's state at the
+   * moment of the call — they are not receipts.</b> The daemon round trip happens on the wait thread
+   * for {@code dispatch}'s reason (a container that is coming back from an idle stop is minutes
+   * away, and no caller may be held for it), so by the time anything is confirmed this answer is
+   * long gone. A caller that needs to know the turn landed watches the workspace, not this record.
+   * Both false with a {@code workspaceId} means the container was not answering yet and the arm is
+   * chosen when it does; both false with a null one means there was nobody to tell.
+   *
+   * @param workspaceId the ACTIVE workspace's row id — {@code Workspace.id}, the id every route and
+   *     port here is keyed on, not the branch-derived label. Null when no workspace stands on the
+   *     branch, which is a normal outcome and not an error
+   * @param delivered an agent was running, so the text is on its way to it as a user turn
+   * @param launched no agent was running, so one is being launched with the text as its seed turn —
+   *     {@link #dispatch}'s path, reached without creating anything
+   * @param detail one sentence, always present, saying which of those it was and why
+   */
+  public record Delivery(Long workspaceId, boolean delivered, boolean launched, String detail) {}
+
   @Inject RepositoryLookup repositories;
 
   @Inject WorkspaceRepository workspaceRepository;
@@ -128,6 +170,34 @@ public class DispatchService {
   long pollIntervalMs;
 
   /**
+   * Whether {@link #deliver} says {@code /compact} to the agent before the caller's text, when the
+   * caller asked for it.
+   *
+   * <p><b>It ships OFF, and the reason is that nobody has watched it work.</b> Whether Claude Code
+   * in ACP/chat mode treats a delivered {@code /compact} as the slash command a person typing it
+   * gets, or simply echoes it back as the first line of a turn, is <em>not established</em> — the
+   * daemon-side spike that would settle it is recorded as unrun in that route's javadoc, and this
+   * host cannot tell the two apart from the outside: both answer {@code delivered:true}. A knob
+   * defaulted on would therefore ship a turn whose effect nobody has seen, ahead of every phase
+   * prompt, on the caller that matters most.
+   *
+   * <p><b>Off is not a degraded mode.</b> The epic's own position is that a phase prompt arriving as
+   * the first turn after a reset is an acceptable substitute for compaction: the context the prompt
+   * needs is in the prompt and in the ticket it names, not in the turns before it.
+   *
+   * <p><b>What would justify turning it on</b> is one observation, and it is a reading of a
+   * transcript rather than a green test: a session whose transcript shows the delivered
+   * {@code /compact} taking effect as a command — a compaction boundary in the harness's own log,
+   * and the next turn answering with the summarised context — rather than an assistant turn quoting
+   * the word back. Until somebody has read that, this stays false and the caller's {@code
+   * compactFirst} is a request nothing acts on.
+   */
+  @ConfigProperty(
+      name = "qits.workspace.agent-dispatch.compact-before-turn",
+      defaultValue = "false")
+  boolean compactBeforeTurn;
+
+  /**
    * The waits. Cached rather than fixed: each one is a workspace's, they last as long as an image
    * pull, and there is no sensible number of concurrent dispatches to cap at — the same reasoning
    * (and the same daemon threads) as {@code WorkspaceService}'s provision executor.
@@ -141,9 +211,11 @@ public class DispatchService {
           });
 
   /**
-   * Workspaces with a launch already waiting. This is what keeps a polled door from queueing one
-   * wait per press: the daemon's own RUNNING answer cannot cover the window between a launch being
-   * scheduled and the agent's first session appearing, so the in-process fact has to.
+   * Workspaces with a wait already running — a launch's or a delivery's, one set for both. This is
+   * what keeps a polled door from queueing one wait per press: the daemon's own RUNNING answer
+   * cannot cover the window between a launch being scheduled and the agent's first session
+   * appearing, so the in-process fact has to. {@link #scheduleDelivery} says why a delivery claims
+   * the same slot rather than one of its own.
    */
   private final Set<Long> pending = ConcurrentHashMap.newKeySet();
 
@@ -254,6 +326,116 @@ public class DispatchService {
   }
 
   /**
+   * Say {@code text} to the agent working on {@code branch} of {@code repositoryId} — the same thing
+   * a person would type into that workspace's chat tab, said by a machine.
+   *
+   * <p>Three arms, chosen by what is there and never by the caller:
+   *
+   * <ol>
+   *   <li><b>No workspace stands on the branch</b> — nothing happens, and the answer says so with a
+   *       null {@code workspaceId}. This is the one way this differs from {@link #dispatch}: it
+   *       <b>never creates a workspace</b>. See the class javadoc for why a status moved by hand
+   *       must not conjure one.
+   *   <li><b>The container is not answering</b> — it is ensured exactly as a dispatch ensures it,
+   *       behind the same {@code EditorService.worthStarting} guard, because an idle-stopped
+   *       container is the ordinary state of a workspace between two phases and not an error. The
+   *       arm below is then chosen on the wait thread, once the daemon answers.
+   *   <li><b>Speak, or launch.</b> An agent is running → the text is delivered to it as a user turn.
+   *       No agent is running (the session ended) → it becomes the seed turn of a launch, which is
+   *       the path {@link #dispatch} already walks and which needs no waiting of its own.
+   * </ol>
+   *
+   * <p><b>Why the wait in front of the turn is not optional.</b> The first caller transitions a
+   * ticket <em>as the last act of a turn</em> — the agent's own tool call is what moves the status —
+   * so the phase prompt this produces is aimed at a session that is, at that instant, still
+   * finishing the turn that asked for it. Something has to stand between the two, or the text lands
+   * mid-turn and is read as an interruption of the work it is supposed to follow. That wait is
+   * bounded by the launch window and ticks at the poll interval, so a container that is never coming
+   * back costs one thread for that window and then a WARN.
+   *
+   * <p><b>What the wait can and cannot see, which is worth knowing before trusting it.</b> The only
+   * idleness the daemon exposes is command-level: {@link WorkspaceAgentLauncher#agentState} reads
+   * {@code GET /commands?status=RUNNING}, and a chat-mode agent's command stays RUNNING for the
+   * whole session — between turns as much as during one. So this waits for a daemon that answers,
+   * and it cannot wait out a turn already in flight; there is no field on that wire that would let
+   * it. Closing that gap means a per-session busy/idle signal from the daemon, and until one exists
+   * the honest statement is that the turn is delivered to a live session and the harness queues it.
+   * Do not read the wait below as more than it is.
+   *
+   * @param text the turn, verbatim. Blank is refused at the door before this is called
+   * @param compactFirst whether to say {@code /compact} ahead of it. A request, not an instruction:
+   *     it is honoured only when {@code qits.workspace.agent-dispatch.compact-before-turn} is on,
+   *     which it is not by default — see that field for what would justify turning it on
+   */
+  public Delivery deliver(String repositoryId, String branch, String text, boolean compactFirst) {
+    // Find only. The requested branch first, then the dash shape a dispatch would have fallen back
+    // to — computed as a string and NOT by asking the git host whether the literal first segment
+    // exists, unlike dispatchBranch: that read is a network call that throws when the host is down,
+    // and this verb answers "nobody to tell" for a branch it cannot find rather than failing. The
+    // two shapes carry the same workspace slug by construction, so a hit on either is the same
+    // workspace the dispatch made.
+    Long rowId =
+        activeOn(repositoryId, branch)
+            .or(() -> activeOn(repositoryId, dashShape(branch)))
+            .orElse(null);
+    if (rowId == null) {
+      return new Delivery(
+          null,
+          false,
+          false,
+          "no workspace stands on "
+              + branch
+              + " in repository "
+              + repositoryId
+              + "; nothing was delivered and nothing was created");
+    }
+
+    WorkspaceAgentLauncher.AgentState state = agentState(rowId);
+    if (state == WorkspaceAgentLauncher.AgentState.UNREACHABLE && activeProcess(rowId) == null) {
+      // The dispatch door's ensure, verbatim and for its reason: a daemon that IS answering needs
+      // none, and a start already under way is the start this call would have made.
+      workspaces.beginEnsureContainer(rowId);
+    }
+
+    if (!scheduleDelivery(rowId, text, compactFirst)) {
+      return new Delivery(
+          rowId,
+          false,
+          false,
+          "a launch or a delivery is already waiting for this workspace; nothing was queued behind"
+              + " it");
+    }
+    return switch (state) {
+      case RUNNING ->
+          new Delivery(
+              rowId, true, false, "an agent is running in this workspace and will be told");
+      case IDLE ->
+          new Delivery(
+              rowId,
+              false,
+              true,
+              "no agent is running in this workspace; one is being launched with this text as its"
+                  + " first turn");
+      case UNREACHABLE ->
+          new Delivery(
+              rowId,
+              false,
+              false,
+              "this workspace's container is not answering yet; it is being started and the text"
+                  + " will be delivered, or launched with, once it does");
+    };
+  }
+
+  /** The branch a dispatch would have fallen back to; see {@link #dispatchBranch}. */
+  private static String dashShape(String requested) {
+    int slash = requested.indexOf('/');
+    if (slash <= 0) {
+      return requested;
+    }
+    return requested.substring(0, slash) + "-" + requested.substring(slash + 1);
+  }
+
+  /**
    * The branch this dispatch can actually use.
    *
    * <p>{@code CaptureService.branchPrefix}'s defense, aimed at the requested name instead of a fixed
@@ -349,6 +531,104 @@ public class DispatchService {
     }
   }
 
+  /**
+   * {@link #schedule}'s twin for a delivery, sharing its one-wait-per-workspace claim.
+   *
+   * <p>The set is shared deliberately rather than kept per verb: the delivery's own fallback arm is
+   * a <em>launch</em>, so two waits on one workspace is exactly the "two agents on one checkout"
+   * this set exists to stop, whichever door queued them. The cost is that a second delivery arriving
+   * inside the milliseconds a first one takes against a live daemon is dropped rather than queued
+   * behind it — stated in the answer, never silent.
+   *
+   * @return false when a wait was already claimed, which the caller reports
+   */
+  private boolean scheduleDelivery(Long rowId, String text, boolean compactFirst) {
+    if (!pending.add(rowId)) {
+      LOG.infof(
+          "a wait is already claimed for workspace %s; not queueing a delivery behind it", rowId);
+      return false;
+    }
+    try {
+      launchExecutor.submit(
+          () -> {
+            try {
+              awaitAndDeliver(rowId, text, compactFirst);
+            } finally {
+              pending.remove(rowId);
+            }
+          });
+      return true;
+    } catch (RejectedExecutionException shuttingDown) {
+      pending.remove(rowId);
+      LOG.warnf("could not schedule a delivery for workspace %s: shutting down", rowId);
+      return false;
+    }
+  }
+
+  /** What a compaction is asked for as — the slash command, exactly as a person would type it. */
+  private static final String COMPACT_TURN = "/compact";
+
+  /** Poll until the daemon answers, then speak to the agent or launch one — or give up loudly. */
+  private void awaitAndDeliver(Long rowId, String text, boolean compactFirst) {
+    long deadline = System.currentTimeMillis() + launchWindowMs;
+    WorkspaceAgentLauncher.AgentState state;
+    while (true) {
+      state = agentState(rowId);
+      if (state != WorkspaceAgentLauncher.AgentState.UNREACHABLE) {
+        break;
+      }
+      if (System.currentTimeMillis() >= deadline) {
+        LOG.warnf(
+            "workspace %s never got a daemon that answers within %s ms; nothing was delivered to it",
+            rowId, Long.valueOf(launchWindowMs));
+        return;
+      }
+      try {
+        Thread.sleep(pollIntervalMs);
+      } catch (InterruptedException stopping) {
+        Thread.currentThread().interrupt();
+        return;
+      }
+    }
+
+    if (state == WorkspaceAgentLauncher.AgentState.IDLE) {
+      // Nobody to say it to, so it is said first instead: the launch path, with the caller's text
+      // as the seed turn. No compaction here — there is nothing to compact in a session that is
+      // about to begin.
+      if (!launch(rowId, text)) {
+        LOG.warnf("workspace %s's daemon refused the agent launch; nothing was delivered", rowId);
+      }
+      return;
+    }
+
+    if (compactFirst && compactBeforeTurn) {
+      // Best effort and deliberately not a gate: a compaction that did not land is a longer
+      // context, while refusing the turn over it would lose the phase prompt entirely.
+      if (deliver(rowId, COMPACT_TURN) != WorkspaceAgentLauncher.DeliveryOutcome.DELIVERED) {
+        LOG.warnf(
+            "workspace %s did not take the %s turn; delivering the text anyway",
+            rowId, COMPACT_TURN);
+      }
+    }
+
+    WorkspaceAgentLauncher.DeliveryOutcome outcome = deliver(rowId, text);
+    if (outcome == WorkspaceAgentLauncher.DeliveryOutcome.DELIVERED) {
+      return;
+    }
+    // The session can end between the probe and the turn — a long wait for a container makes that
+    // window minutes wide. A daemon that now says nothing is running gets the fallback arm rather
+    // than a warning about a turn nobody could have heard.
+    if (agentState(rowId) == WorkspaceAgentLauncher.AgentState.IDLE) {
+      if (!launch(rowId, text)) {
+        LOG.warnf(
+            "workspace %s's agent went away and its daemon refused a launch; nothing was delivered",
+            rowId);
+      }
+      return;
+    }
+    LOG.warnf("workspace %s's daemon would not take the turn; nothing was delivered to it", rowId);
+  }
+
   /** The port's answer, or UNREACHABLE — an absent port and a broken one deserve the same one. */
   private WorkspaceAgentLauncher.AgentState agentState(Long rowId) {
     if (!agents.isResolvable()) {
@@ -359,6 +639,19 @@ public class DispatchService {
     } catch (RuntimeException e) {
       LOG.debugf(e, "could not ask workspace %s's daemon about its agents", rowId);
       return WorkspaceAgentLauncher.AgentState.UNREACHABLE;
+    }
+  }
+
+  /** The port's answer, or UNREACHABLE — an absent port cannot deliver and cannot be asked why. */
+  private WorkspaceAgentLauncher.DeliveryOutcome deliver(Long rowId, String text) {
+    if (!agents.isResolvable()) {
+      return WorkspaceAgentLauncher.DeliveryOutcome.UNREACHABLE;
+    }
+    try {
+      return agents.get().deliver(rowId, text);
+    } catch (RuntimeException e) {
+      LOG.debugf(e, "the delivery to workspace %s failed", rowId);
+      return WorkspaceAgentLauncher.DeliveryOutcome.UNREACHABLE;
     }
   }
 
