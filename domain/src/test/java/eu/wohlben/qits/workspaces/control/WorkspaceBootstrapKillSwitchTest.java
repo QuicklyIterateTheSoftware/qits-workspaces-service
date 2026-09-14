@@ -3,13 +3,10 @@ package eu.wohlben.qits.workspaces.control;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.Map;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
@@ -20,24 +17,12 @@ import org.junit.jupiter.api.Test;
  * switch by construction).
  */
 @QuarkusTest
-@TestProfile(WorkspaceBootstrapKillSwitchTest.KillSwitchProfile.class)
+// The autorun switch this class is about lives in AutoStartOffProfile, which is where its own
+// profile folded to. Auto-start being off besides is immaterial here: the assertion is on
+// readyRecorder, and the runner fires that event itself on the pass-through path — whether the
+// coupler then launches anything is ServiceAutoStartKillSwitchTest's question, not this one's.
+@TestProfile(AutoStartOffProfile.class)
 public class WorkspaceBootstrapKillSwitchTest {
-
-  public static class KillSwitchProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Map<String, String> overrides = new HashMap<>();
-        overrides.put(
-            "qits.test.origins-dir",
-            Files.createTempDirectory("qits-bootstrap-killswitch-test").toString());
-        overrides.put("qits.bootstrap.autorun-enabled", "false");
-        return overrides;
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-  }
 
   private static final long AWAIT_MILLIS = 15_000;
 

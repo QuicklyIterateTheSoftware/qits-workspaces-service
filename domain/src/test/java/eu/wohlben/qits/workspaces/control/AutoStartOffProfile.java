@@ -1,5 +1,6 @@
 package eu.wohlben.qits.workspaces.control;
 
+import eu.wohlben.qits.archrules.NecessaryTestProfileDuplication;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import java.util.Map;
 
@@ -27,12 +28,31 @@ import java.util.Map;
  *       {@code defaultValue} — a no-op override that nonetheless made its map a third distinct one.
  *       The class whose subject is that switch being OFF keeps a profile of its own
  *       ({@code ServiceSettleKillSwitchTest}), because there the value is the point.
+ *   <li><b>Plus {@code qits.bootstrap.autorun-enabled=false}.</b> That switch used to buy {@code
+ *       WorkspaceBootstrapKillSwitchTest} a fourth application of its own. It folds in here because
+ *       it is inert for the other two: {@link WorkspaceBootstrapRunner} reads it only on a FRESH
+ *       PROVISION, and neither {@code ServiceAutoStartKillSwitchTest} (which fires the started event
+ *       by hand and never provisions) nor {@code ServiceLifecycleCouplerSettleTest} (whose one
+ *       provisioning test commits no {@code .qits-config.yml}) has a chain for it to suppress. In
+ *       both directions the runner reaches the same line — {@code fireReadyForServices} immediately
+ *       — so the switch changes which branch gets there, not what any of these three observe.
  * </ul>
+ *
+ * <p><b>Why this one is a {@link NecessaryTestProfileDuplication}</b> rather than folded into {@link
+ * SharedTestOverridesProfile}: auto-start being OFF is the SUBJECT of {@code
+ * ServiceAutoStartKillSwitchTest} (which asserts the coupling launches nothing) and the precondition
+ * that isolates the settle direction for {@code ServiceLifecycleCouplerSettleTest}. It contradicts
+ * {@code WorkspaceBootstrapRunnerTest} head-on: that class's central claim is that a successful
+ * chain RELEASES service auto-start, observed as a staged service reaching STARTING, which cannot
+ * happen with the coupling switched off. The two maps assert opposite things about the same key, so
+ * no single application can serve both. The duplication is the disagreement, not a preference.
  */
-public class AutoStartOffProfile implements QuarkusTestProfile {
+public class AutoStartOffProfile implements QuarkusTestProfile, NecessaryTestProfileDuplication {
 
   @Override
   public Map<String, String> getConfigOverrides() {
-    return Map.of("qits.services.autostart-enabled", "false");
+    return Map.of(
+        "qits.services.autostart-enabled", "false",
+        "qits.bootstrap.autorun-enabled", "false");
   }
 }

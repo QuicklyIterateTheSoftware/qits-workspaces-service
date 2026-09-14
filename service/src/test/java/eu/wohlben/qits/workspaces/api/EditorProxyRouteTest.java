@@ -38,7 +38,7 @@ import org.junit.jupiter.api.Test;
 // so it was a whole second Quarkus application bought for an isolation TestOrigin already gives —
 // every origin goes under a UUID of its own, which is why the default profile's thirty-odd classes
 // share the shipped target/workspaces-test-data without colliding. See
-// daemonhost/TunnelNonceProfile for what a restart costs in metaspace; bug e6f0bdfa.
+// control/SharedTuningProfile for what a restart costs in metaspace; bug e6f0bdfa.
 public class EditorProxyRouteTest {
 
   @Inject FakeRepositoryLookup repositories;

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.SharedTuningProfile;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
@@ -51,7 +52,7 @@ import org.junit.jupiter.api.Test;
  * still listening on {@code qits-net} and one at 4 is not.
  */
 @QuarkusTest
-@TestProfile(TunnelNonceProfile.class)
+@TestProfile(SharedTuningProfile.class)
 public class DaemonStreamRouteTest {
 
   @Inject FakeRepositoryLookup repositories;

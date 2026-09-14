@@ -1942,4 +1942,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.914.93641
+  version: 2026.914.171945

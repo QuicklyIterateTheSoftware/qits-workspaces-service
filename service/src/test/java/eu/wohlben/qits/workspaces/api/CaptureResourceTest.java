@@ -7,12 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import eu.wohlben.qits.workspaces.control.CaptureService;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.SharedTuningProfile;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.dto.CaptureContent;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
 import jakarta.inject.Inject;
@@ -21,8 +21,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -32,25 +30,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
 @QuarkusTest
-@TestProfile(CaptureResourceTest.TestProfile.class)
+@TestProfile(SharedTuningProfile.class)
 public class CaptureResourceTest {
-
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-test-capture");
-        return Map.of(
-            "qits.test.origins-dir",
-            tempDir.toString(),
-            // Small enough to trip cheaply in the oversize tests, large enough for happy paths.
-            "qits.capture.max-payload-bytes",
-            "8192");
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-  }
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 

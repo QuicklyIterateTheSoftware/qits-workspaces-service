@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.quarkus.test.common.http.TestHTTPResource;
+import eu.wohlben.qits.archrules.NecessaryTestProfileDuplication;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -66,8 +67,20 @@ class DaemonControlSocketMachineAuthTest {
     }
   }
 
-  /** Gate-on production posture, with a local verification key instead of a live IdP. */
-  public static class GateOn implements QuarkusTestProfile {
+  /**
+   * Gate-on production posture, with a local verification key instead of a live IdP.
+   *
+   * <p><b>The only in-JVM profile in this module that turns the machine gate on</b>, and that is
+   * what makes it un-mergeable rather than its map. {@code qits.auth.machine.required} gates {@code
+   * quarkus.oidc.tenant-enabled}, so this application validates bearers where every other surefire
+   * application does not — a class that sends no bearer, which is most of them, would stop being
+   * able to reach the socket at all. It also blanks the dev user for the same reason {@code
+   * NoDevUserProfile} does, and swaps the live IdP for a local public key so the gate can be proved
+   * without a network. The one packaged run that also has the gate on ({@code StoryProfile})
+   * deliberately keeps the shipped {@code auth-server-url} + {@code jwks-path} pair instead, which
+   * is the other half of the same coverage and cannot be this half.
+   */
+  public static class GateOn implements QuarkusTestProfile, NecessaryTestProfileDuplication {
     @Override
     public Map<String, String> getConfigOverrides() {
       return Map.of(

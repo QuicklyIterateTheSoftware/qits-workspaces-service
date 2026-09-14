@@ -5,11 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import eu.wohlben.qits.workspaces.control.SharedTuningProfile;
 import eu.wohlben.qits.workspaces.control.TechnicalProcess;
 import eu.wohlben.qits.workspaces.control.TechnicalProcessRegistry;
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -22,7 +22,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -34,16 +33,8 @@ import org.junit.jupiter.api.Test;
  * is a 404 (fatal to {@code EventSource}, so no retry loop).
  */
 @QuarkusTest
-@TestProfile(TechnicalProcessEventsControllerTest.TestProfile.class)
+@TestProfile(SharedTuningProfile.class)
 public class TechnicalProcessEventsControllerTest {
-
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      // Fast heartbeat so the ping assertion doesn't wait 25 s.
-      return Map.of("qits.process.heartbeat-ms", "200");
-    }
-  }
 
   @Inject TechnicalProcessRegistry registry;
 

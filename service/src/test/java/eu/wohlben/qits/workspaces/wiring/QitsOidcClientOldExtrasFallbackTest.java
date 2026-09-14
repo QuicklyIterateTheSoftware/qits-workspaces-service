@@ -2,6 +2,7 @@ package eu.wohlben.qits.workspaces.wiring;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import eu.wohlben.qits.archrules.NecessaryTestProfileDuplication;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -25,7 +26,16 @@ import org.junit.jupiter.api.Test;
 @TestProfile(QitsOidcClientOldExtrasFallbackTest.OldExtrasOnly.class)
 class QitsOidcClientOldExtrasFallbackTest {
 
-  public static class OldExtrasOnly implements QuarkusTestProfile {
+  /**
+   * <b>Its subject is an ABSENCE</b>, which is why it cannot be folded into {@link
+   * QitsOidcClientResourceOverridesOldExtrasTest.BothSet} even though that map is a literal superset
+   * of this one. The claim here is that the {@code qits} client falls back when {@code
+   * QITS_RESOURCE_IDP_*} is not set; add the triple and the fallback is never reached and the test
+   * proves nothing at all. Neither profile can join the module's shared one either: both rewrite the
+   * id, secret and url of a client every application in this module wires, so a co-tenant would be
+   * asserting against credentials that came from a test it has never heard of.
+   */
+  public static class OldExtrasOnly implements QuarkusTestProfile, NecessaryTestProfileDuplication {
     @Override
     public Map<String, String> getConfigOverrides() {
       // Raw env names, not the dotted keys — a QuarkusTestProfile override is a config source in its

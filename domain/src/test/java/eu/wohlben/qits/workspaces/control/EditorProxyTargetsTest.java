@@ -5,10 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
-import java.util.Map;
 import java.util.Optional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
@@ -24,18 +22,15 @@ import org.junit.jupiter.api.Test;
  * one per request.
  *
  * <p>The profile shortens that window. The shipped five seconds would be five seconds of sleeping
- * here, and the assertion is about the answer expiring rather than about the number.
+ * here, and the assertion is about the answer expiring rather than about the number. It is the
+ * shared profile rather than one of this class's own: the window is nobody else's subject, so it
+ * rides along with two other classes' scenery in a single Quarkus application instead of buying a
+ * restart for one line (see {@link SharedTestOverridesProfile}). The 1200 ms sleep below is sized
+ * against the second it sets.
  */
 @QuarkusTest
-@TestProfile(EditorProxyTargetsTest.ShortMissTtl.class)
+@TestProfile(SharedTestOverridesProfile.class)
 public class EditorProxyTargetsTest {
-
-  public static class ShortMissTtl implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      return Map.of("qits.editor.label-miss-ttl-ms", "1000");
-    }
-  }
 
   @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceService workspaceService;

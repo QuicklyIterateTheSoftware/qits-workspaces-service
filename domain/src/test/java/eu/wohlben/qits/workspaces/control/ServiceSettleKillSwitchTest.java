@@ -2,14 +2,13 @@ package eu.wohlben.qits.workspaces.control;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import eu.wohlben.qits.archrules.NecessaryTestProfileDuplication;
 import eu.wohlben.qits.workspaces.dto.ServiceInstanceDto;
 import eu.wohlben.qits.workspaces.entity.ServiceStatus;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -23,18 +22,28 @@ import org.junit.jupiter.api.Test;
 @TestProfile(ServiceSettleKillSwitchTest.TestProfile.class)
 public class ServiceSettleKillSwitchTest {
 
-  public static class TestProfile implements QuarkusTestProfile {
+  /**
+   * A {@link NecessaryTestProfileDuplication} against {@link AutoStartOffProfile}, which it
+   * otherwise matches key for key.
+   *
+   * <p>The difference is {@code autostop-enabled=false}, and it is this class's whole subject: with
+   * the settle coupling switched off, a stopping event must leave a READY service READY. That is the
+   * exact negation of what {@code ServiceLifecycleCouplerSettleTest} — the other {@link
+   * AutoStartOffProfile} consumer — exists to assert, namely that the same event settles the same
+   * service STOPPED without a crash or a relaunch. One map cannot hold both readings, so folding the
+   * two would not cost a restart, it would delete a test's premise: whichever value won, the other
+   * class would be asserting against a coupling in the wrong state.
+   *
+   * <p>{@code autostart-enabled=false} rides along because the service here is started by hand, the
+   * same isolation the settle class takes. It is not the reason for the duplication — the autostop
+   * line is.
+   */
+  public static class TestProfile implements QuarkusTestProfile, NecessaryTestProfileDuplication {
     @Override
     public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-daemon-settle-killswitch-repos");
-        return Map.of(
-            "qits.test.origins-dir", tempDir.toString(),
-            "qits.services.autostop-enabled", "false",
-            "qits.services.autostart-enabled", "false");
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
+      return Map.of(
+          "qits.services.autostop-enabled", "false",
+          "qits.services.autostart-enabled", "false");
     }
   }
 

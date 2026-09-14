@@ -14,6 +14,7 @@ import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import io.quarkus.test.junit.QuarkusTest;
+import eu.wohlben.qits.archrules.NecessaryTestProfileDuplication;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
@@ -21,8 +22,6 @@ import io.restassured.path.json.JsonPath;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import jakarta.inject.Inject;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,25 +65,30 @@ public class AgentTurnCompactionAndWindowTest {
       "{\"entries\":[{\"command\":{\"id\":\"cmd-live\",\"status\":\"RUNNING\",\"kind\":\"CHAT\","
           + "\"agentSessions\":[{\"sessionId\":\"s-1\"}]}}]}";
 
-  public static class CompactingProfile implements QuarkusTestProfile {
+  /**
+   * <b>The one profile whose config map is the subject rather than the setting.</b> Both knobs here
+   * are things the classes it cannot merge with need to be FALSE: {@code compact-before-turn} is
+   * shipped off and the cases below are what turning it on does, and a 1500 ms launch window is
+   * short enough to sit and watch expire, which is exactly the property {@link
+   * AgentDispatchControllerTest}'s 20 s window exists to deny. Merging the two would leave one
+   * number to serve two assertions that contradict each other, and whichever one lost would fail as
+   * a timing flake rather than as a statement. The enabled alternative is the same argument again:
+   * {@code FakeAgentActivity} replaces the rollup every other class here wants real.
+   */
+  public static class CompactingProfile
+      implements QuarkusTestProfile, NecessaryTestProfileDuplication {
     @Override
     public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-agent-turn-window-test-repos");
-        return Map.of(
-            "qits.test.origins-dir", tempDir.toString(),
-            "qits.workspace.daemon-api-port",
-                String.valueOf(AgentDispatchControllerTest.latchedPort()),
-            "qits.workspace.daemon-api-token", "test-delivery-daemon-token",
-            "qits.workspace.agent-dispatch.poll-interval-ms", "50",
-            // Short enough to watch expire, long enough that a healthy daemon in the other test
-            // answers inside it many times over.
-            "qits.workspace.agent-dispatch.launch-window-ms", "1500",
-            // The whole point of this profile: the knob the deployment ships OFF.
-            "qits.workspace.agent-dispatch.compact-before-turn", "true");
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
+      return Map.of(
+          "qits.workspace.daemon-api-port",
+              String.valueOf(AgentDispatchControllerTest.latchedPort()),
+          "qits.workspace.daemon-api-token", "test-delivery-daemon-token",
+          "qits.workspace.agent-dispatch.poll-interval-ms", "50",
+          // Short enough to watch expire, long enough that a healthy daemon in the other test
+          // answers inside it many times over.
+          "qits.workspace.agent-dispatch.launch-window-ms", "1500",
+          // The whole point of this profile: the knob the deployment ships OFF.
+          "qits.workspace.agent-dispatch.compact-before-turn", "true");
     }
 
     @Override

@@ -2,6 +2,7 @@ package eu.wohlben.qits.workspaces.wiring;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import eu.wohlben.qits.archrules.NecessaryTestProfileDuplication;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -20,7 +21,15 @@ import org.junit.jupiter.api.Test;
 @TestProfile(QitsOidcClientResourceOverridesOldExtrasTest.BothSet.class)
 class QitsOidcClientResourceOverridesOldExtrasTest {
 
-  public static class BothSet implements QuarkusTestProfile {
+  /**
+   * <b>Mid-cutover is a state, and a state needs its own application.</b> This is the deployment that
+   * has both spellings set at once, and the assertion is which one wins; {@link
+   * QitsOidcClientOldExtrasFallbackTest.OldExtrasOnly} is the deployment that has only the old one,
+   * and its assertion is that the new triple is absent. One profile cannot be in both states. Nor can
+   * either join the module's shared profile: they rewrite the {@code qits} client's id, secret and
+   * url module-wide, which every other application here wants at its shipped value.
+   */
+  public static class BothSet implements QuarkusTestProfile, NecessaryTestProfileDuplication {
     @Override
     public Map<String, String> getConfigOverrides() {
       return Map.of(

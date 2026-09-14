@@ -3,10 +3,8 @@ package eu.wohlben.qits.workspaces.control;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -20,25 +18,13 @@ import org.junit.jupiter.api.Test;
  * attribution for real.
  */
 @QuarkusTest
-@TestProfile(GitIdentityAttributionTest.TestProfile.class)
+// The identity below is pinned by the shared profile, which is also where two other classes' equally
+// uncontentious overrides live — one Quarkus application rather than three (see
+// SharedTestOverridesProfile). {@link #IDENTITY} must stay in step with the two values it sets.
+@TestProfile(SharedTestOverridesProfile.class)
 public class GitIdentityAttributionTest {
 
   private static final String IDENTITY = "qits-bot <qits-bot@example.com>";
-
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-git-identity-test-repos");
-        return Map.of(
-            "qits.test.origins-dir", tempDir.toString(),
-            "qits.git.author-name", "qits-bot",
-            "qits.git.author-email", "qits-bot@example.com");
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-  }
 
   @Inject FakeRepositoryLookup repositories;
 

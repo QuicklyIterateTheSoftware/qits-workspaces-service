@@ -15,6 +15,7 @@ import eu.wohlben.qits.workspaces.control.ServiceSupervisor;
 import eu.wohlben.qits.workspaces.control.RestartPolicy;
 import eu.wohlben.qits.workspaces.entity.ServiceStatus;
 import io.quarkus.test.junit.QuarkusTest;
+import eu.wohlben.qits.archrules.NecessaryTestProfileDuplication;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.RestAssured;
@@ -24,10 +25,7 @@ import jakarta.inject.Inject;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -54,17 +52,16 @@ import org.junit.jupiter.api.Test;
 @TestProfile(ServiceProxyRouteTest.TestProfile.class)
 public class ServiceProxyRouteTest {
 
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-service-proxy-test-repos");
-        return Map.of("qits.test.origins-dir", tempDir.toString());
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-
+  /**
+   * <b>The alternative IS the profile.</b> Once the throwaway {@code qits.test.origins-dir} went —
+   * it bought nothing over {@code TestOrigin}'s per-origin UUID — there is no config left here at
+   * all: what this profile does is swap {@link FakeWorkspaceServiceDriver} in for the real {@code
+   * WorkspaceDaemonRegistry}, and a {@code getEnabledAlternatives} is not an overlay a co-tenant can
+   * ignore. Any class that shared it would silently lose the real registry, which is the collaborator
+   * the other service tests and the daemon ITs are about. That is why this stays its own application
+   * even though its config map is empty.
+   */
+  public static class TestProfile implements QuarkusTestProfile, NecessaryTestProfileDuplication {
     @Override
     public java.util.Set<Class<?>> getEnabledAlternatives() {
       // Opt this test into the fake daemon driver without disturbing the real

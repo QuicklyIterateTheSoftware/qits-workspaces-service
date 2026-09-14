@@ -4,6 +4,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 
 import eu.wohlben.qits.workspaces.control.TestOrigin;
+import eu.wohlben.qits.archrules.NecessaryTestProfileDuplication;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -27,7 +28,15 @@ import org.junit.jupiter.api.Test;
 @TestProfile(WorkspaceRelativeDataDirTest.TestProfile.class)
 public class WorkspaceRelativeDataDirTest {
 
-  public static class TestProfile implements QuarkusTestProfile {
+  /**
+   * <b>The two relative paths are the regression, not a fixture.</b> Every other class in this module
+   * runs against an absolute data dir, which is precisely the configuration under which the bug
+   * could not happen — so a profile that shared theirs would still pass while asserting nothing. It
+   * is also the one place in this module where a {@code qits.test.origins-dir} override survived the
+   * cull: the others minted a throwaway temp directory for isolation {@code TestOrigin} already
+   * gives, whereas this one is relative on purpose, which is the opposite of throwaway.
+   */
+  public static class TestProfile implements QuarkusTestProfile, NecessaryTestProfileDuplication {
     @Override
     public Map<String, String> getConfigOverrides() {
       // Both deliberately relative (they resolve under the module's target/ build dir): the tree

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.EditorHost;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.SharedTuningProfile;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.entity.Workspace;
@@ -76,7 +77,7 @@ import org.junit.jupiter.api.Test;
  * fail on the fixture rather than on the route.
  */
 @QuarkusTest
-@TestProfile(TunnelNonceProfile.class)
+@TestProfile(SharedTuningProfile.class)
 public class EditorTunnelRouteTest {
 
   @Inject FakeRepositoryLookup repositories;

@@ -11,13 +11,11 @@ import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.dto.ServiceInstanceDto;
 import eu.wohlben.qits.workspaces.entity.ServiceStatus;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Supplier;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,25 +52,12 @@ import org.junit.jupiter.api.Test;
  * config (the reader is keyed by workspace slug, not repo) and starts a service for the wrong repo.
  */
 @QuarkusTest
-@TestProfile(WorkspaceBootstrapRunnerTest.TestProfile.class)
+// Service auto-start is left at its shipped default of ON — this class asserts that the chain
+// RELEASES it, so it needs the coupling live. It used to state `true` here, which is the same value
+// and cost a Quarkus restart of its own; the chain-await bound it actually needs now lives in the
+// shared profile alongside two other classes' scenery (see SharedTestOverridesProfile).
+@TestProfile(SharedTestOverridesProfile.class)
 public class WorkspaceBootstrapRunnerTest {
-
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-bootstrap-runner-test-repos");
-        return Map.of(
-            "qits.test.origins-dir", tempDir.toString(),
-            "qits.services.autostart-enabled", "true",
-            // The host's chain-await timeout (the fake driver runs the chain synchronously, so this
-            // only bounds a hung await).
-            "qits.bootstrap.await-timeout-ms", "8000");
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-  }
 
   private static final long AWAIT_MILLIS = 20_000;
 

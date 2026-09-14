@@ -6,14 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import eu.wohlben.qits.workspaces.control.ContainerRuntime;
 import eu.wohlben.qits.workspaces.control.FakeContainerRuntime;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.SharedTuningProfile;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
-import java.util.Map;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
@@ -23,20 +22,18 @@ import org.junit.jupiter.api.Test;
  *
  * <p>It runs behind a profile because <b>the shipped configuration is off</b> — {@code
  * qits.editor.idle-stop-after} is blank, nothing is idle-stopped, and a keepalive would be a request
- * nothing acts on. Turning it on for this class is what makes the wiring visible at all, and the
- * profile is also the assertion that the switch is what gates it.
+ * nothing acts on. Turning it on is what makes the wiring visible at all, and the profile is also
+ * the assertion that the switch is what gates it.
+ *
+ * <p>The switch lives in {@link SharedTuningProfile} rather than in a profile of this class's own,
+ * because a profile is an application and not an overlay: a nested {@code IdleStopOn} was one more
+ * Quarkus restart, and its {@code qits.editor.touch-interval=PT30S} only restated the shipped
+ * default. Thirty minutes is longer than any class sharing that profile runs, so turning the policy
+ * on costs its co-tenants nothing — see that class for the rule that keeps the count at one.
  */
 @QuarkusTest
-@TestProfile(EditorKeepaliveTest.IdleStopOn.class)
+@TestProfile(SharedTuningProfile.class)
 public class EditorKeepaliveTest {
-
-  /** A deployment that idle-stops editors, with a touch window long enough to debounce inside. */
-  public static class IdleStopOn implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      return Map.of("qits.editor.idle-stop-after", "PT30M", "qits.editor.touch-interval", "PT30S");
-    }
-  }
 
   @Inject EditorKeepalive keepalive;
   @Inject ContainerRuntime containers;

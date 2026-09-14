@@ -9,19 +9,14 @@ import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.RestAssured;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServer;
 import jakarta.inject.Inject;
-import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -42,60 +37,26 @@ import org.junit.jupiter.api.Test;
  *
  * <p>The port has to be fixed before the application starts, because unlike a service's web-view
  * port it comes from configuration rather than from a staged config document — see {@link
- * #PORT_PROPERTY} for how it gets there and why it is latched.
+ * AgentDispatchControllerTest#latchedPort()} for how it gets there and why it is latched.
+ *
+ * <p><b>It runs under {@link AgentDispatchControllerTest}'s profile rather than one of its own.</b>
+ * That profile is a strict superset of what this class needs, and the two things that used to keep
+ * them apart have both lapsed: the throwaway {@code qits.test.origins-dir} bought nothing over
+ * {@code TestOrigin}'s per-origin UUID, and the separate port key existed so that two classes
+ * sharing one surefire fork could never be bound to different ports at once — which stopped being
+ * possible when this module went to a JVM per class ({@code <reuseForks>false</reuseForks>}, bug
+ * e6f0bdfa). Each class now latches its own port inside its own JVM. A profile is an application,
+ * and this class needed no application of its own.
  */
 @QuarkusTest
-@TestProfile(ContainerProxyRouteTest.TestProfile.class)
+@TestProfile(AgentDispatchControllerTest.TestProfile.class)
 public class ContainerProxyRouteTest {
 
-  private static final String TOKEN = "test-daemon-token";
-
-  /**
-   * The port the fake daemon binds, chosen by the profile and handed to the test through a system
-   * property.
-   *
-   * <p>It has to travel that way, and the <em>first caller wins</em>. Unlike a service's web-view
-   * port, the daemon's comes from configuration, so it must be fixed before the application boots —
-   * and {@link QuarkusTestProfile} is instantiated in more than one classloader, so
-   * {@code getConfigOverrides()} runs more than once. A plain static initializer picks a different
-   * port each time; an unconditional {@code setProperty} lets the later call overwrite the value the
-   * application was actually configured with. Either way the proxy targets a port nothing is
-   * listening on, and the symptom is every proxying assertion failing with a bare, bodyless 502 that
-   * says nothing about why. Latching the first value is what makes both halves agree.
-   */
-  private static final String PORT_PROPERTY = "qits.test.container-proxy.daemon-port";
-
-  private static synchronized int latchedPort() {
-    String existing = System.getProperty(PORT_PROPERTY);
-    if (existing != null) {
-      return Integer.parseInt(existing);
-    }
-    try (ServerSocket socket = new ServerSocket(0)) {
-      int port = socket.getLocalPort();
-      System.setProperty(PORT_PROPERTY, String.valueOf(port));
-      return port;
-    } catch (Exception e) {
-      throw new IllegalStateException("no free port for the fake daemon", e);
-    }
-  }
-
-  public static class TestProfile implements QuarkusTestProfile {
-    @Override
-    public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-container-proxy-test-repos");
-        return Map.of(
-            "qits.test.origins-dir", tempDir.toString(),
-            "qits.workspace.daemon-api-port", String.valueOf(latchedPort()),
-            "qits.workspace.daemon-api-token", TOKEN);
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-  }
+  /** The bearer the profile configures; the fake daemon below is what checks it was sent. */
+  private static final String TOKEN = AgentDispatchControllerTest.TOKEN;
 
   private int daemonPort() {
-    return latchedPort();
+    return AgentDispatchControllerTest.latchedPort();
   }
 
   @Inject FakeRepositoryLookup repositories;

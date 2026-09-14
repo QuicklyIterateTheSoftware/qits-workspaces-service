@@ -18,6 +18,7 @@ import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
+import eu.wohlben.qits.archrules.NecessaryTestProfileDuplication;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
@@ -26,8 +27,6 @@ import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import jakarta.inject.Inject;
 import java.net.ServerSocket;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,17 +57,34 @@ import org.junit.jupiter.api.Test;
 @TestProfile(AgentDispatchControllerTest.TestProfile.class)
 public class AgentDispatchControllerTest {
 
-  private static final String TOKEN = "test-dispatch-daemon-token";
+  /**
+   * The bearer this class's profile configures, and therefore the one every class sharing that
+   * profile checks its fake daemon was called with. Package-private for {@link
+   * ContainerProxyRouteTest}, which shares the profile rather than writing a second one.
+   */
+  static final String TOKEN = "test-dispatch-daemon-token";
 
-  /** Its own key, so this class and {@link ContainerProxyRouteTest} never contend for one port. */
+  /** The key the latched port travels on. See {@link #latchedPort()}. */
   private static final String PORT_PROPERTY = "qits.test.agent-dispatch.daemon-port";
 
   /**
-   * See {@link ContainerProxyRouteTest}'s twin for why the first caller has to win.
+   * The port the fake daemon binds, chosen by the profile and handed to the test through a system
+   * property.
    *
-   * <p>Package-private rather than private because {@link AgentTurnDeliveryTest} stubs the same
-   * daemon on the same port under this class's own profile — the latch is what makes that one port
-   * rather than two, and copying the method would be a second latch and therefore a second port.
+   * <p>It has to travel that way, and the <em>first caller wins</em>. Unlike a service's web-view
+   * port, the daemon's comes from configuration, so it must be fixed before the application boots —
+   * and {@link QuarkusTestProfile} is instantiated in more than one classloader, so {@code
+   * getConfigOverrides()} runs more than once. A plain static initializer picks a different port each
+   * time; an unconditional {@code setProperty} lets the later call overwrite the value the
+   * application was actually configured with. Either way the proxy targets a port nothing is
+   * listening on, and the symptom is every proxying assertion failing with a bare, bodyless 502 that
+   * says nothing about why. Latching the first value is what makes both halves agree.
+   *
+   * <p>Package-private, and the module's only such latch: {@link AgentTurnDeliveryTest}, {@link
+   * ContainerProxyRouteTest} and {@link AgentTurnCompactionAndWindowTest} all stub a daemon on it.
+   * Copying the method would be a second latch and therefore a second port. Each of those classes
+   * gets a JVM of its own ({@code <reuseForks>false</reuseForks>}), so the latch is per-class in
+   * practice and no two fakes ever race for one bind.
    */
   static synchronized int latchedPort() {
     String existing = System.getProperty(PORT_PROPERTY);
@@ -84,23 +100,32 @@ public class AgentDispatchControllerTest {
     }
   }
 
-  public static class TestProfile implements QuarkusTestProfile {
+  /**
+   * <b>A profile of its own, and it has to be one.</b> A fake daemon binds a port that the
+   * application must already be configured with, and configuration is fixed before boot — so the
+   * port, and the token that goes with it, can live nowhere but a profile. That is a different kind
+   * of claim from the dials in {@code SharedTuningProfile}, where the value only makes an assertion
+   * cheap.
+   *
+   * <p>What it cannot share is the class it is closest to. {@link
+   * AgentTurnCompactionAndWindowTest}'s subject is the launch window EXPIRING, so its window is
+   * 1500 ms; the classes here need a window long enough that a healthy stub always answers inside
+   * it, which is this 20 s. One profile would have to pick one number, and each class's assertions
+   * are exactly the other's failure. {@link ContainerProxyRouteTest} needs a strict subset of this
+   * map and therefore shares it.
+   */
+  public static class TestProfile
+      implements QuarkusTestProfile, NecessaryTestProfileDuplication {
     @Override
     public Map<String, String> getConfigOverrides() {
-      try {
-        Path tempDir = Files.createTempDirectory("qits-agent-dispatch-test-repos");
-        return Map.of(
-            "qits.test.origins-dir", tempDir.toString(),
-            "qits.workspace.daemon-api-port", String.valueOf(latchedPort()),
-            "qits.workspace.daemon-api-token", TOKEN,
-            // The wait is the feature; the shipped two-second tick would make every assertion
-            // here a sleep. The window stays short so a stub that is gone cannot leave a thread
-            // polling for fifteen minutes behind the suite.
-            "qits.workspace.agent-dispatch.poll-interval-ms", "50",
-            "qits.workspace.agent-dispatch.launch-window-ms", "20000");
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
+      return Map.of(
+          "qits.workspace.daemon-api-port", String.valueOf(latchedPort()),
+          "qits.workspace.daemon-api-token", TOKEN,
+          // The wait is the feature; the shipped two-second tick would make every assertion here a
+          // sleep. The window stays short so a stub that is gone cannot leave a thread polling for
+          // fifteen minutes behind the suite.
+          "qits.workspace.agent-dispatch.poll-interval-ms", "50",
+          "qits.workspace.agent-dispatch.launch-window-ms", "20000");
     }
   }
 

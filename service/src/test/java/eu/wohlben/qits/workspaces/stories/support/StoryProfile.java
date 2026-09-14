@@ -1,5 +1,6 @@
 package eu.wohlben.qits.workspaces.stories.support;
 
+import eu.wohlben.qits.archrules.NecessaryTestProfileDuplication;
 import eu.wohlben.qits.servicemock.idp.MockIdp;
 import eu.wohlben.qits.workspaces.wiring.testdb.EmbeddedPg;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -92,8 +93,20 @@ import java.util.Map;
  * which awaits it on the peer stub's recording before returning — the standard treatment for
  * asynchronous far-side traffic, and it turns a flake into coverage. What is still uncovered is the
  * reconcile's <b>sweep</b>: the listing here is empty, so no credential is ever given back.
+ *
+ * <h2>Why it is a second profile at all</h2>
+ *
+ * <p>It is the only profile here that configures a <b>launched packaged process</b>, and that is not
+ * a matter of degree. Every other profile in this module overlays an in-JVM {@code @QuarkusTest};
+ * this one names the databases a separate process creates and cleans at start, points a real
+ * boot-time JWKS fetch at {@link MockIdp}, and puts a git server and a peer stub on the far end of
+ * calls that leave the process. Folding any of it into a surefire profile would change what thirty
+ * classes boot against — different stores, a gate they do not want, otel on — and folding a surefire
+ * profile into this one would put keys a packaged jar silently ignores into the one place this
+ * repository's worst bug class lives. The budget rule counts it because it counts every
+ * implementation in the module; it costs the surefire fork nothing, because failsafe launches it.
  */
-public class StoryProfile implements QuarkusTestProfile {
+public class StoryProfile implements QuarkusTestProfile, NecessaryTestProfileDuplication {
 
   /**
    * The secret the one named client presents with its {@code client_credentials} grant. It is a

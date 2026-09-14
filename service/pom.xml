@@ -322,11 +322,14 @@
                          every class now pays a JVM start, a Quarkus augmentation and an embedded
                          postgres cluster of its own. That is the price of a suite that finishes at
                          all. What would buy it back is fewer distinct profiles — merging two is
-                         merging one restart, and this fix already merged what could be merged
-                         (see daemonhost/TunnelNonceProfile) — or splitting this into two surefire
-                         executions, a reused fork for the classes with no @TestProfile and a
-                         non-reused one for the rest. Both need the profile inventory to stay
-                         honest, which is why neither is done by guessing. -->
+                         merging one restart. That merge has since been done down to the floor: the
+                         module is at ONE unmarked profile (control/SharedTuningProfile), every
+                         other one carries NecessaryTestProfileDuplication with a javadoc reason,
+                         and TestProfileBudgetTest is what fails the build if a fifteenth arrives
+                         unargued. What is left is splitting this into two surefire executions, a
+                         reused fork for the classes with no @TestProfile and a non-reused one for
+                         the rest. That needs a measurement of what a reused fork now peaks at,
+                         which is why it is not done by guessing. -->
                     <reuseForks>false</reuseForks>
                     <!-- test-jvm-memory.argLine is the root pom's bound and is restated here rather
                          than inherited: surefire's <argLine> is a single element, so this one
