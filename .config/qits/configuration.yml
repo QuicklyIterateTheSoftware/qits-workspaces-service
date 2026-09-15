@@ -38,6 +38,14 @@
 # WHAT IS DELIBERATELY NOT HERE, and therefore shows as `orphaned`:
 #   * QUARKUS_OIDC_CLIENT_GRANT_OPTIONS_CLIENT_AUDIENCE. The `qits` client asks for the fixed
 #     audience `qits-platform`; nothing reads this name.
+#   * QUARKUS_OIDC_CLIENT_GITHOST_* and QUARKUS_OIDC_CLIENT_PROJECTS_* (five each). The two old named
+#     clients, which no code injects. These are NOT inert: an environment variable alone mints the
+#     `quarkus.oidc-client.<name>` map key, and the environment source outranks the shipped
+#     properties, so ..._CLIENT_ENABLED=true genuinely overrides the `client-enabled=false` this
+#     service ships and Quarkus builds a client nobody asked for at boot. `application.properties`
+#     pins `discovery-enabled=false` and a `token-path` for both so that costs no idp round trip in
+#     front of the HTTP listener. They stay OUT of the list on purpose — showing as `orphaned` is
+#     how a person is invited to delete them, which is the only thing that retires those six lines.
 #   * QITS_GITHOST_AUDIENCE. The audience a workspace container asks for is the constant
 #     `WorkspaceContainerFactory.CONTAINER_TOKEN_AUDIENCE` now; the `qits.githost.audience` key is gone.
 #   * QITS_RESOURCE_*. The deployer injects those from its own resource registry, the one authority

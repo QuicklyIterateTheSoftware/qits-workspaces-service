@@ -51,6 +51,21 @@ class QitsOidcClientShippedConfigTest {
   }
 
   @Test
+  void theTwoPhantomNamedClientsAreNeutralisedInARealBoot() {
+    // `githost` and `projects` are minted as map keys by the deployment's QUARKUS_OIDC_CLIENT_*
+    // environment, which this arm does not have — so here they exist only because this file spells
+    // them, and all three lines answer from it. That the environment OVERRIDES client-enabled, and
+    // that discovery-enabled is therefore the line doing the work, is
+    // PhantomOidcClientsNeutralisedTest's claim; this is the same keys resolving through a real
+    // Quarkus config, which is the half a hand-built SmallRyeConfig cannot speak for.
+    for (String client : new String[] {"githost", "projects"}) {
+      assertEquals("false", value("quarkus.oidc-client." + client + ".client-enabled"));
+      assertEquals("false", value("quarkus.oidc-client." + client + ".discovery-enabled"));
+      assertEquals("token", value("quarkus.oidc-client." + client + ".token-path"));
+    }
+  }
+
+  @Test
   void theContainersOwnerKeyFollowsTheQitsClientsId() {
     // qits.workspace.containers.owner reads quarkus.oidc-client.qits.client-id by default —
     // OwnerGuard compares this string to a machine token's `sub` once the gate is on.
