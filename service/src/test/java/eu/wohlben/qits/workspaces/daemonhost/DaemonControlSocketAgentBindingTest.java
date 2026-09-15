@@ -36,7 +36,8 @@ import org.junit.jupiter.api.Test;
 @TestProfile(DaemonControlSocketMachineAuthTest.GateOn.class)
 class DaemonControlSocketAgentBindingTest {
 
-  private static final String OWN_AUDIENCE = "qits-workspaces";
+  /** The one audience this service accepts, and the one every platform token carries. */
+  private static final String PLATFORM_AUDIENCE = "qits-platform";
   private static final Set<String> AGENT = Set.of("qits:agent");
 
   @Inject Vertx vertx;
@@ -87,14 +88,14 @@ class DaemonControlSocketAgentBindingTest {
 
   @Test
   void anAgentOpensItsOwnWorkspacesSocket() throws Exception {
-    String token = DaemonMachineTokens.tokenWithRoles(clientA, AGENT, OWN_AUDIENCE);
+    String token = DaemonMachineTokens.tokenWithRoles(clientA, AGENT, PLATFORM_AUDIENCE);
 
     assertEquals(101, connect("/workspaces/daemon/" + rowA, token));
   }
 
   @Test
   void anAgentIsRefusedAnotherWorkspacesSocket() throws Exception {
-    String token = DaemonMachineTokens.tokenWithRoles(clientA, AGENT, OWN_AUDIENCE);
+    String token = DaemonMachineTokens.tokenWithRoles(clientA, AGENT, PLATFORM_AUDIENCE);
 
     assertEquals(403, connect("/workspaces/daemon/" + rowB, token));
   }
@@ -102,7 +103,7 @@ class DaemonControlSocketAgentBindingTest {
   @Test
   void anAgentIsRefusedAWorkspaceWithNoCommission() throws Exception {
     commission(rowB, null);
-    String token = DaemonMachineTokens.tokenWithRoles(clientB, AGENT, OWN_AUDIENCE);
+    String token = DaemonMachineTokens.tokenWithRoles(clientB, AGENT, PLATFORM_AUDIENCE);
 
     assertEquals(403, connect("/workspaces/daemon/" + rowB, token));
   }
@@ -110,14 +111,14 @@ class DaemonControlSocketAgentBindingTest {
   @Test
   void aSystemCallerKeepsTodaysBehaviour() throws Exception {
     // Any sub, any workspace: qits:system is not bound, until agents switch roles.
-    String token = DaemonMachineTokens.token("some-other-client", OWN_AUDIENCE);
+    String token = DaemonMachineTokens.token("some-other-client", PLATFORM_AUDIENCE);
 
     assertEquals(101, connect("/workspaces/daemon/" + rowB, token));
   }
 
   @Test
   void theLegacyPathBindsTheAgentToItsOwnWorkspaceToo() throws Exception {
-    String token = DaemonMachineTokens.tokenWithRoles(clientA, AGENT, OWN_AUDIENCE);
+    String token = DaemonMachineTokens.tokenWithRoles(clientA, AGENT, PLATFORM_AUDIENCE);
 
     assertEquals(101, connect("/api/workspace-daemon/" + labelA, token));
     assertEquals(403, connect("/api/workspace-daemon/" + labelB, token));

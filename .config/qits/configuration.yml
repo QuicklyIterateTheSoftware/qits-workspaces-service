@@ -38,8 +38,6 @@
 # WHAT IS DELIBERATELY NOT HERE, and therefore shows as `orphaned`:
 #   * QUARKUS_OIDC_CLIENT_GRANT_OPTIONS_CLIENT_AUDIENCE. The `qits` client asks for the fixed
 #     audience `qits-platform`; nothing reads this name.
-#   * QUARKUS_OIDC_CLIENT_GITHOST_* and QUARKUS_OIDC_CLIENT_PROJECTS_* (five each). The two old named
-#     clients. No code uses them; Quarkus still binds their disabled blocks, which is not a read.
 #   * QITS_GITHOST_AUDIENCE. The audience a workspace container asks for is the constant
 #     `WorkspaceContainerFactory.CONTAINER_TOKEN_AUDIENCE` now; the `qits.githost.audience` key is gone.
 #   * QITS_RESOURCE_*. The deployer injects those from its own resource registry, the one authority
@@ -104,7 +102,7 @@ keys:
 
   env.QITS_AUTH_MACHINE_AUDIENCE:
     type: string
-    description: "The audience an inbound machine token must carry, beside qits-platform."
+    description: "The audience an inbound machine token must carry. It is the one platform audience, qits-platform, which every token this platform's idp mints carries; the service ships that value and nothing needs to set this."
 
   env.QUARKUS_OIDC_AUTH_SERVER_URL:
     type: string

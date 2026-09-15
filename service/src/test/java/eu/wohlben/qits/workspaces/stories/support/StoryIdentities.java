@@ -37,12 +37,20 @@ import io.restassured.specification.RequestSpecification;
 public final class StoryIdentities {
 
   /**
-   * The audience this service enforces, environment-qualified on purpose. The shipped default is the
-   * bare {@code qits-workspaces} and a deployment injects the tier's spelling; the profile sets this
-   * one, so {@code quarkus.oidc.token.audience=${qits.auth.machine.audience}} is proved to be read
-   * rather than assumed.
+   * The one audience this service enforces, and the shipped value of {@code
+   * quarkus.oidc.token.audience} — the profile overrides nothing, so what a launched artifact really
+   * ships is what these stories present a token for. qits-idp stamps it onto every token it mints,
+   * whichever client asked for whatever, so every machine caller on the platform is addressed here
+   * and its ROLES decide what it may do.
    */
-  public static final String AUDIENCE = "dev-qits-workspaces";
+  public static final String AUDIENCE = "qits-platform";
+
+  /**
+   * An audience no token of this platform's carries. A sibling service's name would not do: a peer's
+   * bearer carries {@code qits-platform} too and is let in, judged on its roles from there. What the
+   * door refuses is a token cut somewhere else entirely.
+   */
+  public static final String OUTSIDE_AUDIENCE = "somebody-elses-platform";
 
   /** The role every door in {@code api/} names, and the one a person's session carries. */
   public static final String ADMIN_ROLE = "qits:admin";
@@ -85,7 +93,7 @@ public final class StoryIdentities {
   private StoryIdentities() {}
 
   /**
-   * A machine's bearer for this service's audience.
+   * A machine's bearer for the platform audience.
    *
    * <p>Minted fresh per call rather than cached: a token is a credential, and a helper that handed
    * the same string to two stories would make {@link
@@ -96,12 +104,12 @@ public final class StoryIdentities {
     return MockIdp.attach().token().subject(subject).audience(AUDIENCE).groups(roles).mint();
   }
 
-  /** A token minted for a real sibling's audience — the confusion that could happen on qits-net. */
-  public static String foreignAudienceToken(String subject) {
+  /** A token addressed to somewhere that is not this platform — see {@link #OUTSIDE_AUDIENCE}. */
+  public static String outsideAudienceToken(String subject) {
     return MockIdp.attach()
         .token()
         .subject(subject)
-        .audience(StoryPeers.CONTAINERS)
+        .audience(OUTSIDE_AUDIENCE)
         .groups(ADMIN_ROLE)
         .mint();
   }

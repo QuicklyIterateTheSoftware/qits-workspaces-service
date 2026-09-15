@@ -27,7 +27,16 @@ import org.junit.jupiter.api.Test;
 @TestProfile(DaemonControlSocketMachineAuthTest.GateOn.class)
 class DaemonControlSocketMachineAuthTest {
 
-  private static final String OWN_AUDIENCE = "qits-workspaces";
+  /** The one audience this service accepts, and the one every token this platform mints carries. */
+  private static final String PLATFORM_AUDIENCE = "qits-platform";
+
+  /**
+   * An audience no token of this platform's carries. It is deliberately not a sibling service's
+   * name: qits-idp stamps {@code qits-platform} onto every token it mints, whichever client asked
+   * for whatever, so a peer's bearer is addressed here too and its roles decide what it may do.
+   * What the door refuses is a token cut somewhere else entirely.
+   */
+  private static final String OUTSIDE_AUDIENCE = "somebody-elses-platform";
 
   @Inject Vertx vertx;
 
@@ -36,7 +45,7 @@ class DaemonControlSocketMachineAuthTest {
 
   @Test
   void aCommissionedDaemonBearerReachesTheControlSocket() {
-    assertDoesNotThrow(() -> connect(DaemonMachineTokens.token("workspace-1", OWN_AUDIENCE)));
+    assertDoesNotThrow(() -> connect(DaemonMachineTokens.token("workspace-1", PLATFORM_AUDIENCE)));
   }
 
   @Test
@@ -45,9 +54,10 @@ class DaemonControlSocketMachineAuthTest {
   }
 
   @Test
-  void aBearerMintedForAnotherServiceIsRejectedBeforeTheControlSocketOpens() {
+  void aBearerMintedForAnotherPlatformIsRejectedBeforeTheControlSocketOpens() {
     assertThrows(
-        Exception.class, () -> connect(DaemonMachineTokens.token("workspace-1", "qits-projects")));
+        Exception.class,
+        () -> connect(DaemonMachineTokens.token("workspace-1", OUTSIDE_AUDIENCE)));
   }
 
   private void connect(String token) throws Exception {

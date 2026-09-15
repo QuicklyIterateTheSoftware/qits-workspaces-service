@@ -22,9 +22,9 @@ import org.junit.jupiter.api.Test;
  *
  * <p><b>Why the file exists.</b> qits-configuration marks a stored entry {@code orphaned} only when
  * the application has a declaration that does not list the key. The file lists every key this
- * service still reads, so the ones it does not list — the old named clients' keys — show as
- * orphaned and a person can remove them. A key missing from the file is therefore a live key the
- * UI invites somebody to delete.
+ * service still reads, so anything a deployment carries beside them shows as orphaned and a person
+ * can remove it. A key missing from the file is therefore a live key the UI invites somebody to
+ * delete.
  *
  * <p><b>What this test is NOT.</b> It is not a parser. qits-configuration owns the grammar and is
  * the one strict parser of this document; a second opinion here would disagree with it the day the

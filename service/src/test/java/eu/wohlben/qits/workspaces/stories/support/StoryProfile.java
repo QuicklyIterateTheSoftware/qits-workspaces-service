@@ -149,7 +149,9 @@ public class StoryProfile implements QuarkusTestProfile, NecessaryTestProfileDup
 
     // --- the gate, turned on ---------------------------------------------------------------------
     config.put("qits.auth.machine.required", "true");
-    config.put("qits.auth.machine.audience", StoryIdentities.AUDIENCE);
+    // The audience is NOT set here. It is the one platform audience and the jar ships it
+    // (StoryIdentities.AUDIENCE is that same value), so what these stories present a token for is
+    // what a deployment really enforces rather than a second spelling this profile invented.
     config.put("quarkus.oidc.auth-server-url", idp.baseUrl());
     // The dev identity is LaunchMode-guarded and a launched artifact is NORMAL, so this changes
     // nothing — it is here so the refusal stories cannot be read as "the dev user happened to be

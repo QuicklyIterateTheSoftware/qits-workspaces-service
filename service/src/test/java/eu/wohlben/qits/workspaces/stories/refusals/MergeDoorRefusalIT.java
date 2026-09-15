@@ -120,8 +120,8 @@ public class MergeDoorRefusalIT {
       """
       Merging one branch into another moves a ref in somebody's repository, so it is the platform
       admin's verb and nobody else's — a person's door, and the two that are left under /branches are
-      both a person's. A caller here is real — the idp signed its token, the audience is this
-      service's, the request is well formed — and it carries qits:reader, a role this platform
+      both a person's. A caller here is real — the idp signed its token, the audience is the
+      platform's, the request is well formed — and it carries qits:reader, a role this platform
       genuinely issues and this service names on no route at all.
 
       The answer is 403 rather than 401, and the difference matters to a client: 401 says "I do not
@@ -148,7 +148,7 @@ public class MergeDoorRefusalIT {
         .statusCode(403);
     story
         .note(
-            "a correctly signed bearer for this service's audience, carrying a real platform role"
+            "a correctly signed bearer for the platform audience, carrying a real platform role"
                 + " this service names nowhere, is refused 403 — authenticated, and covered by"
                 + " nothing")
         .as("wrong-role-refused");

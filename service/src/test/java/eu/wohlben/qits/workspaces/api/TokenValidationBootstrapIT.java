@@ -74,7 +74,7 @@ public class TokenValidationBootstrapIT {
   static final String ACCEPTED_SLUG =
       "on-start-qits-workspaces-fetches-the-platform-s-signing-keys";
 
-  static final String DENIED_SLUG = "a-bearer-cut-for-another-service-opens-nothing-here";
+  static final String DENIED_SLUG = "a-bearer-cut-for-another-audience-opens-nothing-here";
 
   /** The route both stories present a bearer to. See the accept story for why it is this one. */
   static final String GUARDED_ROUTE =
@@ -154,7 +154,7 @@ public class TokenValidationBootstrapIT {
         .body("entries", notNullValue());
     story
         .note(
-            "a platform service's bearer (aud=dev-qits-workspaces, groups=[qits:system,"
+            "a platform service's bearer (aud=qits-platform, groups=[qits:system,"
                 + " qits:admin]) is accepted")
         .as("history-served");
 
@@ -174,31 +174,31 @@ public class TokenValidationBootstrapIT {
         .as("commissions-reconciled");
   }
 
-  @UserStory(value = "A bearer cut for another service opens nothing here", category = CATEGORY)
+  @UserStory(value = "A bearer cut for another audience opens nothing here", category = CATEGORY)
   @UserStoryDescription(
       """
-      The flip side of trusting the platform's keys. Every service on qits-net is issued tokens by
-      the same idp and validated against the same JWKS, so a signature alone says nothing about who
-      a token was for: a bearer good for qits-containers must not also open this service's doors. The
-      audience claim is what draws that line, and it is checked at the door rather than anywhere a
-      caller can reach.
+      The flip side of trusting the platform's keys. A signature alone says nothing about who a token
+      was cut for, so the audience claim draws that line, and it is checked at the door rather than
+      anywhere a caller can reach.
 
-      qits-containers is not an invented name here — it is an audience this service's own oidc
-      client really requests, so what is refused is the confusion that could actually happen on the
-      platform network rather than a strawman.
+      The line is drawn around the PLATFORM, not around this service. qits-platform-idp stamps
+      qits-platform onto every token it mints, whichever client asked and whatever it asked for, so
+      every machine caller on qits-net is addressed here — a sibling service's bearer included — and
+      what each may do is decided by its roles at the door it knocks on. What must never get in is a
+      token cut for somewhere that is not this platform, and that is what is presented here.
       """)
   @Order(2)
   void aBearerForAnotherAudienceIsRefused(Interactions story) {
     // Everything this story sends is an impostor's, so the actor is set once, up front.
     NetworkCapture.actor(StoryIdentities.IMPOSTOR);
 
-    String wrongAudienceToken = StoryIdentities.foreignAudienceToken("qits-containers");
+    String wrongAudienceToken = StoryIdentities.outsideAudienceToken("an-outside-caller");
     MINTED.add(wrongAudienceToken);
     StoryIdentities.bearer(given(), wrongAudienceToken).get(GUARDED_ROUTE).then().statusCode(401);
     story
         .note(
-            "a token minted for qits-containers' audience — correctly signed, by this platform's"
-                + " own idp — is refused at the door")
+            "a token addressed to an audience this platform never issues — correctly signed, by"
+                + " this platform's own idp — is refused at the door")
         .as("wrong-audience-refused");
 
     // The negative claim is the point of the story: a refused caller cost this service nothing

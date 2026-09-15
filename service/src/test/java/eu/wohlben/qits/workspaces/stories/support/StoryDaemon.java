@@ -42,7 +42,7 @@ import java.util.concurrent.TimeUnit;
  * <h2>The credential is a bearer, and the commissioned pair is what a story reads instead</h2>
  *
  * <p>{@code DaemonControlSocket} is {@code @RolesAllowed("qits:system")}, enforced at the HTTP
- * <b>upgrade</b>, so the dial carries an idp-minted bearer for this service's audience. A real
+ * <b>upgrade</b>, so the dial carries an idp-minted bearer for the platform audience. A real
  * container gets one by exchanging the pair the host commissioned for it — {@code
  * QITS_COMMISSIONED_CLIENT_ID}/{@code …_SECRET}, injected into its environment — and that exchange
  * happens at qits-platform-idp, which is a stub here: it would answer an opaque string, and an

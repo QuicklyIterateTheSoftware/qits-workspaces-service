@@ -463,12 +463,11 @@ public class WorkspaceContainerFactory {
 
   /**
    * The audience a container's Git helper AND the daemon's dial-home control socket bearer both
-   * request: one platform-wide value now (service-client-identity-plan.md, C4), not a
-   * qits-githost-specific or an environment-qualified qits-workspaces one. The receiving side
-   * accepts it because C1 (qits-auth-core) widened its inbound audience check fleet-wide. A literal
-   * rather than a config key: {@code qits.githost.audience} and the daemon's own audience key used
-   * to carry environment-qualified values (still injected by old deployment extras, now inert — C9),
-   * and there is nothing left to configure once every receiver takes the one platform audience.
+   * request: the one platform audience (service-client-identity-plan.md, C4), never a
+   * qits-githost-specific or an environment-qualified one. Every receiver on this platform accepts
+   * it and nothing else, and judges the caller on its roles from there. A literal rather than a
+   * config key: the value is the platform's own name, the same string in every service, so there is
+   * nothing here for a deployment to state.
    */
   static final String CONTAINER_TOKEN_AUDIENCE = "qits-platform";
 

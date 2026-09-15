@@ -332,7 +332,7 @@ the sixth raw route and carries no path at all — see below):
 - `DaemonControlSocket` — `/workspaces/daemon/{id}`, and a **cross-repo contract**:
   `WorkspaceContainerFactory` injects `ws://<host>:<port>/workspaces/daemon/<id>` as
   `QITS_WORKSPACE_DAEMON_URL` and qits-workspace-daemon dials exactly that. Change both together.
-  A commissioned daemon exchanges its own client pair for a qits-workspaces-audience bearer and
+  A commissioned daemon exchanges its own client pair for a platform-audience bearer and
   presents it on every upgrade; the endpoint requires `qits:system` or `qits:agent`. A caller with
   `qits:agent` and not `qits:system` may open only its own workspace's socket: `DaemonAgentBindingCheck`
   (an `HttpUpgradeCheck`, so the refusal is a real 403 before the upgrade) compares the token's `sub`
