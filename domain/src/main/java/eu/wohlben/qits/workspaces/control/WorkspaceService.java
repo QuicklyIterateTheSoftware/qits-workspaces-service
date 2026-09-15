@@ -1535,16 +1535,16 @@ public class WorkspaceService {
 
       ## Releasing from inside this container
 
-      **Branch → release request.** Never push `main` yourself. Push your branch, then ask **qits-projects** to release it. The door is machine-authenticated and this container carries its own identity — a commissioned idp client in `QITS_COMMISSIONED_CLIENT_ID` / `QITS_COMMISSIONED_CLIENT_SECRET` — so mint a bearer for the service you call. Platform services are dialed as `<tier>-qits-<name>:8080` on the platform network, and a token is cut for exactly one of them (its `audience` is that alias). The standing environment's tier is `dev` unless you were told otherwise.
+      **Branch → release request.** Never push `main` yourself. Push your branch, then ask **qits-projects** to release it. The door is machine-authenticated and this container carries its own identity — a commissioned idp client in `QITS_COMMISSIONED_CLIENT_ID` / `QITS_COMMISSIONED_CLIENT_SECRET` — so mint a bearer before you call. Platform services are dialed as `<tier>-qits-<name>:8080` on the platform network, and every platform token is requested with the one platform audience, `audience=qits-platform` — the value this container already carries as `QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE`. The standing environment's tier is `dev` unless you were told otherwise.
 
-          token() { curl -fsS -u "$QITS_COMMISSIONED_CLIENT_ID:$QITS_COMMISSIONED_CLIENT_SECRET" -d "grant_type=client_credentials&audience=$1" "$QITS_GIT_AUTH_TOKEN_URL" | jq -r .access_token; }
+          token() { curl -fsS -u "$QITS_COMMISSIONED_CLIENT_ID:$QITS_COMMISSIONED_CLIENT_SECRET" -d "grant_type=client_credentials&audience=${QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE:-qits-platform}" "$QITS_GIT_AUTH_TOKEN_URL" | jq -r .access_token; }
           PROJECTS=http://<tier>-qits-projects:8080/projects/api
 
-          curl -sS -X POST -H "Authorization: Bearer $(token <tier>-qits-projects)" -H 'Content-Type: application/json' "$PROJECTS/repositories/<repository>/release-requests" -d '{"branch":"<your branch>","summary":"<what this release is>"}'
+          curl -sS -X POST -H "Authorization: Bearer $(token)" -H 'Content-Type: application/json' "$PROJECTS/repositories/<repository>/release-requests" -d '{"branch":"<your branch>","summary":"<what this release is>"}'
 
       `qits release-request create --project <project> --repository <repository> --branch <your branch> --summary '<what this release is>'` is the same door with the token handled for you (next section). The `curl` above stays the fallback: the CLI reaches a container only from the workspace base image that carries it.
 
-      Nothing has merged when that answers. The request folds `main`, your branch and every released tag still in flight onto its own `release/<id>` branch, the QA pipeline builds that fold, and a green gate releases it: the manifests are stamped, the fold is tagged with the version, and the source branches are deleted. Poll the request (`GET $PROJECTS/repositories/<repository>/release-requests/<id>`) until it reads `RELEASED` — `CONFLICTED` means the fold does not merge and is yours to resolve, `FAILED` and `REJECTED` say why in `detail`. Watch the build behind it: `curl -sS -H "Authorization: Bearer $(token <tier>-qits-ci)" http://<tier>-qits-ci:8080/ci/api/runs/active` (and `/ci/api/runs/finished?limit=10`).
+      Nothing has merged when that answers. The request folds `main`, your branch and every released tag still in flight onto its own `release/<id>` branch, the QA pipeline builds that fold, and a green gate releases it: the manifests are stamped, the fold is tagged with the version, and the source branches are deleted. Poll the request (`GET $PROJECTS/repositories/<repository>/release-requests/<id>`) until it reads `RELEASED` — `CONFLICTED` means the fold does not merge and is yours to resolve, `FAILED` and `REJECTED` say why in `detail`. Watch the build behind it: `curl -sS -H "Authorization: Bearer $(token)" http://<tier>-qits-ci:8080/ci/api/runs/active` (and `/ci/api/runs/finished?limit=10`).
 
       **Trains.** Releasing an SPA or a library deploys nothing by itself: the service that embeds or depends on it follows by event — CI commits a `bump(...)` onto that service's `maintenance/<dependency>` branch and releases it on its own. To ship a service change together with its SPA, release the SPA first and the service once the bump has reached the service's `main`; the service branch then merges cleanly on top of the new pin. Never move a submodule gitlink (`service/src/main/webui`) by hand to follow a release you made — the train owns that pin, and `git add -A` would stage it silently (`.gitmodules` says `ignore = all`); confirm with `git ls-tree HEAD <path>` before committing.
 
@@ -1560,7 +1560,7 @@ public class WorkspaceService {
 
       `qits events` and `qits observe` are the other two an agent reaches for; `qits --help` lists everything, and `qits help skill` prints the whole surface as a SKILL.md. The credential is `qits:agent`: reads answer, and an operator write comes back `403 - this credential is qits:agent, which reads but does not write`. That is the credential doing its job, not a misconfiguration — a write that matters goes through the release request above, or through a person.
 
-      The three shell helpers keep their jobs: `qits-git-credential` is git's credential helper, `qits-token <audience>` mints the bearer for a hand-written `curl`, and `qits-npm-ci` is the lockfile-safe `npm ci`.
+      The three shell helpers keep their jobs: `qits-git-credential` is git's credential helper, `qits-token qits-platform` mints the bearer for a hand-written `curl`, and `qits-npm-ci` is the lockfile-safe `npm ci`.
 
       ## Toolchain notes
 
