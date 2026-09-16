@@ -303,6 +303,26 @@ public class WorkspaceDaemonPinIT {
             "-jar",
             jar.toString());
     Map<String, String> env = builder.environment();
+    // EVERY AMBIENT QITS_ VARIABLE IS REMOVED FIRST, and this is the difference between a test and a
+    // coincidence. `ProcessBuilder` seeds the child from this process's environment, and this process
+    // runs somewhere that has opinions: a workspace container carries the full
+    // QITS_WORKSPACE_DAEMON_* set plus a commissioned credential, and a CI step container carries
+    // QITS_COMMISSIONED_CLIENT_ID/SECRET and nothing else of the set.
+    //
+    // That difference is not cosmetic, because ControlSocket.authorization() refuses a PARTIAL
+    // commission: any one of client-id, secret, auth-token-url and auth-audience present means all
+    // four are required, and a step container supplies exactly two. The daemon then fails to mint,
+    // never dials, and the test times out with a daemon that started perfectly — measured on the
+    // first gating run, 2026-09-16, after the same test had passed locally for weeks of wall-clock.
+    // It passed there because a workspace container HAS all four, so the daemon minted a real token
+    // against the real idp: the assertion was riding on this container's credentials.
+    //
+    // A pin test whose result depends on where it runs proves nothing about the pin, which is the
+    // same class of defect as the configuration entry this whole change replaced. So the child gets
+    // exactly the three variables below and no others, and dials anonymously — the stand-in host
+    // above accepts any upgrade, and who may open a control socket is DaemonControlSocket's subject,
+    // not this one's.
+    env.keySet().removeIf(key -> key.startsWith("QITS_"));
     env.put(
         "QITS_WORKSPACE_DAEMON_URL",
         "ws://127.0.0.1:" + hostPort + "/workspaces/daemon/" + WORKSPACE_ID);
