@@ -86,9 +86,13 @@ public final class TestWorkspaceContainerFactory {
   private static WorkspaceContainerFactory build(boolean persistWorkspace) {
     WorkspaceContainerFactory f = new WorkspaceContainerFactory();
     f.imageRepo = IMAGE_REPO;
-    f.imageVersion = IMAGE_VERSION;
+    // Set through the OVERRIDE, because this fixture's whole point is an invented reference that is
+    // not the shipped pin — and the pin is now a compiled-in constant, not something a field
+    // assignment can replace. The two versions below stay invented and stay different from each
+    // other, for the reason the constants' javadoc gives.
+    f.imageVersionOverride = Optional.of(IMAGE_VERSION);
     f.editorImageRepo = EDITOR_IMAGE_REPO;
-    f.editorImageVersion = EDITOR_IMAGE_VERSION;
+    f.editorImageVersionOverride = Optional.of(EDITOR_IMAGE_VERSION);
     f.editorPort = EDITOR_PORT;
     f.projectsUrl = "http://qits-projects:8080";
     f.observabilityUrl = "http://qits-observability:8080";

@@ -44,10 +44,13 @@
             <artifactId>qits-workspaces-domain</artifactId>
         </dependency>
         <dependency>
-            <!-- The daemon wire contract. Vendored into this repo (see that module's pom) because
-                 it is published to no registry. -->
-            <groupId>${project.groupId}</groupId>
-            <artifactId>qits-workspaces-daemon-protocol</artifactId>
+            <!-- The daemon wire contract, released by qits-workspace-daemon and no longer vendored
+                 here. Stated explicitly although `domain` already pulls it: this module IS the side
+                 that speaks the protocol (DaemonControlSocket, WorkspaceDaemonRegistry), and a
+                 compile dependency that arrives transitively is one a refactor can remove by
+                 accident. Its version is the workspace image pin — see the root pom. -->
+            <groupId>eu.wohlben.qits</groupId>
+            <artifactId>qits-workspace-daemon-protocol</artifactId>
         </dependency>
         <dependency>
             <!-- The platform event bus client. Joining it here is what turns a library module into

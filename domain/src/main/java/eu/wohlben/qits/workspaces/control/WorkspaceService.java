@@ -1739,10 +1739,13 @@ public class WorkspaceService {
    *
    * <p><b>That now resolves to a pinned, published release</b> rather than a local {@code :latest}
    * tag, which narrows what a recreate can reach. It rolls a workspace forward exactly as far as
-   * the version this deployment carries, and no further: reaching a newer daemon takes the injected
-   * {@code QITS_WORKSPACE_IMAGE_VERSION} moving first (qits-configuration, kept in step by the
-   * {@code qits/workspace} SoftwareRelease event, then a redeploy). Recreate is still the operation
-   * that applies a new image — it just no longer picks up a rebuild nobody released.
+   * the version this deployment carries, and no further — and what that version is has moved: it is
+   * {@code WorkspaceImage.VERSION}, the version of the {@code qits-workspace-daemon-protocol}
+   * dependency this build was compiled against, not an environment entry qits-configuration rewrote
+   * underneath the running process. So reaching a newer daemon takes a bump of that pom line, a
+   * release of this service and a deploy — three reviewed steps where there used to be a listener.
+   * Recreate is still the operation that applies a new image; it just applies the one this release
+   * was tested with.
    *
    * <p><b>Requires a provably clean working tree.</b> Recreating is lossy for uncommitted work, so
    * the gate is stricter than {@link #requireCleanWorkingTree}: it consults the daemon-reported

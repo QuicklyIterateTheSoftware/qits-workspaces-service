@@ -39,6 +39,21 @@
             <artifactId>qits-workspaces-gitmirror</artifactId>
         </dependency>
         <dependency>
+            <!-- WHICH WORKSPACE IMAGE THIS SERVICE STARTS, and the wire contract that image's daemon
+                 speaks — one artifact, because they are one release. `domain` needs it for the first
+                 half alone (WorkspaceContainerFactory composes the image reference out of
+                 WorkspaceImage.VERSION); `service` needs it for the second, and states it itself
+                 rather than leaning on this transitive. Framework-free, so it adds no beans here. -->
+            <groupId>eu.wohlben.qits</groupId>
+            <artifactId>qits-workspace-daemon-protocol</artifactId>
+        </dependency>
+        <dependency>
+            <!-- …and which EDITOR image, from the repository that publishes it. One class, no
+                 transitive dependencies at all. -->
+            <groupId>eu.wohlben.qits</groupId>
+            <artifactId>qits-workspace-editor-image</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
         </dependency>
