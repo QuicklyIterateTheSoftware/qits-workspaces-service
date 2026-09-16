@@ -67,12 +67,22 @@ public class WorkspaceContainerFactory {
    * before the gate goes green, and the maintenance train moves the pom line through this
    * repository's own release request.
    *
-   * <p><b>The config key survives as an emergency override and must stay empty in normal operation.</b>
-   * {@code Optional}, so absent is the ordinary state rather than a stale default — an operator who
-   * has to pin a different image live can still set {@code QITS_WORKSPACE_IMAGE_VERSION}, and the
-   * pair is then explicitly untested by anything, which is the honest reading of an override.
+   * <p><b>An emergency override survives, under a name nothing automates.</b> {@code
+   * qits.workspace.image-version-override} — {@code QITS_WORKSPACE_IMAGE_VERSION_OVERRIDE} — is
+   * {@code Optional} with no shipped default, so absent is the ordinary state. An operator who has
+   * to pin a different image live can still set it, and the pair is then explicitly untested by
+   * anything, which is the honest reading of an override.
+   *
+   * <p><b>The key was renamed on 2026-09-16 and the old name is the reason.</b> This used to read
+   * {@code qits.workspace.image-version}, which is exactly the key qits-configuration's release
+   * listener wrote on every image release — so "an emergency override" and "the automatic pin" were
+   * one string, and the automatic one won on every deploy. Retiring the listener's row stops it
+   * being written again but cannot unwrite the entries already there, and this service cannot delete
+   * them. A different name is what makes the residue stop deciding, with no deletion required and no
+   * way for an automatic writer to land on the override again by accident. {@link
+   * RetiredImageVersionKeys} says so out loud while the old entries are still present.
    */
-  @ConfigProperty(name = "qits.workspace.image-version")
+  @ConfigProperty(name = "qits.workspace.image-version-override")
   Optional<String> imageVersionOverride;
 
   /**
@@ -103,7 +113,7 @@ public class WorkspaceContainerFactory {
    * it is the half that broke: the version <b>resolves</b>, so it names something that was really
    * published, and it moves through a reviewed release rather than underneath one.
    */
-  @ConfigProperty(name = "qits.editor.image-version")
+  @ConfigProperty(name = "qits.editor.image-version-override")
   Optional<String> editorImageVersionOverride;
 
   /**

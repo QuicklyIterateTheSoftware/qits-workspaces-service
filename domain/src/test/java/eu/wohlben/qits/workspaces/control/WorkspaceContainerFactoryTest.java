@@ -769,6 +769,21 @@ class WorkspaceContainerFactoryTest {
         "repo and pinned version joined as <repo>:<version>, fully qualified");
   }
 
+  /**
+   * THE RETIRED KEY IS NOT A FIELD ON THIS CLASS AT ALL, which is the whole of why the override was
+   * renamed.
+   *
+   * <p>`qits.workspace.image-version` is what qits-configuration's release listener wrote on every
+   * image release, and entries it already wrote are still in every deployment's environment —
+   * nothing deletes a configuration entry, and this service cannot. If that key were still the
+   * override, the residue would go on deciding the image for ever, which is exactly the state this
+   * ticket was sent back to REFINED for.
+   *
+   * <p>So there is no assertion to make here beyond the absence: the factory reads
+   * {@code …-version-override} and the retired name reaches it through nothing. What a value on the
+   * retired key DOES do is make {@link RetiredImageVersionKeys} warn at boot, which is that class's
+   * to prove.
+   */
   /** The editor override behaves exactly as the workspace one does, blank included. */
   @Test
   void theEditorOverrideWinsAndABlankOneDoesNot() {
