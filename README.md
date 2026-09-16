@@ -22,7 +22,7 @@ the boundary. Everything that runs *inside* the container belongs to
 | `gitmirror/` | `eu.wohlben.qits.workspaces.gitmirror` — the git substrate: a local mirror per repository, the worktrees a merge runs in, and the pushes that are the only way a ref moves. Framework-free; its tests run offline against throwaway bares. |
 | `domain/` | `eu.wohlben.qits.workspaces.*` — entity, persistence, dto, mapper, control, and the framework-free SPIs the daemon implements. No web, no JAX-RS. |
 | `service/` | `eu.wohlben.qits.workspaces.{api,daemonhost}` — JAX-RS routes, the SSE channels, and the daemon control socket + registry. |
-| `workspace-daemon-protocol/` | A **vendored copy** of the daemon wire contract. See that module's pom for why. |
+| — | The daemon wire contract is no longer a module here. It is the released `eu.wohlben.qits:qits-workspace-daemon-protocol`, and **its version is the `qits/workspace` image this service starts** — see AGENTS.md, "The protocol is a dependency, and its version is the workspace image". |
 | `service/src/main/webui/` | The SPA — a **submodule**, [qits-workspaces-frontend](https://github.com/QuicklyIterateTheSoftware/qits-workspaces-frontend). Quinoa builds it into the artifact and serves it at `/`. |
 
 So a checkout needs one command a plain clone does not give you:

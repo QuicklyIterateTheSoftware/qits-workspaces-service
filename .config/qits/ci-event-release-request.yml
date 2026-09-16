@@ -247,6 +247,15 @@ steps:
   # added here simply never runs — silently, which is why AGENTS.md says to change both in one commit.
   # Only `service` binds failsafe executions, so no other module is asked for a test it does not have.
   #
+  # `WorkspaceDaemonPinIT` IS IN THAT LIST AND IS NOT A STORY. It downloads the workspace daemon at
+  # exactly the version this reactor pins, runs it as a PROCESS against localhost and round-trips the
+  # real control-socket protocol — so a daemon bump that broke the wire fails here, on a branch,
+  # instead of in a live workspace. It needs no docker (which is why it is not in the `extended`
+  # suite) and it needs qits-artifacts, which this step reaches through $QITS_MAVEN_REPOSITORY_URL —
+  # exported below and derived by the test itself, so there is no second address to configure. It
+  # skips ONLY where no artifacts origin is configured at all, which is a bare clone and never this
+  # step; a version whose daemon is missing is a red gate with a sentence, not a skip.
+  #
   # The story catalogue needs `git` on PATH with `git http-backend` beside it: StoryGitHost shells the
   # CGI program git ships, to serve the fixture repositories over real smart HTTP — a packaged process
   # carries ConfiguredGitHostAddress and cannot be pointed at a bare on disk. maven-base has git; a
@@ -268,7 +277,7 @@ steps:
         -Dqits.maven.repository.url="$QITS_MAVEN_REPOSITORY_URL" \
         -Dquarkus.quinoa=false \
         -DskipITs=false \
-        -Dit.test=TokenValidationBootstrapIT,WorkspaceProvisionIT,EditorEnsureIT,OperatorReadsIT,MergeDoorRefusalIT
+        -Dit.test=TokenValidationBootstrapIT,WorkspaceProvisionIT,EditorEnsureIT,OperatorReadsIT,MergeDoorRefusalIT,WorkspaceDaemonPinIT
 
       # `-C … .` so the story directories are the bundle's roots — nesting one directory deep would
       # put it in every served URL. The path is the module's, since `service` is the only module
