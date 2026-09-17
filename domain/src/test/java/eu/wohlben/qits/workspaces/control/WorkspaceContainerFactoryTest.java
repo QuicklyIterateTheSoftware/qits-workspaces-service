@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceImage;
+import eu.wohlben.qits.workspaceeditor.WorkspaceEditorImage;
 import jakarta.enterprise.inject.Instance;
 import org.eclipse.microprofile.config.ConfigProvider;
 import java.time.ZoneId;
@@ -25,33 +27,34 @@ import org.junit.jupiter.api.Test;
 class WorkspaceContainerFactoryTest {
 
   /**
-   * The shipped default image reference, composed from the two keys the service now ships: {@code
-   * qits.workspace.image-repo} (registry host with a port, repository path) and {@code
-   * qits.workspace.image-version} (the calver tag). Read from config rather than written down — the
-   * version half is a fallback the deployer overrides at runtime (from qits-configuration), so a
-   * literal here would go red on a bump that works as intended. The composed reference carries two
-   * colons, so anything that ever tried to split it into name and tag would fail on it rather than
-   * on a container launch. {@link #composesTheShippedDefaultReference} pins the exact default; the
-   * reuse here asserts the factory joins the same halves the config carries.
+   * The registry host and repository path — the half that IS still config, and the only half.
+   * {@code qits.workspace.image-repo} is a committed property because where the registry is, is a
+   * deployment's business; the version half is the pinned dependency's (see {@link #IMAGE_VERSION}).
+   *
+   * <p>Read from config rather than written down so this constant asserts that the factory joins the
+   * halves the config really carries. The composed reference carries two colons, so anything that
+   * ever tried to split it into name and tag would fail on it rather than on a container launch.
    */
   private static final String IMAGE_REPO =
       ConfigProvider.getConfig().getValue("qits.workspace.image-repo", String.class);
 
-  private static final String IMAGE_VERSION =
-      ConfigProvider.getConfig().getValue("qits.workspace.image-version", String.class);
+  /**
+   * <b>The pin, not a config value.</b> {@code qits.workspace.image-version} ships unset now — it is
+   * an operator's emergency override and nothing else — and the version a launch really uses is the
+   * version of {@code eu.wohlben.qits:qits-workspace-daemon-protocol}, the jar this reactor pins and
+   * whose release also pushed the image. Reading the constant is reading what a deployment reads;
+   * reading the (absent) config key would be asserting against the override path on every case.
+   */
+  private static final String IMAGE_VERSION = WorkspaceImage.VERSION;
 
   private static final String IMAGE = IMAGE_REPO + ":" + IMAGE_VERSION;
 
-  /**
-   * The editor pin, read from config for the reason the workspace pin is: the version half is a
-   * fallback the deployer overrides from qits-configuration, so a literal here would go red on a
-   * bump that works as intended. {@link #composesTheShippedEditorReference} pins the exact default.
-   */
+  /** The editor image's registry host and path, for {@link #IMAGE_REPO}'s reason. */
   private static final String EDITOR_IMAGE_REPO =
       ConfigProvider.getConfig().getValue("qits.editor.image-repo", String.class);
 
-  private static final String EDITOR_IMAGE_VERSION =
-      ConfigProvider.getConfig().getValue("qits.editor.image-version", String.class);
+  /** The editor pin, for {@link #IMAGE_VERSION}'s reason. */
+  private static final String EDITOR_IMAGE_VERSION = WorkspaceEditorImage.VERSION;
 
   private static final String EDITOR_IMAGE = EDITOR_IMAGE_REPO + ":" + EDITOR_IMAGE_VERSION;
 
@@ -68,9 +71,12 @@ class WorkspaceContainerFactoryTest {
   private WorkspaceContainerFactory factory() {
     WorkspaceContainerFactory f = new WorkspaceContainerFactory();
     f.imageRepo = IMAGE_REPO;
-    f.imageVersion = IMAGE_VERSION;
+    // Empty, which is a deployment's normal state: the version comes off the pinned dependency and
+    // the config key is only an override. A fixture that set it would test the override on every
+    // case and never the shipped path.
+    f.imageVersionOverride = Optional.empty();
     f.editorImageRepo = EDITOR_IMAGE_REPO;
-    f.editorImageVersion = EDITOR_IMAGE_VERSION;
+    f.editorImageVersionOverride = Optional.empty();
     f.editorPort = 13339;
     f.projectsUrl = "http://qits-projects:8080/";
     f.observabilityUrl = "http://qits-observability:8080/";
@@ -599,33 +605,56 @@ class WorkspaceContainerFactoryTest {
   }
 
   /**
-   * The two keys compose to the fully qualified default the deployment starts with. This pins the
-   * shipped {@code META-INF/microprofile-config.properties} default exactly, because the version
-   * half no longer moves in this file — the deployer overrides it from qits-configuration — so the
-   * default is now stable.
+   * The committed repo and the PINNED version compose to a fully qualified reference.
+   *
+   * <p>It used to assert a literal, because the version was a shipped config default. That is the
+   * line this whole change deletes: the default aged until it named {@code 2026.820.155203}, an
+   * image the registry's retention had removed, and nothing here could tell. The version half is now
+   * the pinned dependency's, so a literal would have to be edited by every bump of it — which is
+   * exactly the edit a train makes and a person forgets. What is still worth pinning is the SHAPE:
+   * the registry host survives (it carries its own {@code host:port}, so the reference has two
+   * colons and cannot be split naively), and the two halves are joined with one colon between them.
    */
   @Test
   void composesTheShippedDefaultReference() {
     assertEquals(
-        "registry.dev.localhost:8080/qits/workspace:2026.820.155203",
+        "registry.dev.localhost:8080/qits/workspace:" + WorkspaceImage.VERSION,
         factory().image(),
-        "repo and version joined as <repo>:<version>, fully qualified");
+        "repo and pinned version joined as <repo>:<version>, fully qualified");
   }
 
   /**
-   * The deployer injects {@code QITS_WORKSPACE_IMAGE_VERSION}, which SmallRye maps onto {@code
-   * qits.workspace.image-version}, and the injected value wins over the default. A hand-built factory
-   * stands in for that injection so the override is exercised without booting the app: the factory
-   * composes whatever version it is handed against the committed repo, staying fully qualified.
+   * An operator's {@code QITS_WORKSPACE_IMAGE_VERSION} still wins — the emergency door, and the only
+   * thing left of what used to be the normal path. A hand-built factory stands in for the injection
+   * so the override is exercised without booting the app.
    */
   @Test
-  void theInjectedVersionWinsOverTheDefault() {
+  void theInjectedVersionWinsOverThePin() {
     WorkspaceContainerFactory overridden = new WorkspaceContainerFactory();
     overridden.imageRepo = "registry.dev.localhost:8080/qits/workspace";
-    overridden.imageVersion = "2026.999.000000";
+    overridden.imageVersionOverride = Optional.of("2026.999.000000");
 
     assertEquals(
         "registry.dev.localhost:8080/qits/workspace:2026.999.000000", overridden.image());
+  }
+
+  /**
+   * …and a BLANK override is not an override.
+   *
+   * <p>Worth its own case because of how the key is delivered: SmallRye maps an environment variable
+   * onto the property, and a deployment that renders {@code QITS_WORKSPACE_IMAGE_VERSION=} — a
+   * template with nothing to put in it, which is exactly what qits-configuration leaves behind when
+   * the entry it used to write is retired — produces a present, empty value rather than an absent
+   * one. Taken literally that composes {@code …/qits/workspace:} and every container launch fails on
+   * a reference with no tag.
+   */
+  @Test
+  void aBlankOverrideFallsBackToThePin() {
+    WorkspaceContainerFactory blank = new WorkspaceContainerFactory();
+    blank.imageRepo = "registry.dev.localhost:8080/qits/workspace";
+    blank.imageVersionOverride = Optional.of("");
+
+    assertEquals("registry.dev.localhost:8080/qits/workspace:" + WorkspaceImage.VERSION, blank.image());
   }
 
   // --- the editor posture -----------------------------------------------------------------------
@@ -724,16 +753,50 @@ class WorkspaceContainerFactoryTest {
   }
 
   /**
-   * The editor's two keys compose the same way the workspace pin's do, and this pins the shipped
-   * default exactly. The version names no released tag yet — qits-workspace-editor-oci has never
-   * been released — so what is asserted is the placeholder the properties file documents, and the
-   * first real release moves both this literal and that comment together.
+   * The editor's reference composes the same way, out of the committed repo and its own pin.
+   *
+   * <p>The literal this used to assert was worse than the workspace one: it named the calver of the
+   * {@code qits/workspace} release the editor's Dockerfile was pinned FROM, because
+   * qits-workspace-editor-oci had never been released and there was no real tag to name. A
+   * placeholder documented as a placeholder is still a value a launch composes an image reference
+   * out of. The version is the pinned dependency's now, so there is nothing left to stand in for.
    */
   @Test
   void composesTheShippedEditorReference() {
     assertEquals(
-        "registry.dev.localhost:8080/qits/workspace-editor:2026.823.71954",
+        "registry.dev.localhost:8080/qits/workspace-editor:" + WorkspaceEditorImage.VERSION,
         factory().editorImage(),
-        "repo and version joined as <repo>:<version>, fully qualified");
+        "repo and pinned version joined as <repo>:<version>, fully qualified");
+  }
+
+  /**
+   * THE RETIRED KEY IS NOT A FIELD ON THIS CLASS AT ALL, which is the whole of why the override was
+   * renamed.
+   *
+   * <p>`qits.workspace.image-version` is what qits-configuration's release listener wrote on every
+   * image release, and entries it already wrote are still in every deployment's environment —
+   * nothing deletes a configuration entry, and this service cannot. If that key were still the
+   * override, the residue would go on deciding the image for ever, which is exactly the state this
+   * ticket was sent back to REFINED for.
+   *
+   * <p>So there is no assertion to make here beyond the absence: the factory reads
+   * {@code …-version-override} and the retired name reaches it through nothing. What a value on the
+   * retired key DOES do is make {@link RetiredImageVersionKeys} warn at boot, which is that class's
+   * to prove.
+   */
+  /** The editor override behaves exactly as the workspace one does, blank included. */
+  @Test
+  void theEditorOverrideWinsAndABlankOneDoesNot() {
+    WorkspaceContainerFactory overridden = new WorkspaceContainerFactory();
+    overridden.editorImageRepo = "registry.dev.localhost:8080/qits/workspace-editor";
+    overridden.editorImageVersionOverride = Optional.of("2026.999.000000");
+    assertEquals(
+        "registry.dev.localhost:8080/qits/workspace-editor:2026.999.000000",
+        overridden.editorImage());
+
+    overridden.editorImageVersionOverride = Optional.of("");
+    assertEquals(
+        "registry.dev.localhost:8080/qits/workspace-editor:" + WorkspaceEditorImage.VERSION,
+        overridden.editorImage());
   }
 }

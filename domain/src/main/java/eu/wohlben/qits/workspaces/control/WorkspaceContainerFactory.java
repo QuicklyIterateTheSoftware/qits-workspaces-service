@@ -1,5 +1,7 @@
 package eu.wohlben.qits.workspaces.control;
 
+import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceImage;
+import eu.wohlben.qits.workspaceeditor.WorkspaceEditorImage;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -47,14 +49,41 @@ public class WorkspaceContainerFactory {
   String imageRepo;
 
   /**
-   * The released calver the workspace image is pinned to. Read from config, never a constant,
-   * because the deployer injects {@code QITS_WORKSPACE_IMAGE_VERSION} — sourced from
-   * qits-configuration, kept in step by the {@code qits/workspace} image's own {@code
-   * SoftwareRelease} event — and SmallRye maps that env var onto this property automatically, so the
-   * injected value wins over the {@code META-INF/microprofile-config.properties} default.
+   * The released calver the workspace image is pinned to — <b>{@link WorkspaceImage#VERSION}, the
+   * version of the dependency this reactor pins</b>, with config as an explicit override and
+   * nothing else.
+   *
+   * <p><b>It used to be the other way round</b>, and that is the defect this field records. The
+   * value came from config, the deployer injected {@code QITS_WORKSPACE_IMAGE_VERSION} out of
+   * qits-configuration, and qits-configuration's release listener rewrote that entry the moment
+   * qits-workspace-daemon pushed an image. So a new daemon was used by the next workspace without
+   * this service's tests ever having seen the pair — and the shipped fallback aged in silence until
+   * it named an image the registry's retention had deleted, which made any run <em>without</em> the
+   * injection start from a reference that could not be pulled.
+   *
+   * <p>Now the version is the version of {@code eu.wohlben.qits:qits-workspace-daemon-protocol}, the
+   * jar that also carries the protocol both ends speak. It cannot age: the dependency has to resolve
+   * for this reactor to build, {@code WorkspaceDaemonPinIT} starts that exact daemon and talks to it
+   * before the gate goes green, and the maintenance train moves the pom line through this
+   * repository's own release request.
+   *
+   * <p><b>An emergency override survives, under a name nothing automates.</b> {@code
+   * qits.workspace.image-version-override} — {@code QITS_WORKSPACE_IMAGE_VERSION_OVERRIDE} — is
+   * {@code Optional} with no shipped default, so absent is the ordinary state. An operator who has
+   * to pin a different image live can still set it, and the pair is then explicitly untested by
+   * anything, which is the honest reading of an override.
+   *
+   * <p><b>The key was renamed on 2026-09-16 and the old name is the reason.</b> This used to read
+   * {@code qits.workspace.image-version}, which is exactly the key qits-configuration's release
+   * listener wrote on every image release — so "an emergency override" and "the automatic pin" were
+   * one string, and the automatic one won on every deploy. Retiring the listener's row stops it
+   * being written again but cannot unwrite the entries already there, and this service cannot delete
+   * them. A different name is what makes the residue stop deciding, with no deletion required and no
+   * way for an automatic writer to land on the override again by accident. {@link
+   * RetiredImageVersionKeys} says so out loud while the old entries are still present.
    */
-  @ConfigProperty(name = "qits.workspace.image-version")
-  String imageVersion;
+  @ConfigProperty(name = "qits.workspace.image-version-override")
+  Optional<String> imageVersionOverride;
 
   /**
    * The registry host and path of the <b>editor</b> image — {@code qits/workspace-editor}, the
@@ -71,14 +100,21 @@ public class WorkspaceContainerFactory {
   String editorImageRepo;
 
   /**
-   * The released calver the editor image is pinned to. Read from config, never a constant, for the
-   * reason {@link #imageVersion} gives: the deployer injects {@code QITS_EDITOR_IMAGE_VERSION} —
-   * sourced from qits-configuration, kept in step by the {@code qits/workspace-editor} image's own
-   * {@code SoftwareRelease} event — and SmallRye maps that env var onto this property, so the
-   * injected value wins over the shipped default.
+   * The released calver the editor image is pinned to — {@link WorkspaceEditorImage#VERSION}, with
+   * config as an explicit override. Everything {@link #imageVersionOverride}'s javadoc says applies
+   * here verbatim, against {@code eu.wohlben.qits:qits-workspace-editor-image} and {@code
+   * QITS_EDITOR_IMAGE_VERSION}.
+   *
+   * <p>One difference worth stating: nothing tests this pair the way {@code WorkspaceDaemonPinIT}
+   * tests the workspace one, and nothing can from here. The editor image is the workspace image plus
+   * a directory, and what would be under test is whether openvscode-server is where the daemon
+   * expects it — which is a question about the image's contents, and this service cannot run an
+   * image (no docker in a CI step container). What the dependency buys here is the other half, and
+   * it is the half that broke: the version <b>resolves</b>, so it names something that was really
+   * published, and it moves through a reviewed release rather than underneath one.
    */
-  @ConfigProperty(name = "qits.editor.image-version")
-  String editorImageVersion;
+  @ConfigProperty(name = "qits.editor.image-version-override")
+  Optional<String> editorImageVersionOverride;
 
   /**
    * The loopback port the in-container editor listens on, forwarded to the daemon as {@code
@@ -495,7 +531,7 @@ public class WorkspaceContainerFactory {
    * inspect-then-pull this service used to do itself went with the docker socket.
    */
   public String image() {
-    return imageRepo + ":" + imageVersion;
+    return imageRepo + ":" + imageVersion();
   }
 
   /**
@@ -504,7 +540,7 @@ public class WorkspaceContainerFactory {
    * workspace runs and what every other workspace does not — see {@link #editorWorkspace}.
    */
   public String editorImage() {
-    return editorImageRepo + ":" + editorImageVersion;
+    return editorImageRepo + ":" + editorImageVersion();
   }
 
   /**
@@ -519,9 +555,18 @@ public class WorkspaceContainerFactory {
     return imageRepo;
   }
 
-  /** The workspace image's calver tag; see {@link #imageRepo()}. */
+  /**
+   * The workspace image's calver tag — <b>the pinned dependency's version, unless an operator has
+   * deliberately overridden it</b>; see {@link #imageRepo()} for why the two halves are readable
+   * apart, and {@link #imageVersionOverride} for why the pin is the default and not the other way
+   * round.
+   *
+   * <p>One method rather than a field resolved at injection, because {@code GET /workspaces/api/pins}
+   * and every launch have to give the same answer, and a second read of the config key somewhere
+   * else is exactly how they would stop doing so.
+   */
   public String imageVersion() {
-    return imageVersion;
+    return imageVersionOverride.filter(value -> !value.isBlank()).orElse(WorkspaceImage.VERSION);
   }
 
   /** The editor image's registry host and path; see {@link #imageRepo()}. */
@@ -529,9 +574,11 @@ public class WorkspaceContainerFactory {
     return editorImageRepo;
   }
 
-  /** The editor image's calver tag; see {@link #imageRepo()}. */
+  /** The editor image's calver tag; see {@link #imageVersion()}, which it mirrors exactly. */
   public String editorImageVersion() {
-    return editorImageVersion;
+    return editorImageVersionOverride
+        .filter(value -> !value.isBlank())
+        .orElse(WorkspaceEditorImage.VERSION);
   }
 
   /**

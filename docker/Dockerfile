@@ -107,9 +107,12 @@ COPY .mvn/ .mvn/
 RUN ./mvnw --version
 
 # The whole reactor, not a module list. `-am` builds `service`'s dependencies from source —
-# `qits-workspaces-domain` and `qits-workspaces-daemon-protocol` are 1.0.0-SNAPSHOTs this repo never
-# publishes (no distributionManagement, no <repositories>), so a builder container with an empty
-# ~/.m2 has nowhere else to get them. Copying module by module would mean editing this file every
+# `qits-workspaces-domain` and `qits-workspaces-gitmirror` are this reactor's own modules, which this
+# repo never publishes, so a builder container with an empty ~/.m2 has nowhere else to get them.
+# (`qits-workspaces-daemon-protocol` used to be on that list and is not a module any more: the wire
+# contract is the released `eu.wohlben.qits:qits-workspace-daemon-protocol`, resolved from the
+# platform registry like every other pinned coordinate, and its version is the workspace image this
+# service starts. The root pom says why.) Copying module by module would mean editing this file every
 # time one is added, and forgetting to would fail the build with an unresolved dependency rather than
 # anything that names the real cause. `.dockerignore` is what keeps this cheap — without it this line
 # drags in every target/ dir, and a stale one can shadow what this stage compiles.

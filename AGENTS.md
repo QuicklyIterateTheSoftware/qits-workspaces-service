@@ -484,12 +484,45 @@ Two properties worth not simplifying away:
 `ENDED` is lowest precedence deliberately: a workspace with one finished session and one still idling
 has a live conversation in it.
 
-## The vendored protocol module
+## The protocol is a dependency, and its version is the workspace image
 
-`workspace-daemon-protocol/` is a copy of the daemon repo's module, same java package, different
-artifactId. Any change to it must be mirrored in
-[qits-workspace-daemon](https://github.com/QuicklyIterateTheSoftware/qits-workspace-daemon) and bump
-`DaemonProtocol.CAPABILITY_VERSION`. `DaemonCodecTest` runs on both sides and is what catches drift.
+`workspace-daemon-protocol/` used to be a module here — a byte-identical copy of the daemon repo's,
+same java package, different artifactId, because that module was published nowhere. **It is gone.**
+qits-workspace-daemon publishes it as `eu.wohlben.qits:qits-workspace-daemon-protocol`, and this
+reactor depends on it. Its own pom always said this would be the day: the package was kept identical
+precisely so the swap would be a pom change with no source edits, and it was.
+
+**The version of that jar IS the `qits/workspace` tag this service starts containers from.** One
+artifact carries both, because the thing this service must *speak* and the thing it must *start* are
+one release. `WorkspaceImage.VERSION` is the constant; `WorkspaceContainerFactory.imageVersion()`
+reads it. The editor's pin is the same shape one repository over —
+`eu.wohlben.qits:qits-workspace-editor-image`, `WorkspaceEditorImage.VERSION` — with no protocol in
+it, because there is no wire to share with an image the daemon merely starts a process out of.
+
+**What that replaced, because the failure is the reason for all of it.** Both versions used to
+arrive as `env.QITS_WORKSPACE_IMAGE_VERSION` / `env.QITS_EDITOR_IMAGE_VERSION`, qits-configuration
+entries its release listener rewrote the moment an image was pushed. So a new daemon was used by the
+next workspace with nothing having tested the pair, and the fallback defaults shipped in `domain`'s
+properties file aged in silence until they named images the registry's retention had deleted — any
+run *without* the injection started from a reference that could not be pulled. A dependency cannot
+age that way: it has to **resolve** for this reactor to build.
+
+Three consequences worth keeping straight:
+
+- **A protocol change reaches this service as a version bump, gated here.** Add a message in the
+  daemon repo, release it, let qits-platform-maintenance move the pom line, handle the new case in
+  `WorkspaceDaemonRegistry.onMessage`. Slower than editing a vendored copy, and that is the point —
+  the host that must understand a frame is the one whose gate now sees the change.
+- **`WorkspaceDaemonPinIT` is what makes the pin mean something.** It downloads the daemon at exactly
+  the pinned version, runs it as a process and round-trips the real protocol. It is named in
+  `.config/qits/userflow-stories`, the one-class-per-line list the composed QA pipeline turns into
+  `-Dit.test`; a test not named there never runs, so the two move together.
+- **The two config keys survive as emergency overrides and must stay unset.** They are `Optional`
+  with no shipped default, so absent is the ordinary state. Setting one pins an image nothing has
+  tested against this service, which is the honest reading of an override.
+
+**qits-projects-service still vendors a copy of the same module.** Until it takes the dependency too,
+`diff -r` against the daemon repo is still the drift detector over there.
 
 ## The mirror, and what it replaced
 
@@ -1600,13 +1633,13 @@ build-time key; it would silently take the default, which is this repo's own wor
 
 **It is opted in by NAME, not by `skipITs`.** The root pom keeps `skipITs=true`, because failsafe
 has one run per module and flipping it would turn the five docker-backed `Daemon*IT` back on with
-it. Run it — and the userflow half of `.config/qits/ci-event-release-request.yml` runs it — as a
-comma list:
+it. Run it — and the composed QA pipeline's verify runs it — as a comma list:
 
     ./mvnw verify -DskipITs=false -Dquarkus.quinoa=false \
       -Dit.test=TokenValidationBootstrapIT,WorkspaceProvisionIT,EditorEnsureIT,OperatorReadsIT,MergeDoorRefusalIT
 
-Adding a story class means adding it there **and** in the ci file. `-Dit.test` alone still runs the
+Adding a story class means adding it there **and** in `.config/qits/userflow-stories`, which is
+what that selection is composed from. `-Dit.test` alone still runs the
 surefire suites, which is the honest gate; a run that wants only the stories adds
 `-Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false`.
 
@@ -1697,7 +1730,7 @@ class orderer is installed the one way Quarkus permits — the
 `junit.quarkus.orderer.secondary-orderer` line in `service`'s test properties; a local
 `junit-platform.properties` hard-fails surefire.
 
-The userflow half of `.config/qits/ci-event-release-request.yml` publishes the reports as the docs
-bundle `@userflows/qits-workspaces` — once per release-request fold, since per-push CI retired — and
-is **non-gating by design**: it declares `gating: false`, so a red story shows the run red without
-holding the fold at qits-projects' release gate.
+The composed QA pipeline's verify publishes the reports as the docs bundle
+`@userflows/qits-workspaces` — once per release-request fold, since per-push CI retired. It **gates**,
+like every step of the composed pipeline: a `gating: false` step is a run whose verdict qits-projects'
+gate matches neither arm of, so the archetype carries none and a red story holds the fold.

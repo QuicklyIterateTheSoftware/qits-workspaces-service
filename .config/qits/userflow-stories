@@ -3,3 +3,10 @@ WorkspaceProvisionIT
 EditorEnsureIT
 OperatorReadsIT
 MergeDoorRefusalIT
+
+# Not a story. WorkspaceDaemonPinIT downloads the workspace daemon at exactly the version this
+# reactor pins, runs it as a process against localhost and round-trips the real control-socket
+# protocol, so a daemon bump that broke the wire fails here rather than in a live workspace. It
+# rides this list because this list is the QA verify's `-Dit.test`, and a class the selection stops
+# naming silently stops running.
+WorkspaceDaemonPinIT

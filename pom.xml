@@ -31,19 +31,42 @@
          and the mandatory -Dqits.variant=oauth|forwardauth|local auth profiles. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-workspaces</artifactId>
-    <version>2026.916.152154</version>
+    <version>2026.917.62253</version>
     <packaging>pom</packaging>
     <name>qits-workspaces</name>
 
     <modules>
-        <!-- Listed in dependency order for readability; Maven computes reactor order itself. -->
-        <module>workspace-daemon-protocol</module>
+        <!-- Listed in dependency order for readability; Maven computes reactor order itself.
+
+             `workspace-daemon-protocol` used to be the first entry: a vendored, byte-identical copy
+             of qits-workspace-daemon's module, because that module was published nowhere. It is
+             published now, as eu.wohlben.qits:qits-workspace-daemon-protocol, and the version of
+             that jar IS the workspace image this service starts — so it is a dependency below, and
+             the copy is gone. Its pom always said this would be the day. -->
         <module>gitmirror</module>
         <module>domain</module>
         <module>service</module>
     </modules>
 
     <properties>
+        <!-- THE TWO IMAGE PINS, AS DEPENDENCIES. These are not ordinary library versions: each
+             artifact's version IS the tag of the image this service starts containers from, and
+             WorkspaceImage / WorkspaceEditorImage carry that string into the runtime. So moving one
+             of these lines moves which image the next workspace runs, and it moves it through this
+             repository's own release request — reviewed, gated, and tested against the daemon it
+             pins by WorkspaceDaemonPinIT.
+
+             That is the whole point of them. Before, the versions arrived as
+             env.QITS_WORKSPACE_IMAGE_VERSION / env.QITS_EDITOR_IMAGE_VERSION, which qits-configuration
+             rewrote on every image release — a new daemon reached the next workspace with no test of
+             the pair, and the fallback defaults shipped in domain's properties file aged until they
+             named images the registry's retention had deleted. A dependency cannot age that way: it
+             has to RESOLVE for this reactor to build.
+
+             qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
+             gated here. Do not hand-edit one to chase a release. -->
+        <qits.workspace-daemon-protocol.version>2026.917.53228</qits.workspace-daemon-protocol.version>
+        <qits.workspace-editor-image.version>2026.917.55505</qits.workspace-editor-image.version>
         <qits.eventstream.version>2026.915.224730</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.915.220910</qits.db-core.version>
@@ -207,12 +230,26 @@
                 <artifactId>mapstruct</artifactId>
                 <version>${mapstruct.version}</version>
             </dependency>
-            <!-- The reactor's own modules, so children depend on them version-less. -->
+            <!-- The workspace daemon's wire contract AND the version of the image it ships in —
+                 one artifact, because the thing this service must speak and the thing it must start
+                 are the same release. qits-workspace-daemon publishes it; WorkspaceImage is the pin.
+                 Not a reactor module any more; see <modules> above. -->
             <dependency>
-                <groupId>${project.groupId}</groupId>
-                <artifactId>qits-workspaces-daemon-protocol</artifactId>
-                <version>${project.version}</version>
+                <groupId>eu.wohlben.qits</groupId>
+                <artifactId>qits-workspace-daemon-protocol</artifactId>
+                <version>${qits.workspace-daemon-protocol.version}</version>
             </dependency>
+            <!-- The editor image's version, from the repository that publishes the image. One class
+                 and no types: there is no protocol to share with an image the daemon merely starts a
+                 process out of. A SECOND coordinate rather than a suffix on the first, for the
+                 reason the two image-repo keys are two keys — the images are released by two
+                 repositories on two calvers and either train can run alone. -->
+            <dependency>
+                <groupId>eu.wohlben.qits</groupId>
+                <artifactId>qits-workspace-editor-image</artifactId>
+                <version>${qits.workspace-editor-image.version}</version>
+            </dependency>
+            <!-- The reactor's own modules, so children depend on them version-less. -->
             <dependency>
                 <!-- The git substrate: the mirror cache, its worktrees and its pushes. Framework
                      -free like the daemon protocol beside it, so `domain` gets a library and not a
