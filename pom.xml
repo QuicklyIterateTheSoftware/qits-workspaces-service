@@ -66,7 +66,7 @@
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
         <qits.workspace-daemon-protocol.version>2026.916.180326</qits.workspace-daemon-protocol.version>
-        <qits.workspace-editor-image.version>2026.916.164357</qits.workspace-editor-image.version>
+        <qits.workspace-editor-image.version>2026.917.1632</qits.workspace-editor-image.version>
         <qits.eventstream.version>2026.915.224730</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.915.220910</qits.db-core.version>
