@@ -1,0 +1,5 @@
+TokenValidationBootstrapIT
+WorkspaceProvisionIT
+EditorEnsureIT
+OperatorReadsIT
+MergeDoorRefusalIT
