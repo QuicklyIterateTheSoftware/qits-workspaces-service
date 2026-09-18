@@ -65,14 +65,14 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.917.91051</qits.workspace-daemon-protocol.version>
-        <qits.workspace-editor-image.version>2026.917.122911</qits.workspace-editor-image.version>
+        <qits.workspace-daemon-protocol.version>2026.918.163555</qits.workspace-daemon-protocol.version>
+        <qits.workspace-editor-image.version>2026.918.164234</qits.workspace-editor-image.version>
         <qits.eventstream.version>2026.917.70940</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.917.65806</qits.db-core.version>
         <qits.arch-rules.version>2026.917.65806</qits.arch-rules.version>
         <qits.auth-core.version>2026.917.65806</qits.auth-core.version>
-        <qits.containers-client.version>2026.917.175837</qits.containers-client.version>
+        <qits.containers-client.version>2026.918.91418</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
