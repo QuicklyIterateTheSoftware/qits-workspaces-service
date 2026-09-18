@@ -1732,5 +1732,6 @@ class orderer is installed the one way Quarkus permits — the
 
 The composed QA pipeline's verify publishes the reports as the docs bundle
 `@userflows/qits-workspaces` — once per release-request fold, since per-push CI retired. It **gates**,
-like every step of the composed pipeline: a `gating: false` step is a run whose verdict qits-projects'
-gate matches neither arm of, so the archetype carries none and a red story holds the fold.
+like every step of the composed pipeline: a step that did not gate would make the run a verdict
+qits-projects' gate matches neither arm of, so there is no way to declare one — qits-ci refuses the
+key outright — and a red story holds the fold.
