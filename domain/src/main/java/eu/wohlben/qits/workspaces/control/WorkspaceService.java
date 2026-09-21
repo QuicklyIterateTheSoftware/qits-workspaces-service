@@ -631,8 +631,9 @@ public class WorkspaceService {
   }
 
   /**
-   * The live workspaces that name one of these qits-projects tickets or epics — what a ticket panel
-   * over there asks so it can say "an agent is already on this one, here is the way in".
+   * The workspaces that name one of these qits-projects tickets or epics — what a ticket panel over
+   * there asks so it can say "an agent is already on this one, here is the way in", or "the work on
+   * this one was integrated".
    *
    * <p><b>Not {@link #listWorkspaces} with a filter, and the difference is the cost.</b> That
    * listing exists to draw the branch tree of <em>one</em> repository: it refreshes the mirror,
@@ -640,16 +641,26 @@ public class WorkspaceService {
    * asked about a page full of rows at once, and needs none of that — a link and the row it belongs
    * to is the whole answer. So it is a straight query and a thin shape, and it costs one statement.
    *
-   * <p>What counts as live is {@code WorkspaceRepository.findActiveBySubjects}' to say, and it says
-   * it there rather than here: ACTIVE, container state irrelevant.
+   * <p>Which rows come back is {@code WorkspaceRepository.findBySubjects}' to say, and it says it
+   * there rather than here: every workspace the subject names, whatever its status and whatever its
+   * container is doing. So each row carries its own status and its {@code resolvedAt}, and what to
+   * make of a resolved one is the reader's question — this service has no view on whether a landed
+   * workspace is still worth showing beside a ticket.
    */
   public List<WorkspaceSubjectRefDto> workspacesReferencing(
       Collection<String> ticketIds, Collection<String> epicIds) {
-    return workspaceRepository.findActiveBySubjects(ticketIds, epicIds).stream()
+    return workspaceRepository.findBySubjects(ticketIds, epicIds).stream()
         .map(
             w ->
                 new WorkspaceSubjectRefDto(
-                    w.id, w.repositoryId, w.workspaceId, w.branch, w.ticketId, w.epicId))
+                    w.id,
+                    w.repositoryId,
+                    w.workspaceId,
+                    w.branch,
+                    w.ticketId,
+                    w.epicId,
+                    w.status == null ? null : w.status.name(),
+                    w.resolvedAt))
         .toList();
   }
 

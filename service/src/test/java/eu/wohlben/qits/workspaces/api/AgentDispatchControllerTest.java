@@ -406,12 +406,13 @@ public class AgentDispatchControllerTest {
   }
 
   /**
-   * The read back: qits-projects asks which live workspaces name its rows, for a screenful of rows
-   * at once. Both parameters repeat and both are optional, and an id nothing was dispatched onto
-   * answers nothing rather than everything.
+   * The read back: qits-projects asks which workspaces name its rows, for a screenful of rows at
+   * once. Both parameters repeat and both are optional, and an id nothing was dispatched onto
+   * answers nothing rather than everything. Each row states its own status, so a caller reading one
+   * never has to infer from the row's presence what the row itself can say.
    */
   @Test
-  public void theReferencesDoorAnswersTheLiveWorkspacesForTheRowsAskedAbout() throws Exception {
+  public void theReferencesDoorAnswersTheWorkspacesForTheRowsAskedAbout() throws Exception {
     String repoId = seedRepository();
     dispatch(bodyForTicket(repoId, "ticket/referenced", "t-99", "go"), 200);
     Map<String, Object> epicDispatch = body(repoId, "epic/referenced", null, "go");
@@ -426,6 +427,8 @@ public class AgentDispatchControllerTest {
     assertThat(one.getString("entries[0].workspace.workspaceId"), is("ticket-referenced"));
     assertThat(one.getLong("entries[0].workspace.workspaceRowId"), is(notNullValue()));
     assertNull(one.getString("entries[0].workspace.epicId"));
+    assertThat(one.getString("entries[0].workspace.status"), is("ACTIVE"));
+    assertNull(one.getString("entries[0].workspace.resolvedAt"));
 
     // Batched, and across both kinds in one call — the whole reason the parameters repeat.
     JsonPath both = references("?ticketId=t-99&ticketId=t-nothing&epicId=e-7");
@@ -438,12 +441,15 @@ public class AgentDispatchControllerTest {
   }
 
   /**
-   * What ends a reference is the workspace resolving, and nothing else — which is why the ticket
-   * side stores no pointer it would have to clear. Discarding the workspace takes it out of the
-   * answer with nobody over there having done anything.
+   * Resolving a workspace does not end the reference, it changes what the reference says. The row
+   * stays in the answer and reports the status it resolved to, because the side that owns the ticket
+   * wants to show that the work was done and where — "this ticket's workspace was abandoned" is a
+   * sentence somebody reads, and a row that simply vanished would leave the panel unable to tell it
+   * apart from a ticket nobody ever dispatched. The status is what carries the distinction, so the
+   * reader decides; this door decides nothing.
    */
   @Test
-  public void aResolvedWorkspaceStopsBeingReferenced() throws Exception {
+  public void aResolvedWorkspaceIsStillReportedAndCarriesItsStatus() throws Exception {
     String repoId = seedRepository();
     dispatch(bodyForTicket(repoId, "ticket/short-lived", "t-77", "go"), 200);
     assertThat(references("?ticketId=t-77").getList("entries").size(), is(1));
@@ -452,9 +458,16 @@ public class AgentDispatchControllerTest {
     // resolution, not the guard in front of it.
     workspaceService.discardWorkspace(workspaceIds.of(repoId, "ticket-short-lived"), null, true);
 
-    assertTrue(
-        references("?ticketId=t-77").getList("entries").isEmpty(),
-        "a discarded workspace was still reported as working on the ticket");
+    JsonPath after = references("?ticketId=t-77");
+    assertThat(
+        "a resolved workspace stopped being reported for the ticket it was dispatched onto",
+        after.getList("entries").size(),
+        is(1));
+    // ABANDONED and not INTEGRATED: discard is the abandon verb, and asserting the status the code
+    // writes is the whole point of carrying one.
+    assertThat(after.getString("entries[0].workspace.status"), is("ABANDONED"));
+    assertThat(after.getString("entries[0].workspace.resolvedAt"), is(notNullValue()));
+    assertThat(after.getString("entries[0].workspace.branch"), is("ticket/short-lived"));
   }
 
   private JsonPath references(String query) {

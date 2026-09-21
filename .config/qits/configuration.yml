@@ -58,6 +58,14 @@ keys:
     type: string
     description: "The volume at /data: this service's per-repository git mirrors, merge worktrees and workspace metadata (QITS_WORKSPACES_DATA_DIR=/data/workspaces)."
 
+  mounts[1]:
+    type: string
+    description: "The shared harness volume qits_shared_dot_claude, mounted READ-ONLY at /claude-home. Every workspace container writes its agent transcripts to it, and resolving a workspace never touches it — so this is what makes a resolved workspace's sessions readable after its own container and volume are destroyed. Read-only because this service only reads them back; the volume also carries the estate-wide harness credential and history, which is why the reader resolves a session id against what it listed rather than against a path. Absent is supported: every agent-session read answers empty until it is applied."
+
+  env.QITS_WORKSPACE_CLAUDE_ARCHIVE_ROOT:
+    type: string
+    description: "Where this service finds the volume above. Defaults to /claude-home in the shipped properties, which is where mounts[1] puts it, so this exists to move the reader when the mount moves and for no other reason. NOT the same key as QITS_WORKSPACE_CLAUDE_MOUNT, which is where a WORKSPACE container sees the same volume — two mounts of one volume, writable there and read-only here."
+
   # --- peers this service calls ------------------------------------------------------------------
 
   env.QITS_PROJECTS_URL:

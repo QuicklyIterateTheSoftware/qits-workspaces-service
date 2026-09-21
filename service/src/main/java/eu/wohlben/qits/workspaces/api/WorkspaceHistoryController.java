@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.api;
 
 import eu.wohlben.qits.workspaces.control.WorkspaceHistoryService;
+import eu.wohlben.qits.workspaces.dto.ArchivedSessionDto;
 import eu.wohlben.qits.workspaces.dto.WorkspaceHistoryDetailDto;
 import eu.wohlben.qits.workspaces.dto.WorkspaceHistoryDto;
 import jakarta.inject.Inject;
@@ -58,6 +59,48 @@ public class WorkspaceHistoryController {
   @Path("/{id}")
   public GetHistoryRequest.Response get(@PathParam("id") Long id) {
     return new GetHistoryRequest.Response(workspaceHistoryService.get(id));
+  }
+
+  public static record ListAgentSessionsRequest() {
+    public record Response(List<ArchivedSessionDto> sessions) {}
+  }
+
+  /**
+   * The agent sessions that ran in this workspace, oldest first, read off the shared harness volume
+   * rather than out of this context's store — which is why they answer for a resolved workspace at
+   * all: the container and its {@code /workspace} volume are destroyed on resolution, the shared
+   * volume is not.
+   *
+   * <p><b>An empty list is a valid 200.</b> A workspace where no agent ever ran, and one resolved
+   * before the volume was mounted here, both legitimately have no sessions; neither is an error to
+   * report and neither is distinguishable from the other.
+   */
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
+  @GET
+  @Path("/{id}/agent-sessions")
+  public ListAgentSessionsRequest.Response agentSessions(@PathParam("id") Long id) {
+    return new ListAgentSessionsRequest.Response(workspaceHistoryService.agentSessions(id));
+  }
+
+  public static record GetAgentTranscriptRequest() {
+    public record Response(List<String> lines) {}
+  }
+
+  /**
+   * One session's raw JSONL, the lines the harness itself wrote, with each subagent's sidechain
+   * introduced by a synthetic marker line the frontend parser reads. Unrendered on purpose: the
+   * envelopes are the render contract, and reshaping them here would fork it.
+   *
+   * <p>A session id that does not attribute to this workspace answers 404, exactly as one that
+   * never existed does — the id is matched against the listing above and never reaches a path.
+   */
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
+  @GET
+  @Path("/{id}/agent-sessions/{sessionId}/transcript")
+  public GetAgentTranscriptRequest.Response agentTranscript(
+      @PathParam("id") Long id, @PathParam("sessionId") String sessionId) {
+    return new GetAgentTranscriptRequest.Response(
+        workspaceHistoryService.agentTranscript(id, sessionId));
   }
 
   public static record UpdateHistoryRequest(String preamble, String result) {

@@ -137,50 +137,53 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
         .toList();
   }
 
+  // --- Any-status (history / discovery) ----------------------------------------------------------
+
+  /** Every workspace (active + resolved) for a repository, newest first — for the history view. */
+  public List<Workspace> findByRepositoryId(String repositoryId) {
+    return list("repositoryId = ?1 order by id desc", repositoryId);
+  }
+
   /**
-   * The live workspaces that name one of these qits-projects rows as their subject — {@code
-   * ticket_id} or {@code epic_id}, the two columns a dispatch writes. Batched on purpose: the caller
-   * is a whole tickets panel asking one question about thirty rows, not thirty callers.
+   * Every workspace that names one of these qits-projects rows as its subject — {@code ticket_id} or
+   * {@code epic_id}, the two columns a dispatch writes. Batched on purpose: the caller is a whole
+   * tickets panel asking one question about thirty rows, not thirty callers.
    *
-   * <p><b>Live means {@code ACTIVE}, and nothing about the container.</b> This is the rule for the
-   * whole feature and it is written here, once, so no client decides it a second time. An ACTIVE row
-   * is a workspace that still exists and still owns its branch — a stopped one included, because a
-   * container is a recreatable cache of the branch and a second dispatch onto that branch would
-   * adopt the workspace rather than make another. So a stopped workspace is still the one working on
-   * the ticket, and it stays reported and stays navigable. What ends the reference is resolution:
-   * integrating or abandoning the workspace moves the row out of ACTIVE, it stops being reported
-   * from that moment, and nothing had to remember to clear a pointer — which is the whole reason the
-   * reference lives on the workspace and not on the ticket.
+   * <p><b>Status narrows nothing here, and each row carries its own instead.</b> A subject reference
+   * is a historical fact — this workspace was the one dispatched onto that ticket — and it does not
+   * stop being true when the branch lands. Every row the subject names comes back with its {@code
+   * status} and its {@code resolvedAt} beside it, so the reader decides what the answer means: a
+   * tickets panel that wants the way in looks for the ACTIVE row, and one that wants to say "the
+   * work on this ticket was integrated" reads the resolved one instead. Filtering here would make
+   * the second reading impossible and the first no cheaper, and it would hide the difference between
+   * a ticket whose workspace was integrated and a ticket that never had one at all.
+   *
+   * <p>Nothing about the container narrows it either. An ACTIVE row is a workspace that still exists
+   * and still owns its branch — a stopped one included, because a container is a recreatable cache
+   * of the branch and a second dispatch onto that branch would adopt the workspace rather than make
+   * another. So a stopped workspace is still the one working on the ticket, and it stays reported
+   * and stays navigable.
    *
    * <p>Either collection may be empty; both empty answers empty without touching the database. Null
    * ids are dropped rather than matched — a {@code ticket_id is null} row is every hand-made
    * workspace on the platform, and returning those would be the opposite of the question.
    */
-  public List<Workspace> findActiveBySubjects(
-      Collection<String> ticketIds, Collection<String> epicIds) {
+  public List<Workspace> findBySubjects(Collection<String> ticketIds, Collection<String> epicIds) {
     List<String> tickets = nonNull(ticketIds);
     List<String> epics = nonNull(epicIds);
     if (tickets.isEmpty() && epics.isEmpty()) {
       return List.of();
     }
     if (epics.isEmpty()) {
-      return list("status = ?1 and ticketId in ?2", WorkspaceStatus.ACTIVE, tickets);
+      return list("ticketId in ?1", tickets);
     }
     if (tickets.isEmpty()) {
-      return list("status = ?1 and epicId in ?2", WorkspaceStatus.ACTIVE, epics);
+      return list("epicId in ?1", epics);
     }
-    return list(
-        "status = ?1 and (ticketId in ?2 or epicId in ?3)", WorkspaceStatus.ACTIVE, tickets, epics);
+    return list("ticketId in ?1 or epicId in ?2", tickets, epics);
   }
 
   private static List<String> nonNull(Collection<String> ids) {
     return ids == null ? List.of() : ids.stream().filter(Objects::nonNull).distinct().toList();
-  }
-
-  // --- Any-status (history / discovery) ----------------------------------------------------------
-
-  /** Every workspace (active + resolved) for a repository, newest first — for the history view. */
-  public List<Workspace> findByRepositoryId(String repositoryId) {
-    return list("repositoryId = ?1 order by id desc", repositoryId);
   }
 }
