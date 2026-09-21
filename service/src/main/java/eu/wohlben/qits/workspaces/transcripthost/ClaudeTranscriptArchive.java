@@ -15,7 +15,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
+import org.jboss.logging.Logger;
 
 /**
  * Reads Claude Code's own JSONL transcripts back off the shared harness volume, and decides which of
@@ -125,10 +127,44 @@ public final class ClaudeTranscriptArchive {
 
   private static final String JSONL = ".jsonl";
 
+  private static final Logger LOG = Logger.getLogger(ClaudeTranscriptArchive.class);
+
+  /**
+   * Guards the absent-archive warning so it is said once per process rather than once per read.
+   *
+   * <p>Mirrors the harness library's own {@code MISSING_CONFIG_DIR_LOGGED}, and for its reason: the
+   * condition is a deployment's standing shape rather than an event, so repeating it per request
+   * would bury every other line in the log of exactly the deployment that needs reading.
+   */
+  private static final AtomicBoolean ARCHIVE_ABSENT_LOGGED = new AtomicBoolean();
+
   private final Path archiveRoot;
 
   public ClaudeTranscriptArchive(Path archiveRoot) {
     this.archiveRoot = archiveRoot;
+  }
+
+  /**
+   * Say, once, that there is no archive to read — naming the path, so the answer is actionable.
+   *
+   * <p><b>This exists because its absence cost a verification.</b> An unmounted volume and a
+   * workspace whose sessions genuinely do not attribute produce the identical answer, an empty list,
+   * and with nothing in the log the two could only be told apart by reading the platform's stored
+   * configuration. That is a long way to go to learn that a directory is missing, and nobody
+   * diagnosing this later should have to go it.
+   *
+   * <p>WARN and not ERROR: a deployment without the mount is a supported configuration — every read
+   * answers empty and nothing fails — so this is a capability that is switched off, not a fault.
+   */
+  private static void sayTheArchiveIsAbsent(Path projects) {
+    if (ARCHIVE_ABSENT_LOGGED.compareAndSet(false, true)) {
+      LOG.warnf(
+          "No agent-transcript archive at %s, so every resolved workspace will report no sessions."
+              + " The shared harness volume is not mounted into this service; attach it as"
+              + " qits_shared_dot_claude at the archive root (read-only) and recreate the service:"
+              + " a mount is applied on create, never on a service update.",
+          projects);
+    }
   }
 
   /**
@@ -150,7 +186,7 @@ public final class ClaudeTranscriptArchive {
     }
     Path projects = projectsDir();
     if (!Files.isDirectory(projects)) {
-      // The production-normal case today: the volume is not mounted into this service yet.
+      sayTheArchiveIsAbsent(projects);
       return List.of();
     }
     Instant from = attribution.createdAt();
