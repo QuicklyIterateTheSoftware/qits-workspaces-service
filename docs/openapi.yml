@@ -52,6 +52,34 @@ components:
           items:
             type: string
           description: The conflicted paths. Present only for CONFLICT and MERGE_CONFLICT.
+    ArchivedSessionDto:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        startedAt:
+          $ref: "#/components/schemas/Instant"
+        endedAt:
+          $ref: "#/components/schemas/Instant"
+        messageCount:
+          type: integer
+          format: int32
+        subagents:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArchivedSubagentDto"
+    ArchivedSubagentDto:
+      type: object
+      properties:
+        agentId:
+          type: string
+        agentType:
+          type: string
+        description:
+          type: string
+        messageCount:
+          type: integer
+          format: int32
     BootstrapOutcome:
       type: string
       enum:
@@ -359,6 +387,20 @@ components:
     Response17:
       type: object
       properties:
+        lines:
+          type: array
+          items:
+            type: string
+    Response18:
+      type: object
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArchivedSessionDto"
+    Response19:
+      type: object
+      properties:
         id:
           type: string
         mimeType:
@@ -369,24 +411,24 @@ components:
           $ref: "#/components/schemas/PromptAttachmentSource"
         createdAt:
           $ref: "#/components/schemas/Instant"
-    Response18:
-      type: object
-      properties:
-        attachments:
-          type: array
-          items:
-            $ref: "#/components/schemas/WorkspacePromptAttachmentDataDto"
-    Response19:
-      type: object
-      properties:
-        draft:
-          $ref: "#/components/schemas/WorkspacePromptDraftDto"
     Response2:
       type: object
       properties:
         success:
           type: boolean
     Response20:
+      type: object
+      properties:
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspacePromptAttachmentDataDto"
+    Response21:
+      type: object
+      properties:
+        draft:
+          $ref: "#/components/schemas/WorkspacePromptDraftDto"
+    Response22:
       type: object
       properties:
         draft:
@@ -556,22 +598,6 @@ components:
           type: string
         result:
           type: string
-    WorkspaceCommandDto:
-      type: object
-      properties:
-        id:
-          type: string
-        actionName:
-          type: string
-        status:
-          type: string
-        exitCode:
-          type: integer
-          format: int32
-        launchedAt:
-          $ref: "#/components/schemas/Instant"
-        finishedAt:
-          $ref: "#/components/schemas/Instant"
     WorkspaceDto:
       type: object
       properties:
@@ -675,10 +701,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkspaceEventDto"
-        commands:
-          type: array
-          items:
-            $ref: "#/components/schemas/WorkspaceCommandDto"
     WorkspaceHistoryDto:
       type: object
       properties:
@@ -758,6 +780,10 @@ components:
           type: string
         epicId:
           type: string
+        status:
+          type: string
+        resolvedAt:
+          $ref: "#/components/schemas/Instant"
   securitySchemes:
     SecurityScheme:
       type: openIdConnect
@@ -1156,6 +1182,65 @@ paths:
         "403":
           description: Not Allowed
       summary: Get
+      tags:
+      - Workspace History Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:agent
+  /workspaces/api/history/{id}/agent-sessions:
+    get:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response18"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Agent Sessions
+      tags:
+      - Workspace History Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:agent
+  /workspaces/api/history/{id}/agent-sessions/{sessionId}/transcript:
+    get:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: sessionId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response17"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Agent Transcript
       tags:
       - Workspace History Controller
       security:
@@ -1589,7 +1674,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response18"
+                $ref: "#/components/schemas/Response20"
         "404":
           description: No such ACTIVE workspace.
           content:
@@ -1627,7 +1712,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response17"
+                $ref: "#/components/schemas/Response19"
         "400":
           description: "Not valid base64, not a PNG or JPEG, or an unknown source."
           content:
@@ -1682,7 +1767,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response17"
+                $ref: "#/components/schemas/Response19"
         "400":
           description: "Not valid base64, not a PNG or JPEG, or an unknown source."
           content:
@@ -1800,7 +1885,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response19"
+                $ref: "#/components/schemas/Response21"
         "400":
           description: The content is not a well-formed JSON document.
           content:
@@ -1843,7 +1928,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response20"
+                $ref: "#/components/schemas/Response22"
         "404":
           description: "No such ACTIVE workspace, or it has no saved draft."
           content:
@@ -1942,4 +2027,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.916.214656
+  version: 2026.921.142519

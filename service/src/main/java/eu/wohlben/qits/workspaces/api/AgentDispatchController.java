@@ -202,8 +202,8 @@ public class AgentDispatchController {
   }
 
   /**
-   * Which live workspaces are working on these qits-projects rows — the reference this door writes
-   * on a dispatch, read back.
+   * Which workspaces are on these qits-projects rows — the reference this door writes on a dispatch,
+   * read back.
    *
    * <p><b>It is on THIS class and not on {@code WorkspaceController}, and that is the whole of why
    * the read exists here.</b> It shipped there once (2026.911.151414) and was dead on arrival: that
@@ -222,11 +222,15 @@ public class AgentDispatchController {
    * <p><b>A thin shape, not the listing's.</b> {@code GET /workspaces} is scoped to one repository
    * and pays a mirror refresh, a container listing and an ahead/behind computation per row, because
    * it draws a branch tree. This question crosses repositories and wants none of it — see {@link
-   * WorkspaceSubjectRefDto}, and see {@code WorkspaceRepository.findActiveBySubjects} for what
-   * "live" means here.
+   * WorkspaceSubjectRefDto}, and see {@code WorkspaceRepository.findBySubjects} for which rows it
+   * answers with.
    *
-   * <p>Rows the caller did not ask about never appear, and a row whose workspace has been integrated
-   * or abandoned stops appearing the moment it resolves — nothing over there has to clear anything.
+   * <p>Rows the caller did not ask about never appear. Every workspace that names a row it did ask
+   * about does, carrying its own {@code status} and {@code resolvedAt}, and whether an INTEGRATED
+   * one is still interesting is the caller's call and not this door's: a ticket whose workspace
+   * landed is a different thing to say than a ticket that never had one, and a door that dropped the
+   * resolved row would make the two indistinguishable. Nothing over there has to clear anything
+   * either way — the reference lives on the workspace, which is what lets it keep being true.
    */
   // A read, so an agent may make it too (phase 4: agents keep every read, lose writes). It
   // replaces the class's list, so the class's two roles are stated again.

@@ -89,6 +89,17 @@ class AgentReadAccessTest {
   void workspaceHistoryReadsAreOpenAndItsEditIsNot() {
     asAgent().get("/workspaces/api/history?repositoryId=no-such").then().statusCode(admitted());
     asAgent().get("/workspaces/api/history/" + NO_ROW).then().statusCode(admitted());
+    // The two agent-transcript doors. An agent reading back what an agent wrote is the case the
+    // role exists for, and they are stated here rather than only in WorkspaceHistoryControllerTest
+    // because the role list is a property of the CLASS's reads, which is what this class tracks.
+    asAgent()
+        .get("/workspaces/api/history/" + NO_ROW + "/agent-sessions")
+        .then()
+        .statusCode(admitted());
+    asAgent()
+        .get("/workspaces/api/history/" + NO_ROW + "/agent-sessions/no-such/transcript")
+        .then()
+        .statusCode(admitted());
     asAgent()
         .contentType(ContentType.JSON)
         .body(Map.of("preamble", "x"))

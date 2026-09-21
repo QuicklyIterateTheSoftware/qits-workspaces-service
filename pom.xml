@@ -67,6 +67,14 @@
              gated here. Do not hand-edit one to chase a release. -->
         <qits.workspace-daemon-protocol.version>2026.921.51447</qits.workspace-daemon-protocol.version>
         <qits.workspace-editor-image.version>2026.921.54428</qits.workspace-editor-image.version>
+        <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
+             here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
+             path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
+             where Claude writes a session lives in exactly one place and cannot drift between the
+             daemon that produces those files and the service that reads them off the shared volume
+             after the container is gone. Framework-free — vertx-core and qits-commands are its only
+             compile dependencies, and nothing here imports either. -->
+        <qits.coding-agents.version>2026.913.194041</qits.coding-agents.version>
         <qits.eventstream.version>2026.917.70940</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.917.65806</qits.db-core.version>
@@ -257,6 +265,14 @@
                 <groupId>${project.groupId}</groupId>
                 <artifactId>qits-workspaces-gitmirror</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <!-- Declared version-less in the module that compiles against it (`service`), like
+                     every other pin here. qits-commands rides in transitively and is deliberately
+                     not named: naming a coordinate nothing imports invites an import. -->
+                <groupId>eu.wohlben.qits</groupId>
+                <artifactId>qits-coding-agents</artifactId>
+                <version>${qits.coding-agents.version}</version>
             </dependency>
             <dependency>
                 <groupId>${project.groupId}</groupId>

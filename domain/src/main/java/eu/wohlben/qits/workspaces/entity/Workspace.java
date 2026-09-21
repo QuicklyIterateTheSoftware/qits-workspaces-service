@@ -74,8 +74,7 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
    * an identifier. It is slug-validated because it becomes a path segment under the repo's
    * workspaces dir. It is unique only per repository and only among ACTIVE rows — every repository
    * tends to have one called {@code main} — and it is reusable once a workspace resolves, which is
-   * why {@link eu.wohlben.qits.workspaces.control.WorkspaceCommandHistory} keys on {@link #id}
-   * instead.
+   * why every port that holds records for a workspace keys on {@link #id} instead.
    */
   @Column(name = "workspace_id", nullable = false)
   public String workspaceId;
