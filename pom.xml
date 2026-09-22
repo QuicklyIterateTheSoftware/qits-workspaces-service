@@ -65,8 +65,8 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.921.51447</qits.workspace-daemon-protocol.version>
-        <qits.workspace-editor-image.version>2026.921.54428</qits.workspace-editor-image.version>
+        <qits.workspace-daemon-protocol.version>2026.922.225634</qits.workspace-daemon-protocol.version>
+        <qits.workspace-editor-image.version>2026.922.230304</qits.workspace-editor-image.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -80,7 +80,7 @@
         <qits.db-core.version>2026.917.65806</qits.db-core.version>
         <qits.arch-rules.version>2026.917.65806</qits.arch-rules.version>
         <qits.auth-core.version>2026.917.65806</qits.auth-core.version>
-        <qits.containers-client.version>2026.921.2550</qits.containers-client.version>
+        <qits.containers-client.version>2026.922.195204</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
@@ -88,7 +88,7 @@
              beside the steps, OBSERVED rather than narrated. This version is the one that ships
              NetworkTaps.restAssured, which replaced the hand-copied StoryNetworkFilter this repo
              used to keep beside its IT. Nothing in src/main knows any of it exists. -->
-        <qits.userflows.version>2026.920.210236</qits.userflows.version>
+        <qits.userflows.version>2026.922.190204</qits.userflows.version>
         <!-- The recording service mocks that IT boots against (the generic MockService plus
              idp.MockIdp), released out of libs/qits-integrations-quarkus like qits-db-core and
              qits-auth-core above — the same-string policy applies the day this repo consumes a
