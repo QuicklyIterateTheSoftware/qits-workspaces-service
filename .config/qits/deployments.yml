@@ -68,7 +68,7 @@ application: qits-workspaces
 # green. All three key the claim on (slot, label) now, and the ui-components shell renders two
 # same-application rows correctly since 2026.831.134647 (row keys carry the label; the page goes to
 # the longest matching subpath). This entry therefore requires those releases deployed underneath it.
-navigation-entries: services.details.Workspaces:8, daemons.details.Workspaces:8, libs.details.Workspaces:8, frontends.details.Workspaces:8, cli.details.Workspaces:8, images.details.Workspaces:8, project.detail.Workspaces:3, project.detail.Editor:4=editor
+navigation-entries: services.details.Workspaces:8, daemons.details.Workspaces:8, libs.details.Workspaces:8, apps.details.Workspaces:8, frontends.details.Workspaces:8, cli.details.Workspaces:8, images.details.Workspaces:8, project.detail.Workspaces:3, project.detail.Editor:4=editor
 
 # ONE KEY, AND IT ASKS FOR TWO DATABASES, because two jars in this deployable each own one.
 #
