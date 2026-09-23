@@ -369,7 +369,20 @@ public class WorkspaceService {
       return;
     }
     decommissionFor(rowId);
-    RepositoryLookup.RepositoryView repository = repositoryOf(repoId);
+    // THE EDITOR NAMES NO REPOSITORY, so none is asked for. Its row carries a sentinel id, and this
+    // lookup is an HTTP call to qits-projects that could only ever answer "no such repository" for
+    // it — once per provision, in a WARN-shaped log line, to learn what the row already says. What
+    // it costs the editor is what an unresolvable repository costs any workspace and no more: the
+    // `project` claim is absent, which is the credential's own documented "unscoped" answer.
+    //
+    // That absence is the accepted consequence the epic decided: ONE container, holding an ordinary
+    // `qits:agent` workspace credential scoped to no project, now reaches every project on the
+    // platform — see WorkspaceContainerFactory's editor block, which records the same decision from
+    // the container's side.
+    boolean editor =
+        QuarkusTransaction.requiringNew()
+            .call(() -> workspaceRepository.findActiveById(rowId).map(wt -> wt.editor).orElse(false));
+    RepositoryLookup.RepositoryView repository = editor ? null : repositoryOf(repoId);
     // The default branch, read the way a create reads it. An agent never pushes it, so it leaves
     // every list below. A registry that did not answer drops nothing: like the project scope, it
     // costs the scope and not the launch.
@@ -1638,6 +1651,62 @@ public class WorkspaceService {
   }
 
   /**
+   * Find or write <b>the</b> editor workspace — the single row the platform's one shared editor
+   * container runs as. Idempotent, and the second caller gets the first caller's row.
+   *
+   * <p><b>A row and not a derivation, and that is the whole of what changed.</b> The editor used to
+   * be a project's wrapper repository's main workspace: one per project, found by recognising the
+   * wrapper among the repositories somebody had opened a main workspace for, and launched from the
+   * editor image because of what that workspace <em>was</em>. There is one editor now, for the whole
+   * platform, so there is no project to derive it from — and what is left is a decision, which is a
+   * column ({@code Workspace.editor}, {@code V7}).
+   *
+   * <p>What that row deliberately does not have: <b>no branch and no parent</b>, because the editor
+   * checks nothing out of its own; and a <b>sentinel repository id</b> ({@link
+   * EditorWorkspace#REPOSITORY_ID}), because the column is not nullable and the shared editor belongs
+   * to no repository. Every path that would resolve that id — the container factory's project and
+   * name lookups, {@link #ensureContainer}'s branch-still-exists check, the mirror — is skipped for
+   * an editor row rather than asked and failed. The credential is the ordinary one: nothing here
+   * commissions anything, {@link #provisionContainer} does it for every workspace alike, and an
+   * unresolvable repository costs the {@code project} scope exactly as an unreachable registry does
+   * for any other workspace.
+   *
+   * <p><b>No lock, and the race is settled by the index.</b> Two callers can find nothing at the same
+   * moment and both try to write; {@code uq_workspace_active_editor} makes the loser's insert fail
+   * rather than making a second editor, which is the arrangement {@code createMainWorkspace} has with
+   * {@code uq_workspace_active_branch} and for the same reason — a constraint holds under a race and
+   * an agreement does not. The loser's caller retries by polling the door, which it is doing anyway.
+   *
+   * <p>It writes the same {@code CREATED} history entry every other creation writes, because the one
+   * thing this row shares with every workspace is that somebody asked for it and it now exists.
+   */
+  @Transactional
+  public Workspace createEditorWorkspace() {
+    Optional<Workspace> existing = workspaceRepository.findActiveEditor();
+    if (existing.isPresent()) {
+      return existing.get();
+    }
+
+    Workspace workspace = new Workspace();
+    workspace.workspaceId = EditorWorkspace.WORKSPACE_ID;
+    workspace.repositoryId = EditorWorkspace.REPOSITORY_ID;
+    workspace.parent = null;
+    workspace.branch = null; // nothing is checked out: the editor is not a place work lands
+    workspace.status = WorkspaceStatus.ACTIVE;
+    workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+    workspace.editor = true;
+    // The editor pushes nothing today. It has no branch of its own to push, and the repositories it
+    // will one day hold side by side are not cloned into it yet — so the honest list is the empty
+    // one, which is also what GitRefs.effective would answer for a branchless row. Widening it is
+    // part of the task that clones those repositories, not of this one.
+    workspace.gitRefs = GitRefs.write(List.of());
+    workspaceRepository.persist(workspace);
+    recordEvent(workspace, WorkspaceEventType.CREATED, null, null, null);
+
+    return workspace;
+  }
+
+  /**
    * Sanitizes a branch name into a workspace-id slug ([A-Za-z0-9_-], ≤64 chars, not dash-leading).
    * Public because the capture ingest derives workspace ids from its generated branch names through
    * the same rule.
@@ -1664,7 +1733,13 @@ public class WorkspaceService {
         : repo.mainBranch();
   }
 
-  private record BranchParent(String branch, String parent) {}
+  /**
+   * What an ensure needs off the row: the branch to check and provision from, the parent, and
+   * whether this is the editor's row — the one workspace that has no branch and must not be read as
+   * having lost one. See {@link #ensureContainer(String, String, Long,
+   * WorkspaceProcessTracker.Handle)}.
+   */
+  private record BranchParent(String branch, String parent, boolean editor) {}
 
   /** A resolved workspace reduced to what the container/path machinery addresses it by. */
   private record WorkspaceRef(String repoId, String workspaceId) {}
@@ -1849,7 +1924,7 @@ public class WorkspaceService {
                     wt.runtimeError = null;
                     return null; // already running — nothing to provision
                   }
-                  return new BranchParent(wt.branch, wt.parent);
+                  return new BranchParent(wt.branch, wt.parent, wt.editor);
                 });
     if (snapshot == null) {
       observeClientLiveness(repoId, workspaceId, rowId);
@@ -1905,9 +1980,16 @@ public class WorkspaceService {
       }
     }
 
-    if (snapshot.branch() == null
-        || snapshot.branch().isBlank()
-        || !branchExists(repoId, snapshot.branch())) {
+    // THE EDITOR IS EXEMPT, and it is the branchless case rather than an exception to the rule. The
+    // abandonment below fires when a workspace's durable branch has gone — the ref it exists to hold
+    // a checkout of was deleted, so the workspace is genuine dead weight. The editor's row claims no
+    // branch and never did: there is nothing to have lost, no repository to ask, and asking anyway
+    // would put a wire read against a sentinel id in front of every editor ensure. Falling through
+    // to the branch check would abandon the editor on its first launch.
+    if (!snapshot.editor()
+        && (snapshot.branch() == null
+            || snapshot.branch().isBlank()
+            || !branchExists(repoId, snapshot.branch()))) {
       // The durable branch is gone: this is genuine death, so abandon (persisted before we throw).
       QuarkusTransaction.requiringNew()
           .run(

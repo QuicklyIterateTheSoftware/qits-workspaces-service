@@ -34,34 +34,15 @@ public interface RepositoryLookup {
    * minted (a manifest repository's id equals its name, a self-seeded one's is a UUID). Both are
    * nullable: a registry that does not answer with one costs a label, never a workspace.
    *
-   * <p>{@code archetype} joined for the web editor, and it is the fifth field for one question:
-   * <b>is this repository a project's wrapper</b> ({@code PROJECT}). Paired with {@code mainBranch}
-   * it is the whole of {@link WorkspacePostures#isWrapperMain}, which is what decides that a
-   * workspace runs the richer editor image rather than the plain one. It is a plain String and not
-   * an enum for the reason {@code QitsConfig.RepositorySection}'s is: the vocabulary belongs to
-   * whoever owns repositories, and an archetype this context has never heard of must round-trip as
-   * "not a wrapper" rather than fail a launch. Nullable like the two above — a registry that does
-   * not answer with one costs the editor, never the workspace.
+   * <p><b>There was a fifth field, {@code archetype}, and it is gone.</b> It was bound for exactly
+   * one question — is this repository a project's wrapper ({@code PROJECT}) — which, paired with
+   * {@code mainBranch}, was the whole of deciding that a workspace ran the richer editor image. The
+   * editor is one container for the platform now and says so with a column of its own
+   * ({@code Workspace.editor}), so nothing in this context asks that question any more. The field
+   * went with its only reader rather than staying as a binding nobody reads; qits-projects still
+   * answers it, and {@code ignoreUnknown} on the wire record is what makes ignoring it free.
    */
-  record RepositoryView(String id, String name, String projectId, String mainBranch, String archetype) {
-
-    /**
-     * The four-field form every caller predating the editor spells — no archetype, which reads as
-     * "not a wrapper" wherever the question is asked. Kept so a stub or a fixture that only cares
-     * about the branch stays a one-line constructor.
-     */
-    public RepositoryView(String id, String name, String projectId, String mainBranch) {
-      this(id, name, projectId, mainBranch, null);
-    }
-
-    /** The archetype qits-projects gives a project's wrapper repository — the superproject. */
-    public static final String WRAPPER_ARCHETYPE = "PROJECT";
-
-    /** Whether this repository is its project's wrapper. Absent, blank and unknown are all false. */
-    public boolean isWrapper() {
-      return archetype != null && WRAPPER_ARCHETYPE.equalsIgnoreCase(archetype.trim());
-    }
-  }
+  record RepositoryView(String id, String name, String projectId, String mainBranch) {}
 
   /** The repository behind {@code repoId}, or empty when it does not exist. */
   Optional<RepositoryView> find(String repoId);

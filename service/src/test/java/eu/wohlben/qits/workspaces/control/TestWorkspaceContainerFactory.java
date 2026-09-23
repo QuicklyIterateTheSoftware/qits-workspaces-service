@@ -160,22 +160,21 @@ public final class TestWorkspaceContainerFactory {
   }
 
   /**
-   * A factory whose workspaces are the project wrapper's main one — the EDITOR posture, which picks
-   * the editor image and hands the daemon its editor environment. Its own builder for the reason
-   * {@link #admin()} has one: the adapter's test asserts the whole spec twice, and the difference
-   * between the two is the claim.
+   * A factory whose workspaces are THE EDITOR — the posture that picks the editor image and hands
+   * the daemon its editor environment. Its own builder for the reason {@link #admin()} has one: the
+   * adapter's test asserts the whole spec twice, and the difference between the two is the claim.
    *
-   * <p>An explicit implementation rather than a lambda, because {@code isWrapperMain} is a {@code
+   * <p>An explicit implementation rather than a lambda, because {@code isEditor} is a {@code
    * default} method — a lambda would set the admin answer and leave this one false.
    */
   public static WorkspaceContainerFactory editor() {
     WorkspaceContainerFactory f = build(true);
-    f.postures = StubInstance.of(wrapperMain());
+    f.postures = StubInstance.of(editorRow());
     return f;
   }
 
-  /** A posture port that answers "the wrapper's main workspace" and "not admin". */
-  static WorkspacePostures wrapperMain() {
+  /** A posture port that answers "this is the editor" and "not admin". */
+  static WorkspacePostures editorRow() {
     return new WorkspacePostures() {
       @Override
       public boolean isAdmin(Long rowId) {
@@ -183,7 +182,7 @@ public final class TestWorkspaceContainerFactory {
       }
 
       @Override
-      public boolean isWrapperMain(Long rowId) {
+      public boolean isEditor(Long rowId) {
         return true;
       }
     };

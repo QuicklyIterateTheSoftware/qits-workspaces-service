@@ -659,8 +659,8 @@ class WorkspaceContainerFactoryTest {
 
   // --- the editor posture -----------------------------------------------------------------------
 
-  /** A posture port answering "the project wrapper's main workspace" and nothing else. */
-  private static WorkspacePostures wrapperMain(boolean answer) {
+  /** A posture port answering "this is the editor" and nothing else. */
+  private static WorkspacePostures editorRow(boolean answer) {
     return new WorkspacePostures() {
       @Override
       public boolean isAdmin(Long rowId) {
@@ -668,18 +668,18 @@ class WorkspaceContainerFactoryTest {
       }
 
       @Override
-      public boolean isWrapperMain(Long rowId) {
+      public boolean isEditor(Long rowId) {
         return answer;
       }
     };
   }
 
   @Test
-  void theWrapperMainWorkspaceRunsTheEditorImageAndIsToldSo() {
+  void theEditorRowRunsTheEditorImageAndIsToldSo() {
     WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(wrapperMain(true));
+    f.postures = StubInstance.of(editorRow(true));
 
-    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "main", 7L, "main", null);
+    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null);
 
     assertEquals(EDITOR_IMAGE, c.image());
     assertTrue(c.editor(), "the description carries the decision, so the adapter reads it once");
@@ -690,12 +690,53 @@ class WorkspaceContainerFactoryTest {
   }
 
   @Test
+  void theEditorIsToldAboutNoRepositoryAtALL() {
+    // THE ONE THING THE EDITOR'S CONTAINER MUST NOT BE HANDED. Its row belongs to no repository — it
+    // carries a SENTINEL id, because the column is not nullable — and the five names below are
+    // exactly what the in-container daemon self-clones from. Given the sentinel it would try to
+    // clone `/git/editor`, which is not a repository anywhere. Blank is what the daemon reads as
+    // "nothing to clone", and it is the same value an unresolvable repository already produces.
+    //
+    // Both resolvers are made to ANSWER here, and generously: the point is that neither is asked.
+    java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
+    WorkspaceContainerFactory f = factory();
+    f.postures = StubInstance.of(editorRow(true));
+    f.nameResolver =
+        StubInstance.of(
+            repoId -> {
+              asked.incrementAndGet();
+              return Optional.of(
+                  new RepositoryAddressResolver.ProjectScopedName("proj-1", "my-repo"));
+            });
+    f.repositories =
+        StubInstance.of(
+            repoId -> {
+              asked.incrementAndGet();
+              return Optional.of(
+                  new RepositoryLookup.RepositoryView(repoId, "my-repo", "proj-1", "main"));
+            });
+
+    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null);
+
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_REPOSITORY_ID", "");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_REPO_NAME", "");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_PROJECT_ID", "");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_BRANCH", "");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_PARENT", "");
+    assertLabel(c, "qits.project", "");
+    assertEquals(0, asked.get(), "nothing is looked up about a repository that is not one");
+    // What the container IS still told: itself. The workspace id is the label its container name,
+    // its volume name and its proxy paths are all composed from.
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_WORKSPACE_ID", "editor");
+  }
+
+  @Test
   void anOrdinaryWorkspaceIsUntouchedByTheEditor() {
-    // The claim that matters for every workspace that is not the wrapper's main one: the plain
-    // image, and NOTHING said about an editor. Silence is what the daemon's own default reads as
+    // The claim that matters for every workspace that is not the editor: the plain image, and
+    // NOTHING said about an editor. Silence is what the daemon's own default reads as
     // "no editor", so an explicitly-false pair here would be a second way of saying the same thing.
     WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(wrapperMain(false));
+    f.postures = StubInstance.of(editorRow(false));
 
     WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main");
 
@@ -713,10 +754,10 @@ class WorkspaceContainerFactoryTest {
     // the image, the editor environment and the flag alike — which is what makes the posture a
     // lookup rather than a parameter somebody could forget to pass on the resume path.
     WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(wrapperMain(true));
+    f.postures = StubInstance.of(editorRow(true));
 
-    WorkspaceContainer first = f.forWorkspace("repo12345678abc", "main", 7L, "main", null);
-    WorkspaceContainer second = f.forWorkspace("repo12345678abc", "main", 7L, "main", null);
+    WorkspaceContainer first = f.forWorkspace("editor", "editor", 7L, null, null);
+    WorkspaceContainer second = f.forWorkspace("editor", "editor", 7L, null, null);
 
     assertEquals(first.image(), second.image());
     assertEquals(first.env(), second.env());
@@ -743,8 +784,8 @@ class WorkspaceContainerFactoryTest {
               }
 
               @Override
-              public boolean isWrapperMain(Long rowId) {
-                throw new IllegalStateException("the registry blinked");
+              public boolean isEditor(Long rowId) {
+                throw new IllegalStateException("the posture lookup blinked");
               }
             });
     WorkspaceContainer degraded = broken.forWorkspace("repo12345678abc", "main", 7L, "main", null);

@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The test-side {@link RepositoryLookup}: an in-memory registry of repository id → main branch.
@@ -37,8 +36,6 @@ public class FakeRepositoryLookup implements RepositoryLookup {
 
   private final Map<String, String> mainBranches = new ConcurrentHashMap<>();
 
-  private final Map<String, String> archetypes = new ConcurrentHashMap<>();
-
   /**
    * Explicit names, overriding {@link #nameOf}. The derived name is enough wherever a test only
    * needs "the name is not the id"; a test about a name's SHAPE — a wrapper is {@code
@@ -53,29 +50,16 @@ public class FakeRepositoryLookup implements RepositoryLookup {
 
   /**
    * Whether a by-id resolution behaves as an unreachable qits-projects does — it throws. A caller
-   * turns empty into a 404, so "could not ask" has to be tellable from "not there": the wrapper-main
-   * posture reads {@code find} and must not read an outage as "not a wrapper".
+   * turns empty into a 404, so "could not ask" has to be tellable from "not there" wherever this
+   * port decides something rather than merely enriching it.
    *
    * <p>It is off unless a test turns it on, and a test that turns it on turns it back off: this is
    * one {@code @ApplicationScoped} bean for the whole module's suite.
    */
   private volatile boolean findOutage;
 
-  /**
-   * Every by-id resolution this fake has been asked for. A round-trip counter, because that is what
-   * {@code find} is on a real platform — one HTTP call to qits-projects — and a caller that scans
-   * candidate repositories per request is a defect no assertion about its ANSWER can see.
-   */
-  private final AtomicInteger findCalls = new AtomicInteger();
-
-  /** How many times {@link #find} has been called since the last {@link #clear()}. */
-  public int findCalls() {
-    return findCalls.get();
-  }
-
   @Override
   public Optional<RepositoryView> find(String repoId) {
-    findCalls.incrementAndGet();
     if (findOutage) {
       throw new IllegalStateException("qits-projects unreachable (fake outage)");
     }
@@ -84,7 +68,7 @@ public class FakeRepositoryLookup implements RepositoryLookup {
         ? Optional.empty()
         : Optional.of(
             new RepositoryView(
-                repoId, registeredName(repoId), PROJECT_ID, mainBranch, archetypes.get(repoId)));
+                repoId, registeredName(repoId), PROJECT_ID, mainBranch));
   }
 
   @Override
@@ -99,8 +83,7 @@ public class FakeRepositoryLookup implements RepositoryLookup {
                     entry.getKey(),
                     registeredName(entry.getKey()),
                     PROJECT_ID,
-                    entry.getValue(),
-                    archetypes.get(entry.getKey())))
+                    entry.getValue()))
         .toList();
   }
 
@@ -110,29 +93,13 @@ public class FakeRepositoryLookup implements RepositoryLookup {
   }
 
   /**
-   * Register {@code repoId} as its project's WRAPPER — archetype {@code PROJECT}, which is what
-   * makes a workspace on its main branch the editor's workspace. Ordinary {@link #register} leaves
-   * the archetype null, which is a registry that does not answer with one and reads as "not a
-   * wrapper" everywhere.
+   * Register {@code repoId} under an explicit registered name, overriding {@link #nameOf}. The
+   * derived name is enough wherever a test only needs "the name is not the id"; a test about what
+   * the daemon is told to clone has to be able to say what the name is.
    */
-  public void registerWrapper(String repoId, String mainBranch) {
-    mainBranches.put(repoId, mainBranch);
-    archetypes.put(repoId, RepositoryView.WRAPPER_ARCHETYPE);
-  }
-
-  /**
-   * Register {@code repoId} as its project's wrapper under an explicit registered name — {@code
-   * <slug>-<slug>}, which is what an editor origin's project label derives and recognises it by.
-   */
-  public void registerWrapper(String repoId, String mainBranch, String registeredName) {
-    registerWrapper(repoId, mainBranch);
+  public void registerNamed(String repoId, String mainBranch, String registeredName) {
+    register(repoId, mainBranch);
     names.put(repoId, registeredName);
-  }
-
-  /** Register {@code repoId} with an explicit archetype, whatever qits-projects would call it. */
-  public void registerAs(String repoId, String mainBranch, String archetype) {
-    mainBranches.put(repoId, mainBranch);
-    archetypes.put(repoId, archetype);
   }
 
   /** Make {@code repoId} resolvable, with {@code master} as its main branch. */
@@ -153,9 +120,7 @@ public class FakeRepositoryLookup implements RepositoryLookup {
   /** Drop everything — call from {@code @BeforeEach} when a test needs a clean registry. */
   public void clear() {
     mainBranches.clear();
-    archetypes.clear();
     names.clear();
     findOutage = false;
-    findCalls.set(0);
   }
 }

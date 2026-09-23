@@ -121,20 +121,20 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
   }
 
   /**
-   * The repositories that have a <b>root</b> workspace here — an ACTIVE row with no parent, which is
-   * what {@code createMainWorkspace} writes and nothing else does. Distinct, so it is one id per
-   * repository rather than one per row.
+   * <b>The editor's row</b> — the ACTIVE workspace whose {@code editor} column is set, of which
+   * there is at most one ({@code uq_workspace_active_editor}, {@code V7}).
    *
-   * <p>The candidate set for {@code EditorProxyTargets}: an editor's origin names a project, and the
-   * project's wrapper repository is recognised by its name among these. It is deliberately narrow —
-   * every branched workspace is excluded by the parent alone — and it is small by construction, one
-   * entry per repository somebody has ever opened a main workspace for.
+   * <p>One indexed local read, and it is the whole of resolving the editor now: the door asks it to
+   * decide whether to write the singleton, the proxy asks it to turn an editor origin into a
+   * container. What it replaced was a scan — one qits-projects round trip per repository somebody
+   * had opened a main workspace for, to recognise a project's wrapper by the name its slug derives —
+   * which existed only because the editor was per project and had to be found by one.
+   *
+   * <p>{@code firstResultOptional} and not a count-then-read: the index makes a second row
+   * impossible, so taking the first is taking the only one.
    */
-  public List<String> activeRootRepositoryIds() {
-    return find("status = ?1 and parent is null", WorkspaceStatus.ACTIVE).stream()
-        .map(w -> w.repositoryId)
-        .distinct()
-        .toList();
+  public Optional<Workspace> findActiveEditor() {
+    return find("editor = true and status = ?1", WorkspaceStatus.ACTIVE).firstResultOptional();
   }
 
   // --- Any-status (history / discovery) ----------------------------------------------------------

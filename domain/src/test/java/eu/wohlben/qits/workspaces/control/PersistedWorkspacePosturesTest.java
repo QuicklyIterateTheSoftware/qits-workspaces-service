@@ -4,124 +4,105 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import java.time.Instant;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The wrapper-main posture, derived and not stored: a workspace is the editor's workspace when its
- * repository's archetype is {@code PROJECT} and its branch is that repository's main branch.
+ * The editor posture, read off the row: a workspace is the editor when its {@code editor} column is
+ * set, and every other workspace is not.
  *
- * <p>What is worth a test here is not the predicate — it is one {@code &&} — but the three things
- * around it that are easy to get wrong and expensive to have wrong, because this answer picks a
- * container's image and its environment and a spec that differs from what is running is a
- * replacement: that a non-wrapper repository's main workspace is <b>not</b> it, that a wrapper's
- * <em>other</em> branches are not it, and that an unreachable registry does not turn a wrapper-main
- * workspace into an ordinary one on the next ensure.
+ * <p>The predicate is a column read now, so what is worth a test is what surrounds it — this answer
+ * picks a container's image and its environment, and a spec that differs from what is running is a
+ * {@code Recreate.ifChanged} <b>replacement</b>. So: an ordinary workspace is never it, the answer
+ * does not move between two reads, and every absence falls to false.
+ *
+ * <p><b>Four cases that used to be here are gone with the derivation.</b> A non-wrapper repository's
+ * main workspace, a wrapper's other branches, a registry that could not be asked not un-deciding an
+ * already-decided workspace, and a 200 that arrived without an archetype or a main branch not being
+ * memoized — all four were about a posture computed from {@link RepositoryLookup}, and the class
+ * under test no longer calls it. The reproducibility they protected is now a property of the column
+ * rather than of a memo, which is what {@link #theAnswerDoesNotMoveBetweenTwoEnsures} says instead.
  */
 @QuarkusTest
 public class PersistedWorkspacePosturesTest {
 
   @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceService workspaceService;
+  @Inject WorkspaceRepository workspaces;
   @Inject WorkspacePostures postures;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
 
-  /** A repository with a real bare origin, registered as its project's wrapper. */
-  private String wrapperRepo() throws Exception {
-    String repoId = TestOrigin.create(dataDir);
-    repositories.registerWrapper(repoId, "master");
-    return repoId;
+  /** The editor is one row for the whole database, so a class about it resolves the last one. */
+  @BeforeEach
+  void noEditorYet() {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaces
+                    .findActiveEditor()
+                    .ifPresent(
+                        editor -> {
+                          editor.status = WorkspaceStatus.ABANDONED;
+                          editor.resolvedAt = Instant.now();
+                        }));
   }
 
   @Test
-  void theWrappersMainWorkspaceIsTheEditorsWorkspace() throws Exception {
-    String repoId = wrapperRepo();
-    Workspace main = workspaceService.createMainWorkspace(repoId, "master");
+  void theEditorRowIsTheEditorsWorkspace() {
+    Workspace editor = workspaceService.createEditorWorkspace();
 
-    assertTrue(postures.isWrapperMain(main.id));
+    assertTrue(postures.isEditor(editor.id));
     // …and it is not the admin kind by that fact. The two postures are independent: the socket is
-    // asked for at creation, the editor is derived, and neither implies the other.
-    assertFalse(postures.isAdmin(main.id));
+    // asked for at creation, the editor is a row of its own, and neither implies the other.
+    assertFalse(postures.isAdmin(editor.id));
   }
 
   @Test
-  void anotherBranchOfTheWrapperIsNot() throws Exception {
-    String repoId = wrapperRepo();
-    workspaceService.createMainWorkspace(repoId, "master");
-    var branched =
+  void anOrdinaryWorkspaceIsNot() throws Exception {
+    // Every workspace anybody works in, including the one on a repository's main branch — which is
+    // exactly what the editor USED to be, and is now just a workspace.
+    String repoId = TestOrigin.create(dataDir);
+    repositories.register(repoId, "master");
+    Workspace main = workspaceService.createMainWorkspace(repoId, "master");
+    Workspace branched =
         workspaceService.createWorkspace(repoId, "editor-check", "master", "task/editor-check", null);
 
-    assertFalse(postures.isWrapperMain(branched.id));
+    assertFalse(postures.isEditor(main.id));
+    assertFalse(postures.isEditor(branched.id));
   }
 
   @Test
-  void aRepositoryThatIsNotTheWrapperIsNotItEither() throws Exception {
-    // Same shape, same branch, one field different — which is the whole of the predicate that is
-    // not already true of every main workspace on the platform.
-    String repoId = TestOrigin.create(dataDir);
-    repositories.registerAs(repoId, "master", "SERVICE");
-    Workspace main = workspaceService.createMainWorkspace(repoId, "master");
-
-    assertFalse(postures.isWrapperMain(main.id));
-  }
-
-  @Test
-  void aRegistryThatCannotBeAskedDoesNotUNDECIDEAnAlreadyDecidedWorkspace() throws Exception {
-    // THE REPRODUCIBILITY CLAIM, and the reason the shipped posture memoizes at all. The
-    // orchestrator has no start verb — a stopped container is resumed by presenting its spec AGAIN
-    // under Recreate.ifChanged — so an answer that flipped while qits-projects was down would
-    // describe a plain-image container and REPLACE the editor's one. The first read decides; every
-    // read after it says the same thing whether or not the registry can be reached.
-    String repoId = wrapperRepo();
-    Workspace main = workspaceService.createMainWorkspace(repoId, "master");
-    assertTrue(postures.isWrapperMain(main.id));
+  void theAnswerDoesNotMoveBetweenTwoEnsures() throws Exception {
+    // THE REPRODUCIBILITY CLAIM, which is why the posture is a column at all. The orchestrator has
+    // no start verb — a stopped container is resumed by presenting its spec AGAIN under
+    // Recreate.ifChanged — so an answer that flipped between two ensures would describe a
+    // plain-image container and REPLACE the editor's one. It used to take a memo to promise that,
+    // because the answer came off a live registry call that an outage could turn into "no"; a column
+    // in this service's own database is the same answer every time by construction, and the registry
+    // being unreachable is not even a thing this lookup can notice.
+    Workspace editor = workspaceService.createEditorWorkspace();
+    assertTrue(postures.isEditor(editor.id));
 
     repositories.findOutage(true);
     try {
-      assertTrue(postures.isWrapperMain(main.id), "the decided answer survives an outage");
+      assertTrue(postures.isEditor(editor.id), "the row says so whatever qits-projects is doing");
     } finally {
       repositories.findOutage(false);
     }
   }
 
   @Test
-  void aViewWithNoArchetypeIsNotWRITTENDOWNAsAnOrdinaryWorkspace() throws Exception {
-    // The 200 that answers nothing. `archetype` is nullable on the wire, so a registry that does not
-    // carry one is a live, successful read whose `isWrapper()` is false — and remembering THAT is
-    // the unreachable case's exposure with a status code in front of it, except permanent: one
-    // half-answered read would describe the plain image at every ensure for the life of the process.
-    String repoId = TestOrigin.create(dataDir);
-    repositories.register(repoId, "master"); // registered, and with no archetype
-    Workspace main = workspaceService.createMainWorkspace(repoId, "master");
-
-    assertFalse(postures.isWrapperMain(main.id), "not a wrapper for this call");
-
-    // The same workspace, once the registry answers in full. It must be able to flip.
-    repositories.registerWrapper(repoId, "master");
-    assertTrue(postures.isWrapperMain(main.id), "the unanswered read must not have been memoized");
-  }
-
-  @Test
-  void aViewWithNoMainBranchIsNotWrittenDownEither() throws Exception {
-    // The other nullable half of the predicate, and the same rule: a repository whose main branch
-    // the registry did not state cannot say anything about a workspace claiming it.
-    String repoId = TestOrigin.create(dataDir);
-    repositories.registerAs(repoId, " ", RepositoryLookup.RepositoryView.WRAPPER_ARCHETYPE);
-    Workspace main = workspaceService.createMainWorkspace(repoId, "master");
-
-    assertFalse(postures.isWrapperMain(main.id));
-
-    repositories.setMainBranch(repoId, "master");
-    assertTrue(postures.isWrapperMain(main.id), "the unanswered read must not have been memoized");
-  }
-
-  @Test
   void anUnknownWorkspaceIsNotTheEditorsWorkspace() {
-    assertFalse(postures.isWrapperMain(-1L));
-    assertFalse(postures.isWrapperMain(null));
+    assertFalse(postures.isEditor(-1L));
+    assertFalse(postures.isEditor(null));
   }
 }

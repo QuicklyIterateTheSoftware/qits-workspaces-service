@@ -3,6 +3,7 @@ package eu.wohlben.qits.workspaces.stories.editor;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -16,6 +17,7 @@ import eu.wohlben.qits.userflows.UserflowRunsAfter;
 import eu.wohlben.qits.userflows.report.ReportAssertions;
 import eu.wohlben.qits.userflows.report.Slugs;
 import eu.wohlben.qits.userflows.report.UserflowReport;
+import eu.wohlben.qits.workspaces.control.EditorWorkspace;
 import eu.wohlben.qits.workspaces.stories.creation.WorkspaceProvisionIT;
 import eu.wohlben.qits.workspaces.stories.support.StoryDaemon;
 import eu.wohlben.qits.workspaces.stories.support.StoryGitHost;
@@ -40,27 +42,24 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.TestMethodOrder;
 
 /**
- * <b>The web editor's door, and the one workspace it rides</b> — a browser posts {@code POST
- * /workspaces/api/editor/ensure} for a project's <b>wrapper</b> repository, and the service resolves
- * that wrapper's main workspace and begins ensuring its container.
+ * <b>The web editor's door, and the one workspace there is behind it</b> — a browser posts {@code
+ * POST /workspaces/api/editor/ensure} with no parameters at all, and the service finds or writes the
+ * platform's single editor workspace and begins ensuring its container.
  *
  * <h2>Why this is a story about an ABSENCE as much as a presence</h2>
  *
- * <p>The editor is not a new thing with a lifecycle: it is the wrapper's main workspace {@code
- * WorkspaceService.createMainWorkspace} already maintains ({@code WorkspacePostures.isWrapperMain}
- * — archetype {@code PROJECT} and branch == the repository's main branch), launched from the richer
- * editor image. So the door <b>creates nothing new</b>: it makes sure that one row exists and asks
- * for its container the way every other caller does. That is exactly what makes the diagram worth
- * pinning. A fresh workspace on a NEW branch pushes the branch into being — the {@code
- * git-receive-pack} arrow the provision story carries. This one does <b>not push at all</b>: the
- * main branch already exists, so the only git this ensure does is the {@code ls-remote} that asks
- * whether the branch is still there. That single check is two arrows — the ref advertisement and,
- * under git's protocol v2, the {@code git-upload-pack} the {@code ls-refs} command rides — and there
- * is <b>no {@code git-receive-pack}</b>, because a wrapper-main ensure creates no ref. Nothing else
- * touches the host: only one {@code info/refs} and one {@code git-upload-pack} appear, so there is
- * not even a mirror clone of objects (a clone opens its own advertisement) — just the one ref query.
- * "A wrapper-main ensure is idempotent, and it neither clones objects nor pushes" is a claim only a
- * count can make, and this is the count that makes it.
+ * <p>The editor used to be a project's <b>wrapper</b> repository's main workspace — one per project,
+ * launched from the richer image because of what that workspace <em>was</em> — and this story used to
+ * register that wrapper, build its origin on the git host, and name it in the request. All of that
+ * is gone, and what is left is the shape of the change: <b>no repository is named, no repository is
+ * read, and the git host is not touched at all</b>. The editor belongs to no repository, so the
+ * container spec carries no repository id, no project and no branch for the daemon to clone from,
+ * and there is no branch-still-there check to make. A diagram with a single arrow to qits-githost in
+ * it would be this change not having landed; the edge count is what says so.
+ *
+ * <p>The contrast with the provision story one category up is the point: that one forks a new branch
+ * into being with a {@code git-receive-pack}, clones objects, and reads the registry to address the
+ * repository. This one does none of the three.
  *
  * <h2>The door begins the ensure, and the story plays the container to complete it</h2>
  *
@@ -73,12 +72,12 @@ import org.junit.jupiter.api.TestMethodOrder;
  * before this story returns — the standard treatment for asynchronous far-side work, and the reason
  * the {@code networkHash} settles.
  *
- * <h2>The wrapper's id is AUTHORED, for the reason the provision story's is</h2>
+ * <h2>Nothing in the editor's name is generated any more</h2>
  *
- * <p>The editor container is {@code qits-ws-main-<repoId[0:8]>}, and eight characters of an id
- * <i>inside</i> a longer segment is something {@code Labels} refuses to rewrite — so a generated id
- * there would put a run-local value in a hashed label. {@link StoryTarget#WRAPPER_REPO_ID} is a
- * literal for exactly that reason.
+ * <p>The provision story authors its repository id because eight characters of it travel <i>inside</i>
+ * a container name, where {@code Labels} correctly refuses to rewrite them and a generated value
+ * would move the {@code networkHash} every run. The editor needs no such care: its container is
+ * {@code qits-ws-editor-editor}, both halves constant, because there is one of it.
  *
  * <h2>It runs after the provision story, and that is a real dependency</h2>
  *
@@ -97,7 +96,7 @@ public class EditorEnsureIT {
 
   static final String CATEGORY_SLUG = Slugs.slug(CATEGORY);
 
-  static final String OPENED = "Opening a project's editor starts its wrapper-main workspace";
+  static final String OPENED = "Opening the editor starts the one editor workspace";
 
   static final String OPENED_SLUG = Slugs.slug(OPENED);
 
@@ -126,46 +125,33 @@ public class EditorEnsureIT {
   @UserStory(value = OPENED, category = CATEGORY)
   @UserStoryDescription(
       """
-      Somebody opens a project's editor. There is no "editor" to create: a project's editor is the
-      workspace that rides its WRAPPER repository's main branch — the per-project singleton the
-      service already maintains — started from the editor image because of what that workspace IS.
-      So the door is one idempotent sentence: there should be an editor for this project.
+      Somebody opens the editor. There is one editor on this platform — one row, one container, one
+      volume — so the door is one idempotent sentence with nothing in it: there should be an editor.
+      No query parameter, an empty body, and two people coming in from two different projects' pages
+      send the identical request and reach the identical container.
 
-      The scope is the wrapper repository, named as a query parameter the way a workspace listing
-      names its repository and for the same reason — a workspace is not a sub-resource of a
-      repository here, which holds the id as an opaque string in another database. The body is empty.
-      The door refuses a repository that is not a wrapper with a 400, rather than starting a plain
-      workspace nobody could ever poll to ready; this repository is a wrapper, so it resolves.
-
-      Then the main workspace. It already exists or is written on the branch it claims — and because
-      that branch is the main branch, which the git host already holds, there is NOTHING to create
-      on the host: no branch ref pushed, no mirror cloned. The one thing asked of the git host is
-      whether the branch is still there at all. Contrast the ordinary provision, which forks a new
-      branch into being with a push.
+      The row is found or written. It belongs to no repository and claims no branch, which is what
+      makes the rest of this diagram an absence: nothing is asked of the repository registry, and the
+      git host is not touched at all — there is no branch to create, none to check is still there,
+      and no objects to mirror. Contrast the ordinary provision, which forks a new branch into being
+      with a push and reads the registry to address it.
 
       Then the container, begun the moment the door decides one is worth starting: this process holds
       no docker socket, so it commissions the workspace's own idp credential and asks qits-containers
       to put a container under a spec it composes — the EDITOR image, and the editor environment the
-      in-container daemon reads to supervise openvscode-server. The verb answers at once with a
-      technical process id, because a pull and a clone are minutes of somebody else's work, and the
-      provision is not complete until the daemon inside dials the control socket and reports that the
-      checkout is populated. Until then the editor is coming up, which is what a reader who reloaded
-      mid-start rejoins rather than a second one being started.
+      in-container daemon reads to supervise openvscode-server. The spec deliberately carries BLANK
+      repository, project and branch names: a daemon told to clone the row's sentinel id would go
+      looking for a repository that does not exist. The verb answers at once with a technical process
+      id, because an image pull is minutes of somebody else's work, and the provision is not complete
+      until the daemon inside dials the control socket. Until then the editor is coming up, which is
+      what a reader who reloaded mid-start rejoins rather than a second one being started.
       """)
   @UserflowRunsAfter(WorkspaceProvisionIT.class)
   @Order(1)
-  void openingAProjectsEditorStartsItsWrapperMainWorkspace(Interactions story) throws Exception {
-    // A project wrapper: archetype PROJECT with a main branch, which is the whole of being an
-    // editor's repository. Its origin exists on the git host so the branch-existence check finds it.
-    StoryGitHost.createRepository(StoryTarget.PROJECT, StoryTarget.WRAPPER_REPO, false);
-    StoryPeers.register(
-        new StoryPeers.Repository(
-            StoryTarget.WRAPPER_REPO_ID,
-            StoryTarget.PROJECT,
-            StoryTarget.WRAPPER_REPO,
-            StoryTarget.MAIN,
-            StoryPeers.WRAPPER_ARCHETYPE));
-
+  void openingTheEditorStartsTheOneEditorWorkspace(Interactions story) throws Exception {
+    // NO FIXTURE AT ALL, and that is the assertion this method opens with. There is no repository to
+    // register and no origin to build: the editor belongs to none, so nothing about it can be
+    // arranged anywhere but in this service's own database, by the door itself.
     NetworkCapture.actor(StoryIdentities.OPERATOR);
     JsonPath opened =
         StoryIdentities.person(given())
@@ -174,7 +160,7 @@ public class EditorEnsureIT {
             // none.
             .contentType(ContentType.JSON)
             .when()
-            .post(StoryTarget.EDITOR_ENSURE_PATH + "?repositoryId=" + StoryTarget.WRAPPER_REPO_ID)
+            .post(StoryTarget.EDITOR_ENSURE_PATH)
             .then()
             // 201: this call started the editor. The body is BARE — four scalars a two-second poll
             // reads directly, not the {workspace: …} envelope the WorkspaceDto routes carry.
@@ -189,8 +175,8 @@ public class EditorEnsureIT {
     long rowId = Long.parseLong(opened.getString("workspaceId"));
     story
         .note(
-            "the browser posts the wrapper's id and gets 201 — the door resolved the wrapper's main"
-                + " workspace and began starting its container, answering the workspace row id the"
+            "the browser posts nothing at all and gets 201 — there is one editor, so the door wrote"
+                + " its row and began starting its container, answering the workspace row id the"
                 + " container verbs are keyed by, with the editor not yet ready")
         .as("editor-requested");
 
@@ -204,17 +190,22 @@ public class EditorEnsureIT {
     assertNotNull(spec, "no workload spec reached qits-containers");
     assertTrue(
         spec.contains("QITS_WORKSPACE_DAEMON_EDITOR_ENABLED"),
-        "the container was not launched as an editor — isWrapperMain was not recognised");
+        "the container was not launched as an editor — the row's editor column was not read");
     assertTrue(
         spec.contains("QITS_WORKSPACE_DAEMON_URL")
             && spec.contains("/workspaces/daemon/" + rowId),
         "the editor container was not told where to dial home");
+    // …and it was told to clone NOTHING. The sentinel repository id must not reach the daemon: it
+    // names no repository, so a daemon handed it would fail on a clone nobody could explain.
+    assertFalse(
+        spec.contains("\"QITS_WORKSPACE_DAEMON_REPOSITORY_ID\":\"" + EditorWorkspace.REPOSITORY_ID),
+        "the editor's container was told to clone its own sentinel repository id");
     story
         .note(
-            "the container asked for is the wrapper-main one, and its spec carries the editor"
-                + " environment the in-container daemon reads to supervise openvscode-server — which"
-                + " is how the same createMainWorkspace path launches an editor rather than a plain"
-                + " workspace, decided by what the workspace IS and not by a flag on the call")
+            "the container asked for is the one editor's — a constant name, so everybody's editor is"
+                + " this container — and its spec carries the editor environment the in-container"
+                + " daemon reads to supervise openvscode-server, with the repository, project and"
+                + " branch names blank because the editor belongs to none of them")
         .as("editor-container-ensured");
 
     // From here the story plays the container, so the provision it began completes cleanly rather
@@ -224,7 +215,7 @@ public class EditorEnsureIT {
         StoryIdentities.machineToken("workspace-" + rowId, StoryIdentities.SYSTEM_ROLE);
     MINTED.add(daemonBearer);
     try (StoryDaemon daemon = StoryDaemon.dial(baseUrl, rowId, daemonBearer)) {
-      daemon.hello(StoryTarget.MAIN_WORKSPACE_LABEL, StoryTarget.WRAPPER_REPO_ID, StoryTarget.MAIN);
+      daemon.hello(StoryTarget.EDITOR_LABEL, "", "");
       assertNotNull(daemon.awaitAck(), "the host did not acknowledge the daemon's Hello");
       story
           .note(
@@ -259,21 +250,6 @@ public class EditorEnsureIT {
     // requests, one (kind, from, to, label) — the row id scrubs and the loop draws once).
     from(NetworkEdge.HTTP, "POST " + StoryTarget.EDITOR_ENSURE_PATH + " -> 201");
     from(NetworkEdge.HTTP, "GET " + StoryTarget.WORKSPACE_LABEL_PATH + "/active-process -> 200");
-
-    // The registry. ONE arrow for the handful of reads the door and the provision make — the door's
-    // require, createMainWorkspace's, and the posture lookup that decides the editor image — all the
-    // same (kind, from, to, label), and the id authored so it survives verbatim.
-    to(StoryPeers.PROJECTS, StoryPeers.repositoryRead(StoryTarget.WRAPPER_REPO_ID));
-
-    // The git host, and that is the whole point. The only git operation is the `ls-remote` that asks
-    // whether the main branch is still there — the wire read `ensureContainer` guards on. It renders
-    // as TWO arrows: the ref advertisement, and the `git-upload-pack` the `ls-refs` command rides
-    // under protocol v2. There is NO git-receive-pack — no push, because a wrapper-main ensure
-    // creates no ref — and only one advertisement, so no mirror clone of objects either.
-    to(
-        StoryGitHost.SERVICE_NAME,
-        StoryGitHost.advertisement(StoryTarget.PROJECT, StoryTarget.WRAPPER_REPO));
-    to(StoryGitHost.SERVICE_NAME, StoryGitHost.read(StoryTarget.PROJECT, StoryTarget.WRAPPER_REPO));
 
     // The credential this editor's container was commissioned with, minted at qits-platform-idp for
     // it alone. No token arrow beside it: the containers client's token was minted in the provision
@@ -315,12 +291,18 @@ public class EditorEnsureIT {
         StoryIdentities.DAEMON,
         "ack");
 
-    // TWELVE across four planes: two browser doors, one registry read, the ls-remote's two git
-    // arrows, one commission, two container calls, one dial and three frames. The count is what
-    // would notice a PUSH creeping in — a git-receive-pack the wrapper-main path must not make — or a
-    // second advertisement (a mirror clone of objects), or a status poll the design deliberately does
-    // not make because the wait is on the socket instead.
-    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, OPENED_SLUG, 12);
+    // NINE across three planes: two browser doors, one commission, two container calls, one dial and
+    // three frames. Three planes and not four — there is no arrow to qits-githost at all, which is
+    // the whole change, and the count is what says so rather than a reader's good intentions.
+    //
+    // It is also what would notice the two things this path must never start doing again: a
+    // REPOSITORY READ (the editor belongs to none, so a registry round trip could only ever be a
+    // sentinel id being looked up and not found), and any git operation whatsoever. A status poll at
+    // qits-containers would show up here too; the design deliberately waits on the socket instead.
+    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, OPENED_SLUG, 9);
+    // Named absences, both of them the point of the change rather than incidental.
+    ReportAssertions.assertNoEdgesTo(CATEGORY_SLUG, OPENED_SLUG, StoryGitHost.SERVICE_NAME);
+    ReportAssertions.assertNoEdgesTo(CATEGORY_SLUG, OPENED_SLUG, StoryPeers.PROJECTS);
     ReportAssertions.assertOnlyEdgesFrom(
         CATEGORY_SLUG,
         OPENED_SLUG,
@@ -347,7 +329,7 @@ public class EditorEnsureIT {
   private void awaitProvisionAccepted(StoryDaemon daemon, long rowId) throws Exception {
     long deadline = System.nanoTime() + PATIENCE.toNanos();
     while (true) {
-      daemon.provisioned(StoryTarget.MAIN_WORKSPACE_LABEL, PROVISIONED_HEAD);
+      daemon.provisioned(StoryTarget.EDITOR_LABEL, PROVISIONED_HEAD);
       if (awaitProcessOver(rowId, Duration.ofSeconds(5))) {
         return;
       }

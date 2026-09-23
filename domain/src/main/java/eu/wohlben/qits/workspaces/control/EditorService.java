@@ -2,7 +2,6 @@ package eu.wohlben.qits.workspaces.control;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
-import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -11,35 +10,43 @@ import jakarta.inject.Inject;
 import java.util.Optional;
 
 /**
- * The web editor's one door: <b>there should be an editor for this project</b>, said idempotently.
+ * The web editor's one door: <b>there should be an editor</b>, said idempotently.
  *
  * <p>One call and not two, because the request is the same sentence whether or not anything is
  * running: a caller polls this and nothing else, and a reader who reloads mid-start rejoins the
  * editor that is already coming up instead of asking for a second one. It answers what it did — a
  * fresh start or an existing one — and what the caller acts on, which is one boolean.
  *
- * <h2>The editor is the wrapper's main workspace, and that is the whole of its identity</h2>
+ * <h2>One editor, one row, one container, for the whole platform</h2>
  *
- * <p>There is no editor row, no editor container and no editor lifecycle of its own. A project's
- * editor is the workspace {@code WorkspaceService.createMainWorkspace} already maintains for the
- * project wrapper's main branch — the per-project singleton — launched from the editor image because
- * of what that workspace <em>is</em> ({@link WorkspacePostures#isWrapperMain}). So this class creates
- * nothing new: it makes sure that one row exists, and then asks for its container the way every
- * other caller does.
+ * <p>There is a single editor workspace and the door takes no scope, because there is nothing to
+ * scope it by. {@code WorkspaceService.createEditorWorkspace} finds that row or writes it — {@code
+ * workspaceId} and {@code repositoryId} both {@link EditorWorkspace}'s constants, no branch, no
+ * parent, {@code editor = true} — and the container derived from it is therefore a constant too:
+ * {@code qits-ws-editor-editor}, on the volume {@code qits_workspace_editor}. So two people opening
+ * the editor from two different projects land on the same row and the same container, which is the
+ * entire point of the change and the reason this call carries no project.
  *
- * <p><b>Which is why the two things a caller can do about a stuck editor are the ordinary container
- * verbs.</b> The answer carries the workspace's row id for exactly that: {@code
- * /workspaces/{id}/stop-container} and {@code /recreate-container} are aimed at it, and they are the
- * same routes the workspace detail page uses.
+ * <p><b>What that replaced was a derivation.</b> The editor used to be a project's wrapper
+ * repository's main workspace — one per project, launched from the editor image because of what
+ * that workspace <em>was</em> — so this door took a repository id, refused anything that was not a
+ * wrapper, and leaned on {@code createMainWorkspace}. None of that survives a single editor: there
+ * is no project, so there is no wrapper to check and no repository to be sent at the wrong one of.
+ *
+ * <p><b>The answer still carries the workspace's row id, and for the same reason it always did.</b>
+ * The two things a caller can do about a stuck editor are the ordinary container verbs: {@code
+ * /workspaces/{id}/stop-container} and {@code /recreate-container} are aimed at that id, and they
+ * are the same routes the workspace detail page uses.
  *
  * <h2>Why there are no locks here</h2>
  *
- * <p>Double-provision safety is structural and predates this door. {@code createMainWorkspace} is
- * idempotent on the branch, {@code uq_workspace_active_branch} makes that true under a race rather
- * than by agreement, and the orchestrator's ensure is a PUT per {@code (owner, workload, ref)} — so a
- * second ensure adopts the place the first one made. What this class adds is not a lock but a reason
- * not to ask: an ensure is not started while a technical process is already running for the
- * workspace, or while its container is up with a daemon on the socket. Without that, a client
+ * <p>Double-provision safety is structural and predates this door. {@code createEditorWorkspace} is
+ * find-or-write, {@code uq_workspace_active_editor} makes that true under a race rather than by
+ * agreement — the same arrangement {@code createMainWorkspace} has with {@code
+ * uq_workspace_active_branch} — and the orchestrator's ensure is a PUT per {@code (owner, workload,
+ * ref)}, so a second ensure adopts the place the first one made. What this class adds is not a lock
+ * but a reason not to ask: an ensure is not started while a technical process is already running for
+ * the workspace, or while its container is up with a daemon on the socket. Without that, a client
  * polling every two seconds would spawn one provision per tick through a multi-gigabyte image pull.
  */
 @ApplicationScoped
@@ -48,8 +55,6 @@ public class EditorService {
   @Inject WorkspaceService workspaces;
 
   @Inject WorkspaceRepository workspaceRepository;
-
-  @Inject RepositoryLookup repositories;
 
   /**
    * The technical process a start streams over. Optional like everywhere else this context touches
@@ -96,34 +101,17 @@ public class EditorService {
       boolean fresh) {}
 
   /**
-   * Find or start this project's editor.
+   * Find or start the editor. It takes no argument, because there is one editor.
    *
-   * @param repositoryId the <b>wrapper</b> repository's id — the project's superproject, which is the
-   *     repository whose main workspace the editor rides
-   * @throws eu.wohlben.qits.workspaces.error.NotFoundException no such repository
-   * @throws BadRequestException the repository is not a project wrapper, so it has no editor. A
-   *     refusal and not a silent plain-workspace start: a caller that was sent to the wrong
-   *     repository would otherwise poll a workspace that can never become ready, forever.
+   * <p>No refusals of its own, and that is the shape of the change: the 400 for "that repository is
+   * not a project's wrapper" and the 404 for "no such repository" both existed to stop a caller
+   * polling a workspace that could never become ready, and neither can be asked for any more.
    */
-  public EditorSession ensure(String repositoryId) {
-    RepositoryLookup.RepositoryView repository = repositories.require(repositoryId);
-    if (!repository.isWrapper()) {
-      throw new BadRequestException(
-          "Repository "
-              + repositoryId
-              + " is not a project's wrapper, so it has no editor. The editor rides the wrapper"
-              + " repository's main workspace.");
-    }
-    String mainBranch = repository.mainBranch();
-    if (mainBranch == null || mainBranch.isBlank()) {
-      throw new BadRequestException(
-          "Repository " + repositoryId + " has no main branch, so there is no workspace to open.");
-    }
-
-    // Idempotent on the branch, and that is what makes this door one: an existing main workspace is
-    // handed back, a missing one is written, and two callers racing are settled by the partial
-    // unique index rather than by either of them holding anything.
-    Workspace workspace = workspaces.createMainWorkspace(repositoryId, mainBranch);
+  public EditorSession ensure() {
+    // Find-or-write, and that is what makes this door one: the existing editor row is handed back, a
+    // missing one is written, and two callers racing are settled by the partial unique index rather
+    // than by either of them holding anything.
+    Workspace workspace = workspaces.createEditorWorkspace();
     Long rowId = workspace.id;
 
     EditorLifecycle editorState = editorState(rowId);

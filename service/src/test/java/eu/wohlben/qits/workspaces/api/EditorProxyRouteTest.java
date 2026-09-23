@@ -4,16 +4,16 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 
-import eu.wohlben.qits.workspaces.control.EditorHost;
-import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
-import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.daemonhost.WorkspaceDaemonRegistry;
 import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspacedaemon.protocol.EditorState;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -41,26 +41,40 @@ import org.junit.jupiter.api.Test;
 // control/SharedTuningProfile for what a restart costs in metaspace; bug e6f0bdfa.
 public class EditorProxyRouteTest {
 
-  @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceService workspaceService;
+  @Inject WorkspaceRepository workspaces;
   @Inject WorkspaceDaemonRegistry registry;
-
-  @ConfigProperty(name = "qits.test.origins-dir")
-  String dataDir;
 
   // --- fixtures -----------------------------------------------------------------------------------
 
-  /** A project whose wrapper has a main workspace with a (fake) container running. */
-  private Workspace editorWorkspace(String slug) throws Exception {
-    String repoId = TestOrigin.create(dataDir);
-    repositories.registerWrapper(repoId, "master", EditorHost.wrapperRepositoryName(slug));
-    Workspace main = workspaceService.createMainWorkspace(repoId, "master");
-    workspaceService.ensureContainer(main.id);
-    return main;
+  /**
+   * THE editor, with a (fake) container running — and nothing else, which is the fixture the change
+   * collapsed. Every case used to mint a repository, register it as a project's wrapper under the
+   * name that project's slug derives, and open its main workspace, because the origin named a
+   * project and the lookup had to find it. There is one editor row now and no project anywhere in
+   * the path.
+   *
+   * <p>It is one row for the whole database, so the state each case needs is arranged per case
+   * rather than assumed: the container is ensured here, and the daemon's last word about the editor
+   * is dropped, because "nothing reported" is one of the five answers and a previous case's frame
+   * would otherwise still be standing.
+   */
+  private Workspace editorWorkspace() {
+    Workspace editor = workspaceService.createEditorWorkspace();
+    workspaceService.ensureContainer(editor.id);
+    // A state this host cannot name drops the entry — the registry's own rule, and the only way to
+    // say "the daemon has said nothing" from outside a disconnect.
+    registry.onMessage(editor.id, null, new EditorState("NOTHING_THIS_HOST_CAN_NAME"));
+    return editor;
   }
 
-  private static String host(String slug) {
-    return "editor." + slug + ".dev.example.eu";
+  /**
+   * The editor's origin. The old per-project grammar, deliberately: it is what is deployed today,
+   * and the route is grammar-agnostic behind the first label precisely so the origin can move on its
+   * own.
+   */
+  private static String host() {
+    return "editor.qits.dev.example.eu";
   }
 
   /** What the daemon would have said, without a daemon: the registry caches the frame either way. */
@@ -73,7 +87,7 @@ public class EditorProxyRouteTest {
   @Test
   public void aRequestWithoutThePlatformsIdentityIsRefusedBeforeAnythingIsDialled()
       throws Exception {
-    Workspace main = editorWorkspace("refusal");
+    Workspace main = editorWorkspace();
     reportEditor(main.id, EditorState.State.RUNNING);
 
     // The edge strips the X-Qits-* namespace from every inbound request unconditionally, so the
@@ -81,7 +95,7 @@ public class EditorProxyRouteTest {
     // session gate that is this platform's auth boundary. 403 rather than 401 because this hop has
     // no challenge to issue — the login is at the edge.
     given()
-        .header("X-Forwarded-Host", host("refusal"))
+        .header("X-Forwarded-Host", host())
         .get("/")
         .then()
         .statusCode(403)
@@ -89,12 +103,23 @@ public class EditorProxyRouteTest {
   }
 
   @Test
-  public void aLabelNobodyRegisteredIs404WithNothingDialled() throws Exception {
-    editorWorkspace("known");
+  public void anEditorNobodyHasOpenedYetIs404WithNothingDialled() throws Exception {
+    // The fresh-platform answer, and the case that replaced "a project label nobody registered".
+    // The row is written by the DOOR, so a browser that navigates straight to the origin finds
+    // nothing — and a GET at an origin deliberately does not start a container for it.
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaces
+                    .findActiveEditor()
+                    .ifPresent(
+                        editor -> {
+                          editor.status = WorkspaceStatus.ABANDONED;
+                          editor.resolvedAt = Instant.now();
+                        }));
 
-    // Not a redirect, not a default project, not the only project this platform happens to have.
     given()
-        .header("X-Forwarded-Host", host("nosuchproject"))
+        .header("X-Forwarded-Host", host())
         .header("X-Qits-User", "alice")
         .get("/")
         .then()
@@ -104,14 +129,14 @@ public class EditorProxyRouteTest {
 
   @Test
   public void aStoppedContainerIsASplashAndNotAnError() throws Exception {
-    Workspace main = editorWorkspace("stopped");
+    Workspace main = editorWorkspace();
     reportEditor(main.id, EditorState.State.RUNNING);
     workspaceService.stopContainer(main.id);
 
     // A container that is not up is not a broken editor. The page says so and refreshes itself, so
     // opening the editor while it starts is the same act as opening it once it has.
     given()
-        .header("X-Forwarded-Host", host("stopped"))
+        .header("X-Forwarded-Host", host())
         .header("X-Qits-User", "alice")
         .get("/")
         .then()
@@ -122,12 +147,12 @@ public class EditorProxyRouteTest {
 
   @Test
   public void aStartingEditorAndAnUnreportedOneAreTheSameSplash() throws Exception {
-    Workspace main = editorWorkspace("starting");
+    Workspace main = editorWorkspace();
 
     // Nothing reported: the container is up, and no frame has arrived. A reader cannot act on the
     // difference between that and STARTING, so they are one answer.
     given()
-        .header("X-Forwarded-Host", host("starting"))
+        .header("X-Forwarded-Host", host())
         .header("X-Qits-User", "alice")
         .get("/")
         .then()
@@ -137,7 +162,7 @@ public class EditorProxyRouteTest {
 
     reportEditor(main.id, EditorState.State.STARTING);
     given()
-        .header("X-Forwarded-Host", host("starting"))
+        .header("X-Forwarded-Host", host())
         .header("X-Qits-User", "alice")
         .get("/")
         .then()
@@ -147,13 +172,13 @@ public class EditorProxyRouteTest {
 
   @Test
   public void anEndedEditorStopsTheWaitingWithAStatusOfItsOwn() throws Exception {
-    Workspace main = editorWorkspace("ended");
+    Workspace main = editorWorkspace();
     reportEditor(main.id, EditorState.State.ENDED);
 
     // Terminal, so it must NOT be the refreshing splash: the editor is not coming back in this
     // container, and a page that kept waiting would spin for the container's lifetime.
     given()
-        .header("X-Forwarded-Host", host("ended"))
+        .header("X-Forwarded-Host", host())
         .header("X-Qits-User", "alice")
         .get("/")
         .then()
@@ -176,11 +201,11 @@ public class EditorProxyRouteTest {
   @Test
   public void aRunningEditorWithNoTunnelSaysSoRatherThanDiallingSomethingUnreachable()
       throws Exception {
-    Workspace main = editorWorkspace("notunnel");
+    Workspace main = editorWorkspace();
     reportEditor(main.id, EditorState.State.RUNNING);
 
     given()
-        .header("X-Forwarded-Host", host("notunnel"))
+        .header("X-Forwarded-Host", host())
         .header("X-Qits-User", "alice")
         .get("/")
         .then()
@@ -193,7 +218,7 @@ public class EditorProxyRouteTest {
 
   @Test
   public void theMachineSurfaceIsUntouchedByThisRoute() throws Exception {
-    Workspace main = editorWorkspace("ordering");
+    Workspace main = editorWorkspace();
     reportEditor(main.id, EditorState.State.RUNNING);
 
     // A request that names no editor origin falls straight through — this route claims nothing it
@@ -211,7 +236,7 @@ public class EditorProxyRouteTest {
     // /workspaces/*, so the ordering costs nothing and keeps this route out of the way of a surface
     // it has nothing to do with.
     given()
-        .header("X-Forwarded-Host", host("ordering"))
+        .header("X-Forwarded-Host", host())
         .header("X-Qits-User", "alice")
         .get("/workspaces/container/999999/files")
         .then()

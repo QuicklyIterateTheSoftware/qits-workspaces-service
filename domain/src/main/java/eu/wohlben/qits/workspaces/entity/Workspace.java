@@ -173,6 +173,31 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public boolean admin = false;
 
   /**
+   * Whether this row <b>is the web editor</b> — the one shared editor container the whole platform
+   * opens, started from the editor image and told to supervise {@code openvscode-server}.
+   *
+   * <p><b>It is the editor's whole identity.</b> There is no project behind it, no repository whose
+   * archetype could say so and no branch that means anything: the editor used to be derived (a
+   * {@code PROJECT}-archetype repository's main workspace, one per project) and is now a single
+   * container for the platform, so the only thing that can say which row it is, is the row. Exactly
+   * one writer — {@code WorkspaceService.createEditorWorkspace} — and no verb that promotes an
+   * existing workspace, because that would swap a running workspace's image underneath somebody's
+   * checkout.
+   *
+   * <p><b>Read at container-spec time, so it must never change for a live row.</b> The orchestrator
+   * has no start verb: a stopped container is started by presenting its spec again under {@code
+   * Recreate.ifChanged}, and a spec that differs REPLACES the container, writable layer and all.
+   * This answer picks the image and two environment variables, so a row whose flag moved would lose
+   * its container on the next ensure — the same reasoning {@link #admin} and the commissioned
+   * credential pair carry, and the reason this is a column rather than something a caller passes in.
+   *
+   * <p><b>False for everything that did not ask</b>, and {@code uq_workspace_active_editor} ({@code
+   * V7}) makes "at most one ACTIVE editor row" structural rather than a thing the creator agrees to.
+   */
+  @Column(name = "editor", nullable = false)
+  public boolean editor = false;
+
+  /**
    * What a <b>dispatched</b> workspace is for: the qits-projects ticket, or the epic, the dispatch
    * was about. Both null for every workspace a person created by hand, and for every workspace that
    * predates {@code V5}.

@@ -415,20 +415,20 @@ public class WorkspaceContainerFactory {
   }
 
   /**
-   * Whether this workspace is the project wrapper's main workspace — the one that runs the editor.
-   * <b>Every failure direction is false</b>, exactly as above, and here it means something different
-   * from a lost privilege: a false answer for a workspace that really is the wrapper's main one
-   * describes a plain-image container, and a spec that differs from what is running is a {@code
-   * Recreate.ifChanged} replacement. That is why the shipped posture memoizes its answer rather than
-   * asking the registry afresh at every ensure ({@code PersistedWorkspacePostures}) — the falling is
-   * the last resort, not the ordinary path.
+   * Whether this workspace is <b>the editor</b> — the one shared editor container the platform
+   * opens. <b>Every failure direction is false</b>, exactly as above, and here it means something
+   * different from a lost privilege: a false answer for the row that really is the editor describes
+   * a plain-image container, and a spec that differs from what is running is a {@code
+   * Recreate.ifChanged} replacement. That is why the shipped posture reads a column
+   * ({@code PersistedWorkspacePostures}) — a local read that gives the same answer at every ensure,
+   * so the falling below is the last resort rather than the ordinary path.
    */
   private boolean editorWorkspace(Long rowId) {
     if (rowId == null || !postures.isResolvable()) {
       return false;
     }
     try {
-      return postures.get().isWrapperMain(rowId);
+      return postures.get().isEditor(rowId);
     } catch (RuntimeException e) {
       LOG.warnf(
           e,
@@ -536,8 +536,8 @@ public class WorkspaceContainerFactory {
 
   /**
    * The fully qualified, version-pinned <b>editor</b> image reference: {@code <repo>:<version>},
-   * composed for the reason {@link #image()} is composed. It is what the project wrapper's main
-   * workspace runs and what every other workspace does not — see {@link #editorWorkspace}.
+   * composed for the reason {@link #image()} is composed. It is what the one editor workspace runs
+   * and what every other workspace does not — see {@link #editorWorkspace}.
    */
   public String editorImage() {
     return editorImageRepo + ":" + editorImageVersion();
@@ -728,22 +728,48 @@ public class WorkspaceContainerFactory {
     // API base path above.
     container.env("QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE", ServiceProxyPath.PREFIX + rowId);
     container.env("QITS_WORKSPACE_DAEMON_WORKSPACE_ID", workspaceId);
-    container.env("QITS_WORKSPACE_DAEMON_REPOSITORY_ID", repoId);
-    container.env("QITS_WORKSPACE_DAEMON_BRANCH", branch == null ? "" : branch);
-    container.env("QITS_WORKSPACE_DAEMON_PARENT", parent == null ? "" : parent);
+    // THE EDITOR BELONGS TO NO REPOSITORY, so it is told about none. Every name below is what the
+    // in-container daemon self-clones from — repository id, project-scoped name, branch, parent —
+    // and the editor's row carries a SENTINEL repository id (EditorWorkspace.REPOSITORY_ID) and no
+    // branch at all. Handing the daemon that sentinel would send it to clone `/git/editor`, which is
+    // nothing, and the failure would be a provision that never completes rather than a container
+    // with an empty /workspace. So the five names are written BLANK, which is the same value a
+    // repository the registry could not resolve already produces, and the two lookups behind them
+    // are not made: there is nothing to resolve and the sentinel would cost a round trip per ensure
+    // to learn that.
+    //
+    // WHAT THIS ONE CONTAINER NOW REACHES IS AN ACCEPTED CONSEQUENCE, decided deliberately by the
+    // epic and recorded here because it is the kind of thing that must not be rediscovered. It holds
+    // an ordinary `qits:agent` workspace credential — the same one every workspace container gets,
+    // no new client and no new audience — but it is no longer one project's container: everybody
+    // opens THIS one, so an unattended agent inside it acts on the whole platform rather than on the
+    // project whose page somebody came in through. Its commission is unscoped for the same reason
+    // the blanks above are blank (no repository ⇒ no project claim), so it READS every project.
+    //
+    // Cloning every project's wrapper side by side inside it is a LATER task and is deliberately not
+    // done here — which is also why the row's stated Git refs are empty today and why this block is
+    // a clean seam rather than a special case: that task sets what is cloned and widens what may be
+    // pushed, and nothing else here has to move.
+    container.env("QITS_WORKSPACE_DAEMON_REPOSITORY_ID", editor ? "" : repoId);
+    container.env("QITS_WORKSPACE_DAEMON_BRANCH", editor || branch == null ? "" : branch);
+    container.env("QITS_WORKSPACE_DAEMON_PARENT", editor || parent == null ? "" : parent);
     // The project-scoped name the daemon self-clones under (/git/<projectId>/<name>), so committed
     // relative submodule urls resolve natively in-container. Blank when the repo has no project —
     // the
     // daemon then id-addresses (/git/<repositoryId>), mirroring cloneUrl's fallback.
-    Optional<RepositoryAddressResolver.ProjectScopedName> scopedName = scopedName(repoId);
+    Optional<RepositoryAddressResolver.ProjectScopedName> scopedName =
+        editor ? Optional.empty() : scopedName(repoId);
     // The owning project id, also as a label so it mirrors the per-workspace volume's qits.project
     // (the volume labels carry it for dangling-volume reconcile; the container carries it for
     // symmetry). Resolved through projectIdFor — the RepositoryLookup fallback is what stopped
-    // this env var from shipping empty (D2). Blank only when no registry answers.
+    // this env var from shipping empty (D2). Blank only when no registry answers — and for the
+    // editor, which owns no project the way it owns no repository.
     String projectId =
-        scopedName
-            .map(RepositoryAddressResolver.ProjectScopedName::projectId)
-            .orElseGet(() -> projectIdFor(repoId));
+        editor
+            ? ""
+            : scopedName
+                .map(RepositoryAddressResolver.ProjectScopedName::projectId)
+                .orElseGet(() -> projectIdFor(repoId));
     container.label("qits.project", projectId);
     container.env("QITS_WORKSPACE_DAEMON_PROJECT_ID", projectId);
     container.env(
@@ -807,7 +833,7 @@ public class WorkspaceContainerFactory {
               container.env("QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL", tokenUrl(idpUrl));
               container.env("QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE", CONTAINER_TOKEN_AUDIENCE);
             });
-    // THE WEB EDITOR, and only for the project wrapper's main workspace. The daemon supervises
+    // THE WEB EDITOR, and only for the one row that IS it. The daemon supervises
     // openvscode-server when it is told to; every other workspace is told nothing and behaves
     // exactly as it did before an editor existed — which is also the daemon's own shipped default,
     // so the absence is not a second way of saying the same thing.
@@ -819,8 +845,8 @@ public class WorkspaceContainerFactory {
     //
     // IT RIDES THE SPEC, so it obeys the spec-hash rule: environment is part of the spec, a changed
     // spec is a Recreate.ifChanged REPLACEMENT, and a resume presents the spec again. That is why
-    // both values are stable lookups — the posture off the row and its repository, the port off
-    // config — and never something a caller passed in. See WorkspacePostures.
+    // both values are stable lookups — the posture off the row's own column, the port off config —
+    // and never something a caller passed in. See WorkspacePostures.
     if (editor) {
       container.env("QITS_WORKSPACE_DAEMON_EDITOR_ENABLED", "true");
       container.env("QITS_WORKSPACE_DAEMON_EDITOR_PORT", Integer.toString(editorPort));
@@ -947,7 +973,7 @@ public class WorkspaceContainerFactory {
     //
     // THE IMAGE IS THE LAST THING DECIDED AND THE FIRST THING THE ORCHESTRATOR READS. The editor's
     // is a child of this one — `qits/workspace-editor` is FROM `qits/workspace` plus one directory —
-    // so a wrapper-main workspace is an ordinary workspace container that happens to carry
+    // so the editor is an ordinary workspace container that happens to carry
     // openvscode-server, and everything above it is identical. Which one a container runs is
     // answered before it exists rather than by a flag inside it, which is why the editor is a second
     // image at all.

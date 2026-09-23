@@ -407,34 +407,45 @@ public class WorkspaceContainerLifecycleServiceTest {
   }
 
   @Test
-  public void anIdleStoppedEditorWorkspaceResumesInPlaceWithItsCheckout() throws Exception {
+  public void anIdleStoppedEditorWorkspaceResumesInPlaceWithItsVolume() throws Exception {
     // THE REOPEN PATH, and the whole reason it needs no code. qits-containers' IdleSweep STOPS an
     // idle-stopped place — it does not delete it — so what the editor comes back to is the ladder's
     // second rung, which every workspace has always had: the container is present but not running,
     // and ensureContainer starts it back up where it stands rather than re-cloning. The daemon then
     // finds a populated /workspace and clones nothing.
     //
-    // The workspace here is the WRAPPER'S MAIN one, because that is the only workspace an idle-stop
-    // policy is ever asked for — see WorkspaceContainers.lifetime.
-    String repoId = TestOrigin.create(dataDir);
-    repositories.registerWrapper(repoId, "master", "editorproject-editorproject");
-    workspaceService.createMainWorkspace(repoId, "master");
-    workspaceService.ensureContainer(workspaceIds.of(repoId, "master"));
-    String container = containers.containerName("master", repoId);
-    String head = commitInContainer(container, "editor-unpushed.txt");
+    // The workspace here is THE EDITOR'S, because that is the only workspace an idle-stop policy is
+    // ever asked for — see WorkspaceContainers.lifetime. It is one row for the whole platform now,
+    // so it is created by its own verb and belongs to no repository: its container carries whatever
+    // its /workspace volume holds and nothing was cloned into it.
+    Long rowId = workspaceService.createEditorWorkspace().id;
+    workspaceService.ensureContainer(rowId);
+    String container =
+        containers.containerName(EditorWorkspace.WORKSPACE_ID, EditorWorkspace.REPOSITORY_ID);
+    // What survives is the VOLUME's contents, and for the editor that is not a checkout: it clones
+    // nothing (it belongs to no repository), so what a reader loses if the resume re-provisions is
+    // whatever they left in /workspace. A file is therefore the honest witness here, where an
+    // ordinary workspace's is an unpushed commit.
+    containers.exec(
+        container, "/workspace", Map.of(), "bash", "-lc", "echo hi > editor-scratch.txt");
 
     // What the sweep does: a stop, in place. The container and its volume are both still there.
     ((FakeContainerRuntime) containers).markExited(container);
     assertFalse(containers.isRunning(container));
     assertTrue(containers.exists(container), "an idle stop leaves the container present");
-    assertTrue(workspaceVolumeExists("master"), "and its /workspace volume");
+    assertTrue(
+        workspaceVolumeExists(EditorWorkspace.WORKSPACE_ID), "and its /workspace volume");
 
     // Reopening the editor is one ensure — the same call the door makes.
-    workspaceService.ensureContainer(workspaceIds.of(repoId, "master"));
+    workspaceService.ensureContainer(rowId);
     assertTrue(containers.isRunning(container), "the stopped editor is started back up");
-    assertEquals(WorkspaceRuntimeStatus.RUNNING, workspaceDto(repoId, "master").runtimeStatus());
     assertEquals(
-        head, containerHead(container), "with the checkout it had, unpushed commit and all");
+        "hi",
+        containers
+            .exec(container, "/workspace", Map.of(), "cat", "editor-scratch.txt")
+            .output()
+            .trim(),
+        "with what was in /workspace still in it");
   }
 
   @Test

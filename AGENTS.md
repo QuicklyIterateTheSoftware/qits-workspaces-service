@@ -876,44 +876,53 @@ real value will arrive through the train (or by hand at the first published calv
 workspace launch fails at the orchestrator's pull, which is the loud version of what used to be
 silent.
 
-## The web editor: one workspace, a second image, and an origin of its own
+## The web editor: ONE container for the platform, a second image, and an origin of its own
 
-The editor is **not a new thing with a lifecycle**. It is the project wrapper's main workspace — the
-per-project singleton `WorkspaceService.createMainWorkspace` already maintains — started from a
-richer image and told to supervise `openvscode-server`. There is no editor row, no editor container
-and no editor teardown, which is why the door's answer carries the *workspace* row id: the two ways
-out of a stuck editor are `/workspaces/{id}/stop-container` and `/recreate-container`, the routes
-that already existed.
+The editor is **one workspace row, one container, one volume, for the whole platform**. Everybody
+who opens it lands on the same container — `qits-ws-editor-editor`, on `qits_workspace_editor` —
+because both halves of that name are constants. The door's answer carries the *workspace* row id,
+which is what makes the two ways out of a stuck editor the ordinary container verbs:
+`/workspaces/{id}/stop-container` and `/recreate-container`, the routes that already existed.
 
-**Which workspace is DERIVED and there is no column.** `WorkspacePostures.isWrapperMain` is
-repository archetype `PROJECT` plus branch == that repository's main branch. A column would be a
-fourth copy of an answer three places already hold and would go stale the day a main branch is
-renamed. `RepositoryView` grew `archetype` for this and nothing else, and `ProjectsRepositories`
-binds the one qits-projects field this context had deliberately left unbound.
+**What it replaced was PER PROJECT and derived.** Until then a project's editor was its wrapper
+repository's main workspace — the per-project singleton `createMainWorkspace` maintains — started
+from the richer image because of what that workspace *was*: `WorkspacePostures.isWrapperMain` was
+repository archetype `PROJECT` plus branch == that repository's main branch, and there was
+deliberately no column, because a derivation cannot go stale while a fourth copy of somebody else's
+fact can. All of that reasoning was right for a per-project editor and none of it survives a single
+one: there is no project behind the editor, no wrapper repository whose archetype could answer, and
+no branch that means anything.
 
-**`isWrapperMain` is a `default` method**, and that is mechanical as well as semantic: every
-hand-built test factory writes `WorkspacePostures` as a lambda, so a second abstract method would
-break all of them at once. False is the right default — a port that does not answer is a plain
-workspace.
+**So the posture is a COLUMN now** — `Workspace.editor`, `V7`, with
+`uq_workspace_active_editor` making "at most one ACTIVE editor row" structural rather than agreed.
+`WorkspacePostures.isEditor` reads it and `PersistedWorkspacePostures` is three lines. The whole
+memo went with the derivation: it existed because the answer took a live `RepositoryLookup` call
+that an outage could turn into "not the wrapper", and a false answer there describes a plain-image
+spec, which under `Recreate.ifChanged` **replaces** the editor's container. A column in this
+service's own database gives the same answer at every ensure by construction, so there is nothing
+left to promise. `RepositoryView.archetype`, `isWrapper()` and `WRAPPER_ARCHETYPE` went with their
+only reader, and `ProjectsRepositories` unbound the field.
 
-**`PersistedWorkspacePostures` memoizes it, and that memo is load-bearing.** The answer picks the
-image AND two environment variables, so it is part of the spec — and a spec that differs from what is
-running is a `Recreate.ifChanged` **replacement**. A live `RepositoryLookup` call cannot promise the
-same answer twice: an unreachable qits-projects throws, the factory reads that as "not the wrapper",
-and the resume presents a plain-image spec and destroys the editor's container. The memo is sound
-because its three inputs do not move (a workspace's branch is written once at creation, an archetype
-is what a repository was registered as, a main branch is the ref it was cloned from), and it caches
-both answers — a plain workspace re-deciding on every ensure is the same exposure pointed the other
-way. Row ids are never reused, so an entry can only become dead weight.
+**`isEditor` is a `default` method**, and that is mechanical as well as semantic: every hand-built
+test factory writes `WorkspacePostures` as a lambda, so a second abstract method would break all of
+them at once. False is the right default — a port that does not answer is a plain workspace.
 
-**Only a FULLY-ANSWERED view may be written down**, and an unreachable registry is not the only way
-to not learn the answer. `RepositoryView.archetype` and `.mainBranch` are both nullable, so a 200 can
-arrive carrying neither — and `isWrapper()` on such a view is false. Memoizing *that* is the outage's
-exposure with a status code in front of it, except permanent: one half-answered read and every ensure
-for the life of the process describes the plain image, which under `Recreate.ifChanged` replaces the
-editor's container with a plain one. So a view missing either field takes the same third answer a
-thrown lookup does — false for this call, nothing remembered. An archetype the registry *did* state
-and this host does not recognise is a real answer and is memoized as "not a wrapper".
+**The row belongs to no repository, and three places have to know it.** `repository_id` is a
+sentinel (`EditorWorkspace.REPOSITORY_ID`, the string `editor`) because the column is not nullable;
+`branch` and `parent` are null. So: `WorkspaceContainerFactory` writes the daemon's repository id,
+repo name, project id, branch and parent **blank** and makes neither lookup — a daemon handed the
+sentinel would try to clone `/git/editor`, which is not a repository anywhere. `ensureContainer`'s
+branch-still-there check is skipped, because that check abandons a workspace whose ref was deleted
+and the editor never had one. `WorkspaceResolver` skips the repository existence check, which is a
+fail-closed guard against dangling history and would otherwise 404 the exact row the door hands out
+for the container verbs. Each of the three is a narrow exemption with the reason beside it.
+
+**One container reaching every project is an accepted consequence, decided by the epic.** It holds an
+ordinary `qits:agent` workspace credential — no new client, no new audience — but it is no longer
+one project's container, so an unattended agent inside it acts platform-wide. Its commission is
+unscoped (no repository ⇒ no `project` claim), and its stated Git refs are empty today because
+nothing is cloned into it yet. **Cloning every project's wrapper side by side inside it is a later
+task**; the seam is left clean and the comment in `WorkspaceContainerFactory` says so.
 
 **Two image keys, not a suffix.** `qits.editor.image-repo`/`-version` are a second pin because two
 repositories publish the two images on two calvers: qits-workspace-daemon publishes `qits/workspace`
@@ -921,8 +930,8 @@ and qits-workspace-editor-oci follows it one release later. A derived name (`${i
 would tie the versions into one string and be wrong the moment either train ran alone. The version
 half is a fallback the deployer overrides with `QITS_EDITOR_IMAGE_VERSION`, exactly as the workspace
 pin does. **The shipped default names no released tag** — qits-workspace-editor-oci has never been
-released — so it states the `qits/workspace` calver the editor recipe currently sits on, and a
-wrapper-main workspace fails at the orchestrator's pull with `IMAGE_MISSING` until the first real
+released — so it states the `qits/workspace` calver the editor recipe currently sits on, and the
+editor workspace fails at the orchestrator's pull with `IMAGE_MISSING` until the first real
 release moves it. That is the same posture the workspace pin shipped with, and the loud version of
 the same absence.
 
@@ -936,47 +945,36 @@ is `WorkspaceContainerFactory`, which writes it into the environment and nothing
 told **nothing** — silence is what the daemon reads as "no editor", so an explicitly-false pair would
 be a second way of saying the same thing.
 
-### The origin, and how a label reaches a workspace
+### The origin, and how it reaches the editor
 
 `openvscode-server` serves from `/` with its own service worker, websockets and webviews, and this
-platform rewrites no paths anywhere — so an editor is a whole host, `editor.<project>.<env>.<domain>`,
-aliased at the edge onto this service. The project label arrives in `X-Forwarded-Host`.
+platform rewrites no paths anywhere — so the editor is a whole host, aliased at the edge onto this
+service. Which surface a request is for arrives in `X-Forwarded-Host`.
 
-**One label out of that name is read: position 1.** The environment label at position 2 is the
-edge's, and reading it here would be the same routing decision made twice — the request is already
-in this environment's qits-workspaces and there is nothing to do with a second opinion but disagree.
-The parser's floor is **three** labels and not four, because `editor.qits.localhost` is a real local
-address and the three-label short form is still routable until the edge's default-environment
-fallthrough removal ships; see "What the edge does with the editor's vhost" below.
+**The FIRST LABEL is the whole test, and nothing behind it is read.** `EditorHost.isEditorHost`
+answers a boolean: a name whose first label is `editor` is the editor's, whatever follows. That is
+deliberately grammar-agnostic, because the origin is not changing in the same step as the routing —
+what is deployed is still `editor.<slug>.<env>.<domain>` and it is moving to `editor.<env>.<domain>`,
+and both reach the one editor. It is the first LABEL and not a prefix: `editorial.example.eu` is
+somebody else's host. The tolerances stay what they were — the first entry of the comma list, a port
+suffix, a trailing dot, surrounding space, letter case.
 
-`EditorHost` turns the **first entry** of that header into a label and stops; `EditorProxyTargets`
-turns a label into a workspace row and nothing else. **Nothing about the request ever selects a host
-or a port** — `DaemonProxyTargets`' posture verbatim, and for its reason. The label is validated
-against qits-projects' own project-slug grammar before anything is looked up, and an unknown label is
-empty, which the caller answers as a 404 with nothing dialled.
+**What went with the project label is the whole resolution behind it.** `EditorHost` used to parse
+position 1 against qits-projects' slug grammar and `EditorProxyTargets` used to turn that label into
+a repository by DERIVING the name a wrapper carries (`<slug>-<slug>`) and scanning every repository
+somebody had opened a main workspace for — one registry round trip each, with the hits cached
+forever (a project's wrapper cannot change) and the misses cached against the candidate set they
+were computed over, `qits.editor.label-miss-ttl-ms` underneath as a backstop. All of it is deleted:
+`EditorProxyTargets.editor()` is `findActiveEditor()`, one indexed local query, and the config key is
+retired (the properties file names it among the keys nothing reads).
 
-**A label reaches a repository by DERIVING a name.** There is no route from a project slug to a
-project — the registry answers repositories by id and by `(projectId, name)`, and this context holds
-no project table — but qits-projects names a wrapper `<slug>-<slug>` (`ProjectService.wrapperName`)
-and the slug is `updatable = false`. So the label *recognises* the wrapper among the repositories
-this service already has **root** workspaces for (`activeRootRepositoryIds`: ACTIVE, parent null,
-distinct — one entry per repository somebody has opened a main workspace for).
+**The row is still re-read on every request** — that half of the old cache was always right, because
+a workspace row can be resolved and made again and a remembered row id would point the proxy at
+nothing.
 
-**The registry half is remembered and the row half never is**, and the split is the whole design: a
-project's wrapper repository cannot change, so recognising it once is recognising it for good and a
-warm resolution is a map read plus one indexed query; a main workspace *can* be discarded and made
-again, so a cached row id would point the proxy at nothing.
-
-**A miss is remembered too, and against the CANDIDATE SET rather than a clock.** The scan behind one
-is a `find` per root repository — N qits-projects round trips per request, and a browser sitting on
-an editor origin whose main workspace does not exist yet reloads twice a second, so uncached that is
-N calls twice a second per tab to keep saying 404. But a plain TTL would be wrong in the direction
-that matters: the miss's answer is a **404 page and not the reloading splash**, so a project whose
-main workspace was created a second ago must resolve *now*. It does, because everything the scan
-reads about a repository is immutable and the candidate set is one indexed local query: the answer
-can only have changed when the set has. `qits.editor.label-miss-ttl-ms` (5 s) sits underneath as a
-backstop for the label nobody ever registers. A scan the registry **threw** in is not remembered at
-all — "could not ask" is not "not there".
+**No editor row is a 404 with nothing dialled**, and it is the fresh-platform answer: the row is
+written by the *door*, so a browser that navigates straight to the editor origin before anybody has
+opened it finds nothing, and a GET at an origin deliberately does not start a container.
 
 ### The data path, and the five answers it can give
 
@@ -1088,7 +1086,7 @@ already on the request.
 
 ### The door
 
-`POST /workspaces/api/editor/ensure?repositoryId=<wrapper>` with an empty body, answering a **bare**
+`POST /workspaces/api/editor/ensure` — **no parameters**, an empty body — answering a **bare**
 JSON object `{workspaceId, containerStatus, editorState, editorReady}` — 201 fresh, 200 existing, the
 `TerminalController.open` pairing. It is the whole readiness protocol: there is no status read beside
 it, so a caller polls this and nothing else and a reader who reloads mid-start rejoins the editor
@@ -1099,17 +1097,18 @@ scalars off it; the `WorkspaceDto` routes keep their envelope.
 daemon says the editor is serving. A client that waited on `editorState` alone would be deciding for
 itself when the editor answers requests.
 
-**No locks, and none are needed.** `createMainWorkspace` is idempotent on the branch,
-`uq_workspace_active_branch` makes that true under a race, and the orchestrator's ensure is a PUT per
+**No locks, and none are needed.** `createEditorWorkspace` is find-or-write,
+`uq_workspace_active_editor` makes that true under a race, and the orchestrator's ensure is a PUT per
 place. What the door adds is not a lock but two reasons **not to ask**: a technical process already
 running for the workspace *is* the start this call would make, and a container that is up with a
 daemon on its socket is up. Without them a two-second poll would spawn one provision per tick through
 a multi-gigabyte pull. A RUNNING row whose daemon is *not* live is asked about anyway — that is what
 a container which died out-of-band looks like, and the ensure ladder's first rung is to find out.
 
-A repository that is not a wrapper is a **400 naming the rule**, not a plain workspace start: an
-ordinary workspace runs the plain image, so no editor could ever report and the caller would poll a
-workspace that can never become ready.
+**The 400 and the 404 are gone, and they had one cause.** They answered a `?repositoryId=` that was
+not a project's wrapper, or named nothing at all — refusals that existed so a caller sent at the
+wrong repository could not poll a plain workspace to a readiness it could never reach. There is one
+editor and no parameter, so there is nothing left to name wrongly.
 
 ### The idle-stop switch, and the keepalive
 
@@ -1179,14 +1178,16 @@ the environment's origin with the env label **always** present even where the en
 from the bare apex, and the workspaces SPA composes the hand-off against that rather than deciding an
 env label for itself (`editor-origin.ts` carries the bug history).
 
-**Nothing on this side reads that label, deliberately.** `EditorHost` takes position 1 and stops —
-the edge already decided which environment's process this is, so reading it again would be one
-routing decision made twice, by the endpoint of the first. It is also a header a client may write:
-`X-Forwarded-Host` is `set`-if-absent at the edge (`EdgeHeaders.applyForwarded:193-200`), so a
-client-supplied value wins, which is why the resolver treats it as caller-shaped input that selects a
-row and never an address. The parser's minimum stays **three** labels rather than moving to four —
-`editor.qits.localhost` is a real local address, and the short form is still routable until the
-fallthrough removal ships.
+**Nothing on this side reads any label but the first, deliberately.** `EditorHost` asks whether label
+0 is `editor` and stops — the edge already decided which environment's process this is, so reading
+the name again would be one routing decision made twice, by the endpoint of the first. It is also a
+header a client may write: `X-Forwarded-Host` is `set`-if-absent at the edge
+(`EdgeHeaders.applyForwarded:193-200`), so a client-supplied value wins, which is why it is treated
+as caller-shaped input that selects a SURFACE and never an address — and why a permissive test costs
+nothing, since every name that passes it reaches the same one editor, behind the same 403 for a
+request that did not come through the session gate. **The slug in the alias is now decoration**: the
+per-project origin is what is deployed and the editor behind it is the platform's, so moving to
+`editor.<env>.<domain>` is the edge's and the client's change to make, with nothing to do here.
 
 ## Dispatching an agent onto a branch
 
@@ -1622,7 +1623,7 @@ running.
 | --- | --- | --- |
 | `api.TokenValidationBootstrapIT` | authentication | the boot: the JWKS fetch, the commission reconcile, and a bearer cut for another audience |
 | `stories.creation.WorkspaceProvisionIT` | workspaces | a workspace provisioned end to end, daemon dial included |
-| `stories.editor.EditorEnsureIT` | editor | the editor door — the wrapper's main workspace begun, with a branch check but no push |
+| `stories.editor.EditorEnsureIT` | editor | the editor door — the one editor workspace begun, with no repository read and no git at all |
 | `stories.operations.OperatorReadsIT` | operations | what a live read costs, and what a stored read does not |
 | `stories.refusals.MergeDoorRefusalIT` | refusals | four ways not to get through a door, told at `/branches/merge` |
 

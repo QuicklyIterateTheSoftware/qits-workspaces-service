@@ -200,12 +200,22 @@ class WorkspaceContainersTest {
     assertEquals(ordinary, adminWithoutTheSocket);
   }
 
+  /**
+   * The editor's own arguments: the row carries {@code editor} as both its label and its sentinel
+   * repository id, and no branch. Every editor case below uses them, so what the spec is compared
+   * against is a plain workspace built from the SAME arguments — otherwise the volume name, the
+   * labels and the branch would differ for reasons that have nothing to do with the posture.
+   */
+  private static final String EDITOR_REPO = "editor";
+
+  private static final String EDITOR_LABEL = "editor";
+
   @Test
-  void theEditorPostureChangesTheImageAndTheDaemonsEditorEnvironment() {
-    Spec ordinary = adapter().ensureRequest(REPO, "main", 1L, "main", null).spec();
+  void theEditorPostureChangesTheImageTheDaemonsEditorEnvironmentAndNothingElseButTheRepository() {
+    Spec ordinary = adapter().ensureRequest(EDITOR_REPO, EDITOR_LABEL, 1L, null, null).spec();
     Spec editor =
         adapter(TestWorkspaceContainerFactory.editor())
-            .ensureRequest(REPO, "main", 1L, "main", null)
+            .ensureRequest(EDITOR_REPO, EDITOR_LABEL, 1L, null, null)
             .spec();
 
     // The editor image is a SECOND pin on a second repository path, not a suffix on the first: the
@@ -221,21 +231,38 @@ class WorkspaceContainersTest {
     assertEquals("true", editor.env().get("QITS_WORKSPACE_DAEMON_EDITOR_ENABLED"));
     assertEquals("13339", editor.env().get("QITS_WORKSPACE_DAEMON_EDITOR_PORT"));
 
+    // THE SECOND HALF OF THE POSTURE: the editor belongs to no repository, so the three names the
+    // in-container daemon would self-clone from are BLANK rather than carrying the row's sentinel
+    // id. A daemon handed `editor` there would try to clone a repository that does not exist.
+    assertEquals("", editor.env().get("QITS_WORKSPACE_DAEMON_REPOSITORY_ID"));
+    assertEquals("", editor.env().get("QITS_WORKSPACE_DAEMON_REPO_NAME"));
+    assertEquals("", editor.env().get("QITS_WORKSPACE_DAEMON_PROJECT_ID"));
+    assertEquals(EDITOR_REPO, ordinary.env().get("QITS_WORKSPACE_DAEMON_REPOSITORY_ID"));
+
     // …and that is the WHOLE difference, asserted the way the admin posture's is: the editor spec
-    // with the image and the two variables put back to the plain workspace's. Same user, same
-    // limits, same mounts, same labels, same socket answer. The editor image is the workspace image
-    // plus one directory, so a container that differed anywhere else would be a second decision
-    // riding along with the one somebody made.
+    // with the image, the two editor variables and the three repository names put back to the plain
+    // workspace's. Same user, same limits, same mounts, same socket answer. The editor image is the
+    // workspace image plus one directory, so a container that differed anywhere else would be a
+    // second decision riding along with the one somebody made.
     java.util.Map<String, String> env = new java.util.LinkedHashMap<>(editor.env());
     env.remove("QITS_WORKSPACE_DAEMON_EDITOR_ENABLED");
     env.remove("QITS_WORKSPACE_DAEMON_EDITOR_PORT");
+    for (String repositoryName :
+        List.of(
+            "QITS_WORKSPACE_DAEMON_REPOSITORY_ID",
+            "QITS_WORKSPACE_DAEMON_REPO_NAME",
+            "QITS_WORKSPACE_DAEMON_PROJECT_ID")) {
+      env.put(repositoryName, ordinary.env().get(repositoryName));
+    }
     Spec editorAsAPlainWorkspace =
         new Spec(
             ordinary.image(),
             editor.entrypoint(),
             editor.args(),
             env,
-            editor.extraLabels(),
+            // The project LABEL is blank for the same reason its env var is, so it is put back
+            // beside them rather than being a difference this comparison has to swallow.
+            withProjectLabel(editor.extraLabels(), ordinary.extraLabels().get("qits.project")),
             editor.network(),
             editor.aliases(),
             editor.addHosts(),
@@ -250,6 +277,14 @@ class WorkspaceContainersTest {
     assertEquals(ordinary, editorAsAPlainWorkspace);
   }
 
+  /** {@code labels} with {@code qits.project} set to {@code value} — see the comparison above. */
+  private static java.util.Map<String, String> withProjectLabel(
+      java.util.Map<String, String> labels, String value) {
+    java.util.Map<String, String> copy = new java.util.LinkedHashMap<>(labels);
+    copy.put("qits.project", value);
+    return copy;
+  }
+
   @Test
   void theEditorSpecIsTheSameOnEveryEnsure() {
     // The spec-hash rule from the adapter's side: the orchestrator has no start verb, so a resume
@@ -258,8 +293,8 @@ class WorkspaceContainersTest {
     // editor workspace would replace the container it meant to start.
     WorkspaceContainers adapter = adapter(TestWorkspaceContainerFactory.editor());
 
-    EnsureRequest first = adapter.ensureRequest(REPO, "main", 1L, "main", null);
-    EnsureRequest second = adapter.ensureRequest(REPO, "main", 1L, "main", null);
+    EnsureRequest first = adapter.ensureRequest(EDITOR_REPO, EDITOR_LABEL, 1L, null, null);
+    EnsureRequest second = adapter.ensureRequest(EDITOR_REPO, EDITOR_LABEL, 1L, null, null);
 
     assertEquals(first, second);
   }
@@ -271,7 +306,8 @@ class WorkspaceContainersTest {
     // The shipped posture. An editor workspace with no deadline configured is EXPLICIT like every
     // other workspace, which is exactly the behaviour that predates this key.
     EnsureRequest editor =
-        adapter(TestWorkspaceContainerFactory.editor()).ensureRequest(REPO, "main", 1L, "main", null);
+        adapter(TestWorkspaceContainerFactory.editor())
+            .ensureRequest(EDITOR_REPO, EDITOR_LABEL, 1L, null, null);
 
     assertEquals(PolicyType.EXPLICIT, editor.policy().type());
     assertNull(editor.policy().idleAfterSeconds());
@@ -286,7 +322,7 @@ class WorkspaceContainersTest {
 
     EnsureRequest editor =
         adapter(TestWorkspaceContainerFactory.editor(), idle)
-            .ensureRequest(REPO, "main", 1L, "main", null);
+            .ensureRequest(EDITOR_REPO, EDITOR_LABEL, 1L, null, null);
     assertEquals(PolicyType.IDLE_STOP, editor.policy().type());
     assertEquals(Long.valueOf(1800L), editor.policy().idleAfterSeconds());
 
@@ -303,10 +339,11 @@ class WorkspaceContainersTest {
     // the switch on does not replace a container that is already running. Asserted as the two specs
     // being equal while the two policies are not.
     EnsureRequest off =
-        adapter(TestWorkspaceContainerFactory.editor()).ensureRequest(REPO, "main", 1L, "main", null);
+        adapter(TestWorkspaceContainerFactory.editor())
+            .ensureRequest(EDITOR_REPO, EDITOR_LABEL, 1L, null, null);
     EnsureRequest on =
         adapter(TestWorkspaceContainerFactory.editor(), Optional.of(Duration.ofMinutes(30)))
-            .ensureRequest(REPO, "main", 1L, "main", null);
+            .ensureRequest(EDITOR_REPO, EDITOR_LABEL, 1L, null, null);
 
     assertEquals(off.spec(), on.spec());
     assertEquals(PolicyType.EXPLICIT, off.policy().type());

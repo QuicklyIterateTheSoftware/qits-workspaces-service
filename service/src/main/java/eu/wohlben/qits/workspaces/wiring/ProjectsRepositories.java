@@ -45,21 +45,23 @@ public interface ProjectsRepositories {
   record GetRepositoryResponse(Repository repository) {}
 
   /**
-   * The five fields this context is entitled to. qits-projects' {@code RepositoryDto} also carries
-   * {@code backupUrl} and {@code lastBackup}; not binding to them is what keeps that service free to
-   * change them, and {@code ignoreUnknown} is what makes that true rather than aspirational.
+   * The four fields this context is entitled to. qits-projects' {@code RepositoryDto} also carries
+   * {@code backupUrl}, {@code lastBackup} and {@code archetype}; not binding to them is what keeps
+   * that service free to change them, and {@code ignoreUnknown} is what makes that true rather than
+   * aspirational.
    *
    * <p>{@code projectId} and {@code name} joined for the {@code SCMRelease} this service used to
    * publish and stayed for the workspace daemon, which clones by the public {@code (project, name)}
    * pair — {@code id} is per-platform (a self-seeded repository's is a UUID) and no committed url
    * can name it.
    *
-   * <p>{@code archetype} joined for the web editor, and it is the one field bound here that this
-   * context deliberately did <em>not</em> bind before. It answers exactly one question — is this
-   * repository the project's wrapper — which is what makes a workspace on its main branch the
-   * editor's workspace. It stays a String: qits-projects owns the vocabulary, and an archetype
-   * added there must read as "not a wrapper" here rather than fail a deserialization.
+   * <p><b>{@code archetype} was bound here for one release and is unbound again.</b> It answered
+   * exactly one question — is this repository a project's wrapper — which is what made a workspace on
+   * its main branch the editor's, back when there was one editor per project. The editor is a single
+   * container with a column of its own now, so the field has no reader; unbinding it is this
+   * context going back to being entitled to less, which is the direction this record is supposed to
+   * move in.
    */
   @JsonIgnoreProperties(ignoreUnknown = true)
-  record Repository(String id, String name, String mainBranch, String projectId, String archetype) {}
+  record Repository(String id, String name, String mainBranch, String projectId) {}
 }
