@@ -138,7 +138,8 @@ public class HttpRepositoryLookup implements RepositoryLookup {
             id,
             answer.repository().name(),
             answer.repository().projectId(),
-            answer.repository().mainBranch()));
+            answer.repository().mainBranch(),
+            answer.repository().archetype()));
   }
 
   /**
@@ -180,7 +181,12 @@ public class HttpRepositoryLookup implements RepositoryLookup {
         .map(ProjectsProjectRepositories.Entry::repository)
         .map(
             repo ->
-                new RepositoryView(repo.id(), repo.name(), repo.projectId(), repo.mainBranch()))
+                new RepositoryView(
+                    repo.id(),
+                    repo.name(),
+                    repo.projectId(),
+                    repo.mainBranch(),
+                    repo.archetype()))
         .toList();
   }
 

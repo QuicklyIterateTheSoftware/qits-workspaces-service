@@ -239,6 +239,14 @@ class WorkspaceContainersTest {
     assertEquals("", editor.env().get("QITS_WORKSPACE_DAEMON_PROJECT_ID"));
     assertEquals(EDITOR_REPO, ordinary.env().get("QITS_WORKSPACE_DAEMON_REPOSITORY_ID"));
 
+    // THE THIRD HALF, which is what the blanks above are FOR: the editor is told every project's
+    // wrapper instead, and an ordinary workspace is told nothing at all. The daemon skips the root
+    // clone exactly when a container has no repository AND carries a list, so a list on an ordinary
+    // workspace would silence the loud failure a missing repository is supposed to be.
+    assertNull(ordinary.env().get("QITS_WORKSPACE_DAEMON_PROJECTS"));
+    assertEquals(
+        "alpha/alpha-alpha,beta/beta-beta", editor.env().get("QITS_WORKSPACE_DAEMON_PROJECTS"));
+
     // …and that is the WHOLE difference, asserted the way the admin posture's is: the editor spec
     // with the image, the two editor variables and the three repository names put back to the plain
     // workspace's. Same user, same limits, same mounts, same socket answer. The editor image is the
@@ -247,6 +255,7 @@ class WorkspaceContainersTest {
     java.util.Map<String, String> env = new java.util.LinkedHashMap<>(editor.env());
     env.remove("QITS_WORKSPACE_DAEMON_EDITOR_ENABLED");
     env.remove("QITS_WORKSPACE_DAEMON_EDITOR_PORT");
+    env.remove("QITS_WORKSPACE_DAEMON_PROJECTS");
     for (String repositoryName :
         List.of(
             "QITS_WORKSPACE_DAEMON_REPOSITORY_ID",

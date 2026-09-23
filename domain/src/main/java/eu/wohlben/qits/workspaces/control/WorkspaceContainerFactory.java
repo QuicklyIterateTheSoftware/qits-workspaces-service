@@ -359,6 +359,14 @@ public class WorkspaceContainerFactory {
    */
   @Inject Instance<WorkspacePostures> postures;
 
+  /**
+   * The wrappers the one shared editor clones side by side, asked only while an EDITOR spec is being
+   * built. An {@code Instance<>} for the reason every port here is one — the hand-built unit-test
+   * factory wires no database — and absent reads as an empty list, which is the same answer a
+   * platform with no workspaces in it yet gives.
+   */
+  @Inject Instance<EditorProjects> editorProjects;
+
   /** The repo's project-scoped name, from an override resolver or the repository registry. */
   private Optional<RepositoryAddressResolver.ProjectScopedName> scopedName(String repoId) {
     if (nameResolver.isResolvable()) {
@@ -436,6 +444,31 @@ public class WorkspaceContainerFactory {
               + " editor",
           rowId);
       return false;
+    }
+  }
+
+  /**
+   * The composed projects list for the editor's spec, or the empty string when the port is
+   * unsatisfied or could not compose one.
+   *
+   * <p><b>Blank rather than a failure</b>, following the same rule as every other registry read in
+   * this class: an ensure that threw here would take the editor away from everybody on the platform
+   * because qits-projects blinked. What a blank buys is a daemon that finds nothing to clone and
+   * says so inside a container that is up, which is the recoverable half of the trade —
+   * {@link EditorProjects} carries the reasoning and the churn it costs.
+   */
+  private String editorProjects() {
+    if (!editorProjects.isResolvable()) {
+      return "";
+    }
+    try {
+      return editorProjects.get().composed();
+    } catch (RuntimeException e) {
+      LOG.warn(
+          "could not compose the editor's project list; its container is launched with none and"
+              + " will clone nothing until the next ensure that can read the registry",
+          e);
+      return "";
     }
   }
 
@@ -746,10 +779,10 @@ public class WorkspaceContainerFactory {
     // project whose page somebody came in through. Its commission is unscoped for the same reason
     // the blanks above are blank (no repository ⇒ no project claim), so it READS every project.
     //
-    // Cloning every project's wrapper side by side inside it is a LATER task and is deliberately not
-    // done here — which is also why the row's stated Git refs are empty today and why this block is
-    // a clean seam rather than a special case: that task sets what is cloned and widens what may be
-    // pushed, and nothing else here has to move.
+    // WHAT IT CLONES INSTEAD IS THE PROJECTS LIST, injected a few lines below: the daemon skips the
+    // root clone exactly when a container has no repository of its own AND carries a list, which is
+    // this container and only this container. An ordinary workspace is told no list and still fails
+    // loudly without a repository, which is the property that keeps the two cases apart.
     container.env("QITS_WORKSPACE_DAEMON_REPOSITORY_ID", editor ? "" : repoId);
     container.env("QITS_WORKSPACE_DAEMON_BRANCH", editor || branch == null ? "" : branch);
     container.env("QITS_WORKSPACE_DAEMON_PARENT", editor || parent == null ? "" : parent);
@@ -850,6 +883,29 @@ public class WorkspaceContainerFactory {
     if (editor) {
       container.env("QITS_WORKSPACE_DAEMON_EDITOR_ENABLED", "true");
       container.env("QITS_WORKSPACE_DAEMON_EDITOR_PORT", Integer.toString(editorPort));
+      // EVERY PROJECT'S WRAPPER, side by side, as <projectId>/<repoName> — the two halves the
+      // daemon already builds a clone url from, so each lands at /workspace/<repoName>. This is the
+      // other half of the blank repository id above: a container with no repository of its own and
+      // a list SKIPS the root clone, which is how one container holds the whole estate. On the
+      // editor only — an ordinary workspace carries no list at all, the same both-or-neither shape
+      // the two lines above and the credential block follow.
+      //
+      // IT RIDES THE SPEC, so EditorProjects sorts: a list that reshuffled between two ensures
+      // would be a changed spec, and a changed spec is a Recreate.ifChanged REPLACEMENT of the
+      // container somebody is working in. See that class for what a registry outage does instead,
+      // and for why the list is derived rather than asked for through a door of its own.
+      //
+      // THE KEY IS ALWAYS WRITTEN, EVEN EMPTY, and that is a decision rather than string formatting
+      // falling out a particular way. An empty value is what a registry outage and a platform with
+      // no workspaces in it yet both compose, and the alternative — omitting the key — would make
+      // the SPEC differ between those states and the ordinary one, so the editor's container would
+      // be REPLACED each time the registry came back. Present-with-a-varying-value churns on the
+      // value alone; present-or-absent churns on both, and is strictly worse. It also keeps this
+      // side deterministic about a question the daemon owns: whether an empty list reads as "has a
+      // list" (an editor that comes up with nothing cloned) or as none (a container that refuses to
+      // provision beside a blank repository id) is that repository's to answer, and either answer is
+      // loud, recoverable and visible. What must not happen is this service picking one accidentally.
+      container.env(EditorProjects.ENV, editorProjects());
     }
     // Resource limits (opt-out): without a memory cap, every JVM in the container sizes its heap
     // against the whole host's RAM and a dev server can OOM the host. Blank config disables a cap.

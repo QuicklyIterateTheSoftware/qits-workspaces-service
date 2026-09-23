@@ -51,15 +51,18 @@ import org.junit.jupiter.api.TestMethodOrder;
  * <p>The editor used to be a project's <b>wrapper</b> repository's main workspace — one per project,
  * launched from the richer image because of what that workspace <em>was</em> — and this story used to
  * register that wrapper, build its origin on the git host, and name it in the request. All of that
- * is gone, and what is left is the shape of the change: <b>no repository is named, no repository is
- * read, and the git host is not touched at all</b>. The editor belongs to no repository, so the
+ * is gone, and what is left is the shape of the change: <b>no repository is named, none is cloned, and
+ * the git host is not touched at all</b>. The registry IS read, twice, and that is the other half of
+ * the same change rather than a leftover of the old one: the editor holds no repository, so what it
+ * checks out is every project's wrapper, and naming those is what the two reads are. The editor belongs to no repository, so the
  * container spec carries no repository id, no project and no branch for the daemon to clone from,
  * and there is no branch-still-there check to make. A diagram with a single arrow to qits-githost in
  * it would be this change not having landed; the edge count is what says so.
  *
  * <p>The contrast with the provision story one category up is the point: that one forks a new branch
  * into being with a {@code git-receive-pack}, clones objects, and reads the registry to address the
- * repository. This one does none of the three.
+ * repository. This one does neither of the first two, and reads the registry for a different
+ * reason entirely — not to address a repository it is about to clone, but to enumerate the estate.
  *
  * <h2>The door begins the ensure, and the story plays the container to complete it</h2>
  *
@@ -291,18 +294,30 @@ public class EditorEnsureIT {
         StoryIdentities.DAEMON,
         "ack");
 
-    // NINE across three planes: two browser doors, one commission, two container calls, one dial and
-    // three frames. Three planes and not four — there is no arrow to qits-githost at all, which is
-    // the whole change, and the count is what says so rather than a reader's good intentions.
+    // ELEVEN across three planes: two browser doors, one commission, two container calls, one dial,
+    // three frames — and TWO registry reads, which are the editor's project list being composed.
+    // Three planes and not four: there is still no arrow to qits-githost at all, which is the half
+    // of the change the count is here to protect.
     //
-    // It is also what would notice the two things this path must never start doing again: a
-    // REPOSITORY READ (the editor belongs to none, so a registry round trip could only ever be a
-    // sentinel id being looked up and not found), and any git operation whatsoever. A status poll at
-    // qits-containers would show up here too; the design deliberately waits on the socket instead.
-    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, OPENED_SLUG, 9);
-    // Named absences, both of them the point of the change rather than incidental.
+    // THE TWO REGISTRY READS ARE THE EDITOR'S CLONE LIST, and they are a presence this story asserts
+    // rather than an absence. The editor holds no repository of its own, so what it checks out is
+    // every project's wrapper — and naming those takes the two doors qits-projects already has: one
+    // GET per repository this platform is worked in, to learn the project that owns it, then one
+    // listing per project, to learn which of its repositories is the wrapper. The workspace the
+    // provision story left ACTIVE is the whole estate here, so that is one of each.
+    //
+    // It is still what would notice the thing this path must never start doing: any git operation
+    // whatsoever. A status poll at qits-containers would show up here too; the design deliberately
+    // waits on the socket instead.
+    //
+    // What is NO LONGER asserted is an absence of qits-projects arrows. That absence was right while
+    // the editor belonged to no repository AND cloned nothing — a registry round trip could then only
+    // have been the sentinel id being looked up and not found. It clones the estate now, so the
+    // registry is exactly where the estate is named, and the assertion below pins WHICH reads those
+    // are rather than that there are none.
+    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, OPENED_SLUG, 11);
+    // The named absence that survives, and it is the point of the change rather than incidental.
     ReportAssertions.assertNoEdgesTo(CATEGORY_SLUG, OPENED_SLUG, StoryGitHost.SERVICE_NAME);
-    ReportAssertions.assertNoEdgesTo(CATEGORY_SLUG, OPENED_SLUG, StoryPeers.PROJECTS);
     ReportAssertions.assertOnlyEdgesFrom(
         CATEGORY_SLUG,
         OPENED_SLUG,

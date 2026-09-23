@@ -145,6 +145,10 @@ public final class TestWorkspaceContainerFactory {
     // No posture lookup — an ordinary workspace, which is what every workspace is unless somebody
     // asked otherwise at creation. `admin()` below is the other one.
     f.postures = StubInstance.empty();
+    // No projects list either — the port a spec builder needs only for the EDITOR, and absent is
+    // what a platform with no workspaces in it yet answers. An ordinary workspace is told nothing
+    // regardless, so this is invisible to every case but the editor's.
+    f.editorProjects = StubInstance.empty();
     return f;
   }
 
@@ -170,8 +174,16 @@ public final class TestWorkspaceContainerFactory {
   public static WorkspaceContainerFactory editor() {
     WorkspaceContainerFactory f = build(true);
     f.postures = StubInstance.of(editorRow());
+    // ARMED, and with more than one project: the editor's whole reason for having no repository is
+    // that it clones every project's wrapper instead, so a fixture whose list was empty would let
+    // the adapter's spec comparison pass against a factory that never wrote the key.
+    f.editorProjects = StubInstance.of(() -> EDITOR_PROJECTS);
     return f;
   }
+
+  /** The wrappers the fixture's editor is told to clone. Invented, like every other address here. */
+  public static final java.util.List<String> EDITOR_PROJECTS =
+      java.util.List.of("alpha/alpha-alpha", "beta/beta-beta");
 
   /** A posture port that answers "this is the editor" and "not admin". */
   static WorkspacePostures editorRow() {

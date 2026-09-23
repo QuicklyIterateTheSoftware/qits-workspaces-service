@@ -55,13 +55,15 @@ public interface ProjectsRepositories {
    * pair — {@code id} is per-platform (a self-seeded repository's is a UUID) and no committed url
    * can name it.
    *
-   * <p><b>{@code archetype} was bound here for one release and is unbound again.</b> It answered
-   * exactly one question — is this repository a project's wrapper — which is what made a workspace on
-   * its main branch the editor's, back when there was one editor per project. The editor is a single
-   * container with a column of its own now, so the field has no reader; unbinding it is this
-   * context going back to being entitled to less, which is the direction this record is supposed to
-   * move in.
+   * <p><b>{@code archetype} is bound, and it is the one field here whose reader changed rather than
+   * left.</b> It answers "is this repository a project's wrapper", which is what made a workspace on
+   * its main branch the editor's back when there was one editor per project. That reader went when
+   * the editor became a single container with a column of its own — and the field went with it, for
+   * one release. It is back because the single editor clones <em>every</em> project's wrapper side
+   * by side and something has to name which repository that is; see {@code EditorProjects}. Being
+   * entitled to less is still the direction this record should move in, so the day that list is
+   * sourced from a door of qits-projects' own, unbind it again.
    */
   @JsonIgnoreProperties(ignoreUnknown = true)
-  record Repository(String id, String name, String mainBranch, String projectId) {}
+  record Repository(String id, String name, String mainBranch, String projectId, String archetype) {}
 }

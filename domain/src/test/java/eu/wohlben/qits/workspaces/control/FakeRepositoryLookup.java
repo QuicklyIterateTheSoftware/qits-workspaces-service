@@ -87,7 +87,8 @@ public class FakeRepositoryLookup implements RepositoryLookup {
                 repoId,
                 registeredName(repoId),
                 projectOf(repoId),
-                mainBranch));
+                mainBranch,
+                archetypeOf(repoId)));
   }
 
   @Override
@@ -100,8 +101,27 @@ public class FakeRepositoryLookup implements RepositoryLookup {
                     entry.getKey(),
                     registeredName(entry.getKey()),
                     projectId,
-                    entry.getValue()))
+                    entry.getValue(),
+                    archetypeOf(entry.getKey())))
         .toList();
+  }
+
+  /**
+   * The repositories a test declared to be their project's WRAPPER. Empty by default, because most
+   * repositories are not one and a fake that guessed would make the archetype look derivable — which
+   * is exactly the mistake the per-project editor made.
+   */
+  private final java.util.Set<String> wrappers = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+  /** Register {@code repoId} as {@code projectId}'s wrapper — its superproject. */
+  public void registerWrapper(String repoId, String projectId, String registeredName) {
+    registerNamed(repoId, "master", registeredName);
+    projects.put(repoId, projectId);
+    wrappers.add(repoId);
+  }
+
+  private String archetypeOf(String repoId) {
+    return wrappers.contains(repoId) ? RepositoryView.WRAPPER_ARCHETYPE : "LIBRARY";
   }
 
   /** Make every by-id resolution fail the way an unreachable registry does. Reset it. */
@@ -139,6 +159,7 @@ public class FakeRepositoryLookup implements RepositoryLookup {
     mainBranches.clear();
     names.clear();
     projects.clear();
+    wrappers.clear();
     findOutage = false;
   }
 }

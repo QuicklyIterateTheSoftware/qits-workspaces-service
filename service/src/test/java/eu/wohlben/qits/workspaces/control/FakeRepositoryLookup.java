@@ -37,6 +37,16 @@ public class FakeRepositoryLookup implements RepositoryLookup {
   private final Map<String, String> mainBranches = new ConcurrentHashMap<>();
 
   /**
+   * Projects other than {@link #PROJECT_ID}, by repository. Only a test about more than one project
+   * — the editor's list of every project's wrapper — sets one.
+   */
+  private final Map<String, String> projects = new ConcurrentHashMap<>();
+
+  private String projectOf(String repoId) {
+    return projects.getOrDefault(repoId, PROJECT_ID);
+  }
+
+  /**
    * Explicit names, overriding {@link #nameOf}. The derived name is enough wherever a test only
    * needs "the name is not the id"; a test about a name's SHAPE — a wrapper is {@code
    * <slug>-<slug>} — has to be able to say what it is.
@@ -68,23 +78,44 @@ public class FakeRepositoryLookup implements RepositoryLookup {
         ? Optional.empty()
         : Optional.of(
             new RepositoryView(
-                repoId, registeredName(repoId), PROJECT_ID, mainBranch));
+                repoId,
+                registeredName(repoId),
+                projectOf(repoId),
+                mainBranch,
+                archetypeOf(repoId)));
   }
 
   @Override
   public List<RepositoryView> listByProject(String projectId) {
-    if (!PROJECT_ID.equals(projectId)) {
-      return List.of();
-    }
     return mainBranches.entrySet().stream()
+        .filter(entry -> projectOf(entry.getKey()).equals(projectId))
         .map(
             entry ->
                 new RepositoryView(
                     entry.getKey(),
                     registeredName(entry.getKey()),
-                    PROJECT_ID,
-                    entry.getValue()))
+                    projectId,
+                    entry.getValue(),
+                    archetypeOf(entry.getKey())))
         .toList();
+  }
+
+  /**
+   * The repositories a test declared to be their project's WRAPPER. Empty by default, because most
+   * repositories are not one and a fake that guessed would make the archetype look derivable — which
+   * is exactly the mistake the per-project editor made.
+   */
+  private final java.util.Set<String> wrappers = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+  /** Register {@code repoId} as {@code projectId}'s wrapper — its superproject. */
+  public void registerWrapper(String repoId, String projectId, String registeredName) {
+    registerNamed(repoId, "master", registeredName);
+    projects.put(repoId, projectId);
+    wrappers.add(repoId);
+  }
+
+  private String archetypeOf(String repoId) {
+    return wrappers.contains(repoId) ? RepositoryView.WRAPPER_ARCHETYPE : "LIBRARY";
   }
 
   /** Make every by-id resolution fail the way an unreachable registry does. Reset it. */

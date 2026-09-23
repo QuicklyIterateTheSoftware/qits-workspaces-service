@@ -137,6 +137,44 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
     return find("editor = true and status = ?1", WorkspaceStatus.ACTIVE).firstResultOptional();
   }
 
+  /**
+   * Every distinct repository an ACTIVE workspace stands on.
+   *
+   * <p>It is the only enumeration this context has, and {@link
+   * eu.wohlben.qits.workspaces.control.EditorProjects} is its reader: this service holds no project
+   * table and qits-projects publishes no "every project" door here, so the set of projects the
+   * shared editor clones is derived from the repositories this platform is <em>worked in</em>. That
+   * is a real narrowing and it is deliberate — see {@code PersistedEditorProjects} for what it costs
+   * and why the alternative is a new cross-context door.
+   *
+   * <p><b>EVERY active row, not only the root ones, and that is the whole of this query's history.</b>
+   * It used to read {@code parent is null}, back when a root row meant something: {@code
+   * createMainWorkspace} wrote one per project and the per-project editor was the thing that called
+   * it. That door is gone, and with it the only production writer of a parentless row —
+   * {@code createWorkspace} always sets a parent — so the narrow form would have answered EMPTY on a
+   * live platform and the shared editor would have cloned nothing, which is precisely the failure
+   * the feature exists to prevent. The cost of the wide form is one {@code find} per repository
+   * instead of per project's root, paid only while an editor spec is being built.
+   *
+   * <p>The editor's own row is excluded here rather than at the caller, because its {@code
+   * repository_id} is a sentinel ({@code EditorWorkspace.REPOSITORY_ID}) that resolves to nothing
+   * and would cost a registry round trip per ensure to learn it.
+   *
+   * <p>Ordered, and that is not cosmetic: the answer reaches a container's environment, environment
+   * is part of the spec, and a spec that reshuffles is a {@code Recreate.ifChanged} replacement of
+   * the running editor.
+   */
+  public List<String> activeRepositoryIds() {
+    return getEntityManager()
+        .createQuery(
+            "select distinct w.repositoryId from Workspace w"
+                + " where w.status = :status and w.editor = false"
+                + " order by w.repositoryId",
+            String.class)
+        .setParameter("status", WorkspaceStatus.ACTIVE)
+        .getResultList();
+  }
+
   // --- Any-status (history / discovery) ----------------------------------------------------------
 
   /** Every workspace (active + resolved) for a repository, newest first — for the history view. */

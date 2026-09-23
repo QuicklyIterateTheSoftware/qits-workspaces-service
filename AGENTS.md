@@ -900,8 +900,11 @@ memo went with the derivation: it existed because the answer took a live `Reposi
 that an outage could turn into "not the wrapper", and a false answer there describes a plain-image
 spec, which under `Recreate.ifChanged` **replaces** the editor's container. A column in this
 service's own database gives the same answer at every ensure by construction, so there is nothing
-left to promise. `RepositoryView.archetype`, `isWrapper()` and `WRAPPER_ARCHETYPE` went with their
-only reader, and `ProjectsRepositories` unbound the field.
+left to promise. `RepositoryView.archetype`, `isWrapper()` and `WRAPPER_ARCHETYPE` went with that
+reader — and came back for a different one a step later, which is the clone list below. They answer
+the same question (*is this repository a project's wrapper*) for a reason that is no longer a
+posture: not which image THIS workspace runs, but which repository of each project the one editor
+checks out.
 
 **`isEditor` is a `default` method**, and that is mechanical as well as semantic: every hand-built
 test factory writes `WorkspacePostures` as a lambda, so a second abstract method would break all of
@@ -920,9 +923,46 @@ for the container verbs. Each of the three is a narrow exemption with the reason
 **One container reaching every project is an accepted consequence, decided by the epic.** It holds an
 ordinary `qits:agent` workspace credential — no new client, no new audience — but it is no longer
 one project's container, so an unattended agent inside it acts platform-wide. Its commission is
-unscoped (no repository ⇒ no `project` claim), and its stated Git refs are empty today because
-nothing is cloned into it yet. **Cloning every project's wrapper side by side inside it is a later
-task**; the seam is left clean and the comment in `WorkspaceContainerFactory` says so.
+unscoped (no repository ⇒ no `project` claim), and its stated Git refs are empty — it pushes nothing,
+which is a separate decision from what it reads.
+
+**What it clones instead is every project's wrapper, and that is a second environment variable.**
+`QITS_WORKSPACE_DAEMON_PROJECTS` carries `<projectId>/<repoName>` entries separated by commas — the
+same two halves the daemon already builds a clone url from, so each wrapper lands at
+`/workspace/<repoName>`. It is the other half of the blank repository id above and the two are one
+contract: the daemon **skips the root clone** exactly when a container has no repository of its own
+*and* carries a list, while an ordinary workspace carries no list and still fails loudly without a
+repository. So the key is written on the editor and on nothing else.
+
+**Where the list comes from is a derivation, and the narrowing is deliberate.** There is no "every
+project" door to ask: this context holds no project table, and qits-projects exposes a repository and
+a project's repository listing here, not a listing of projects. `PersistedEditorProjects` therefore
+walks `WorkspaceRepository.activeRepositoryIds` → `RepositoryLookup.find` (which project owns it) →
+`listByProject` (which of its repositories is the wrapper). **A project nobody has ever opened a
+workspace in is not in the list**, and that self-corrects the moment somebody does. A project added
+later is picked up on the next container recreate — no polling, no watch, no scheduler, because the
+list rides the container spec and is only ever asked for while one is being built.
+
+That query reads **every** active row and not only the parentless ones, which is the correction worth
+remembering: it was written as `parent is null` back when `createMainWorkspace` wrote one such row per
+project for the per-project editor. That door is gone and `createWorkspace` always sets a parent, so
+the narrow form would have answered EMPTY on a live platform and the editor would have cloned nothing.
+
+**`RepositoryView.archetype` is bound again, for this reader and no other.** Which repository of a
+project *is* the wrapper is a fact only qits-projects holds. The per-project editor avoided asking by
+DERIVING the name a wrapper carries (`<slug>-<slug>`) and matching it — a convention this context is
+not entitled to re-derive, and one that went with that editor. The comparison is trimmed and
+case-insensitive because the vocabulary is another service's to change.
+
+**Sorted, and the key is written even when empty.** Environment is part of the spec, `Recreate.ifChanged`
+compares the spec, and this door is polled every two seconds — so a list that reshuffled would
+*replace* the container somebody is working in. Both the query and the composer order. And the key is
+present even when nothing could be composed, because omitting it would make the spec differ between a
+registry outage and the ordinary state, so the container would be replaced each time the registry came
+back: present-with-a-varying-value churns on the value, present-or-absent churns on both. A registry
+that cannot be asked costs that project its entry and never the ensure — the standing reading here —
+which trades a little churn for not taking the editor away from everybody because qits-projects
+blinked.
 
 **Two image keys, not a suffix.** `qits.editor.image-repo`/`-version` are a second pin because two
 repositories publish the two images on two calvers: qits-workspace-daemon publishes `qits/workspace`
