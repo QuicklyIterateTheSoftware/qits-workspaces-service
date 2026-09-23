@@ -121,20 +121,58 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
   }
 
   /**
-   * The repositories that have a <b>root</b> workspace here — an ACTIVE row with no parent, which is
-   * what {@code createMainWorkspace} writes and nothing else does. Distinct, so it is one id per
-   * repository rather than one per row.
+   * <b>The editor's row</b> — the ACTIVE workspace whose {@code editor} column is set, of which
+   * there is at most one ({@code uq_workspace_active_editor}, {@code V7}).
    *
-   * <p>The candidate set for {@code EditorProxyTargets}: an editor's origin names a project, and the
-   * project's wrapper repository is recognised by its name among these. It is deliberately narrow —
-   * every branched workspace is excluded by the parent alone — and it is small by construction, one
-   * entry per repository somebody has ever opened a main workspace for.
+   * <p>One indexed local read, and it is the whole of resolving the editor now: the door asks it to
+   * decide whether to write the singleton, the proxy asks it to turn an editor origin into a
+   * container. What it replaced was a scan — one qits-projects round trip per repository somebody
+   * had opened a main workspace for, to recognise a project's wrapper by the name its slug derives —
+   * which existed only because the editor was per project and had to be found by one.
+   *
+   * <p>{@code firstResultOptional} and not a count-then-read: the index makes a second row
+   * impossible, so taking the first is taking the only one.
    */
-  public List<String> activeRootRepositoryIds() {
-    return find("status = ?1 and parent is null", WorkspaceStatus.ACTIVE).stream()
-        .map(w -> w.repositoryId)
-        .distinct()
-        .toList();
+  public Optional<Workspace> findActiveEditor() {
+    return find("editor = true and status = ?1", WorkspaceStatus.ACTIVE).firstResultOptional();
+  }
+
+  /**
+   * Every distinct repository an ACTIVE workspace stands on.
+   *
+   * <p>It is the only enumeration this context has, and {@link
+   * eu.wohlben.qits.workspaces.control.EditorProjects} is its reader: this service holds no project
+   * table and qits-projects publishes no "every project" door here, so the set of projects the
+   * shared editor clones is derived from the repositories this platform is <em>worked in</em>. That
+   * is a real narrowing and it is deliberate — see {@code PersistedEditorProjects} for what it costs
+   * and why the alternative is a new cross-context door.
+   *
+   * <p><b>EVERY active row, not only the root ones, and that is the whole of this query's history.</b>
+   * It used to read {@code parent is null}, back when a root row meant something: {@code
+   * createMainWorkspace} wrote one per project and the per-project editor was the thing that called
+   * it. That door is gone, and with it the only production writer of a parentless row —
+   * {@code createWorkspace} always sets a parent — so the narrow form would have answered EMPTY on a
+   * live platform and the shared editor would have cloned nothing, which is precisely the failure
+   * the feature exists to prevent. The cost of the wide form is one {@code find} per repository
+   * instead of per project's root, paid only while an editor spec is being built.
+   *
+   * <p>The editor's own row is excluded here rather than at the caller, because its {@code
+   * repository_id} is a sentinel ({@code EditorWorkspace.REPOSITORY_ID}) that resolves to nothing
+   * and would cost a registry round trip per ensure to learn it.
+   *
+   * <p>Ordered, and that is not cosmetic: the answer reaches a container's environment, environment
+   * is part of the spec, and a spec that reshuffles is a {@code Recreate.ifChanged} replacement of
+   * the running editor.
+   */
+  public List<String> activeRepositoryIds() {
+    return getEntityManager()
+        .createQuery(
+            "select distinct w.repositoryId from Workspace w"
+                + " where w.status = :status and w.editor = false"
+                + " order by w.repositoryId",
+            String.class)
+        .setParameter("status", WorkspaceStatus.ACTIVE)
+        .getResultList();
   }
 
   // --- Any-status (history / discovery) ----------------------------------------------------------

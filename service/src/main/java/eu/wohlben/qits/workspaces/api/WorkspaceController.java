@@ -96,6 +96,13 @@ public class WorkspaceController {
    * <p>Costs the repository's whole listing internally (ahead/behind is computed per workspace
    * against the mirror), which is why it is a read and not a poll — the workspace's SSE channel is
    * what says when to call it again.
+   *
+   * <p><b>The editor workspace answers here too, and it is the one row that does not cost that.</b>
+   * It belongs to no repository, so there is no listing to run and no mirror to refresh: it is read
+   * straight off its row, with the live container/daemon half asked exactly as the listing asks it.
+   * The fields a repository would have supplied — the main branch, ahead, behind — come back null,
+   * because there is nothing for an editor to be ahead OF, and a client reads them the way it reads
+   * every other unknown on this shape.
    */
   @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
   @GET

@@ -55,7 +55,7 @@ import org.junit.jupiter.api.Test;
 // Service auto-start is left at its shipped default of ON — this class asserts that the chain
 // RELEASES it, so it needs the coupling live. It used to state `true` here, which is the same value
 // and cost a Quarkus restart of its own; the chain-await bound it actually needs now lives in the
-// shared profile alongside two other classes' scenery (see SharedTestOverridesProfile).
+// shared profile alongside another class's scenery (see SharedTestOverridesProfile).
 @TestProfile(SharedTestOverridesProfile.class)
 public class WorkspaceBootstrapRunnerTest {
 

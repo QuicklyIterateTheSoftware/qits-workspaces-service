@@ -59,6 +59,16 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
                           .orElseThrow(
                               () ->
                                   new IllegalStateException("no such workspace " + workspaceId));
+                  if (ws.editor) {
+                    // THE EDITOR CLONES NOTHING, and the double has to say so or it would be
+                    // testing a container the service never asks for. The editor's row belongs to
+                    // no repository and claims no branch, so WorkspaceContainerFactory writes its
+                    // repository id, name, project, branch and parent BLANK — and a daemon told
+                    // nothing to clone starts its editor over an empty /workspace and reports
+                    // Provisioned. Falling through would clone the sentinel id, which is not a
+                    // repository anywhere.
+                    return null;
+                  }
                   String repoId = ws.repositoryId;
                   String url =
                       nameResolver
@@ -68,6 +78,9 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
                   return new Target(ws.repositoryId, ws.workspaceId, ws.branch, url);
                 });
 
+    if (target == null) {
+      return Optional.of(ProvisionResult.ok("")); // the editor: nothing to clone, nothing to report
+    }
     String container = containers.containerName(target.label(), target.repoId());
     // Idempotent reconnect: the real workspace-daemon skips its self-clone when /workspace/.git
     // already exists (a persistent /workspace volume reattached after container recreation —

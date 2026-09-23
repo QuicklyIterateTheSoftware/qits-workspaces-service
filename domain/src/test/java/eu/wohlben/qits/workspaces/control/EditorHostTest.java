@@ -1,93 +1,74 @@
 package eu.wohlben.qits.workspaces.control;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
- * The editor origin, read. Plain JUnit and no Quarkus: this is a header becoming a label, and the
- * lookup that label then drives is {@link EditorProxyTargetsTest}'s.
+ * The editor origin, recognised. Plain JUnit and no Quarkus: this is a header becoming a yes or a
+ * no, and the row that answer then reaches is {@link EditorProxyTargetsTest}'s.
  *
- * <p>What is worth pinning is the refusals rather than the happy path. The value comes off a request
- * — the edge writes {@code X-Forwarded-Host} only when the client did not — so every shape that is
- * not an editor origin has to reach the same "no" without a query behind it.
+ * <p>What is worth pinning is the tolerances and the one refusal that is not obvious. The value comes
+ * off a request — the edge writes {@code X-Forwarded-Host} only when the client did not — so the
+ * shapes a browser really sends have to be accepted, and a host that merely begins with the same
+ * seven letters must not be.
+ *
+ * <p><b>The cases that used to be here about a PROJECT label are gone rather than rewritten</b>, and
+ * that is the change: there is one editor, so the name has no project in it to read, no slug grammar
+ * to validate it against, and no label count to insist on. What this class asserts instead is that
+ * the test is grammar-agnostic on purpose — both the old four-label origin and the shorter one it is
+ * moving to answer yes — so the origin can change without this file changing with it.
  */
 class EditorHostTest {
 
   @Test
-  void theLabelBetweenTheFirstTwoDotsIsTheProject() {
-    assertEquals(
-        Optional.of("qits"), EditorHost.projectLabel("editor.qits.dev.example.eu"));
+  void aHostWhoseFirstLabelIsEditorIsTheEditors() {
+    assertTrue(EditorHost.isEditorHost("editor.dev.example.eu"));
+    assertTrue(EditorHost.isEditorHost("editor.example.eu"));
   }
 
   @Test
-  void aFourLabelEditorHostNamesItsProjectAtPositionOne() {
-    // The shape a deployed platform serves once the edge's default-environment fallthrough is gone:
-    // `editor.<project>.<env>.<domain>`. The env label at position 2 is present and is deliberately
-    // not read — the edge routed this request to this environment already, and this parser's answer
-    // is the same whether the name says `dev` or says nothing.
-    assertEquals(Optional.of("qits"), EditorHost.projectLabel("editor.qits.dev.wohlben.dev"));
-    assertEquals(Optional.of("qits"), EditorHost.projectLabel("editor.qits.prod.wohlben.dev"));
+  void theOldPerProjectGrammarStillAnswersYes() {
+    // DELIBERATELY still accepted. The origin is not changing in the same step as the routing, so
+    // what is deployed today is `editor.<slug>.<env>.<domain>` and every one of them has to reach
+    // the one editor — and the shorter form has to reach it the day the edge and the client move.
+    // The label behind `editor` is the edge's business either way: it routed this request to this
+    // environment's process already, and reading the name again here would be that decision made
+    // twice, off a header a client may have written.
+    assertTrue(EditorHost.isEditorHost("editor.qits.dev.example.eu"));
+    assertTrue(EditorHost.isEditorHost("editor.qits.localhost"));
   }
 
   @Test
-  void aPortIsToleratedOnAFourLabelHostToo() {
-    // A four-label name is where a port suffix actually shows up: a local platform serves the edge
-    // on 8080, so this is the address a browser sends verbatim.
-    assertEquals(
-        Optional.of("qits"), EditorHost.projectLabel("editor.qits.dev.wohlben.dev:8080"));
-    assertEquals(Optional.of("qits"), EditorHost.projectLabel("Editor.QITS.Dev.Localhost.:8080"));
-  }
-
-  @Test
-  void theThreeLabelShortFormStillParses() {
-    // Two reasons the minimum stays three rather than moving to four. `editor.qits.localhost` is a
-    // real local address, and the short `editor.<project>.<domain>` form is still in flight while
-    // the edge's fallthrough is removed — a parser that demanded four would refuse both, and the
-    // edge is what decides which names it is willing to route here.
-    assertEquals(Optional.of("qits"), EditorHost.projectLabel("editor.qits.localhost"));
-    assertEquals(Optional.of("qits"), EditorHost.projectLabel("editor.qits.wohlben.dev"));
+  void aPortATrailingDotAndLetterCaseAreAllTolerated() {
+    // A Host name is case-insensitive and may carry a port and a root dot; a local platform serves
+    // the edge on 8080, so this is the address a browser sends verbatim.
+    assertTrue(EditorHost.isEditorHost("  Editor.QITS.Dev.Example.EU.:8080 "));
+    assertTrue(EditorHost.isEditorHost("editor.dev.wohlben.dev:8080"));
   }
 
   @Test
   void theFirstEntryWins() {
     // X-Forwarded-Host is a LIST, and only the client-facing hop's value describes the name a
-    // browser asked for. A second hop appending its own must not repoint the lookup.
-    assertEquals(
-        Optional.of("qits"),
-        EditorHost.projectLabel("editor.qits.dev.example.eu, editor.other.internal"));
+    // browser asked for. A second hop appending its own must not change which surface answers.
+    assertTrue(EditorHost.isEditorHost("editor.dev.example.eu, workspaces.dev.example.eu"));
+    assertFalse(EditorHost.isEditorHost("workspaces.dev.example.eu, editor.dev.example.eu"));
   }
 
   @Test
-  void aPortATrailingDotAndLetterCaseAreAllTolerated() {
-    // A Host name is case-insensitive and may carry a port and a root dot; every comparison and
-    // every lookup after this point is against something lowercase, so normalising is not optional.
-    assertEquals(Optional.of("qits"), EditorHost.projectLabel("  Editor.QITS.Dev.Example.EU.:8080 "));
-  }
-
-  @Test
-  void everythingThatIsNotAnEditorOriginIsNothing() {
-    // One answer for all of them, on purpose: the caller turns every one into a 404 without
-    // connecting anywhere, so telling them apart would be a distinction only an attacker could use.
-    assertTrue(EditorHost.projectLabel(null).isEmpty(), "no header at all");
-    assertTrue(EditorHost.projectLabel("").isEmpty(), "a blank header");
-    assertTrue(
-        EditorHost.projectLabel("workspaces.qits.dev.example.eu").isEmpty(), "another app");
-    assertTrue(EditorHost.projectLabel("editor.qits").isEmpty(), "nowhere to be served");
-    assertTrue(EditorHost.projectLabel("editor..dev.example.eu").isEmpty(), "no label");
-    assertTrue(
-        EditorHost.projectLabel("editor.-qits.dev.example.eu").isEmpty(), "not a project slug");
-    assertTrue(
-        EditorHost.projectLabel("editor.qits_qits.dev.example.eu").isEmpty(),
-        "underscores are not slug characters");
-  }
-
-  @Test
-  void aWrapperIsNamedAfterItsProjectTwice() {
-    // qits-projects' own ProjectService.wrapperName. It is derived here because there is nothing to
-    // look a project slug up by — see EditorProxyTargets.
-    assertEquals("qits-qits", EditorHost.wrapperRepositoryName("qits"));
+  void everythingThatIsNotAnEditorOriginIsNo() {
+    // One answer for all of them, on purpose: the caller falls through to the surface the request
+    // was always going to reach, so telling them apart would be a distinction only an attacker could
+    // use.
+    assertFalse(EditorHost.isEditorHost(null), "no header at all");
+    assertFalse(EditorHost.isEditorHost(""), "a blank header");
+    assertFalse(EditorHost.isEditorHost("workspaces.qits.dev.example.eu"), "another app");
+    assertFalse(
+        EditorHost.isEditorHost("editorial.example.eu"),
+        "the FIRST LABEL, not a prefix — somebody else's host starts with the same seven letters");
+    assertFalse(
+        EditorHost.isEditorHost("qits.editor.dev.example.eu"),
+        "position 0 and nowhere else: a name with `editor` behind something is not the editor's");
   }
 }

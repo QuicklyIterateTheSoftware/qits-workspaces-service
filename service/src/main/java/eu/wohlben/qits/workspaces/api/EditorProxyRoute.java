@@ -34,14 +34,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 /**
- * The web editor's data path: everything arriving on {@code editor.<project>.<env>.<domain>} is
- * forwarded, byte for byte and path for path, to that project's editor inside its workspace
- * container.
+ * The web editor's data path: everything arriving on the editor's origin is forwarded, byte for byte
+ * and path for path, to the platform's one editor inside its workspace container.
  *
  * <p>The sibling of {@link ContainerProxyRoute} and built from its parts — the same hand-rolled
  * upgrade, the same both-direction backpressure, the same {@code DbRetry} at the lookup. What
@@ -50,18 +48,20 @@ import org.jboss.logging.Logger;
  * <h2>A host, not a path prefix</h2>
  *
  * <p>openvscode-server serves from {@code /} with its own service worker, websockets and webviews,
- * and this platform rewrites no paths anywhere — so an editor cannot live under a prefix and is a
+ * and this platform rewrites no paths anywhere — so the editor cannot live under a prefix and is a
  * whole origin instead, aliased at the edge onto this service. This route therefore matches on the
- * <b>shape of the forwarded host</b> rather than on a path: {@link EditorHost} turns the first entry
- * of {@code X-Forwarded-Host} into a project label, and anything that is not an editor origin falls
- * straight through to the surface it was always going to reach ({@code rc.next()}).
+ * <b>forwarded host</b> rather than on a path: {@link EditorHost} answers whether the first entry of
+ * {@code X-Forwarded-Host} is the editor's, and anything that is not falls straight through to the
+ * surface it was always going to reach ({@code rc.next()}).
  *
- * <p><b>Nothing about the request selects an address.</b> The label selects a row through {@link
- * EditorProxyTargets}; the container name is derived from that row, and the listener inside it is
- * asked for by <em>name</em> over the reverse tunnel, so no port is ever stated on this side —
- * {@link eu.wohlben.qits.workspaces.control.DaemonProxyTargets}' posture verbatim, and for its
- * reason: a component of a request that could name an origin would be an SSRF primitive aimed at
- * everything on the platform network. An unknown label is a 404 with nothing dialled.
+ * <p><b>The host selects a SURFACE and not a workspace.</b> There is one editor for the platform, so
+ * the row is the one {@link EditorProxyTargets} finds and the name has nothing left to say about
+ * which one it is — it used to carry a project label, and the whole per-project resolution went with
+ * it. The container name is derived from that row, and the listener inside it is asked for by
+ * <em>name</em> over the reverse tunnel, so no port is ever stated on this side — {@link
+ * eu.wohlben.qits.workspaces.control.DaemonProxyTargets}' posture verbatim, and for its reason: a
+ * component of a request that could name an origin would be an SSRF primitive aimed at everything on
+ * the platform network. No editor row is a 404 with nothing dialled.
  *
  * <h2>The identity headers are required, and then removed</h2>
  *
@@ -96,9 +96,9 @@ import org.jboss.logging.Logger;
  * <p>The splash pattern is {@link ServiceProxyRoute}'s, gated on {@link WorkspaceEditorState}: a
  * container that is not up and an editor that has not finished starting are both <em>200 and a page
  * that refreshes itself</em>, an editor that has ended is a distinct 502 that stops the waiting, an
- * editor with no tunnel to it is a second distinct 502, and an unknown project is a 404. A proxy
- * that reported all of them as one connection error would make every editor problem look like the
- * same problem.
+ * editor with no tunnel to it is a second distinct 502, and an editor nobody has opened yet is a
+ * 404. A proxy that reported all of them as one connection error would make every editor problem
+ * look like the same problem.
  */
 @ApplicationScoped
 public class EditorProxyRoute {
@@ -174,10 +174,8 @@ public class EditorProxyRoute {
   }
 
   private void handle(RoutingContext rc) {
-    Optional<String> label =
-        EditorHost.projectLabel(rc.request().getHeader("X-Forwarded-Host"));
-    if (label.isEmpty()) {
-      // Not an editor origin: the workspaces host, qits-net, a health probe. This route claims
+    if (!EditorHost.isEditorHost(rc.request().getHeader("X-Forwarded-Host"))) {
+      // Not the editor's origin: the workspaces host, qits-net, a health probe. This route claims
       // nothing it was not addressed by name.
       rc.next();
       return;
@@ -191,7 +189,7 @@ public class EditorProxyRoute {
     // needs a worker thread and a transaction; the proxy resumes it when forwarding.
     rc.request().pause();
     rc.vertx()
-        .executeBlocking(() -> resolve(label.get()))
+        .executeBlocking(this::resolve)
         .onFailure(e -> respond(rc, 502, "The editor could not be looked up."))
         .onSuccess(resolved -> route(rc, resolved));
   }
@@ -219,15 +217,15 @@ public class EditorProxyRoute {
    * records — and an editor session is a stream of requests, so a status call per request would cost
    * more than the container does.
    *
-   * <p><b>{@code DbRetry} wraps the lookup and nothing else.</b> {@code resolveLabel} is {@code
+   * <p><b>{@code DbRetry} wraps the lookup and nothing else.</b> {@code editor()} is {@code
    * @Transactional}, so the retry has to surround the transactional call for each attempt to get a
-   * new transaction; and an absent project is an <em>answer</em> rather than a failure, so it 404s
-   * on the first attempt instead of sitting on the deadline. This runs on the thread {@code
+   * new transaction; and no editor row is an <em>answer</em> rather than a failure, so it 404s on
+   * the first attempt instead of sitting on the deadline. This runs on the thread {@code
    * executeBlocking} gave it, holding no monitor and no session — the other half of the same rule.
    */
-  private Resolved resolve(String projectLabel) {
+  private Resolved resolve() {
     EditorProxyTargets.EditorTarget target =
-        DbRetry.call("editor proxy lookup", () -> targets.resolveLabel(projectLabel)).orElse(null);
+        DbRetry.call("editor proxy lookup", () -> targets.editor()).orElse(null);
     if (target == null) {
       return new Resolved(null, null, null, false);
     }
@@ -265,7 +263,7 @@ public class EditorProxyRoute {
    * What one request resolved to: the workspace, what its editor last said, and the one way to
    * reach it.
    *
-   * @param target the workspace the origin names, or null for a project nobody registered
+   * @param target the editor's workspace, or null when there is no editor row yet
    * @param editorState the daemon's last report, or null when there is none
    * @param tunnel the reverse tunnel's entrance, when a capable daemon is connected
    * @param containerRunning whether the container is up at all — the splash's fork
@@ -279,13 +277,14 @@ public class EditorProxyRoute {
   /** Answer differently for each way an editor can be absent; see the class note. */
   private void route(RoutingContext rc, Resolved resolved) {
     if (resolved.target() == null) {
-      // No project by that name. Not a redirect, not a default project, not the only project this
-      // platform happens to have — and nothing was dialled to find out.
+      // Nobody has opened the editor yet, so there is no row and no container — and nothing was
+      // dialled to find that out. A GET at this origin deliberately does not create one: the door
+      // does, which is where somebody asked for it.
       respond(rc, 404, "There is no editor for this address.");
       return;
     }
     if (!resolved.containerRunning()) {
-      splash(rc, "The editor's workspace is not running. Opening it from the project page starts it");
+      splash(rc, "The editor's workspace is not running. Opening it from qits starts it");
       return;
     }
     if (resolved.editorState() == EditorLifecycle.ENDED) {

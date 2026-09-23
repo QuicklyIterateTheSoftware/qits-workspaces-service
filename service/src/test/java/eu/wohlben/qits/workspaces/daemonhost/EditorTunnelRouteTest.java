@@ -7,10 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import eu.wohlben.qits.workspaces.control.EditorHost;
-import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.SharedTuningProfile;
-import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspacedaemon.protocol.DaemonCodec;
@@ -43,7 +40,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -80,13 +76,9 @@ import org.junit.jupiter.api.Test;
 @TestProfile(SharedTuningProfile.class)
 public class EditorTunnelRouteTest {
 
-  @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceService workspaceService;
   @Inject WorkspaceTunnels tunnels;
   @Inject WorkspaceDaemonRegistry registry;
-
-  @ConfigProperty(name = "qits.test.origins-dir")
-  String dataDir;
 
   private Vertx vertx;
   private HttpServer editor;
@@ -271,25 +263,35 @@ public class EditorTunnelRouteTest {
     local.resume();
   }
 
-  /** A project whose wrapper has a main workspace — and deliberately NO container. */
-  private Workspace editorWorkspace(String slug) throws Exception {
-    String repoId = TestOrigin.create(dataDir);
-    repositories.registerWrapper(repoId, "master", EditorHost.wrapperRepositoryName(slug));
-    return workspaceService.createMainWorkspace(repoId, "master");
+  /**
+   * THE editor's row — and deliberately NO container, which is the point of the tunnel cases: a live
+   * control socket at the editor capability is stronger evidence than a container status call, and
+   * the request is served without one ever being made.
+   *
+   * <p>One row for the whole database, so every case here shares it and each connects its own fake
+   * daemon to it. It used to be a repository registered as a project's wrapper plus that wrapper's
+   * main workspace, because the origin named a project; there is no project in the path now.
+   */
+  private Workspace editorWorkspace() {
+    return workspaceService.createEditorWorkspace();
   }
 
-  private static String host(String slug) {
-    return "editor." + slug + ".dev.example.eu";
+  /**
+   * The editor's origin — the old per-project grammar, which is what is deployed today. The route is
+   * grammar-agnostic behind the first label, so the origin moves on its own.
+   */
+  private static String host() {
+    return "editor.qits.dev.example.eu";
   }
 
   @Test
   public void aRequestReachesTheEditorThroughAStreamAskedForByName() throws Exception {
-    Workspace main = editorWorkspace("tunnelled");
+    Workspace main = editorWorkspace();
     connectFakeDaemon(main.id, DaemonProtocol.CAPABILITY_VERSION);
     reportEditor(main.id, EditorState.State.RUNNING);
 
     given()
-        .header("X-Forwarded-Host", host("tunnelled"))
+        .header("X-Forwarded-Host", host())
         .header("X-Qits-User", "alice")
         .header("X-Qits-Roles", "qits:admin")
         .header("Authorization", "Bearer smuggled-in-by-the-caller")
@@ -306,7 +308,7 @@ public class EditorTunnelRouteTest {
     // this platform happens to assert today.
     assertNoPlatformIdentity(lastEditorHeaders.get());
     // What DOES travel is the public name, which is the only thing the editor could want.
-    assertEquals(host("tunnelled"), lastEditorHeaders.get().get("X-Forwarded-Host"));
+    assertEquals(host(), lastEditorHeaders.get().get("X-Forwarded-Host"));
 
     assertEquals(1, asked.size(), "exactly one stream was asked for");
     assertEquals(
@@ -324,12 +326,12 @@ public class EditorTunnelRouteTest {
     // all — and the request is still served. A live control socket at the editor capability is
     // stronger evidence that the container is up than a status call is, and it is one round trip
     // less per request on a surface where a keystroke is a request.
-    Workspace main = editorWorkspace("nocontainerread");
+    Workspace main = editorWorkspace();
     connectFakeDaemon(main.id, DaemonProtocol.CAPABILITY_VERSION);
     reportEditor(main.id, EditorState.State.RUNNING);
 
     given()
-        .header("X-Forwarded-Host", host("nocontainerread"))
+        .header("X-Forwarded-Host", host())
         .header("X-Qits-User", "alice")
         .get("/")
         .then()
@@ -339,7 +341,7 @@ public class EditorTunnelRouteTest {
 
   @Test
   public void aWebSocketTraversesTheTunnelToTheEditor() throws Exception {
-    Workspace main = editorWorkspace("tunnelsockets");
+    Workspace main = editorWorkspace();
     connectFakeDaemon(main.id, DaemonProtocol.CAPABILITY_VERSION);
     reportEditor(main.id, EditorState.State.RUNNING);
 
@@ -353,7 +355,7 @@ public class EditorTunnelRouteTest {
                     .setHost("127.0.0.1")
                     .setPort(RestAssured.port)
                     .setURI("/stable-abc/vscode-remote-resource")
-                    .addHeader("X-Forwarded-Host", host("tunnelsockets"))
+                    .addHeader("X-Forwarded-Host", host())
                     .addHeader("X-Qits-User", "alice")
                     .addHeader("X-Qits-Roles", "qits:admin")
                     .addHeader("Authorization", "Bearer smuggled-in-by-the-caller")));
@@ -367,7 +369,7 @@ public class EditorTunnelRouteTest {
     // upgrade is precisely the request that carries a browser session, so a strip that only covered
     // the ordinary path would be dead on exactly the traffic it exists for.
     assertNoPlatformIdentity(lastEditorHeaders.get());
-    assertEquals(host("tunnelsockets"), lastEditorHeaders.get().get("X-Forwarded-Host"));
+    assertEquals(host(), lastEditorHeaders.get().get("X-Forwarded-Host"));
     browser.close();
   }
 
@@ -392,7 +394,7 @@ public class EditorTunnelRouteTest {
    */
   @Test
   public void aParkedBrowserStopsTheEditorRatherThanFillingThisProcessesHeap() throws Exception {
-    Workspace main = editorWorkspace("tunnelbackpressure");
+    Workspace main = editorWorkspace();
     connectFakeDaemon(main.id, DaemonProtocol.CAPABILITY_VERSION);
     reportEditor(main.id, EditorState.State.RUNNING);
 
@@ -406,7 +408,7 @@ public class EditorTunnelRouteTest {
                     .setHost("127.0.0.1")
                     .setPort(RestAssured.port)
                     .setURI("/flooded")
-                    .addHeader("X-Forwarded-Host", host("tunnelbackpressure"))
+                    .addHeader("X-Forwarded-Host", host())
                     .addHeader("X-Qits-User", "alice")));
 
     CompletableFuture<Void> allReceived = new CompletableFuture<>();
@@ -444,7 +446,7 @@ public class EditorTunnelRouteTest {
 
   @Test
   public void aDaemonBelowTheEditorCapabilityIsNeverAskedForAnEditorStream() throws Exception {
-    Workspace main = editorWorkspace("olddaemon");
+    Workspace main = editorWorkspace();
     connectFakeDaemon(main.id, WorkspaceTunnels.EDITOR_CAPABILITY_VERSION - 1);
 
     // That image carries no editor, and an absent target decodes there as API — so asking would be
@@ -452,7 +454,7 @@ public class EditorTunnelRouteTest {
     // is broken rather than one that is absent. It gets the splash instead: no container was ever
     // ensured for this workspace, so there is nothing running to wait for either.
     given()
-        .header("X-Forwarded-Host", host("olddaemon"))
+        .header("X-Forwarded-Host", host())
         .header("X-Qits-User", "alice")
         .get("/")
         .then()
@@ -479,7 +481,7 @@ public class EditorTunnelRouteTest {
   @Test
   public void aDaemonThatDROPSToAnOlderImageIsNotAskedByASocketTheOldGateAdmitted()
       throws Exception {
-    Workspace main = editorWorkspace("capabilityrace");
+    Workspace main = editorWorkspace();
     connectFakeDaemon(main.id, DaemonProtocol.CAPABILITY_VERSION);
     int tunnelPort = tunnels.originFor(main.id, StreamTarget.EDITOR).orElseThrow().port();
 

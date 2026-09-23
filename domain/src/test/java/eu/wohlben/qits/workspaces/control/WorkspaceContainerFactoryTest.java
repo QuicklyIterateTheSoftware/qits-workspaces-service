@@ -131,6 +131,10 @@ class WorkspaceContainerFactoryTest {
     // No posture lookup either, which is the "port not installed" answer and must read as no admin
     // workspace exists — the socket is the one thing an absence may never grant.
     f.postures = StubInstance.empty();
+    // No projects list either — the port a spec builder needs only for the EDITOR, and absent is
+    // what a platform with no workspaces in it yet answers. An ordinary workspace is told nothing
+    // regardless, so this is invisible to every case but the editor's.
+    f.editorProjects = StubInstance.empty();
     return f;
   }
 
@@ -659,8 +663,8 @@ class WorkspaceContainerFactoryTest {
 
   // --- the editor posture -----------------------------------------------------------------------
 
-  /** A posture port answering "the project wrapper's main workspace" and nothing else. */
-  private static WorkspacePostures wrapperMain(boolean answer) {
+  /** A posture port answering "this is the editor" and nothing else. */
+  private static WorkspacePostures editorRow(boolean answer) {
     return new WorkspacePostures() {
       @Override
       public boolean isAdmin(Long rowId) {
@@ -668,18 +672,18 @@ class WorkspaceContainerFactoryTest {
       }
 
       @Override
-      public boolean isWrapperMain(Long rowId) {
+      public boolean isEditor(Long rowId) {
         return answer;
       }
     };
   }
 
   @Test
-  void theWrapperMainWorkspaceRunsTheEditorImageAndIsToldSo() {
+  void theEditorRowRunsTheEditorImageAndIsToldSo() {
     WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(wrapperMain(true));
+    f.postures = StubInstance.of(editorRow(true));
 
-    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "main", 7L, "main", null);
+    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null);
 
     assertEquals(EDITOR_IMAGE, c.image());
     assertTrue(c.editor(), "the description carries the decision, so the adapter reads it once");
@@ -690,12 +694,130 @@ class WorkspaceContainerFactoryTest {
   }
 
   @Test
+  void theEditorIsToldAboutNoRepositoryAtALL() {
+    // THE ONE THING THE EDITOR'S CONTAINER MUST NOT BE HANDED. Its row belongs to no repository — it
+    // carries a SENTINEL id, because the column is not nullable — and the five names below are
+    // exactly what the in-container daemon self-clones from. Given the sentinel it would try to
+    // clone `/git/editor`, which is not a repository anywhere. Blank is what the daemon reads as
+    // "nothing to clone", and it is the same value an unresolvable repository already produces.
+    //
+    // Both resolvers are made to ANSWER here, and generously: the point is that neither is asked.
+    java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
+    WorkspaceContainerFactory f = factory();
+    f.postures = StubInstance.of(editorRow(true));
+    f.nameResolver =
+        StubInstance.of(
+            repoId -> {
+              asked.incrementAndGet();
+              return Optional.of(
+                  new RepositoryAddressResolver.ProjectScopedName("proj-1", "my-repo"));
+            });
+    f.repositories =
+        StubInstance.of(
+            repoId -> {
+              asked.incrementAndGet();
+              return Optional.of(
+                  new RepositoryLookup.RepositoryView(repoId, "my-repo", "proj-1", "main"));
+            });
+
+    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null);
+
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_REPOSITORY_ID", "");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_REPO_NAME", "");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_PROJECT_ID", "");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_BRANCH", "");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_PARENT", "");
+    assertLabel(c, "qits.project", "");
+    assertEquals(0, asked.get(), "nothing is looked up about a repository that is not one");
+    // What the container IS still told: itself. The workspace id is the label its container name,
+    // its volume name and its proxy paths are all composed from.
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_WORKSPACE_ID", "editor");
+  }
+
+  @Test
+  void theEditorIsToldEveryPROJECTSWrapperInstead() {
+    // THE OTHER HALF OF THE BLANK REPOSITORY ID ABOVE. The editor clones no repository of its own
+    // and every project's wrapper side by side instead, so what replaces the five blanks is one
+    // list — <projectId>/<repoName>, the same two halves a clone url is built from, which is what
+    // puts each wrapper at /workspace/<repoName>. More than one project deliberately: a list that
+    // only ever held one entry would pass with a composer that ignored everything but the first.
+    WorkspaceContainerFactory f = factory();
+    f.postures = StubInstance.of(editorRow(true));
+    f.editorProjects =
+        StubInstance.of(() -> List.of("alpha/alpha-alpha", "beta/beta-beta", "gamma/gamma-gamma"));
+
+    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null);
+
+    assertEnv(
+        c,
+        "QITS_WORKSPACE_DAEMON_PROJECTS",
+        "alpha/alpha-alpha,beta/beta-beta,gamma/gamma-gamma");
+  }
+
+  @Test
+  void theProjectsListIsTHESAMESTRINGOnEveryEnsure() {
+    // THE SPEC-HASH RULE, aimed at the one value here that is a collection. Environment is part of
+    // the spec, the orchestrator resumes a container by presenting its spec AGAIN under
+    // Recreate.ifChanged, and this door is polled every two seconds — so a list that reshuffled
+    // between two builds would REPLACE the container somebody is working in, over and over. The
+    // port is handed the entries in a deliberately unsorted order to prove the composer does not
+    // merely inherit one that happened to be sorted upstream.
+    WorkspaceContainerFactory f = factory();
+    f.postures = StubInstance.of(editorRow(true));
+    f.editorProjects = StubInstance.of(() -> List.of("gamma/gamma-gamma", "alpha/alpha-alpha"));
+
+    String first = f.forWorkspace("editor", "editor", 7L, null, null).env().get("QITS_WORKSPACE_DAEMON_PROJECTS");
+    String second = f.forWorkspace("editor", "editor", 7L, null, null).env().get("QITS_WORKSPACE_DAEMON_PROJECTS");
+
+    assertEquals(first, second, "two ensures of one estate describe one container");
+  }
+
+  @Test
+  void aListNOBODYCouldComposeIsStillWrittenAsAKey() {
+    // THE DECISION ABOUT EMPTY, pinned so it cannot fall out of string formatting later. A registry
+    // outage and a platform with no workspaces in it yet both compose nothing, and the key is
+    // written anyway — because OMITTING it would make the spec differ between those states and the
+    // ordinary one, so the editor's container would be REPLACED every time the registry came back.
+    // Present-with-a-varying-value churns on the value; present-or-absent churns on both.
+    WorkspaceContainerFactory f = factory();
+    f.postures = StubInstance.of(editorRow(true));
+    f.editorProjects = StubInstance.of(List::of);
+
+    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null);
+
+    assertTrue(
+        c.env().containsKey("QITS_WORKSPACE_DAEMON_PROJECTS"),
+        "the key is present even when there is nothing to put in it");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_PROJECTS", "");
+  }
+
+  @Test
+  void aPortThatCannotAnswerCostsTheLISTAndNeverTheCONTAINER() {
+    // The standing reading everywhere this class touches a registry: a lookup that throws costs a
+    // label, never a workspace. Here it costs the clones — which is recoverable by pressing the
+    // door again — where throwing would take the editor away from everybody on the platform
+    // because qits-projects blinked.
+    WorkspaceContainerFactory f = factory();
+    f.postures = StubInstance.of(editorRow(true));
+    f.editorProjects =
+        StubInstance.of(
+            () -> {
+              throw new IllegalStateException("qits-projects unreachable");
+            });
+
+    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null);
+
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_PROJECTS", "");
+    assertEquals(EDITOR_IMAGE, c.image(), "the container is still the editor's");
+  }
+
+  @Test
   void anOrdinaryWorkspaceIsUntouchedByTheEditor() {
-    // The claim that matters for every workspace that is not the wrapper's main one: the plain
-    // image, and NOTHING said about an editor. Silence is what the daemon's own default reads as
+    // The claim that matters for every workspace that is not the editor: the plain image, and
+    // NOTHING said about an editor. Silence is what the daemon's own default reads as
     // "no editor", so an explicitly-false pair here would be a second way of saying the same thing.
     WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(wrapperMain(false));
+    f.postures = StubInstance.of(editorRow(false));
 
     WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main");
 
@@ -703,6 +825,28 @@ class WorkspaceContainerFactoryTest {
     assertFalse(c.editor());
     assertNull(c.env().get("QITS_WORKSPACE_DAEMON_EDITOR_ENABLED"));
     assertNull(c.env().get("QITS_WORKSPACE_DAEMON_EDITOR_PORT"));
+    // AND NO PROJECTS LIST, which is load-bearing rather than tidy: the daemon skips the root clone
+    // exactly when a container has no repository AND carries a list, and an ordinary workspace is
+    // meant to fail loudly without a repository. A list here would make that failure silent.
+    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_PROJECTS"));
+  }
+
+  @Test
+  void anOrdinaryWorkspaceIsToldNoListEvenWhereOneCouldBeComposed() {
+    // The same claim with the port ARMED, which is the arrangement that can actually fail: the test
+    // above would pass against a factory that wrote the list unconditionally out of an unsatisfied
+    // port. Here the port answers, and the ordinary workspace must still be told nothing.
+    WorkspaceContainerFactory f = factory();
+    f.postures = StubInstance.of(editorRow(false));
+    f.editorProjects = StubInstance.of(() -> List.of("alpha/alpha-alpha", "beta/beta-beta"));
+
+    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main");
+
+    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_PROJECTS"));
+    // And it keeps the single-clone keys it has always had — the pair the daemon needs to clone the
+    // one repository this workspace IS.
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_REPOSITORY_ID", "repo12345678abc");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_BRANCH", "feature/x");
   }
 
   @Test
@@ -713,10 +857,10 @@ class WorkspaceContainerFactoryTest {
     // the image, the editor environment and the flag alike — which is what makes the posture a
     // lookup rather than a parameter somebody could forget to pass on the resume path.
     WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(wrapperMain(true));
+    f.postures = StubInstance.of(editorRow(true));
 
-    WorkspaceContainer first = f.forWorkspace("repo12345678abc", "main", 7L, "main", null);
-    WorkspaceContainer second = f.forWorkspace("repo12345678abc", "main", 7L, "main", null);
+    WorkspaceContainer first = f.forWorkspace("editor", "editor", 7L, null, null);
+    WorkspaceContainer second = f.forWorkspace("editor", "editor", 7L, null, null);
 
     assertEquals(first.image(), second.image());
     assertEquals(first.env(), second.env());
@@ -743,8 +887,8 @@ class WorkspaceContainerFactoryTest {
               }
 
               @Override
-              public boolean isWrapperMain(Long rowId) {
-                throw new IllegalStateException("the registry blinked");
+              public boolean isEditor(Long rowId) {
+                throw new IllegalStateException("the posture lookup blinked");
               }
             });
     WorkspaceContainer degraded = broken.forWorkspace("repo12345678abc", "main", 7L, "main", null);

@@ -109,40 +109,25 @@ public final class StoryTarget {
   /** A repository id nothing has ever been worked in. Authored, and never registered anywhere. */
   public static final String UNWORKED_REPO_ID = "story-unworked-repo";
 
-  // --- the project wrapper the web editor rides -------------------------------------------------
+  // --- the one editor -----------------------------------------------------------------------------
 
   /**
-   * A project's <b>wrapper</b> repository — archetype {@code PROJECT}, the superproject whose main
-   * workspace <em>is</em> the project editor ({@code WorkspacePostures.isWrapperMain}). The editor
-   * story registers it as a wrapper so {@code POST /editor/ensure} resolves a real editor.
+   * The editor workspace's label and its sentinel repository id, which are the same word.
+   *
+   * <p>There is one editor for the platform, so nothing about it is generated and nothing needs
+   * authoring to keep a diagram stable: the row belongs to no repository, and both halves of its
+   * container name are constants. What this replaced was a project's <b>wrapper</b> repository —
+   * archetype {@code PROJECT}, whose main workspace <em>was</em> that project's editor — whose row
+   * id had to be a literal precisely because eight characters of it travelled inside a container
+   * name where {@code Labels} could not rewrite them.
    */
-  public static final String WRAPPER_REPO = "story-editor";
+  public static final String EDITOR_LABEL = "editor";
 
   /**
-   * …and its row id, authored rather than generated for the same reason {@link #WORKSPACE_REPO_ID}
-   * is: it travels into the editor container's name ({@code qits-ws-main-<repoId[0:8]>}) as eight
-   * characters <i>inside</i> a segment, which {@code Labels} correctly refuses to rewrite — so a
-   * uuid there would move the {@code networkHash} every run. The rule: an id that reaches a label
-   * inside a segment has to be authored.
+   * The container name the editor gets — {@code qits-ws-<label>-<repoId[0:8]>} like every other
+   * workspace's, except that both halves are the same constant, so the whole name is one.
    */
-  public static final String WRAPPER_REPO_ID = "story-wrapper-repo";
-
-  /** The first eight characters of the id above, which is what rides in the editor container name. */
-  public static final String WRAPPER_REPO_SHORT = "story-wr";
-
-  /**
-   * The workspace id the editor rides: the wrapper's main branch, slugged. {@code
-   * WorkspaceService.toWorkspaceSlug("main")} is {@code "main"}, so this is what the container name
-   * and every path segment carry.
-   */
-  public static final String MAIN_WORKSPACE_LABEL = "main";
-
-  /**
-   * The container name the editor's main workspace gets — {@code qits-ws-<label>-<repoId[0:8]>},
-   * authored end to end so it survives a label verbatim.
-   */
-  public static final String EDITOR_CONTAINER_NAME =
-      "qits-ws-" + MAIN_WORKSPACE_LABEL + "-" + WRAPPER_REPO_SHORT;
+  public static final String EDITOR_CONTAINER_NAME = "qits-ws-" + EDITOR_LABEL + "-" + EDITOR_LABEL;
 
   // --- branches ---------------------------------------------------------------------------------
 

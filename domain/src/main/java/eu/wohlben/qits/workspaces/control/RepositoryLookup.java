@@ -34,30 +34,39 @@ public interface RepositoryLookup {
    * minted (a manifest repository's id equals its name, a self-seeded one's is a UUID). Both are
    * nullable: a registry that does not answer with one costs a label, never a workspace.
    *
-   * <p>{@code archetype} joined for the web editor, and it is the fifth field for one question:
-   * <b>is this repository a project's wrapper</b> ({@code PROJECT}). Paired with {@code mainBranch}
-   * it is the whole of {@link WorkspacePostures#isWrapperMain}, which is what decides that a
-   * workspace runs the richer editor image rather than the plain one. It is a plain String and not
-   * an enum for the reason {@code QitsConfig.RepositorySection}'s is: the vocabulary belongs to
-   * whoever owns repositories, and an archetype this context has never heard of must round-trip as
-   * "not a wrapper" rather than fail a launch. Nullable like the two above — a registry that does
-   * not answer with one costs the editor, never the workspace.
+   * <p><b>{@code archetype} answers exactly one question, and it has had two readers.</b> The
+   * question is always the same — is this repository a project's <em>wrapper</em> ({@code
+   * PROJECT})? The first reader was the per-project editor's posture, which paired it with {@code
+   * mainBranch} to decide that a workspace ran the richer image; that reader is gone, and for one
+   * release so was the field. The reader now is {@link EditorProjects}: the one shared editor
+   * clones every project's wrapper side by side, so something has to say which repository of a
+   * project <em>is</em> the wrapper, and this is the only fact on the wire that does. It is
+   * nullable like the rest — a registry that does not answer with it costs an entry in that list,
+   * never a workspace.
    */
   record RepositoryView(String id, String name, String projectId, String mainBranch, String archetype) {
 
+    /** The {@code archetype} a project's wrapper repository carries, as qits-projects spells it. */
+    public static final String WRAPPER_ARCHETYPE = "PROJECT";
+
     /**
-     * The four-field form every caller predating the editor spells — no archetype, which reads as
-     * "not a wrapper" wherever the question is asked. Kept so a stub or a fixture that only cares
-     * about the branch stays a one-line constructor.
+     * The four-field form, for every caller that does not care what kind of repository this is —
+     * which is nearly all of them. Reads as {@code archetype == null}, which {@link #isWrapper} is
+     * false for, so an unstated archetype can never widen anything.
      */
     public RepositoryView(String id, String name, String projectId, String mainBranch) {
       this(id, name, projectId, mainBranch, null);
     }
 
-    /** The archetype qits-projects gives a project's wrapper repository — the superproject. */
-    public static final String WRAPPER_ARCHETYPE = "PROJECT";
-
-    /** Whether this repository is its project's wrapper. Absent, blank and unknown are all false. */
+    /**
+     * Whether this repository is a project's wrapper — its superproject.
+     *
+     * <p><b>Trimmed and case-insensitive deliberately</b>, which is not the tidiness it looks like:
+     * the value is another service's vocabulary travelling over JSON, so the exact casing is
+     * qits-projects' to change and this side reading it strictly would turn a cosmetic change there
+     * into an editor here that clones nothing, silently. Nothing is widened by the leniency — no
+     * other archetype differs from this one by case or whitespace.
+     */
     public boolean isWrapper() {
       return archetype != null && WRAPPER_ARCHETYPE.equalsIgnoreCase(archetype.trim());
     }

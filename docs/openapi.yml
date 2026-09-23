@@ -1042,11 +1042,6 @@ paths:
         - qits:system
   /workspaces/api/editor/ensure:
     post:
-      parameters:
-      - name: repositoryId
-        in: query
-        schema:
-          type: string
       responses:
         "201":
           description: The editor was started by this call.
@@ -1055,18 +1050,6 @@ paths:
           content:
             application/json:
               schema: {}
-        "400":
-          description: "The repository is not a project's wrapper, so it has no editor."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "404":
-          description: No such repository.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
         "403":
@@ -2027,4 +2010,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.921.182303
+  version: 2026.922.234434

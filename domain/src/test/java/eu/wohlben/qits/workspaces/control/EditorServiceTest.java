@@ -3,15 +3,18 @@ package eu.wohlben.qits.workspaces.control;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
-import eu.wohlben.qits.workspaces.error.BadRequestException;
-import eu.wohlben.qits.workspaces.error.NotFoundException;
+import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import java.time.Instant;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -20,51 +23,111 @@ import org.junit.jupiter.api.Test;
  * <p>Three claims, and each of them is something a two-second poll would otherwise get wrong: the
  * row is found rather than made twice, an editor that is up is not asked for again, and readiness is
  * the service's judgement rather than the caller's.
+ *
+ * <p>The first of those grew a second half with the editor becoming one container for the platform.
+ * It is not enough that a second call finds what the first made: <b>callers who came in from two
+ * different projects</b> have to land on the same row and therefore the same container, which is the
+ * whole of what changed. The door no longer takes a project, so what that reads as here is two
+ * callers of one door — and the assertion is about the answer being the same row, and that row
+ * belonging to no repository either of them named.
  */
 @QuarkusTest
 public class EditorServiceTest {
 
   @Inject FakeRepositoryLookup repositories;
   @Inject FakeWorkspaceDaemonLiveness liveness;
-  @Inject WorkspaceService workspaceService;
   @Inject WorkspaceContainerStartedRecorder startedRecorder;
+  @Inject ContainerRuntime containers;
+  @Inject WorkspaceRepository workspaces;
   @Inject EditorService editors;
-  @Inject WorkspaceIds workspaceIds;
+  @Inject WorkspaceService workspaceService;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
 
-  private String wrapperRepository() throws Exception {
-    String repoId = TestOrigin.create(dataDir);
-    repositories.registerWrapper(repoId, "master", "someproject-someproject");
-    return repoId;
+  /** The container the one editor row derives — deterministic, and shared, which is the point. */
+  private static final String EDITOR_CONTAINER = "qits-ws-editor-editor";
+
+  /**
+   * <b>There is no editor yet</b>, arranged rather than assumed.
+   *
+   * <p>A per-project editor was per-project in the database too, so every test could mint a fresh
+   * repository and get a fresh editor with it. The editor is a platform singleton now and the
+   * database outlives a test method — so the second test to run would find the first one's row and
+   * {@code fresh} would answer whatever the class's method order happened to be. Resolving it here
+   * is what makes "this call started it" a claim about the call.
+   *
+   * <p>The row is resolved directly rather than through {@code discardWorkspace}, which is the right
+   * verb for a workspace and the wrong one for this: it resolves the repository the row names, and
+   * the editor's is a sentinel nothing resolves. The container goes with it, because the next
+   * ensure's answer depends on whether one is there.
+   */
+  @BeforeEach
+  void noEditorYet() {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaces
+                    .findActiveEditor()
+                    .ifPresent(
+                        editor -> {
+                          editor.status = WorkspaceStatus.ABANDONED;
+                          editor.resolvedAt = Instant.now();
+                        }));
+    containers.rm(EDITOR_CONTAINER);
+    startedRecorder.clear();
   }
 
   @Test
-  void theFirstCallStartsTheWrappersMainWorkspaceAndTheSecondFindsIt() throws Exception {
-    String repoId = wrapperRepository();
-
-    EditorService.EditorSession first = editors.ensure(repoId);
+  void theFirstCallStartsTheEditorAndTheSecondFindsIt() throws Exception {
+    EditorService.EditorSession first = editors.ensure();
     assertTrue(first.fresh(), "nothing was there, so this call started it — a 201");
-
-    // The row is the wrapper's main workspace and not a workspace of the editor's own: the editor
-    // has no lifecycle, it rides one that already exists.
-    Long mainId = workspaceIds.of(repoId, "master");
-    assertEquals(Long.toString(mainId), first.workspaceId());
 
     // Wait for the provision to settle, then let the workspace look the way a live editor does: the
     // container running and its daemon on the socket.
-    assertTrue(startedRecorder.awaitCount(repoId, "master", 1, 10_000));
+    assertTrue(
+        startedRecorder.awaitCount(
+            EditorWorkspace.REPOSITORY_ID, EditorWorkspace.WORKSPACE_ID, 1, 10_000));
     startedRecorder.clear();
-    liveness.markLive(mainId);
+    Long rowId = Long.valueOf(first.workspaceId());
+    liveness.markLive(rowId);
     try {
-      EditorService.EditorSession second = editors.ensure(repoId);
+      EditorService.EditorSession second = editors.ensure();
       assertFalse(second.fresh(), "it was already there — a 200");
       assertEquals(first.workspaceId(), second.workspaceId(), "and it is the same workspace");
       assertEquals(WorkspaceRuntimeStatus.RUNNING.name(), second.containerStatus());
     } finally {
-      liveness.markDead(mainId);
+      liveness.markDead(rowId);
     }
+  }
+
+  @Test
+  void twoCallersFromTwoDifferentProjectsReachOneEditorContainer() throws Exception {
+    // THE POINT OF THE WHOLE CHANGE, stated as the thing a user notices. Two projects exist and
+    // somebody opens the editor from each of their pages; before, that was two rows on two wrapper
+    // repositories running two containers off a multi-gigabyte image. The door takes no project any
+    // more, so the two presses are the same request — and they have to answer the same row.
+    String alpha = TestOrigin.create(dataDir);
+    String beta = TestOrigin.create(dataDir);
+    repositories.registerNamed(alpha, "master", "alpha-alpha");
+    repositories.registerNamed(beta, "master", "beta-beta");
+
+    EditorService.EditorSession fromAlpha = editors.ensure();
+    EditorService.EditorSession fromBeta = editors.ensure();
+
+    assertEquals(
+        fromAlpha.workspaceId(), fromBeta.workspaceId(), "one editor row, whoever asked for it");
+
+    // And ONE container, which is the claim the row id alone does not quite make: the name is
+    // composed from the row's workspace id and repository id, and both are constants for the editor
+    // — so it cannot carry either project's repository in it and cannot differ between the two
+    // callers.
+    assertEquals(EDITOR_CONTAINER, containers.containerName("editor", "editor"));
+    assertTrue(
+        startedRecorder.awaitCount(
+            EditorWorkspace.REPOSITORY_ID, EditorWorkspace.WORKSPACE_ID, 1, 10_000));
+    startedRecorder.clear();
+    assertTrue(containers.exists(EDITOR_CONTAINER), "and it is the container that was started");
   }
 
   @Test
@@ -75,30 +138,86 @@ public class EditorServiceTest {
     // is the honest answer and the one a waiting page needs.
     // A door that read readiness off the container alone would send a reader to an origin serving
     // nothing.
-    String repoId = wrapperRepository();
-
-    EditorService.EditorSession session = editors.ensure(repoId);
-    assertTrue(startedRecorder.awaitCount(repoId, "master", 1, 10_000));
+    EditorService.EditorSession session = editors.ensure();
+    assertTrue(
+        startedRecorder.awaitCount(
+            EditorWorkspace.REPOSITORY_ID, EditorWorkspace.WORKSPACE_ID, 1, 10_000));
     startedRecorder.clear();
 
-    EditorService.EditorSession settled = editors.ensure(repoId);
+    EditorService.EditorSession settled = editors.ensure();
     assertNull(settled.editorState());
     assertFalse(settled.editorReady());
     assertEquals(session.workspaceId(), settled.workspaceId());
   }
 
   @Test
-  void aRepositoryThatIsNotAWrapperIsRefused() throws Exception {
-    String repoId = TestOrigin.create(dataDir);
-    repositories.registerAs(repoId, "master", "SERVICE");
+  void theEditorRowIsReadableByItsIdLikeEveryOtherWorkspace() throws Exception {
+    // THE REGRESSION THE SINGLETON INTRODUCED, and the reason it is a defect rather than a
+    // limitation: the door hands a caller this row id for exactly the container verbs, and the read
+    // behind them re-derived the row from listWorkspaces(repositoryId) — which opens with
+    // repositories.require and refreshes a git mirror. The editor's repository id is a sentinel that
+    // resolves to nothing, so the read 404'd for a row that plainly exists.
+    EditorService.EditorSession session = editors.ensure();
+    Long rowId = Long.valueOf(session.workspaceId());
+    // Await the provision this ensure began, as every test here does: it runs on another thread and
+    // a method that returned without it would have its row abandoned by the NEXT test's setup while
+    // that thread was still writing to it — which resurrects the row and makes the next `fresh`
+    // answer the method order rather than the call.
+    assertTrue(
+        startedRecorder.awaitCount(
+            EditorWorkspace.REPOSITORY_ID, EditorWorkspace.WORKSPACE_ID, 1, 10_000));
+    startedRecorder.clear();
 
-    // Refused rather than started: an ordinary workspace runs the plain image, so no editor could
-    // ever report and the caller would poll a workspace that can never become ready.
-    assertThrows(BadRequestException.class, () -> editors.ensure(repoId));
+    WorkspaceDto editor = workspaceService.getWorkspace(rowId);
+
+    assertEquals(rowId, editor.id());
+    assertEquals(EditorWorkspace.WORKSPACE_ID, editor.workspaceId());
+    assertEquals(WorkspaceStatus.ACTIVE, editor.status());
   }
 
   @Test
-  void anUnknownRepositoryIsNotFound() {
-    assertThrows(NotFoundException.class, () -> editors.ensure("no-such-repository"));
+  void theEditorsReadAnswersNullWhereAREPOSITORYWouldHaveAnswered() throws Exception {
+    // What the editor cannot know, as opposed to what was skipped to make it cheap. It has no
+    // branch, no parent and no repository, so there is nothing for it to be ahead OF — null is the
+    // honest answer and the same one every other unknown on this shape uses. Asserted so that a
+    // later change which quietly starts inventing a main branch here has to argue with a test.
+    EditorService.EditorSession session = editors.ensure();
+    // Await the provision this ensure began, as every test here does: it runs on another thread and
+    // a method that returned without it would have its row abandoned by the NEXT test's setup while
+    // that thread was still writing to it — which resurrects the row and makes the next `fresh`
+    // answer the method order rather than the call.
+    assertTrue(
+        startedRecorder.awaitCount(
+            EditorWorkspace.REPOSITORY_ID, EditorWorkspace.WORKSPACE_ID, 1, 10_000));
+    startedRecorder.clear();
+
+    WorkspaceDto editor = workspaceService.getWorkspace(Long.valueOf(session.workspaceId()));
+
+    assertNull(editor.repositoryMainBranch());
+    assertNull(editor.ahead());
+    assertNull(editor.behind());
+    assertFalse(editor.conflictsWithParent());
+  }
+
+  @Test
+  void theCONTAINERVERBSAnswerForTheEditorToo() throws Exception {
+    // The four container verbs (ensure/stop/delete/recreate) all RETURN getWorkspace(id), so before
+    // the fix each of them did its work and then 404'd on the way out — the worst shape of the bug,
+    // because the side effect landed and the caller saw a failure. They are repaired by the one
+    // change rather than four special cases, and this is that claim: the read the verbs return
+    // answers, and it answers with the editor's own runtime status.
+    EditorService.EditorSession session = editors.ensure();
+    Long rowId = Long.valueOf(session.workspaceId());
+    assertTrue(
+        startedRecorder.awaitCount(
+            EditorWorkspace.REPOSITORY_ID, EditorWorkspace.WORKSPACE_ID, 1, 10_000));
+    startedRecorder.clear();
+
+    // The live container check is asked BY NAME here rather than by listing a repository's
+    // containers, which is the one substitution the sentinel forces — so a running editor must read
+    // as RUNNING through this path, not merely as whatever the column last said.
+    assertTrue(containers.exists(EDITOR_CONTAINER));
+    assertEquals(
+        WorkspaceRuntimeStatus.RUNNING, workspaceService.getWorkspace(rowId).runtimeStatus());
   }
 }

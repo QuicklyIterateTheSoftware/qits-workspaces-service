@@ -5,15 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.ContainerRuntime;
 import eu.wohlben.qits.workspaces.control.FakeContainerRuntime;
-import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.EditorWorkspace;
 import eu.wohlben.qits.workspaces.control.SharedTuningProfile;
-import eu.wohlben.qits.workspaces.control.TestOrigin;
-import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -37,22 +34,18 @@ public class EditorKeepaliveTest {
 
   @Inject EditorKeepalive keepalive;
   @Inject ContainerRuntime containers;
-  @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceService workspaceService;
-  @Inject WorkspaceIds workspaceIds;
-
-  @ConfigProperty(name = "qits.test.origins-dir")
-  String dataDir;
 
   @Test
   void aReportTouchesTheWorkspacesOwnContainerOncePerWindow() throws Exception {
-    String repoId = TestOrigin.create(dataDir);
-    repositories.registerWrapper(repoId, "master", "keepalive-keepalive");
-    workspaceService.createMainWorkspace(repoId, "master");
-    Long rowId = workspaceIds.of(repoId, "master");
+    // The editor's row, which is what the keepalive is about: one row for the platform, so the
+    // container it names is the constant `qits-ws-editor-editor` rather than something derived from
+    // whoever opened it.
+    Long rowId = workspaceService.createEditorWorkspace().id;
 
     FakeContainerRuntime runtime = (FakeContainerRuntime) containers;
-    String container = runtime.containerName("master", repoId);
+    String container =
+        runtime.containerName(EditorWorkspace.WORKSPACE_ID, EditorWorkspace.REPOSITORY_ID);
     runtime.clearTouches();
 
     keepalive.touched(rowId);
