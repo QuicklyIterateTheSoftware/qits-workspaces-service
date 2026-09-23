@@ -709,13 +709,94 @@ public class WorkspaceService {
     return info.buildTime().isBefore(latest.buildTime()) ? Boolean.TRUE : null;
   }
 
-  /** A single active workspace's current DTO (runtime status computed live), or 404. */
+  /**
+   * A single active workspace's current DTO (runtime status computed live), or 404.
+   *
+   * <p><b>The editor is read directly and every other workspace through its repository's listing</b>,
+   * which is not an optimisation but the only way the editor is readable at all. The listing is the
+   * older path and stays exactly as it was: it opens with {@code repositories.require(repoId)} and
+   * refreshes a git mirror, because ahead/behind against a parent branch is most of what it answers.
+   * The editor's row belongs to no repository — it carries a sentinel id ({@code
+   * EditorWorkspace.REPOSITORY_ID}) precisely because the column is not nullable — so that first
+   * line could only ever 404, and a read that 404s for a row which exists is a defect rather than a
+   * limitation. This is the regression the singleton editor introduced: the editor used to be a
+   * per-project workspace the listing covered, and the same listing now misses it.
+   *
+   * <p><b>The difference is what cannot be known rather than what is skipped.</b> An editor has no
+   * branch, no parent and no repository, so {@code ahead}, {@code behind} and the repository's main
+   * branch are null and {@code conflictsWithParent} is false — not because they were too expensive
+   * to compute, but because there is nothing to compute them against. Everything keyed by the row
+   * itself is answered exactly as the listing answers it: the live container check, clean/dirty,
+   * agent activity and the daemon's identity, all of them RUNNING-only on the same contract.
+   *
+   * <p>Five endpoints reach this method — the by-id read and the four container verbs that return
+   * the refreshed workspace — so fixing it here is what makes all five answer for the editor rather
+   * than each of them growing a special case.
+   */
   public WorkspaceDto getWorkspace(Long id) {
     Workspace workspace = requireActive(id);
+    if (workspace.editor) {
+      return describeEditor(workspace);
+    }
     return listWorkspaces(workspace.repositoryId).stream()
         .filter(w -> id.equals(w.id()))
         .findFirst()
         .orElseThrow(() -> new NotFoundException("Workspace not found: " + id));
+  }
+
+  /**
+   * The editor row as a {@link WorkspaceDto}, built without touching a repository or a git mirror.
+   *
+   * <p>The live half is read the same way {@link #listWorkspaces} reads it and from the same ports,
+   * so the two agree about a workspace that is up: the container is asked for BY NAME rather than by
+   * listing a repository's containers, which is the one substitution the sentinel forces and the
+   * same composition {@code EditorKeepalive} and the editor proxy already make.
+   */
+  private WorkspaceDto describeEditor(Workspace workspace) {
+    WorkspaceRuntimeStatus runtime =
+        containers.isRunning(containers.containerName(workspace.workspaceId, workspace.repositoryId))
+            ? WorkspaceRuntimeStatus.RUNNING
+            : workspace.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
+                ? WorkspaceRuntimeStatus.STOPPED
+                : workspace.runtimeStatus;
+    boolean live = runtime == WorkspaceRuntimeStatus.RUNNING;
+    Boolean clean =
+        live && gitStatus.isResolvable() ? gitStatus.get().isClean(workspace.id).orElse(null) : null;
+    AgentActivityState activity =
+        live && agentActivity.isResolvable()
+            ? agentActivity.get().activityFor(workspace.id).orElse(null)
+            : null;
+    WorkspaceDaemonInfo.Info info =
+        live && daemonInfo.isResolvable() ? daemonInfo.get().lookup(workspace.id).orElse(null) : null;
+    WorkspaceDaemonInfo.Info latestDaemon =
+        daemonInfo.isResolvable() ? latestDaemon(daemonInfo.get().all()) : null;
+    return new WorkspaceDto(
+        workspace.id,
+        workspace.workspaceId,
+        workspace.parent,
+        workspace.branch,
+        // No repository ⇒ no main branch to be ahead of, and no parent to conflict with. Null is the
+        // honest answer here, and the same one every other unknown on this DTO uses.
+        null,
+        null,
+        null,
+        false,
+        workspace.status,
+        runtime,
+        workspace.runtimeError,
+        clean,
+        activity,
+        workspace.preamble,
+        workspace.ticketId,
+        workspace.epicId,
+        workspace.result,
+        workspace.createdAt,
+        workspace.resolvedAt,
+        info != null ? info.connectedAt() : null,
+        info != null ? info.version() : null,
+        info != null ? info.buildTime() : null,
+        daemonOutdated(info, latestDaemon),
+        workspace.admin);
   }
 
   /**

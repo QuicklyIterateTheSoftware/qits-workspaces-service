@@ -446,6 +446,15 @@ Three more host-owned surfaces landed on the same rule, all plain JAX-RS under `
 - `GET /workspaces/api/workspaces/{id}` — the single-workspace read. The same `WorkspaceDto` the
   collection serves, so a detail page opens from a bare id; ACTIVE only, 404 for a resolved one
   (whose live half would be uniformly null — `history/{id}` is where that record stays readable).
+  **The editor row answers here, by a path of its own**, and the reason is worth keeping: the
+  ordinary path re-derives the row from `listWorkspaces(repositoryId)`, which opens with
+  `repositories.require` and refreshes a git mirror, and the editor's sentinel `repositoryId`
+  resolves to nothing — so it 404'd for a row that plainly exists. `getWorkspace` now reads an editor
+  straight off its row. The repository-shaped fields (`repositoryMainBranch`, `ahead`, `behind`) come
+  back null because there is nothing to compute them against, and everything keyed by the row —
+  live container, clean/dirty, agent activity, daemon identity — is answered from the same ports the
+  listing uses. Fixing it there rather than at the endpoint is what also repaired the four container
+  verbs, which all return `getWorkspace(id)` and so all 404'd for the editor after doing their work.
 - `GET`/`PUT`/`DELETE /workspaces/api/workspaces/{id}/prompt-draft` — the composition the next agent
   run is written in. Database rows, no container, so they work while the workspace is STOPPED.
 - `GET`/`POST`/`DELETE /workspaces/api/workspaces/{id}/prompt-attachments[/{attachmentId}]` — its
