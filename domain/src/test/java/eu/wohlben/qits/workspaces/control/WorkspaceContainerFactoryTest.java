@@ -91,8 +91,9 @@ class WorkspaceContainerFactoryTest {
     f.npmRegistryUrl = Optional.empty();
     f.npmProxyUrl = Optional.empty();
     // …and the fourth registry key is the one that DOES ship an address, so the default factory
-    // carries it: qits-platform-mirror is a platform service with no environment in its name, which
-    // is exactly why a default is possible here and was not for the three above.
+    // carries it: qits-platform-mirror's address is DERIVED from QITS_ENVIRONMENT rather than a
+    // deployment's own topology, which is exactly why a default is possible here and was not for the
+    // three above.
     f.mavenCentralUrl = Optional.of(MAVEN_CENTRAL_URL);
     f.timezone = Optional.empty();
     // Mirrors the shipped default: a 4g memory cap with an 8g memory+swap total on every
@@ -534,7 +535,8 @@ class WorkspaceContainerFactoryTest {
     // container sits on qits-net, where the mirror answers under its own service alias on its own
     // /mirror route. A published host name (mirror.<env>.<domain>) would resolve to nothing in
     // there, and the /artifacts route belongs to the hosted registry, which does not proxy Central.
-    assertEquals("http://qits-platform-mirror:8080/mirror/maven/central", MAVEN_CENTRAL_URL);
+    // QITS_ENVIRONMENT is unset in this suite, so the shipped default's own fallback applies: dev.
+    assertEquals("http://dev-qits-platform-mirror:8080/mirror/maven/central", MAVEN_CENTRAL_URL);
   }
 
   @Test
