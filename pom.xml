@@ -75,12 +75,12 @@
              after the container is gone. Framework-free — vertx-core and qits-commands are its only
              compile dependencies, and nothing here imports either. -->
         <qits.coding-agents.version>2026.913.194041</qits.coding-agents.version>
-        <qits.eventstream.version>2026.917.70940</qits.eventstream.version>
+        <qits.eventstream.version>2026.924.141456</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.917.65806</qits.db-core.version>
         <qits.arch-rules.version>2026.917.65806</qits.arch-rules.version>
         <qits.auth-core.version>2026.917.65806</qits.auth-core.version>
-        <qits.containers-client.version>2026.922.195204</qits.containers-client.version>
+        <qits.containers-client.version>2026.924.184531</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
