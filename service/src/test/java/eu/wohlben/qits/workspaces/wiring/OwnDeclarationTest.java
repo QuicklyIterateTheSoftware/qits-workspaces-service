@@ -112,8 +112,17 @@ class OwnDeclarationTest {
   void everyRawEnvNameThisServiceInterpolatesIsDeclared() throws IOException {
     // `${QUARKUS_OIDC_CLIENT_CLIENT_ID:…}` and its siblings are the `qits` client's fallback, read by
     // raw env name and named nowhere in the code. Left out of the declaration, they would show as
-    // orphaned while the service still reads them. QITS_RESOURCE_* is the deployer's to inject and
-    // configuration's never to state, so it is the one family left out on purpose.
+    // orphaned while the service still reads them.
+    //
+    // TWO families are left out on purpose, and both for the same reason: the deployer injects them
+    // and configuration never states them. QITS_RESOURCE_* is the original. QITS_ENVIRONMENT is the
+    // second, added when the platform plane was deleted — every platform peer's address became
+    // `<env>-<application>` and the shipped config derives the tier from that variable rather than
+    // being told it, so it is now interpolated all over this file.
+    // `BootResourceRegistration.ENVIRONMENT_VARIABLE` in qits-deployments is what sets it, into
+    // every container. DECLARING it would be the error, not the omission: a declared key is one an
+    // operator may set, and there is no entry behind this one on any application — so it would
+    // report as orphaned forever, which is exactly the confusion the rest of this test prevents.
     Set<String> declared = new TreeSet<>(declaredKeys());
     Set<String> missing = new TreeSet<>();
     for (String file : CONFIG_FILES) {
@@ -124,7 +133,9 @@ class OwnDeclarationTest {
         Matcher reference = RAW_ENV_REFERENCE.matcher(line);
         while (reference.find()) {
           String name = reference.group(1);
-          if (!name.startsWith("QITS_RESOURCE_") && !declared.contains("env." + name)) {
+          if (!name.startsWith("QITS_RESOURCE_")
+              && !name.equals("QITS_ENVIRONMENT")
+              && !declared.contains("env." + name)) {
             missing.add(name);
           }
         }

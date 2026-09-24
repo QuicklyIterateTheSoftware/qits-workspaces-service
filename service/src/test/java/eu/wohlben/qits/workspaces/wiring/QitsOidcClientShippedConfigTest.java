@@ -29,7 +29,9 @@ class QitsOidcClientShippedConfigTest {
 
   @Test
   void theQitsClientResolvesItsOwnLiteralDefaults() {
-    assertEquals("http://qits-idp:8080/idp", value("quarkus.oidc-client.qits.auth-server-url"));
+    // QITS_ENVIRONMENT is unset here, so the shipped default's own fallback applies: dev.
+    assertEquals(
+        "http://dev-qits-platform-idp:8080/idp", value("quarkus.oidc-client.qits.auth-server-url"));
     assertEquals("qits-workspaces", value("quarkus.oidc-client.qits.client-id"));
     // Empty, not absent — SmallRye reads a configured-empty String as null (the trap AGENTS.md
     // documents), so an empty secret reads as an empty Optional rather than as "" itself.
