@@ -66,7 +66,7 @@ class OtelLogConfigTest {
 
     // Resolved, not the raw expression: this is the base the SDK appends /v1/logs to.
     assertEquals(
-        "http://qits-observability:8080/observability/api/otel",
+        "http://dev-qits-observability:8080/observability/api/otel",
         value("quarkus.otel.exporter.otlp.endpoint"));
   }
 
