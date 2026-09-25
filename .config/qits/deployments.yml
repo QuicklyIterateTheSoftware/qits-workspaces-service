@@ -8,9 +8,6 @@
 # are gone: deployment follows the `SoftwareRelease` event now, and qits-projects makes the
 # deployable/non-deployable call off this file at the released tag.
 #
-# qits-workspaces is an ENVIRONMENT service: one instance per tier, the default target, so the
-# `deployment_target` key is left off rather than written out as its own default.
-#
 # The path prefix the edge routes here on EVERY host, browser and machine alike. The client itself
 # is served at `/` on this service's own host (workspaces.<env>.<domain>), so this covers the machine
 # surface only: /workspaces/api, /workspaces/q and the four literal wire routes under it.
