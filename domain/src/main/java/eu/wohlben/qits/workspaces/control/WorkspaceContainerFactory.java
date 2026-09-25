@@ -31,7 +31,7 @@ public class WorkspaceContainerFactory {
   String projectsUrl;
 
   /** qits-observability's service base, used by workspace-scoped coding agents. */
-  @ConfigProperty(name = "qits.observability.url", defaultValue = "http://qits-observability:8080")
+  @ConfigProperty(name = "qits.observability.url", defaultValue = "http://${QITS_ENVIRONMENT:dev}-qits-observability:8080")
   String observabilityUrl;
 
   /**

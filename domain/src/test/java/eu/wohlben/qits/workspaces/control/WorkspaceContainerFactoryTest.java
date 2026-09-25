@@ -79,7 +79,7 @@ class WorkspaceContainerFactoryTest {
     f.editorImageVersionOverride = Optional.empty();
     f.editorPort = 13339;
     f.projectsUrl = "http://qits-projects:8080/";
-    f.observabilityUrl = "http://qits-observability:8080/";
+    f.observabilityUrl = "http://dev-qits-observability:8080/";
     f.network = "qits-net";
     f.claudeVolume = "qits_shared_dot_claude";
     f.claudeMount = "/claude-home";
@@ -201,7 +201,7 @@ class WorkspaceContainerFactoryTest {
     assertEnv(
         c,
         "QITS_OBSERVABILITY_MCP_URL",
-        "http://qits-observability:8080/observability/mcp");
+        "http://dev-qits-observability:8080/observability/mcp");
     // The self-clone base, told rather than left to the daemon's pre-split derivation
     // (/artifacts/git), which 404s now that the git host is qits-githost under /git.
     assertEnv(c, "QITS_WORKSPACE_DAEMON_GIT_BASE_URL", "http://qits-platform-edge:8080/git");
