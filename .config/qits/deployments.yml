@@ -114,7 +114,7 @@ resources: postgresql:db, postgresql:eventstream:qits_workspaces_eventstream
 #
 # WHY THIS IS HERE AND NOT IN CONFIG. Both lines are identical in every environment — they are
 # properties of what this service IS, not of where it runs. They arrived as
-# `qits.platform.deployments.extras.qits-workspaces.mounts[i]`, an indexed list authored in
+# `qits.deployments.extras.qits-workspaces.mounts[i]`, an indexed list authored in
 # qits-bootstrap-cli and stored in qits-configuration, which made attaching a volume an operator's
 # write in another repository and left the index as the only identity a mount had. Ticket qits-291
 # is where that cost something: the reader shipped, deployed and correct, and unable to read
