@@ -65,7 +65,7 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.926.53146</qits.workspace-daemon-protocol.version>
+        <qits.workspace-daemon-protocol.version>2026.926.181342</qits.workspace-daemon-protocol.version>
         <qits.workspace-editor-image.version>2026.926.54933</qits.workspace-editor-image.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
