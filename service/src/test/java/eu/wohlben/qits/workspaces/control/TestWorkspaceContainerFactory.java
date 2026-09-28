@@ -102,11 +102,14 @@ public final class TestWorkspaceContainerFactory {
     f.mavenVolume = "qits_shared_m2";
     f.pnpmVolume = "qits_shared_pnpm";
     // The registry addresses a deployment tells the factory. Empty here, which is the shipped
-    // posture — there is no default address to ship — and enough to keep every container this
+    // posture, and enough to keep every container this
     // builder makes identical to one built before these keys existed.
     f.mavenRepositoryUrl = Optional.empty();
     f.npmRegistryUrl = Optional.empty();
     f.npmProxyUrl = Optional.empty();
+    // No public domain, the suites' pinned posture: without one the npm proxy is not derived
+    // (https://mirror.qits.<domain>/npm/npmjs/), so containers here carry no npm_config_registry.
+    f.domain = Optional.empty();
     // Maven Central's pull-through, which unlike the three above IS shipped non-empty — the mirror
     // is a platform service with no environment in its name, so the address is the same on every
     // deployment. Set here so this fixture carries the shipped posture; the address itself is

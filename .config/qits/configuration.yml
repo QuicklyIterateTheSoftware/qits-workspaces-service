@@ -104,7 +104,7 @@ keys:
 
   env.QITS_WORKSPACE_NPM_PROXY_URL:
     type: string
-    description: "The npm proxy for public packages handed to each workspace container."
+    description: "An override for the npm proxy handed to each workspace container. Unset, the service derives https://mirror.qits.<QITS_DOMAIN>/npm/npmjs/ (the mirror through the public edge)."
 
   env.QITS_WORKSPACE_GIT_HOST:
     type: string

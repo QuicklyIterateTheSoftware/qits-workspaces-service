@@ -85,11 +85,15 @@ class WorkspaceContainerFactoryTest {
     f.claudeMount = "/claude-home";
     f.mavenVolume = "qits_shared_m2";
     f.pnpmVolume = "qits_shared_pnpm";
-    // The shipped posture is the three registry keys BLANK — no default address exists to ship —
-    // so the default factory here carries none, and the test that wants them sets them itself.
+    // The shipped posture is the three registry keys BLANK, so the default factory here carries
+    // none, and the test that wants them sets them itself. (The npm proxy's blank means "derive
+    // from the domain", which the domain line below leaves empty.)
     f.mavenRepositoryUrl = Optional.empty();
     f.npmRegistryUrl = Optional.empty();
     f.npmProxyUrl = Optional.empty();
+    // No public domain, which is what the suites pin (%test.qits.workspace.domain is empty): with
+    // it the npm proxy is DERIVED, and the cases that want that derivation set a domain themselves.
+    f.domain = Optional.empty();
     // …and the fourth registry key is the one that DOES ship an address, so the default factory
     // carries it: qits-platform-mirror's address is DERIVED from QITS_ENVIRONMENT rather than a
     // deployment's own topology, which is exactly why a default is possible here and was not for the
@@ -508,14 +512,74 @@ class WorkspaceContainerFactoryTest {
   @Test
   void tellsTheContainerNothingAboutRegistriesItWasNotToldAbout() {
     // Absent is a supported configuration, not a misconfiguration: a deployment that wires none of
-    // the three gets a container identical to the one it got before these keys existed. Asserted
-    // because the alternative — injecting a derived or defaulted address — would point builds at a
-    // host that does not exist on that deployment, which is worse than leaving them as they were.
+    // the three, and has no public domain to derive the npm proxy from, gets a container identical
+    // to the one it got before these keys existed. Asserted because the alternative — a guessed
+    // address — would point builds at a host that does not exist on that deployment, which is worse
+    // than leaving them as they were.
     WorkspaceContainer c = factory().forWorkspace("repo12345678abc", "work", 1L, "main", null);
 
     assertNull(c.env().get("QITS_MAVEN_REPOSITORY_URL"));
     assertNull(c.env().get("npm_config_registry"));
     assertNull(c.env().get("npm_config_@qits:registry"));
+  }
+
+  @Test
+  void derivesTheNpmProxyFromThePublicDomainThroughTheEdge() {
+    // No deployment config at all: QITS_DOMAIN alone names the mirror's public host, under the edge
+    // grammar <app>.qits.<domain> — the platform project carries no environment label — and the
+    // npmjs cache sits at the root of that host. https, because this is the edge, not qits-net.
+    WorkspaceContainerFactory f = factory();
+    f.domain = Optional.of("wohlben.eu");
+
+    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
+
+    assertEnv(c, "npm_config_registry", "https://mirror.qits.wohlben.eu/npm/npmjs/");
+  }
+
+  @Test
+  void normalisesTheDomainTheWayQitsCiDoes() {
+    // Case and stray dots are the same domain; the value must still be one constant per process.
+    WorkspaceContainerFactory f = factory();
+    f.domain = Optional.of(" .Wohlben.EU. ");
+
+    assertEquals(Optional.of("https://mirror.qits.wohlben.eu/npm/npmjs/"), f.npmProxy());
+  }
+
+  @Test
+  void anExplicitNpmProxyWinsOverTheDerivation() {
+    WorkspaceContainerFactory f = factory();
+    f.domain = Optional.of("wohlben.eu");
+    f.npmProxyUrl = Optional.of("https://npm.example.org/npmjs/");
+
+    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
+
+    assertEnv(c, "npm_config_registry", "https://npm.example.org/npmjs/");
+  }
+
+  @Test
+  void aBlankNpmProxyIsUnsetAndStillDerives() {
+    // SmallRye reads an empty property as absent, but a whitespace value reaches the field; either
+    // way a blank key means "derive", never "inject a blank registry".
+    WorkspaceContainerFactory f = factory();
+    f.domain = Optional.of("wohlben.eu");
+    f.npmProxyUrl = Optional.of("  ");
+
+    assertEquals(Optional.of("https://mirror.qits.wohlben.eu/npm/npmjs/"), f.npmProxy());
+  }
+
+  @Test
+  void injectsNoNpmProxyWithoutADomainOrAnExplicitValue() {
+    // Neither ⇒ nothing, exactly as before either key existed. A dotless domain is a developer's
+    // `localhost`, which names no public host, so it counts as none.
+    for (Optional<String> domain :
+        List.of(Optional.<String>empty(), Optional.of(""), Optional.of("localhost"))) {
+      WorkspaceContainerFactory f = factory();
+      f.domain = domain;
+
+      WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
+
+      assertNull(c.env().get("npm_config_registry"), "domain " + domain);
+    }
   }
 
   @Test
