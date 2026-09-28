@@ -467,7 +467,7 @@ class WorkspaceContainerFactoryTest {
   void tellsTheContainerWhereThePlatformRegistriesAreWhenItHasBeenTold() {
     WorkspaceContainerFactory f = factory();
     f.mavenRepositoryUrl = Optional.of("http://dev-qits-artifacts:8080/artifacts/maven/maven");
-    f.npmProxyUrl = Optional.of("http://qits-platform-mirror:8080/artifacts/npm/npmjs/");
+    f.npmProxyUrl = Optional.of("http://qits-platform-mirror:8080/npm/npmjs/");
     f.npmRegistryUrl = Optional.of("http://dev-qits-artifacts:8080/artifacts/npm/npm/");
 
     WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
@@ -480,7 +480,7 @@ class WorkspaceContainerFactoryTest {
     assertEquals(
         "http://dev-qits-artifacts:8080/artifacts/maven/maven", c.env().get("QITS_MAVEN_REPOSITORY_URL"));
     assertEquals(
-        "http://qits-platform-mirror:8080/artifacts/npm/npmjs/", c.env().get("npm_config_registry"));
+        "http://qits-platform-mirror:8080/npm/npmjs/", c.env().get("npm_config_registry"));
     assertEquals(
         "http://dev-qits-artifacts:8080/artifacts/npm/npm/",
         c.env().get("QITS_WORKSPACE_NPM_REGISTRY_URL"));
