@@ -1659,7 +1659,7 @@ public class WorkspaceService {
 
       `qits` is on PATH and already signed in: both `QITS_COMMISSIONED_CLIENT_ID` and `QITS_COMMISSIONED_CLIENT_SECRET` being set is the signal, so there is no `qits login` to run in here — the credential is minted once per process with `client_credentials` and kept in memory, never written to disk. It dials a service by its wire alias (`http://dev-qits-projects:8080`) itself, so none of the addressing above has to be composed by hand.
 
-          qits ticket list --project qits
+          qits work list --project qits
           qits ci runs --project qits --repository <repository> --limit 3
           qits release-request --project qits --repository <repository> list
 
