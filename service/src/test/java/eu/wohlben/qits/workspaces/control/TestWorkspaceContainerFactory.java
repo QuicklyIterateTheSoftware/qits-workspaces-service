@@ -106,7 +106,6 @@ public final class TestWorkspaceContainerFactory {
     // builder makes identical to one built before these keys existed.
     f.mavenRepositoryUrl = Optional.empty();
     f.npmRegistryUrl = Optional.empty();
-    f.npmProxyUrl = Optional.empty();
     // No public domain, the suites' pinned posture: without one the npm proxy is not derived
     // (https://mirror.qits.<domain>/npm/npmjs/), so containers here carry no npm_config_registry.
     f.domain = Optional.empty();

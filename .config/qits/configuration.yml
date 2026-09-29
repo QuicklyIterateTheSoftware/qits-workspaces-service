@@ -102,10 +102,6 @@ keys:
     type: string
     description: "The platform npm registry (the @qits scope) handed to each workspace container."
 
-  env.QITS_WORKSPACE_NPM_PROXY_URL:
-    type: string
-    description: "An override for the npm proxy handed to each workspace container. Unset, the service derives https://mirror.qits.<QITS_DOMAIN>/npm/npmjs/ (the mirror through the public edge)."
-
   env.QITS_WORKSPACE_GIT_HOST:
     type: string
     description: "The host name workspace daemons dial back on for the control socket. It must name qits-workspaces itself; the default `auto` is wrong in a container."

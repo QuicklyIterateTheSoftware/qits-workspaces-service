@@ -90,7 +90,6 @@ class WorkspaceContainerFactoryTest {
     // from the domain", which the domain line below leaves empty.)
     f.mavenRepositoryUrl = Optional.empty();
     f.npmRegistryUrl = Optional.empty();
-    f.npmProxyUrl = Optional.empty();
     // No public domain, which is what the suites pin (%test.qits.workspace.domain is empty): with
     // it the npm proxy is DERIVED, and the cases that want that derivation set a domain themselves.
     f.domain = Optional.empty();
@@ -471,8 +470,9 @@ class WorkspaceContainerFactoryTest {
   void tellsTheContainerWhereThePlatformRegistriesAreWhenItHasBeenTold() {
     WorkspaceContainerFactory f = factory();
     f.mavenRepositoryUrl = Optional.of("http://dev-qits-artifacts:8080/artifacts/maven/maven");
-    f.npmProxyUrl = Optional.of("http://qits-platform-mirror:8080/npm/npmjs/");
     f.npmRegistryUrl = Optional.of("http://dev-qits-artifacts:8080/artifacts/npm/npm/");
+    // The npm mirror is never explicit; it derives from the domain whenever one is set.
+    f.domain = Optional.of("wohlben.eu");
 
     WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
 
@@ -484,7 +484,7 @@ class WorkspaceContainerFactoryTest {
     assertEquals(
         "http://dev-qits-artifacts:8080/artifacts/maven/maven", c.env().get("QITS_MAVEN_REPOSITORY_URL"));
     assertEquals(
-        "http://qits-platform-mirror:8080/npm/npmjs/", c.env().get("npm_config_registry"));
+        "https://mirror.qits.wohlben.eu/npm/npmjs/", c.env().get("npm_config_registry"));
     assertEquals(
         "http://dev-qits-artifacts:8080/artifacts/npm/npm/",
         c.env().get("QITS_WORKSPACE_NPM_REGISTRY_URL"));
@@ -499,8 +499,8 @@ class WorkspaceContainerFactoryTest {
     // answers 400 INVALID, which surfaces as a workspace stuck in FAILED with no container at all.
     WorkspaceContainerFactory f = factory();
     f.mavenRepositoryUrl = Optional.of("http://a/maven");
-    f.npmProxyUrl = Optional.of("http://b/npmjs/");
     f.npmRegistryUrl = Optional.of("http://c/npm/");
+    f.domain = Optional.of("wohlben.eu");
 
     for (String key : f.forWorkspace("repo12345678abc", "work", 1L, "main", null).env().keySet()) {
       assertTrue(
@@ -511,8 +511,8 @@ class WorkspaceContainerFactoryTest {
 
   @Test
   void tellsTheContainerNothingAboutRegistriesItWasNotToldAbout() {
-    // Absent is a supported configuration, not a misconfiguration: a deployment that wires none of
-    // the three, and has no public domain to derive the npm proxy from, gets a container identical
+    // Absent is a supported configuration, not a misconfiguration: a deployment that wires neither
+    // maven key, and has no public domain to derive the npm mirror from, gets a container identical
     // to the one it got before these keys existed. Asserted because the alternative — a guessed
     // address — would point builds at a host that does not exist on that deployment, which is worse
     // than leaving them as they were.
@@ -546,30 +546,8 @@ class WorkspaceContainerFactoryTest {
   }
 
   @Test
-  void anExplicitNpmProxyWinsOverTheDerivation() {
-    WorkspaceContainerFactory f = factory();
-    f.domain = Optional.of("wohlben.eu");
-    f.npmProxyUrl = Optional.of("https://npm.example.org/npmjs/");
-
-    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
-
-    assertEnv(c, "npm_config_registry", "https://npm.example.org/npmjs/");
-  }
-
-  @Test
-  void aBlankNpmProxyIsUnsetAndStillDerives() {
-    // SmallRye reads an empty property as absent, but a whitespace value reaches the field; either
-    // way a blank key means "derive", never "inject a blank registry".
-    WorkspaceContainerFactory f = factory();
-    f.domain = Optional.of("wohlben.eu");
-    f.npmProxyUrl = Optional.of("  ");
-
-    assertEquals(Optional.of("https://mirror.qits.wohlben.eu/npm/npmjs/"), f.npmProxy());
-  }
-
-  @Test
-  void injectsNoNpmProxyWithoutADomainOrAnExplicitValue() {
-    // Neither ⇒ nothing, exactly as before either key existed. A dotless domain is a developer's
+  void injectsNoNpmProxyWithoutADomain() {
+    // No domain ⇒ nothing, exactly as before the key existed. A dotless domain is a developer's
     // `localhost`, which names no public host, so it counts as none.
     for (Optional<String> domain :
         List.of(Optional.<String>empty(), Optional.of(""), Optional.of("localhost"))) {

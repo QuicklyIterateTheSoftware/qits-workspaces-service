@@ -187,15 +187,6 @@ public class WorkspaceContainerFactory {
   Optional<String> npmRegistryUrl;
 
   /**
-   * The npmjs pull-through cache — qits-platform-mirror — as an explicit address. Unlike its two
-   * siblings above it is not the whole story: blank is not "nothing", it is "use {@link
-   * #npmProxy()}'s derivation", which reaches the mirror through the PUBLIC EDGE rather than its
-   * qits-net alias. A value here replaces that derivation outright.
-   */
-  @ConfigProperty(name = "qits.workspace.npm-proxy-url")
-  Optional<String> npmProxyUrl;
-
-  /**
    * The platform's public domain, {@code QITS_DOMAIN}, which qits-deployments writes into every
    * service container — the same key qits-ci reads as {@code qits.ci.domain}. Used for one thing:
    * the npm mirror's public origin, {@code https://mirror.qits.<domain>} ({@link #npmProxy()}).
@@ -215,36 +206,26 @@ public class WorkspaceContainerFactory {
   /**
    * The npm registry a workspace installs public packages from, or empty to inject nothing.
    *
-   * <p>An explicit {@code qits.workspace.npm-proxy-url} wins. Otherwise it is DERIVED from the
-   * public domain the way qits-ci derives every address it hands a runner ({@code
-   * RunnerAddresses.publicOrigin}): {@code https://mirror.qits.<domain>/npm/npmjs/} — through the
-   * edge, not the {@code qits-net} alias, because internal addressing is being retired
-   * platform-wide and a code default needs no deployment wiring. The edge authenticates the
-   * container by its commissioned client pair, which the workspace image's npm shim hands npm as
-   * that registry's {@code _auth}. The platform project carries no environment label, so {@code
-   * QITS_ENVIRONMENT} plays no part. A domain with no dot in it ({@code localhost}) or none at all
-   * names no public host, and then nothing is injected — the container behaves exactly as it did
-   * before either key existed.
+   * <p>Not configuration: it is always DERIVED from the public domain the way qits-ci derives
+   * every address it hands a runner ({@code RunnerAddresses.publicOrigin}): {@code
+   * https://mirror.qits.<domain>/npm/npmjs/} — through the edge, not the {@code qits-net} alias,
+   * because internal addressing is being retired platform-wide and a code default needs no
+   * deployment wiring. The edge authenticates the container by its commissioned client pair,
+   * which the workspace image's npm shim hands npm as that registry's {@code _auth}. The
+   * platform project carries no environment label, so {@code QITS_ENVIRONMENT} plays no part. A
+   * domain with no dot in it ({@code localhost}) or none at all names no public host, and then
+   * nothing is injected — the container behaves exactly as it did before either key existed.
    *
    * <p>Config, never per call, so the value stays a constant within one process and does not turn
    * every ensure into a {@code Recreate.ifChanged} replacement.
    */
   Optional<String> npmProxy() {
-    return set(npmProxyUrl)
-        .or(
-            () ->
-                set(domain)
-                    .map(value -> value.toLowerCase(Locale.ROOT).replaceAll("^\\.+|\\.+$", ""))
-                    .filter(value -> value.indexOf('.') > 0)
-                    .map(
-                        value ->
-                            "https://"
-                                + MIRROR_HOST
-                                + "."
-                                + PLATFORM_PROJECT
-                                + "."
-                                + value
-                                + NPM_PROXY_PATH));
+    return set(domain)
+        .map(value -> value.toLowerCase(Locale.ROOT).replaceAll("^\\.+|\\.+$", ""))
+        .filter(value -> value.indexOf('.') > 0)
+        .map(
+            value ->
+                "https://" + MIRROR_HOST + "." + PLATFORM_PROJECT + "." + value + NPM_PROXY_PATH);
   }
 
   private static Optional<String> set(Optional<String> value) {
