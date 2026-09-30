@@ -65,7 +65,7 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.929.192056</qits.workspace-daemon-protocol.version>
+        <qits.workspace-daemon-protocol.version>2026.930.81208</qits.workspace-daemon-protocol.version>
         <qits.workspace-editor-image.version>2026.929.194236</qits.workspace-editor-image.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
@@ -74,7 +74,7 @@
              daemon that produces those files and the service that reads them off the shared volume
              after the container is gone. Framework-free — vertx-core and qits-commands are its only
              compile dependencies, and nothing here imports either. -->
-        <qits.coding-agents.version>2026.927.52527</qits.coding-agents.version>
+        <qits.coding-agents.version>2026.930.74707</qits.coding-agents.version>
         <qits.eventstream.version>2026.929.142419</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.929.140626</qits.db-core.version>
