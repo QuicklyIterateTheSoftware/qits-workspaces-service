@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import eu.wohlben.qits.workspaces.QitsTokenAuth;
 import eu.wohlben.qits.workspacedaemon.protocol.CommandChunk;
 import eu.wohlben.qits.workspacedaemon.protocol.CommandExit;
 import eu.wohlben.qits.workspacedaemon.protocol.DaemonCodec;
@@ -261,21 +262,25 @@ public class WorkspaceDaemonPinIT {
   private static void download(Path target) throws Exception {
     String url = ARTIFACTS_BASE + "/daemons/" + WorkspaceImage.DAEMON_NAME + "/" + WorkspaceImage.VERSION;
     try (HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build()) {
+      HttpRequest.Builder request =
+          HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofMinutes(5)).GET();
+      // On an EDGE runner this reaches the registry through the public edge, which refuses an
+      // anonymous read; QITS_TOKEN is the step's own job token, and unset on the internal plane.
+      QitsTokenAuth.addIfPresent(request);
       HttpResponse<InputStream> answer =
-          client.send(
-              HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofMinutes(5)).GET().build(),
-              HttpResponse.BodyHandlers.ofInputStream());
+          client.send(request.build(), HttpResponse.BodyHandlers.ofInputStream());
       if (answer.statusCode() != 200) {
         fail(
             "the pinned daemon "
                 + WorkspaceImage.DAEMON_NAME
                 + " "
                 + WorkspaceImage.VERSION
-                + " is not in qits-artifacts ("
+                + " could not be read from qits-artifacts ("
                 + answer.statusCode()
                 + " from "
                 + url
-                + "). The pom pins a version whose daemon was never published or no longer exists.");
+                + "). "
+                + QitsTokenAuth.describe(answer.statusCode()));
       }
       try (InputStream body = answer.body()) {
         Files.copy(body, target, StandardCopyOption.REPLACE_EXISTING);
