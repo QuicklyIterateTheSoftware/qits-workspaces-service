@@ -1945,6 +1945,7 @@ public class WorkspaceService {
             // crash
             // the restart policy would resurrect — the same courtesy stopContainer/discard extend.
             containerEvents.fireStopping(repoId, workspaceId, rowId, true);
+            stopBeforeRemove(containers.containerName(workspaceId, repoId));
             containers.rm(containers.containerName(workspaceId, repoId));
             // Container now absent → ensureContainer's provision path re-clones on the current
             // image.
@@ -2230,6 +2231,24 @@ public class WorkspaceService {
   }
 
   /**
+   * Best-effort graceful stop ahead of a {@link ContainerRuntime#rm}, used at every call site that
+   * tears a container down. {@code containers.stop} is documented best-effort and never throws on
+   * its own, but a fake or a future implementation might, and removal must never get stuck or fail
+   * on account of it — so any {@link RuntimeException} is logged and swallowed here, and the caller
+   * always proceeds to {@code rm}. The point is giving whatever is running inside (notably a coding
+   * agent started with {@code claude --remote-control}) a SIGTERM instead of the SIGKILL a straight
+   * {@code rm} delivers, since that agent only archives its claude.ai session on SIGTERM.
+   */
+  private void stopBeforeRemove(String container) {
+    try {
+      containers.stop(container);
+    } catch (RuntimeException e) {
+      LOG.debugf(e, "Graceful stop before removal failed for container %s; removing anyway",
+          container);
+    }
+  }
+
+  /**
    * Deletes a workspace's container outright ({@code docker rm}) while keeping its durable branch
    * and the ACTIVE workspace row. Where {@link #stopContainer} pauses in place (keeping the
    * container and its {@code /workspace} volume for a lossless resume) and a plain recreate now
@@ -2249,6 +2268,7 @@ public class WorkspaceService {
     String repoId = workspace.repositoryId;
     String workspaceId = workspace.workspaceId;
     containerEvents.fireStopping(repoId, workspaceId, workspace.id, false);
+    stopBeforeRemove(containers.containerName(workspaceId, repoId));
     containers.rm(containers.containerName(workspaceId, repoId));
     containers.removeWorkspaceVolume(workspaceId);
     // The row stays ACTIVE and fires no WorkspaceResolved, but the CONTAINER is gone — and the
@@ -2931,7 +2951,14 @@ public class WorkspaceService {
       // Settle any live services first (immediate — no graceful signal, the work is being
       // discarded)
       // so their disappearance doesn't read as a crash to be resurrected.
+      //
+      // The container itself still gets a best-effort docker stop ahead of the rm, though, and for
+      // a reason that has nothing to do with services: a coding agent running inside (claude
+      // --remote-control) only archives its claude.ai session on SIGTERM, and an rm straight to
+      // SIGKILL leaves that session dangling. stopBeforeRemove gives it the chance; the rm follows
+      // regardless of whether the stop lands.
       containerEvents.fireStopping(repoId, workspace.workspaceId, workspace.id, false);
+      stopBeforeRemove(containers.containerName(workspace.workspaceId, repoId));
       containers.rm(containers.containerName(workspace.workspaceId, repoId));
       containers.removeWorkspaceVolume(workspace.workspaceId);
       // The credential dies with the container, so it goes back here — beside the rm, not on the

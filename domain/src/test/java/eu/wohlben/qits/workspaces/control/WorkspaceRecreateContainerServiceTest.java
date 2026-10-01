@@ -31,6 +31,7 @@ public class WorkspaceRecreateContainerServiceTest {
   @Inject WorkspaceIds workspaceIds;
   @Inject WorkspaceService workspaceService;
   @Inject ContainerRuntime containers;
+  @Inject FakeContainerRuntime fakeContainers;
   @Inject WorkspaceContainerStartedRecorder startedRecorder;
   @Inject FakeWorkspaceGitStatus gitStatus;
 
@@ -97,6 +98,41 @@ public class WorkspaceRecreateContainerServiceTest {
         containers.exec(container, "/workspace", Map.of(), "test", "-f", "marker.txt").exitCode(),
         "recreate keeps the persistent /workspace volume, so the untracked file survives the"
             + " teardown+reprovision — the checkout is reattached, not re-cloned");
+  }
+
+  @Test
+  public void recreateStopsTheOldContainerBeforeRemovingIt() throws Exception {
+    String repoId = clonedRepo();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    ensureRunning(repoId, "feat");
+    String container = containers.containerName("feat", repoId);
+    gitStatus.report(workspaceIds.of(repoId, "feat"), true);
+    fakeContainers.clearTeardownCalls();
+
+    workspaceService.beginRecreateContainer(workspaceIds.of(repoId, "feat"));
+    assertTrue(startedRecorder.awaitCount(repoId, "feat", 1, 5_000), "recreate re-provisions");
+
+    assertEquals(
+        java.util.List.of("stop:" + container, "rm:" + container),
+        fakeContainers.teardownCalls(),
+        "recreate stops the old container gracefully (SIGTERM, so an agent inside can archive its"
+            + " remote-control session) before the rm that would otherwise SIGKILL it");
+  }
+
+  @Test
+  public void recreateReprovisionsEvenWhenTheGracefulStopOfTheOldContainerFails() throws Exception {
+    String repoId = clonedRepo();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    ensureRunning(repoId, "feat");
+    String container = containers.containerName("feat", repoId);
+    gitStatus.report(workspaceIds.of(repoId, "feat"), true);
+    fakeContainers.throwOnNextStop(container);
+
+    workspaceService.beginRecreateContainer(workspaceIds.of(repoId, "feat"));
+
+    assertTrue(
+        startedRecorder.awaitCount(repoId, "feat", 1, 5_000),
+        "a failed stop does not block the rm/reprovision that follows");
   }
 
   // MOVED: recreatePreservesCommittedWorkByPushingBeforeTeardown.

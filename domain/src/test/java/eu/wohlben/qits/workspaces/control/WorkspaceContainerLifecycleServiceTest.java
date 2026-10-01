@@ -38,6 +38,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Inject WorkspaceIds workspaceIds;
   @Inject WorkspaceService workspaceService;
   @Inject ContainerRuntime containers;
+  @Inject FakeContainerRuntime fakeContainers;
   @Inject WorkspaceContainerStartedRecorder startedRecorder;
   @Inject WorkspaceContainerStoppingRecorder stoppingRecorder;
   @Inject FakeWorkspaceGitStatus gitStatus;
@@ -534,6 +535,67 @@ public class WorkspaceContainerLifecycleServiceTest {
     assertTrue(
         seen.get(0).containerExistedWhenObserved(),
         "the stopping event fires before containers.rm");
+  }
+
+  @Test
+  public void discardStopsTheContainerBeforeRemovingIt() throws Exception {
+    String repoId = clonedRepo();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
+    gitStatus.report(workspaceIds.of(repoId, "feat"), true);
+    String container = containers.containerName("feat", repoId);
+    fakeContainers.clearTeardownCalls();
+
+    workspaceService.discardWorkspace(workspaceIds.of(repoId, "feat"));
+
+    assertEquals(
+        java.util.List.of("stop:" + container, "rm:" + container),
+        fakeContainers.teardownCalls(),
+        "discard gives the container a graceful stop (SIGTERM, so an agent inside can archive its"
+            + " remote-control session) before the rm that would otherwise SIGKILL it");
+  }
+
+  @Test
+  public void discardRemovesTheContainerEvenWhenTheGracefulStopFails() throws Exception {
+    String repoId = clonedRepo();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
+    gitStatus.report(workspaceIds.of(repoId, "feat"), true);
+    String container = containers.containerName("feat", repoId);
+    fakeContainers.throwOnNextStop(container);
+
+    workspaceService.discardWorkspace(workspaceIds.of(repoId, "feat"));
+
+    assertFalse(containers.exists(container), "a failed stop does not block the rm that follows");
+  }
+
+  @Test
+  public void deleteContainerStopsTheContainerBeforeRemovingIt() throws Exception {
+    String repoId = clonedRepo();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
+    String container = containers.containerName("feat", repoId);
+    fakeContainers.clearTeardownCalls();
+
+    workspaceService.deleteContainer(workspaceIds.of(repoId, "feat"));
+
+    assertEquals(
+        java.util.List.of("stop:" + container, "rm:" + container),
+        fakeContainers.teardownCalls(),
+        "deleteContainer stops gracefully before the rm");
+  }
+
+  @Test
+  public void deleteContainerRemovesTheContainerEvenWhenTheGracefulStopFails() throws Exception {
+    String repoId = clonedRepo();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
+    String container = containers.containerName("feat", repoId);
+    fakeContainers.throwOnNextStop(container);
+
+    workspaceService.deleteContainer(workspaceIds.of(repoId, "feat"));
+
+    assertFalse(containers.exists(container), "a failed stop does not block the rm that follows");
   }
 
   // --- Dirty-tree guards: merges/abandon are refused server-side when the working tree is dirty,
