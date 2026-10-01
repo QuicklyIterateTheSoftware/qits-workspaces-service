@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- THIS SERVICE'S CONSUMER PACT AGAINST qits-projects AS A JAR, and nothing else (epic
+         qits-546). It holds no code: it packages the repository-root
+         `pacts/qits-workspaces-qits-projects.json` — written and kept current by service's
+         ProjectsPactFileTest — as a classpath resource UNDER `pacts/`, so qits-projects' provider
+         verification reads `pacts/qits-workspaces-qits-projects.json` off its test classpath.
+
+         The shape is qits-projects' golden-masters-jar/, copied on purpose:
+
+         NO PARENT. The reactor root `qits-workspaces` is never published (this repository ships an
+         image, not a library), so a published pom naming it as parent would resolve to nothing for
+         every consumer. Standalone, the deployed pom is this file verbatim and depends on nothing.
+         It is still a <module> of the root reactor, because the release commit's version bump
+         (ManifestVersionBump) walks the reactor by <module> and rewrites every pom's own <version>
+         — so this one moves with the release like the others.
+
+         THE TREE LIVES OUTSIDE THIS DIRECTORY so the published tree holds no build files.
+
+         ONE PACT PER JAR: the artifactId names the provider, and the resource is included BY NAME,
+         so a second provider's pact added under pacts/ later gets a jar of its own rather than
+         riding in this one. (The release step's change gate compares the `pacts` directory with
+         this jar's `pacts/`; split that directory per provider the day a second pact lands.)
+
+         Released by the second step of `.config/qits/release.yml`, and only when the tree differs
+         from the newest published jar's (`.config/qits/published-tree-changed.sh`). -->
+    <groupId>eu.wohlben.qits</groupId>
+    <artifactId>qits-workspaces-pacts-qits-projects</artifactId>
+    <version>2026.1001.140052</version>
+    <packaging>jar</packaging>
+    <name>qits-workspaces :: pacts :: qits-projects</name>
+    <description>qits-workspaces' consumer pact against qits-projects (pacts/qits-workspaces-qits-projects.json, Pact V4)</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Fixed, so two builds of one tree produce the same jar bytes. The change gate compares
+             tree contents, not jar bytes, so this is hygiene rather than the mechanism. -->
+        <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
+        <jar-plugin.version>3.4.2</jar-plugin.version>
+    </properties>
+
+    <build>
+        <resources>
+            <resource>
+                <directory>${project.basedir}/../pacts</directory>
+                <targetPath>pacts</targetPath>
+                <filtering>false</filtering>
+                <includes>
+                    <include>qits-workspaces-qits-projects.json</include>
+                </includes>
+            </resource>
+        </resources>
+        <plugins>
+            <plugin>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>${jar-plugin.version}</version>
+                <configuration>
+                    <archive>
+                        <!-- No META-INF/maven/**: the jar is the tree plus a manifest. -->
+                        <addMavenDescriptor>false</addMavenDescriptor>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1540,6 +1540,72 @@ Who may ask is `WorkspaceController`'s standing `@RolesAllowed("qits:admin")`: c
 workspace already requires the platform admin role, and the socket is granted per workspace rather
 than per caller. A second role invented here would be a vocabulary qits-idp does not issue.
 
+## The contract with qits-projects: golden masters in, a pact out
+
+Epic qits-546. `HttpRepositoryLookup` makes two calls to qits-projects — `getRepository` behind
+`find`/`require`, `listProjectRepositories` behind `listByProject` — and both ends of that contract
+are now files rather than prose.
+
+**In: the provider's golden masters.** qits-projects records what it answers per provider state and
+publishes the tree as `eu.wohlben.qits:qits-projects-golden-masters`, pinned in the root pom as
+`qits.projects-golden-masters.version` (test scope, declared version-less in `service`). It moves
+like every internal pin — a qits-maintenance bump on that property, gated here — and
+`testing/contracts/GoldenMasters` (service test sources) reads `golden-masters/index.json` off the
+classpath. `GoldenMasters.body(state, operationId)` is what the fakes serve now:
+`HttpRepositoryLookupTest`'s ordinary answers and `stories/support/StoryPeers`' qits-projects routes
+(StoryPeers lays each registered row's id/name/projectId/mainBranch over the recorded repository;
+everything else — `archetype: SERVICE`, `backupUrl`, `declared`, the listing's `wrapper` shape — is
+the recording's). The deliberately malformed answers in `HttpRepositoryLookupTest` (no name, an
+unknown field, a 500, not JSON) stay hand-written: they are what the provider does not say.
+
+**Out: the consumer pact, `pacts/qits-workspaces-qits-projects.json`.** Consumer `qits-workspaces`,
+provider `qits-projects`, Pact V4. Three test classes in `service/…/wiring/`:
+
+- `ProjectsContract` — the table, one row per **(trigger, call)**. The trigger is the workspaces
+  entry point that reaches `RepositoryLookup`, named by its openapi `operationId`, and it is what
+  tells apart the rows that send the identical request. The `operationId`s exist for this:
+  `dispatchAgent`, `createWorkspace`, `mergeWorkspace`, `ensureEditor` and `captureWorkspace` (the
+  last on an `@Operation(hidden = true)`, so it is in no document). The class javadoc traces each one
+  from the call site up; renaming an `operationId` renames a trigger in the pact.
+- `ProjectsConsumerPactTest` — a real `HttpRepositoryLookup` with the real generated REST clients
+  against a pact-jvm mock server, one mock server per row. **A `@QuarkusTest`, by necessity**: the
+  reactive REST client refuses to build outside a running application ("needs to be built within the
+  context of a Quarkus application with a valid ArC (CDI) context running"), and a hand-rolled client
+  would prove a contract for a client that does not ship. It boots the default profile, so no
+  `@TestProfile`. It drives pact-jvm's programmatic `runConsumerTest` rather than
+  `PactConsumerTestExt`: the extension serves a whole pact from one mock server, which cannot tell
+  five identical `GET /projects/api/repositories/{id}` rows apart, and injects that server as a
+  method parameter across Quarkus' classloader.
+- `ProjectsPactFileTest` — plain JUnit. pact-jvm's writer serialises the table's pact (raw copy in
+  `service/target/pacts/`), the test normalises it (interactions sorted by description then state,
+  `metadata.pact-jvm` stripped so a library bump is not a contract change, 2-space indent, trailing
+  newline) and **compares** it to the committed file. `-Dgolden.update=true` (or
+  `QITS_GOLDEN_UPDATE=true`) rewrites it — the provider's switch, through a copy of its
+  `GoldenFiles`. It also asserts the references below on every interaction of the committed file.
+
+**Matchers come from the index's `frozen` lists, never from a value's shape**: `ids` → `uuid`,
+`instants` → an ISO-8601 regex, `strings` → type, `listFilteredTo` → `minArrayLike(recorded
+length)`, every other leaf → type. Every other non-empty array is `minMaxArrayLike(n, n)` against ONE
+template merged from all recorded elements, because qits-projects does not guarantee element order;
+a leaf that is null in one element and set in another becomes a V4 `type OR null` combined matcher.
+
+**Every interaction carries `comments.references`**: `qits-call` `{app: qits-projects,
+operationId}` and `qits-trigger` `{kind, app: qits-workspaces, operationId | event | schedule}` (or
+`{kind: ui, app, interaction}`). **pact-jvm 4.6.21 has no DSL for it** — `comment(text)` and the test
+name are all its builder offers — but the V4 model's `comments` map is mutable and its writer emits
+every key, so `GoldenMasters.interaction` puts the group there directly; no post-processing of the
+written JSON. `ProjectsPactFileTest.everyInteractionCarriesBothReferences` is what notices if a
+pact-jvm upgrade stops writing it. `trigger` is required: a null one throws.
+
+**Published only on change.** `pacts-jar/` is a parentless module (qits-projects' `golden-masters-jar/`
+shape) packaging the file as `pacts/qits-workspaces-qits-projects.json`, released as
+`eu.wohlben.qits:qits-workspaces-pacts-qits-projects` by the second step of
+`.config/qits/release.yml` — and only when `.config/qits/published-tree-changed.sh` (copied from
+qits-projects) finds the `pacts/` tree differs from the newest published jar's. Step one of that file
+is the java-service archetype's release step verbatim; re-copy it when the archetype's changes.
+`pacts/` holds this one pact today — the gate compares the whole directory, so split it per provider
+before a second pact lands.
+
 ## Tests
 
 - **App-level config lives in `service/src/main/resources/application.properties`, and the tests

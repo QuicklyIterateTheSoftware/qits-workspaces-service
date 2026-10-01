@@ -841,6 +841,7 @@ components:
 paths:
   /workspaces/api/agent-dispatches:
     post:
+      operationId: dispatchAgent
       requestBody:
         content:
           application/json:
@@ -1163,6 +1164,7 @@ paths:
         - qits:system
   /workspaces/api/editor/ensure:
     post:
+      operationId: ensureEditor
       responses:
         "201":
           description: The editor was started by this call.
@@ -1454,6 +1456,7 @@ paths:
         - qits:admin
         - qits:agent
     post:
+      operationId: createWorkspace
       requestBody:
         content:
           application/json:
@@ -1718,6 +1721,7 @@ paths:
         - qits:admin
   /workspaces/api/workspaces/{id}/merge:
     post:
+      operationId: mergeWorkspace
       parameters:
       - name: id
         in: path
@@ -2131,4 +2135,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.1001.82803
+  version: 2026.1001.132659

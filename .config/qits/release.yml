@@ -1,4 +1,204 @@
 archetype: java-service
 artifacts:
   - { type: docker, name: qits/qits-workspaces, sbom: .sbom/sbom.json }
+  # THE CONSUMER PACT AGAINST qits-projects AS A JAR (epic qits-546), published ONLY when the pact
+  # changed — so `announce: if-published`: qits-ci asks qits-artifacts for the .pom at the release
+  # version before it announces, and a release that published nothing announces nothing. No `sbom:` —
+  # the jar has no dependencies, and the postlude runs in the builder step, where this jar does not
+  # exist.
+  - { type: maven, name: "eu.wohlben.qits:qits-workspaces-pacts-qits-projects", announce: if-published }
 userflows: qits-workspaces
+
+# THE RELEASE SLOT IS OVERRIDDEN because java-service pushes one image and publishes nothing else,
+# and this release also publishes the pacts jar. The QA slot is NOT overridden: the archetype's
+# `release-request:` (with `-Dit.test` composed from `.config/qits/userflow-stories`) is exactly what
+# this repository needs. qits-projects' release.yml is the shape this follows, minus its docs sites.
+#
+# STEP ONE IS THE ARCHETYPE'S RELEASE STEP, VERBATIM — copied from qits-ci-service's packaged
+# `.config/qits/release-archetypes/java-service.yml` (at ae82936; byte-identical to qits-projects'
+# step one), comments and guards included: the image, the webui submodule and its bundle, and the
+# SBOM the composed postlude submits from this step (the last one with `build: true`). Keep it
+# byte-identical to the archetype's QA build: the builder cache is content-addressed, so a release
+# after a green fold is cache hits. When the archetype's step changes, re-copy it here.
+#
+# STEP TWO IS THE PACTS JAR, on maven-base because it needs maven + a JDK and the builder image has
+# neither (node-docker-base is node + buildctl). It runs after the image is pushed.
+release:
+  - image: qits/build-images/node-docker-base:latest
+    build: true
+    timeout-seconds: 3600
+    script: |
+      # THE COORDINATE, OUT OF THE DECLARATION THAT ANNOUNCES IT. See the header for why this is
+      # read rather than derived, and why the spelling is one line of flow YAML.
+      declared=$(sed -n \
+        's/^[[:space:]]*-[[:space:]]*{[[:space:]]*type:[[:space:]]*docker[[:space:]]*,[[:space:]]*name:[[:space:]]*\([^,}[:space:]]*\).*/\1/p' \
+        .config/qits/release.yml)
+      count=$(printf '%s' "$declared" | grep -c . || true)
+      if [ "$count" != 1 ]; then
+        echo "release.yml declares $count docker artifacts and java-service pushes exactly one." >&2
+        echo "Spell it as one flow line — '- { type: docker, name: qits/x, sbom: .sbom/sbom.json }'" >&2
+        echo "— or declare this repository's own 'release:' steps." >&2
+        exit 1
+      fi
+      case "$declared" in
+        *[!A-Za-z0-9._:/@+-]*)
+          echo "release.yml's docker artifact name is not a coordinate: $declared" >&2
+          exit 1 ;;
+      esac
+      # The first segment is the platform namespace and is re-supplied from the environment, which
+      # is how every hand-written file spelled it: a deployment may re-point the namespace and the
+      # declaration may not have to move.
+      image=${declared#*/}
+      ref="$QITS_BUILD_REGISTRY/$QITS_IMAGE_REPOSITORY/$image:$QITS_VERSION"
+      echo "releasing $ref"
+
+      # --- half one: the bundle -------------------------------------------------------------------
+      # Byte-identical to the QA step's, deliberately. `checkout --detach` on the tag is what makes
+      # the submodule update land on the gitlink the RELEASE recorded rather than on main's.
+      origin_parent="${QITS_CI_REPOSITORY_URL%/*}"
+      webui_dirs=""
+      if [ -f .gitmodules ]; then
+        for key in $(git config -f .gitmodules --name-only --get-regexp '^submodule\..*\.path$'); do
+          name=${key#submodule.}
+          name=${name%.path}
+          path=$(git config -f .gitmodules --get "$key")
+          git -c "submodule.$name.url=$origin_parent/$name" submodule update --init "$path"
+          if [ -f "$path/package.json" ]; then
+            webui_dirs="$webui_dirs $path"
+          fi
+        done
+      fi
+
+      npm_hosted_origin=$(node -p 'new URL(process.env.QITS_NPM_REGISTRY_URL).origin')
+      npm_proxy_origin=$(node -p 'new URL(process.env.QITS_NPM_PROXY_URL).origin')
+      npm_hosted_path=$(node -p 'new URL(process.env.QITS_NPM_REGISTRY_URL).pathname')
+      for dir in $webui_dirs; do
+        (
+          cd "$dir"
+          if [ -f package-lock.json ]; then
+            sed -i -E \
+              -e "s#(\"resolved\": \")https?://[^/\"]+#\1$npm_proxy_origin#" \
+              -e "s#(\"resolved\": \")https?://[^/\"]+($npm_hosted_path)#\1$npm_hosted_origin\2#" \
+              package-lock.json
+          fi
+          env npm_config_registry="$QITS_NPM_PROXY_URL" \
+              "npm_config_@qits:registry=$QITS_NPM_REGISTRY_URL" \
+              npm ci --no-audit --no-fund
+          npm run build
+        )
+      done
+
+      # --- half two: the image --------------------------------------------------------------------
+      # `push=true` IS THE PUBLISH: the image goes from the builder straight to the registry and
+      # never enters any local image store. $QITS_BUILD_REGISTRY is the registry as the BUILDER
+      # resolves it; $QITS_REGISTRY stays the host daemon's view and is not dialled here.
+      buildctl build --frontend dockerfile.v0 \
+        --local context=. --local dockerfile=docker \
+        --opt build-arg:QITS_MAVEN_REPOSITORY_URL="$QITS_MAVEN_REGISTRY_URL" \
+        --opt build-arg:QITS_MAVEN_CENTRAL_URL="${QITS_MAVEN_PROXY_URL:-}" \
+        --secret id=qits-client-id,src=/tmp/qits-client-id \
+        --secret id=qits-client-secret,src=/tmp/qits-client-secret \
+        --output "type=image,name=$ref,push=true"
+
+      # --- the SBOM, GENERATED HERE AND SUBMITTED BY THE PLATFORM ---------------------------------
+      # The second build reaches the Dockerfile's `sbom` stage — a `FROM scratch` holding the
+      # service module's CycloneDX document, exported with `type=local` instead of pushed. Build
+      # args and secrets are byte-identical to the image build above, which is what makes every
+      # layer a cache hit in the same builder and this export seconds rather than a second native
+      # compile.
+      #
+      # NOTHING SUBMITS IT HERE. The composed postlude runs `qits-publish sbom submit` for every
+      # declared artifact carrying `sbom:`, after this script and before the step's exit code — so
+      # "SBOM before green" holds by construction. Declare `sbom: .sbom/sbom.json` and stop.
+      buildctl build --frontend dockerfile.v0 \
+        --local context=. --local dockerfile=docker \
+        --opt target=sbom \
+        --opt build-arg:QITS_MAVEN_REPOSITORY_URL="$QITS_MAVEN_REGISTRY_URL" \
+        --opt build-arg:QITS_MAVEN_CENTRAL_URL="${QITS_MAVEN_PROXY_URL:-}" \
+        --secret id=qits-client-id,src=/tmp/qits-client-id \
+        --secret id=qits-client-secret,src=/tmp/qits-client-secret \
+        --output type=local,dest=.sbom
+
+  - image: qits/build-images/maven-base:latest
+    timeout-seconds: 1800
+    script: |
+      export QITS_MAVEN_REPOSITORY_URL="$QITS_MAVEN_REGISTRY_URL"
+      export QITS_MAVEN_CENTRAL_URL="${QITS_MAVEN_PROXY_URL:-}"
+
+      # --- the pacts jar, only when the pact changed ---------------------------------------------
+      # THE GATE COMPARES AGAINST THE NEWEST PUBLISHED JAR, not the previous tag (see the script's
+      # header): a publish that failed once is retried by the next release, and a re-run of this one
+      # reads its own version back and skips. It prints one word and exits 0, or fails the step — a
+      # registry error is never read as "unchanged".
+      coordinate="eu.wohlben.qits:qits-workspaces-pacts-qits-projects"
+      decision=$(sh .config/qits/published-tree-changed.sh "$coordinate" pacts)
+      case "$decision" in
+        first)       echo "publishing $coordinate at $QITS_VERSION: first publish" ;;
+        "changed "*) echo "publishing $coordinate at $QITS_VERSION: changed since ${decision#changed }" ;;
+        "unchanged "*)
+          echo "$coordinate: unchanged since ${decision#unchanged } — not publishing at $QITS_VERSION"
+          exit 0 ;;
+        *) echo "the change gate answered '$decision'" >&2; exit 1 ;;
+      esac
+
+      # THE DEPLOY CREDENTIAL, maven-library.yml's mechanism verbatim (read its comments): a bearer
+      # minted at the call site into a `-gs` settings file of this recipe's OWN path (never the
+      # platform's /tmp/qits-deploy-settings.xml), the http blocker re-declared, anonymous when no
+      # mint is possible. `printf`, not a heredoc, because this is a YAML block scalar.
+      deploy_settings=""
+      deploy_token=""
+      if [ -n "${QITS_PUBLISH_TOKEN_COMMAND:-}" ] \
+        && command -v "$QITS_PUBLISH_TOKEN_COMMAND" >/dev/null 2>&1; then
+        deploy_token=$("$QITS_PUBLISH_TOKEN_COMMAND" 2>/dev/null) || deploy_token=""
+      fi
+      if [ -n "$deploy_token" ]; then
+        ( umask 077
+          printf '%s\n' \
+            '<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">' \
+            '  <servers>' \
+            '    <server>' \
+            '      <id>qits</id>' \
+            '      <configuration>' \
+            '        <httpHeaders>' \
+            '          <property>' \
+            '            <name>Authorization</name>' \
+            "            <value>Bearer $deploy_token</value>" \
+            '          </property>' \
+            '        </httpHeaders>' \
+            '      </configuration>' \
+            '    </server>' \
+            '  </servers>' \
+            '  <mirrors>' \
+            '    <mirror>' \
+            '      <id>maven-default-http-blocker</id>' \
+            '      <mirrorOf>external:http:*</mirrorOf>' \
+            '      <url>http://0.0.0.0/</url>' \
+            '      <blocked>true</blocked>' \
+            '    </mirror>' \
+            '  </mirrors>' \
+            '</settings>' > /tmp/qits-recipe-deploy-settings.xml )
+        deploy_settings="-gs /tmp/qits-recipe-deploy-settings.xml"
+      fi
+
+      # ONLY THE PACTS MODULE, and as a standalone build: `-f` its own pom, which has no parent, so
+      # no other reactor module (the service, its Quarkus extension, its BOM imports) is even
+      # loaded. The release commit already moved its <version> to $QITS_VERSION.
+      ./mvnw -B -ntp -s .qits-maven-settings.xml $deploy_settings -f pacts-jar/pom.xml \
+        deploy -DskipTests \
+        -Dqits.maven.repository.url="$QITS_MAVEN_REGISTRY_URL" \
+        -DaltDeploymentRepository="qits::default::$QITS_MAVEN_REGISTRY_URL"
+      rm -f /tmp/qits-recipe-deploy-settings.xml
+
+      # AND THE VERSION PUBLISHED IS THE VERSION THIS BUILD IS — maven-library.yml's check: the pom
+      # at $QITS_VERSION must now answer, or `announce: if-published` would skip a release whose jar
+      # went to some other coordinate, in silence.
+      set --
+      if [ -n "${QITS_TOKEN:-}" ]; then
+        set -- -H "Authorization: Bearer $QITS_TOKEN"
+      fi
+      pom="${QITS_MAVEN_REGISTRY_URL%/}/eu/wohlben/qits/qits-workspaces-pacts-qits-projects/$QITS_VERSION/qits-workspaces-pacts-qits-projects-$QITS_VERSION.pom"
+      if ! curl -fsS -o /dev/null "$@" "$pom"; then
+        echo "the deploy did not leave $coordinate at $QITS_VERSION: $pom" >&2
+        exit 1
+      fi
+      echo "published $coordinate:$QITS_VERSION"
