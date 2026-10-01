@@ -746,11 +746,21 @@ public class WorkspaceContainerFactory {
   /**
    * {@link #forWorkspace(String, String, Long, String, String)} carrying the row's subject entity
    * id (qits-projects' qualified id, e.g. {@code qits-614} — {@code Workspace.entityId}, {@code V8})
-   * as {@code QITS_WORKSPACE_DAEMON_ENTITY_ID}. Blank for the editor and for a row with none, the
-   * same pattern {@code QITS_WORKSPACE_DAEMON_BRANCH} already follows — the daemon names its agent
-   * sessions {@code <entityId>: <branch>} from the pair, and it is a column rather than a one-time
-   * launch argument because the orchestrator has no start verb: a value missing on the resume path
-   * would make every resume a spec change.
+   * as {@code QITS_WORKSPACE_DAEMON_ENTITY_ID} — the daemon names its agent sessions
+   * {@code <entityId>: <branch>} from the pair, and it is a column rather than a one-time launch
+   * argument because the orchestrator has no start verb: a value missing on the resume path would
+   * make every resume a spec change.
+   *
+   * <p><b>Omitted, not blank, when there is none — and that is deliberately the opposite of {@code
+   * QITS_WORKSPACE_DAEMON_BRANCH}'s own absence.</b> {@code BRANCH} is written on every row because
+   * every ordinary workspace already has one; this field is new, so the overwhelming majority of
+   * rows alive today — every ad-hoc workspace, the editor, and every row that predates {@code V8} —
+   * have none. Writing the key with an empty value anyway would add it to the environment of every
+   * one of those specs, and environment is part of the spec: the orchestrator resumes a stopped
+   * container by presenting its spec again under {@code Recreate.ifChanged}, so that would REPLACE
+   * every stopped workspace's container once, on its next start, for a key that says nothing.
+   * Omitting the key entirely keeps a row with no entity id byte-identical to the spec it had before
+   * this field existed.
    */
   public WorkspaceContainer forWorkspace(
       String repoId, String workspaceId, Long rowId, String branch, String parent, String entityId) {
@@ -848,11 +858,17 @@ public class WorkspaceContainerFactory {
     container.env("QITS_WORKSPACE_DAEMON_REPOSITORY_ID", editor ? "" : repoId);
     container.env("QITS_WORKSPACE_DAEMON_BRANCH", editor || branch == null ? "" : branch);
     container.env("QITS_WORKSPACE_DAEMON_PARENT", editor || parent == null ? "" : parent);
-    // The subject's qualified id (Workspace.entityId, V8), told the same way: blank for the editor
-    // and for a row with none. The daemon names its agent sessions `<entityId>: <branch>` from the
-    // pair — a column rather than a one-time launch argument, for BRANCH's own reason.
-    container.env(
-        "QITS_WORKSPACE_DAEMON_ENTITY_ID", editor || entityId == null ? "" : entityId);
+    // The subject's qualified id (Workspace.entityId, V8). The daemon names its agent sessions
+    // `<entityId>: <branch>` from the pair — a column rather than a one-time launch argument, for
+    // BRANCH's own reason. UNLIKE BRANCH, this key is OMITTED rather than written blank when there
+    // is none (the editor, an ad-hoc workspace, or any row that predates V8): BRANCH is on every
+    // spec already, but this field is new, so writing it blank would add a key to the environment
+    // of every workspace alive today, and environment is part of the spec a stopped container is
+    // resumed by re-presenting under Recreate.ifChanged — adding even a blank key there replaces
+    // every one of their containers once, on its next start, for a value that says nothing.
+    if (!editor && entityId != null && !entityId.isBlank()) {
+      container.env("QITS_WORKSPACE_DAEMON_ENTITY_ID", entityId);
+    }
     // The project-scoped name the daemon self-clones under (/git/<projectId>/<name>), so committed
     // relative submodule urls resolve natively in-container. Blank when the repo has no project —
     // the

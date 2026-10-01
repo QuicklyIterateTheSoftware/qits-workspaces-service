@@ -175,12 +175,17 @@ class WorkspaceContainersTest {
   }
 
   @Test
-  void theEnsureRequestWithNoEntityIdLeavesItBlank() {
-    // The 5-argument overload is every existing caller, and it must still mean "no entity id" —
-    // blank, like QITS_WORKSPACE_DAEMON_BRANCH's own absence, never a null entry.
+  void theEnsureRequestWithNoEntityIdOmitsTheKey() {
+    // The 5-argument overload is every existing caller, and omitted — not blank — is what "no
+    // entity id" has to mean: this field is new, so writing it blank on every existing workspace's
+    // spec would add a key to the environment of every one of them, and environment is part of the
+    // spec a stopped container is resumed by re-presenting under Recreate.ifChanged — replacing
+    // every one of their containers once, for a key that says nothing. Unlike
+    // QITS_WORKSPACE_DAEMON_BRANCH, which is written blank because every ordinary workspace already
+    // has one.
     Spec spec = adapter().ensureRequest(REPO, "work", 1L, "main", "0parent").spec();
 
-    assertEquals("", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_ID"));
+    assertNull(spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_ID"));
   }
 
   @Test

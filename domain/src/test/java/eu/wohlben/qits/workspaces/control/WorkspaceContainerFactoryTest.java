@@ -908,24 +908,29 @@ class WorkspaceContainerFactoryTest {
   }
 
   @Test
-  void theEntityIdIsBlankWhenTheRowHasNone() {
-    // The 5-argument overload is every existing caller, and it must still mean "no entity id" —
-    // never a null entry that reads differently from BRANCH's own absence.
+  void theEntityIdKeyIsOmittedWhenTheRowHasNone() {
+    // The 5-argument overload is every existing caller, and omitted — not blank — is what "no
+    // entity id" has to mean here: this field is new, so the overwhelming majority of rows alive
+    // today have none, and writing the key blank anyway would add it to every one of their specs.
+    // Environment is part of the spec a stopped container resumes by re-presenting under
+    // Recreate.ifChanged, so that would replace every one of them once, for a key that says
+    // nothing — unlike QITS_WORKSPACE_DAEMON_BRANCH, which is written blank because every ordinary
+    // workspace already has one.
     WorkspaceContainer c = factory().forWorkspace("repo12345678abc", "work", 1L, "main", "0parent");
 
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_ID", "");
+    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_ID"));
   }
 
   @Test
-  void theEntityIdIsBlankForTheEditor() {
+  void theEntityIdKeyIsOmittedForTheEditor() {
     // THE EDITOR IS EXEMPT, same as every other per-repository/per-branch fact: it belongs to no
-    // ticket and no epic, so it is told nothing about either.
+    // ticket and no epic, so the key is omitted rather than written blank, for the reason above.
     WorkspaceContainerFactory f = factory();
     f.postures = StubInstance.of(editorRow(true));
 
     WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null, "qits-614");
 
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_ID", "");
+    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_ID"));
   }
 
   @Test
