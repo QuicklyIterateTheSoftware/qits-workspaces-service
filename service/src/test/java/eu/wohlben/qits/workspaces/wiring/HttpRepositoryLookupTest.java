@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
+import com.fasterxml.jackson.databind.JsonNode;
 import eu.wohlben.qits.workspaces.control.RepositoryLookup;
+import eu.wohlben.qits.workspaces.testing.contracts.GoldenMasters;
 import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
 import io.quarkus.test.junit.QuarkusTest;
 import java.io.OutputStream;
@@ -29,6 +31,13 @@ import org.junit.jupiter.api.Test;
  * an ephemeral port, and a client built by {@link QuarkusRestClientBuilder} against it. The bean is
  * constructed directly rather than injected, so each case can set the address it is testing —
  * including the unwired one, which no injected configuration could express.
+ *
+ * <p><b>The ordinary answers are qits-projects' own recordings</b> ({@link GoldenMasters}, epic
+ * qits-546), not hand-written documents: a repository that exists, one that does not, and a
+ * project's listing. The expectations read their values out of the same recording, so a newer
+ * golden master moves fixture and assertion together. The deliberately malformed answers — no
+ * name, an unknown field, a 500, not JSON — stay hand-written: they are what the provider does NOT
+ * say, which no recording can supply.
  */
 @QuarkusTest
 public class HttpRepositoryLookupTest {
@@ -62,7 +71,7 @@ public class HttpRepositoryLookupTest {
   }
 
   /** The bean wired to {@code baseUrl}, with a real generated client pointed at the same place. */
-  private HttpRepositoryLookup lookupAgainst(String baseUrl) {
+  static HttpRepositoryLookup lookupAgainst(String baseUrl) {
     HttpRepositoryLookup lookup = new HttpRepositoryLookup();
     lookup.baseUrl = Optional.ofNullable(baseUrl);
     lookup.projectsBearer =
@@ -86,28 +95,28 @@ public class HttpRepositoryLookupTest {
   }
 
   /**
-   * The row id and the name are read as two separate answers, and the fixture makes them differ on
-   * purpose: a repository the projects self-seed registered carries a UUID id, and a view that
-   * quietly reported the id as the name would name a repository nothing committed can address.
+   * The row id and the name are read as two separate answers, and the recording has them differ:
+   * a repository the projects self-seed registered carries a UUID id, and a view that quietly
+   * reported the id as the name would name a repository nothing committed can address.
    */
   @Test
   public void aKnownRepositoryYieldsItsIdNameProjectAndMainBranch() throws Exception {
-    String base =
-        serve(
-            200,
-            """
-            {"repository":{"id":"7d45ae57-8cab-49dd-afbd-ac82c720ec6e",\
-            "name":"qits-projects-daemon","url":"file:///origin","mainBranch":"main",\
-            "archetype":"NONE","projectId":"p-1"}}""");
+    String base = serve(200, GoldenMasters.body("a repository exists", "getRepository"));
+    JsonNode recorded =
+        GoldenMasters.json("a repository exists", "getRepository").path("repository");
+    String id = recorded.path("id").asText();
+    assertTrue(
+        !id.equals(recorded.path("name").asText()), "the recording keeps id and name apart");
 
-    Optional<RepositoryLookup.RepositoryView> found =
-        lookupAgainst(base).find("7d45ae57-8cab-49dd-afbd-ac82c720ec6e");
+    Optional<RepositoryLookup.RepositoryView> found = lookupAgainst(base).find(id);
 
     assertTrue(found.isPresent());
-    assertEquals("7d45ae57-8cab-49dd-afbd-ac82c720ec6e", found.get().id());
-    assertEquals("qits-projects-daemon", found.get().name(), "the view names the repository");
-    assertEquals("main", found.get().mainBranch());
-    assertEquals("p-1", found.get().projectId(), "the view names the project");
+    assertEquals(id, found.get().id());
+    assertEquals(
+        recorded.path("name").asText(), found.get().name(), "the view names the repository");
+    assertEquals(recorded.path("mainBranch").asText(), found.get().mainBranch());
+    assertEquals(
+        recorded.path("projectId").asText(), found.get().projectId(), "the view names the project");
   }
 
   /** A registry answering with no name resolves anyway: no flow may depend on the field. */
@@ -141,7 +150,7 @@ public class HttpRepositoryLookupTest {
    */
   @Test
   public void theRequestGoesToTheProjectsSegment() throws Exception {
-    String base = serve(200, "{\"repository\":{\"id\":\"repo-1\",\"mainBranch\":\"main\"}}");
+    String base = serve(200, GoldenMasters.body("a repository exists", "getRepository"));
 
     lookupAgainst(base).find("repo-1");
 
@@ -150,24 +159,21 @@ public class HttpRepositoryLookupTest {
 
   /**
    * The second cross-repo path, read by aggregate workspace creation: the project's repository
-   * listing. Its wrapper field is deliberately not bound, so the fixture carries one.
+   * listing. Its wrapper field is deliberately not bound, and the recording carries one.
    */
   @Test
   public void theProjectRepositoryListingGoesToTheProjectsSegment() throws Exception {
-    String base =
-        serve(
-            200,
-            """
-            {"entries":[{"repository":{"id":"repo-1","name":"qits-qits","mainBranch":"main",\
-            "projectId":"p-1"}},{"repository":{"id":"repo-2","name":"qits-workspaces",\
-            "mainBranch":"main","projectId":"p-1"}}],"wrapper":{"entries":[]}}""");
+    String state = "a project with 3 repositories";
+    String base = serve(200, GoldenMasters.body(state, "listProjectRepositories"));
+    JsonNode entries = GoldenMasters.json(state, "listProjectRepositories").path("entries");
+    String projectId = GoldenMasters.params(state).get("projectId");
 
-    List<RepositoryLookup.RepositoryView> found = lookupAgainst(base).listByProject("p-1");
+    List<RepositoryLookup.RepositoryView> found = lookupAgainst(base).listByProject(projectId);
 
-    assertEquals(List.of("/projects/api/projects/p-1/repositories"), requestedPaths);
-    assertEquals(2, found.size());
-    assertEquals("qits-qits", found.get(0).name());
-    assertEquals("repo-2", found.get(1).id());
+    assertEquals(List.of("/projects/api/projects/" + projectId + "/repositories"), requestedPaths);
+    assertEquals(entries.size(), found.size());
+    assertEquals(entries.path(0).path("repository").path("name").asText(), found.get(0).name());
+    assertEquals(entries.path(1).path("repository").path("id").asText(), found.get(1).id());
   }
 
   /**
@@ -185,9 +191,10 @@ public class HttpRepositoryLookupTest {
 
   @Test
   public void anUnknownRepositoryIsEmptyRatherThanAnError() throws Exception {
-    String base = serve(404, "{\"message\":\"Repository not found\"}");
+    String state = "no repository with the given id";
+    String base = serve(404, GoldenMasters.body(state, "getRepository"));
 
-    assertTrue(lookupAgainst(base).find("no-such-repo").isEmpty());
+    assertTrue(lookupAgainst(base).find(GoldenMasters.params(state).get("repositoryId")).isEmpty());
   }
 
   /**
@@ -233,7 +240,7 @@ public class HttpRepositoryLookupTest {
 
   @Test
   public void aBlankRepositoryIdIsNotWorthACall() throws Exception {
-    String base = serve(200, "{\"repository\":{\"id\":\"repo-1\",\"mainBranch\":\"main\"}}");
+    String base = serve(200, GoldenMasters.body("a repository exists", "getRepository"));
 
     assertTrue(lookupAgainst(base).find("  ").isEmpty());
     assertTrue(requestedPaths.isEmpty(), "a blank id should not reach the network");

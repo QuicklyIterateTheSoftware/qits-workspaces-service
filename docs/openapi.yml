@@ -80,6 +80,14 @@ components:
         messageCount:
           type: integer
           format: int32
+    BlockedMark:
+      type: object
+      properties:
+        workspaceId:
+          type: integer
+          format: int64
+        applied:
+          type: boolean
     BootstrapOutcome:
       type: string
       enum:
@@ -229,6 +237,8 @@ components:
           type: string
         epicId:
           type: string
+        entityId:
+          type: string
         instruction:
           type: string
         gitRefs:
@@ -282,6 +292,20 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LaunchPin"
+    MarkBlockedRequest:
+      type: object
+      required:
+      - repositoryId
+      - branch
+      properties:
+        repositoryId:
+          type: string
+          pattern: \S
+        branch:
+          type: string
+          pattern: \S
+        blocked:
+          type: boolean
     MergeBranchRequest:
       type: object
       required:
@@ -792,6 +816,7 @@ components:
 paths:
   /workspaces/api/agent-dispatches:
     post:
+      operationId: dispatchAgent
       requestBody:
         content:
           application/json:
@@ -827,6 +852,42 @@ paths:
         "403":
           description: Not Allowed
       summary: Dispatch
+      tags:
+      - Agent Dispatch Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
+  /workspaces/api/agent-dispatches/blocked:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkBlockedRequest"
+        required: true
+      responses:
+        "200":
+          description: "Answered. `workspaceId: null` means no workspace stands on\
+            \ that branch; `applied: false` with a non-null `workspaceId` means the\
+            \ daemon was not reachable or did not take the marker. Neither is an error\
+            \ — this door never creates a workspace, ensures a container or starts\
+            \ an agent."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockedMark"
+        "400":
+          description: A blank repository or branch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Blocked
       tags:
       - Agent Dispatch Controller
       security:
@@ -1042,6 +1103,7 @@ paths:
         - qits:system
   /workspaces/api/editor/ensure:
     post:
+      operationId: ensureEditor
       responses:
         "201":
           description: The editor was started by this call.
@@ -1333,6 +1395,7 @@ paths:
         - qits:admin
         - qits:agent
     post:
+      operationId: createWorkspace
       requestBody:
         content:
           application/json:
@@ -1597,6 +1660,7 @@ paths:
         - qits:admin
   /workspaces/api/workspaces/{id}/merge:
     post:
+      operationId: mergeWorkspace
       parameters:
       - name: id
         in: path
@@ -2010,4 +2074,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.922.234434
+  version: 2026.1001.82803

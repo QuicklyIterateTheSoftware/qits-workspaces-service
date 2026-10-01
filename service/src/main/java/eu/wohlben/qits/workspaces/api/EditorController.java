@@ -11,6 +11,7 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 /**
@@ -87,6 +88,10 @@ public class EditorController {
   @Path("/ensure")
   @APIResponse(responseCode = "201", description = "The editor was started by this call.")
   @APIResponse(responseCode = "200", description = "The editor was already there.")
+  // The operationId is the name a consumer pact uses for this door as the TRIGGER of the calls it
+  // makes downstream (pacts/qits-workspaces-qits-projects.json, `qits-trigger`). Renaming it
+  // renames the trigger there.
+  @Operation(operationId = "ensureEditor")
   public Response ensure() {
     EditorService.EditorSession session = editors.ensure();
     return Response.status(session.fresh() ? 201 : 200)

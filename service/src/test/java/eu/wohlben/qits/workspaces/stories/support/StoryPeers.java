@@ -2,10 +2,14 @@ package eu.wohlben.qits.workspaces.stories.support;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import eu.wohlben.qits.servicemock.idp.MockIdp;
 import eu.wohlben.qits.userflows.Labels;
 import eu.wohlben.qits.userflows.NetworkCapture;
 import eu.wohlben.qits.userflows.NetworkEdge;
+import eu.wohlben.qits.workspaces.testing.contracts.GoldenMasters;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
@@ -268,13 +272,21 @@ public final class StoryPeers {
   /**
    * What each peer answers — the smallest documents that make the shipped client bind, and no
    * larger. Every field here is one a client really reads.
+   *
+   * <p><b>qits-projects' answers are its own recordings</b> ({@link GoldenMasters}, epic qits-546)
+   * rather than documents written here: the recorded {@code a repository exists}, {@code no
+   * repository with the given id} and {@code a project with 3 repositories} bodies, with the
+   * registered row's own facts laid over the recorded repository (see {@link Repository#node}). So
+   * every field qits-projects really sends reaches the launched client — {@code backupUrl}, {@code
+   * component}, {@code declared}, the listing's {@code wrapper} — and a newer recording arrives
+   * here with the pin bump that brings it.
    */
   private static Answer answer(String method, String path, String request) {
     if (path.startsWith(REPOSITORY_PATH)) {
       String repoId = path.substring(REPOSITORY_PATH.length());
       return registered(repoId)
-          .map(row -> new Answer(200, "{\"repository\":" + row.json() + "}"))
-          .orElseGet(() -> new Answer(404, notFound("no repository " + repoId)));
+          .map(row -> new Answer(200, repositoryAnswer(row)))
+          .orElseGet(() -> new Answer(404, unknownRepositoryAnswer(repoId)));
     }
     if (path.startsWith(PROJECT_PATH)) {
       return projectRoute(path);
@@ -337,13 +349,9 @@ public final class StoryPeers {
     String rest = path.substring(PROJECT_PATH.length());
     String[] segments = rest.split("/");
     if (segments.length == 2 && "repositories".equals(segments[1])) {
-      String entries =
-          rows().stream()
-              .filter(row -> row.projectId().equals(segments[0]))
-              .map(row -> "{\"repository\":" + row.json() + "}")
-              .reduce((a, b) -> a + "," + b)
-              .orElse("");
-      return new Answer(200, "{\"entries\":[" + entries + "]}");
+      return new Answer(
+          200,
+          listingAnswer(rows().stream().filter(row -> row.projectId().equals(segments[0])).toList()));
     }
     return new Answer(404, notFound("no such route"));
   }
@@ -415,6 +423,50 @@ public final class StoryPeers {
     }
   }
 
+  // --- qits-projects' answers, out of its golden masters -----------------------------------------
+
+  private static final String REPOSITORY_EXISTS = "a repository exists";
+  private static final String NO_REPOSITORY = "no repository with the given id";
+  private static final String PROJECT_WITH_REPOSITORIES = "a project with 3 repositories";
+
+  /** {@code getRepository} in {@code a repository exists}, carrying {@code row}. */
+  private static String repositoryAnswer(Repository row) {
+    ObjectNode body = (ObjectNode) GoldenMasters.json(REPOSITORY_EXISTS, "getRepository");
+    body.set("repository", row.node());
+    return body.toString();
+  }
+
+  /** {@code getRepository} in {@code no repository with the given id}, naming the id asked for. */
+  private static String unknownRepositoryAnswer(String repoId) {
+    ObjectNode body = (ObjectNode) GoldenMasters.json(NO_REPOSITORY, "getRepository");
+    String frozen = GoldenMasters.params(NO_REPOSITORY).get("repositoryId");
+    body.put("message", body.path("message").asText().replace(frozen, repoId));
+    return body.toString();
+  }
+
+  /**
+   * {@code listProjectRepositories} in {@code a project with 3 repositories}, one recorded entry
+   * per registered row. The recorded {@code wrapper} keeps its shape and loses its content: this
+   * registry knows no wrapper and no submodules, so it names none rather than the recording's.
+   */
+  private static String listingAnswer(List<Repository> rows) {
+    ObjectNode body =
+        (ObjectNode) GoldenMasters.json(PROJECT_WITH_REPOSITORIES, "listProjectRepositories");
+    JsonNode template = body.path("entries").path(0);
+    ArrayNode entries = body.arrayNode();
+    for (Repository row : rows) {
+      ObjectNode entry = ((ObjectNode) template).deepCopy();
+      entry.set("repository", row.node());
+      entries.add(entry);
+    }
+    body.set("entries", entries);
+    if (body.path("wrapper") instanceof ObjectNode wrapper) {
+      wrapper.putNull("repositoryId");
+      wrapper.set("entries", body.arrayNode());
+    }
+    return body.toString();
+  }
+
   // --- the repository registry a story writes -----------------------------------------------------
 
   /**
@@ -427,16 +479,20 @@ public final class StoryPeers {
    */
   public record Repository(String id, String projectId, String name, String mainBranch) {
 
-    String json() {
-      return "{\"id\":\""
-          + id
-          + "\",\"name\":\""
-          + name
-          + "\",\"projectId\":\""
-          + projectId
-          + "\",\"mainBranch\":\""
-          + mainBranch
-          + "\"}";
+    /**
+     * The recorded {@code a repository exists} repository with this row's four facts over it. Every
+     * other field — {@code archetype} included — is the recording's, which names a plain
+     * repository ({@code SERVICE}), so no story repository reads as a wrapper, as before.
+     */
+    ObjectNode node() {
+      ObjectNode repository =
+          ((ObjectNode) GoldenMasters.json(REPOSITORY_EXISTS, "getRepository").path("repository"))
+              .deepCopy();
+      repository.put("id", id);
+      repository.put("name", name);
+      repository.put("projectId", projectId);
+      repository.put("mainBranch", mainBranch);
+      return repository;
     }
   }
 

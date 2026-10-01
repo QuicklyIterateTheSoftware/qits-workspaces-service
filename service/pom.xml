@@ -240,6 +240,22 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <!-- qits-projects' recorded answers (golden-masters/index.json + one JSON per state and
+                 operation), read by testing/contracts/GoldenMasters for HttpRepositoryLookupTest,
+                 the stories' StoryPeers and ProjectsConsumerPactTest. Pinned in the root pom. -->
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-projects-golden-masters</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- The consumer half of the qits-projects contract: ProjectsConsumerPactTest, plain
+                 JUnit 5 with no Quarkus boot. Test scope, so its Kotlin/ktor/netty tree never
+                 reaches the application classpath or the native image. -->
+            <groupId>au.com.dius.pact.consumer</groupId>
+            <artifactId>junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <!-- The store every @QuarkusTest here boots against — BOTH of this module's datasources,
                  `workspaces` and the qits-eventstream jar's `eventstream`. Zonky spawns real
                  postgres binaries as a child process, a maven dependency rather than a container,

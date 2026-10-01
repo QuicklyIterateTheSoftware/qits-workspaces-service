@@ -77,7 +77,9 @@ public class CaptureResource {
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
-  @Operation(hidden = true)
+  // Hidden from docs/openapi.yml, but it still carries an operationId: the consumer pact against
+  // qits-projects names this door as the trigger of its repository lookup (`qits-trigger`).
+  @Operation(hidden = true, operationId = "captureWorkspace")
   public Response capture(byte[] body, @Context UriInfo uriInfo) {
     byte[] json = gunzipBounded(body == null ? new byte[0] : body);
     CaptureRequest request = parse(json);

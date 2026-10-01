@@ -15,6 +15,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import java.util.List;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -131,6 +132,10 @@ public class AgentDispatchController {
       responseCode = "404",
       description = "No such repository. Nothing was created.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  // The operationId is the name a consumer pact uses for this door as the TRIGGER of the calls it
+  // makes downstream (pacts/qits-workspaces-qits-projects.json, `qits-trigger`). Renaming it
+  // renames the trigger there.
+  @Operation(operationId = "dispatchAgent")
   public DispatchService.Dispatch dispatch(@Valid DispatchAgentRequest request) {
     return dispatches.dispatch(
         request.repositoryId(),
