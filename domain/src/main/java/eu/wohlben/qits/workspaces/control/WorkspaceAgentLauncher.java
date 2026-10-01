@@ -88,4 +88,24 @@ public interface WorkspaceAgentLauncher {
    * DeliveryOutcome#UNREACHABLE}, which is an answer.
    */
   DeliveryOutcome deliver(Long workspaceRowId, String text);
+
+  /**
+   * Tell the daemon in {@code workspaceRowId} whether the subject it is working is blocked, so it
+   * can rename the live session with — or clear from it — the {@code "❗ "} marker a person scanning
+   * a list of Claude sessions reads at a glance. qits-projects is the caller: a ticket or epic it
+   * owns moved into or out of BLOCKED, and the workspace standing on its branch is where that has to
+   * be said.
+   *
+   * <p><b>This is a cosmetic rename and never a reason to wake a container up.</b> Unlike {@link
+   * #launch} and {@link #deliver}, there is no fallback arm here: a workspace whose daemon is not
+   * answering right now has nothing to rename and gets nothing started on its behalf — a blocked
+   * marker is not worth the container, the clone and the agent a launch would cost. See {@link
+   * DispatchService#markBlocked} for why the caller never ensures a container or schedules a launch
+   * around this call.
+   *
+   * @return whether the daemon took it. False rather than an exception, for {@link #launch}'s
+   *     reason: a daemon that is not there, or one too old to carry the route, both answer false and
+   *     neither is an error worth unwinding — only a WARN.
+   */
+  boolean setBlocked(Long workspaceRowId, boolean blocked);
 }

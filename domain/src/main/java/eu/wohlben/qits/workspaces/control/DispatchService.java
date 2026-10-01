@@ -145,6 +145,19 @@ public class DispatchService {
    */
   public record Delivery(Long workspaceId, boolean delivered, boolean launched, String detail) {}
 
+  /**
+   * What {@link #markBlocked} answers.
+   *
+   * @param workspaceId the ACTIVE workspace's row id the marker was aimed at, or null when no
+   *     workspace stands on the branch — a normal outcome, never an error
+   * @param applied whether the daemon took the marker. False covers three things the caller cannot
+   *     tell apart from out here and does not need to: no workspace, a daemon that is not answering,
+   *     and a daemon too old to carry the route. None of them is retried from this side — qits-projects
+   *     re-presses this door the next time the subject's blocked state changes, which is the same
+   *     recovery {@link #dispatch} relies on for its own launch
+   */
+  public record BlockedMark(Long workspaceId, boolean applied) {}
+
   @Inject RepositoryLookup repositories;
 
   @Inject WorkspaceRepository workspaceRepository;
@@ -440,6 +453,42 @@ public class DispatchService {
               "this workspace's container is not answering yet; it is being started and the text"
                   + " will be delivered, or launched with, once it does");
     };
+  }
+
+  /**
+   * Tell the workspace standing on {@code branch} of {@code repositoryId} whether its subject is
+   * blocked, so its daemon can mark — or clear — the session rename a person reads at a glance.
+   *
+   * <p><b>Find-only, exactly {@link #deliver}'s lookup and for {@link #deliver}'s reason.</b> A
+   * ticket moving into or out of BLOCKED must not conjure a branch, a container and an agent as a
+   * side effect of a status a person never dispatched anything onto — most tickets never get a
+   * workspace, and this is a cosmetic rename, not work. The requested branch is tried first, then
+   * the dash shape a dispatch would have fallen back to, as a string and never by asking the git
+   * host, for {@link #deliver}'s reason: that read is a network call that throws, and this verb
+   * answers "nobody to tell" for a branch it cannot find rather than failing.
+   *
+   * <p><b>No ensure, no schedule, no launch — ever.</b> Unlike {@link #dispatch} and {@link
+   * #deliver}, there is nothing here worth waking a container for: the daemon is asked only if it is
+   * already reachable, and a workspace whose container is stopped, starting, or simply not there
+   * gets {@code applied:false} at once rather than a wait for one to come up. A rename a person
+   * glances at is not worth the minutes a cold image pull costs, and is certainly not worth starting
+   * an agent nobody asked to run.
+   *
+   * <p>A failed call is a WARN and nothing else, for {@link #dispatch}'s reason: this is a
+   * best-effort cosmetic, qits-projects holds the intent (the subject's blocked state) and will say
+   * it again the next time that state changes, so there is nothing here worth retrying or escalating.
+   *
+   * @param blocked whether the subject this workspace was dispatched for is now blocked
+   */
+  public BlockedMark markBlocked(String repositoryId, String branch, boolean blocked) {
+    Long rowId =
+        activeOn(repositoryId, branch)
+            .or(() -> activeOn(repositoryId, dashShape(branch)))
+            .orElse(null);
+    if (rowId == null) {
+      return new BlockedMark(null, false);
+    }
+    return new BlockedMark(rowId, setBlocked(rowId, blocked));
   }
 
   /** The branch a dispatch would have fallen back to; see {@link #dispatchBranch}. */
@@ -779,6 +828,34 @@ public class DispatchService {
       LOG.debugf(e, "the agent launch for workspace %s failed", rowId);
       return false;
     }
+  }
+
+  /**
+   * The port's answer, or false — an absent port has nothing to rename and a broken one deserves
+   * the same answer. Unlike {@link #agentState}'s own absence-is-silent reading, a false here is
+   * logged once, at WARN and never above it: there is no wait and no retry behind this call (see
+   * {@link #markBlocked}), so an unreachable daemon, a non-2xx and a thrown exception are each the
+   * whole of what happened and each deserves exactly the one line the caller's contract promises —
+   * never a thrown exception, which would turn a cosmetic rename into a 500 for qits-projects.
+   */
+  private boolean setBlocked(Long rowId, boolean blocked) {
+    boolean applied;
+    if (!agents.isResolvable()) {
+      applied = false;
+    } else {
+      try {
+        applied = agents.get().setBlocked(rowId, blocked);
+      } catch (RuntimeException e) {
+        LOG.debugf(e, "could not ask workspace %s's daemon to mark blocked=%s", rowId, Boolean.valueOf(blocked));
+        applied = false;
+      }
+    }
+    if (!applied) {
+      LOG.warnf(
+          "workspace %s's daemon did not take a blocked=%s marker; the rename was not applied",
+          rowId, Boolean.valueOf(blocked));
+    }
+    return applied;
   }
 
   private String activeProcess(Long rowId) {

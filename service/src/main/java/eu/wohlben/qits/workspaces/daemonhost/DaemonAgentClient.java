@@ -112,6 +112,18 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
   long requestTimeoutMs;
 
   /**
+   * How long the blocked-marker call may take — shorter than {@link #requestTimeoutMs}, on purpose.
+   * {@link #setBlocked} never ensures a container and never waits for one: its caller ({@link
+   * DispatchService#markBlocked}) asks once, immediately, and a daemon that is slow to answer a
+   * cosmetic rename is not worth holding qits-projects' request open for as long as a launch or a
+   * turn delivery is.
+   */
+  @ConfigProperty(
+      name = "qits.workspace.agent-dispatch.blocked-timeout-ms",
+      defaultValue = "5000")
+  long blockedTimeoutMs;
+
+  /**
    * The direct branch's client; the tunnel branch must use the tunnel's own.
    *
    * <p><b>Keep-alive is off, deliberately.</b> A pooled connection outlives the container it was
@@ -243,6 +255,47 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
   }
 
   /**
+   * {@code POST /agents/blocked} — <b>rename the session</b>, never launch one.
+   *
+   * <p><b>No ensure, no wait, no fallback.</b> Every other verb here is written around a container
+   * that might still be coming up — {@link #launch} and {@link #deliver} are reached only after
+   * {@link DispatchService} has ensured one and waited for the daemon to answer. This one is not:
+   * {@link DispatchService#markBlocked} calls straight through, and a daemon this is not currently
+   * reachable through is simply {@code false} — never a reason to start anything. A {@code ❗ }
+   * marker is worth a rename and never worth a cold image pull.
+   *
+   * <p><b>A non-2xx — including the 404 an older daemon image answers, this route not existing on
+   * it yet — is {@code false} and logged no louder than DEBUG here.</b> {@link
+   * DispatchService#markBlocked} is the one place that turns a false into the WARN qits-projects'
+   * caller sees: there is no wait and no retry behind this call, so that is the single line the
+   * whole attempt gets, and logging twice would double it for no reason.
+   */
+  @Override
+  public boolean setBlocked(Long workspaceRowId, boolean blocked) {
+    Route route = route(workspaceRowId);
+    if (route == null) {
+      return false;
+    }
+    Answer answer =
+        send(
+            route,
+            HttpMethod.POST,
+            "agents/blocked",
+            new JsonObject().put("blocked", blocked),
+            blockedTimeoutMs);
+    if (answer == null) {
+      return false;
+    }
+    if (answer.status() < 200 || answer.status() >= 300) {
+      LOG.debugf(
+          "workspace %s's daemon answered %s to a blocked-marker update",
+          workspaceRowId, Integer.valueOf(answer.status()));
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Whether the daemon said it gave the turn to an agent. An unparseable body reads as not
    * delivered: the only honest answer about a body nobody can read is that nothing is known to have
    * happened, and this caller's fallback for that is a launch, not a retry.
@@ -308,6 +361,16 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
    * request thread and its wait thread; neither is one.
    */
   private Answer send(Route route, HttpMethod method, String path, JsonObject body) {
+    return send(route, method, path, body, requestTimeoutMs);
+  }
+
+  /**
+   * The same exchange, taking its own timeout rather than {@link #requestTimeoutMs} — {@link
+   * #setBlocked} is the one caller that needs a shorter one, for the reason {@link
+   * #blockedTimeoutMs} carries.
+   */
+  private Answer send(
+      Route route, HttpMethod method, String path, JsonObject body, long timeoutMs) {
     RequestOptions options =
         new RequestOptions()
             .setMethod(method)
@@ -315,7 +378,7 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
             .setHost("localhost")
             .setPort(Integer.valueOf(daemonApiPort))
             .setURI(ContainerProxyPath.base(route.workspaceRowId()) + path)
-            .setTimeout(requestTimeoutMs);
+            .setTimeout(timeoutMs);
     try {
       return await(
           route
@@ -336,7 +399,8 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
                   response ->
                       response
                           .body()
-                          .map(buffer -> new Answer(response.statusCode(), buffer.toString()))));
+                          .map(buffer -> new Answer(response.statusCode(), buffer.toString()))),
+          timeoutMs);
     } catch (RuntimeException e) {
       LOG.debugf(
           e, "workspace %s's daemon did not answer %s %s", route.workspaceRowId(), method, path);
@@ -369,12 +433,9 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
     return false;
   }
 
-  private <T> T await(Future<T> future) {
+  private <T> T await(Future<T> future, long timeoutMs) {
     try {
-      return future
-          .toCompletionStage()
-          .toCompletableFuture()
-          .get(requestTimeoutMs, TimeUnit.MILLISECONDS);
+      return future.toCompletionStage().toCompletableFuture().get(timeoutMs, TimeUnit.MILLISECONDS);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new IllegalStateException("interrupted calling a workspace daemon", e);

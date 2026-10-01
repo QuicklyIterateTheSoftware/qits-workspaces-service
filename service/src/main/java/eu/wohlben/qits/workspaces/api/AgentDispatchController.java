@@ -200,6 +200,55 @@ public class AgentDispatchController {
         request.repositoryId(), request.branch(), request.text(), request.compactFirst());
   }
 
+  /**
+   * @param repositoryId the catalog id of the repository the branch is in. Resolved by nothing
+   *     here, exactly {@link DeliverTurnRequest#repositoryId()}'s reason: this verb creates no
+   *     workspace, so an id naming nothing simply finds no workspace, the same 200 as a branch with
+   *     none
+   * @param branch the branch whose workspace is to be told. A branch with no ACTIVE workspace is
+   *     answered, not refused
+   * @param blocked whether the subject this workspace was dispatched for is now blocked
+   */
+  public static record MarkBlockedRequest(
+      @NotBlank String repositoryId, @NotBlank String branch, boolean blocked) {}
+
+  /**
+   * <b>Tell the workspace's agent session whether its subject is blocked</b> — the fact qits-
+   * projects' ticket/epic phase machinery relays when a row moves into or out of BLOCKED, so the
+   * in-container daemon can mark — or clear — the {@code "❗ "} it prefixes onto a live Claude
+   * session's name. This is the relay: nothing here knows what "blocked" means to a ticket.
+   *
+   * <p><b>Never creates a workspace, and never wakes a stopped one.</b> {@link #deliver} above
+   * still ensures a container, because a turn is something to deliver or launch into. A blocked
+   * marker is neither: {@link DispatchService#markBlocked} asks the daemon only if it is already
+   * reachable, and a workspace with no container, a cold one, or none at all for the branch
+   * answers {@code applied:false} at once — this door never calls {@code beginEnsureContainer},
+   * never schedules a delivery and never launches an agent. A rename nobody can see yet is not
+   * worth starting one.
+   *
+   * <p>{@code applied:false} covers three things this door's caller cannot tell apart and does not
+   * need to: no workspace stands on the branch, its daemon is not answering, or it answered with
+   * something other than success (including the 404 an older daemon image gives a route it does
+   * not carry yet). None of them is retried from this side — qits-projects holds the subject's
+   * blocked state and will say so again the next time it changes.
+   */
+  @POST
+  @Path("/blocked")
+  @APIResponse(
+      responseCode = "200",
+      description =
+          "Answered. `workspaceId: null` means no workspace stands on that branch; `applied: false`"
+              + " with a non-null `workspaceId` means the daemon was not reachable or did not take"
+              + " the marker. Neither is an error — this door never creates a workspace, ensures a"
+              + " container or starts an agent.")
+  @APIResponse(
+      responseCode = "400",
+      description = "A blank repository or branch.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
+  public DispatchService.BlockedMark blocked(@Valid MarkBlockedRequest request) {
+    return dispatches.markBlocked(request.repositoryId(), request.branch(), request.blocked());
+  }
+
   public static record ListSubjectRefsRequest() {
     public record Response(List<Entry> entries) {
       public record Entry(WorkspaceSubjectRefDto workspace) {}

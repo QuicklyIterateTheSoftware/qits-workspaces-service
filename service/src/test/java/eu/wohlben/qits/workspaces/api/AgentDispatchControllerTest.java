@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import eu.wohlben.qits.workspaces.control.FakeContainerRuntime;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.GitRefs;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
@@ -133,6 +134,7 @@ public class AgentDispatchControllerTest {
   @Inject WorkspaceIds workspaceIds;
   @Inject WorkspaceService workspaceService;
   @Inject WorkspaceRepository workspaceRepository;
+  @Inject FakeContainerRuntime containerRuntime;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -154,10 +156,14 @@ public class AgentDispatchControllerTest {
 
   private final Map<String, String> launchBearers = new ConcurrentHashMap<>();
 
+  /** Every blocked-marker call the stub received, by the path it arrived on. */
+  private final Map<String, JsonObject> blockedCalls = new ConcurrentHashMap<>();
+
   @BeforeEach
   void startFakeDaemon() throws Exception {
     launches.clear();
     launchBearers.clear();
+    blockedCalls.clear();
     runningCommands.set("{\"entries\":[]}");
     daemonVertx = Vertx.vertx();
     daemonVertx
@@ -165,6 +171,16 @@ public class AgentDispatchControllerTest {
         .requestHandler(
             req -> {
               String path = req.path();
+              if (path.endsWith("/agents/blocked")) {
+                req.bodyHandler(
+                    buffer -> {
+                      blockedCalls.put(path, new JsonObject(buffer.toString()));
+                      req.response()
+                          .putHeader("Content-Type", "application/json")
+                          .end("{}");
+                    });
+                return;
+              }
               if (path.endsWith("/agents")) {
                 req.bodyHandler(
                     buffer -> {
@@ -654,5 +670,110 @@ public class AgentDispatchControllerTest {
     // "later".
     Thread.sleep(300);
     assertNull(launches.get("/workspaces/container/" + rowId + "/agents"));
+  }
+
+  private JsonPath blocked(String repositoryId, String branch, boolean isBlocked, int status) {
+    Map<String, Object> body = new HashMap<>();
+    body.put("repositoryId", repositoryId);
+    body.put("branch", branch);
+    body.put("blocked", Boolean.valueOf(isBlocked));
+    return given()
+        .contentType(ContentType.JSON)
+        .body(body)
+        .when()
+        .post("/workspaces/api/agent-dispatches/blocked")
+        .then()
+        .statusCode(status)
+        .extract()
+        .jsonPath();
+  }
+
+  /**
+   * A ticket's blocked state changing when nobody ever dispatched a workspace onto it is the
+   * ordinary case — the caller is qits-projects reacting to every ticket's transitions, and most
+   * tickets carry no workspace at all. {@code workspaceId: null} says so without a 404.
+   */
+  @Test
+  public void markingBlockedWithNoWorkspaceAnswersNullAndNotApplied() throws Exception {
+    String repoId = seedRepository();
+
+    JsonPath answer = blocked(repoId, "ticket/never-dispatched", true, 200);
+
+    assertNull(answer.getObject("workspaceId", Long.class));
+    assertThat(answer.getBoolean("applied"), is(false));
+  }
+
+  /**
+   * The daemon is already answering (the stub's {@code /commands} route), so the marker reaches
+   * it, with the flag this call named — and the {@code blocked:false} clear reaches it the same
+   * way, which is the other half of the contract: a daemon that can be told "blocked" can be told
+   * to stop saying so.
+   */
+  @Test
+  public void markingBlockedWithAReachableDaemonCallsItWithTheFlag() throws Exception {
+    String repoId = seedRepository();
+    Long rowId = workspaceWithContainer(repoId, "ticket-blocked", "ticket/blocked");
+
+    JsonPath answer = blocked(repoId, "ticket/blocked", true, 200);
+
+    assertThat(answer.getLong("workspaceId"), is(rowId));
+    assertThat(answer.getBoolean("applied"), is(true));
+    String path = "/workspaces/container/" + rowId + "/agents/blocked";
+    assertThat(blockedCalls.get(path).getBoolean("blocked"), is(true));
+
+    JsonPath cleared = blocked(repoId, "ticket/blocked", false, 200);
+    assertThat(cleared.getBoolean("applied"), is(true));
+    assertThat(blockedCalls.get(path).getBoolean("blocked"), is(false));
+  }
+
+  /**
+   * A dash-shape fallback branch finds the same workspace a dispatch would have fallen back to —
+   * {@link DispatchService#deliver}'s string-only lookup, reused rather than copied: the requested
+   * branch is {@code ticket/dash}, the workspace actually stands on the literal {@code
+   * ticket-dash}, exactly as it would if a repository holding a literal {@code refs/heads/ticket}
+   * had pushed a dispatch there first.
+   */
+  @Test
+  public void markingBlockedFindsTheDashShapeWorkspace() throws Exception {
+    String repoId = seedRepository();
+    Long rowId = workspaceWithContainer(repoId, "ticket-dash", "ticket-dash");
+
+    JsonPath answer = blocked(repoId, "ticket/dash", true, 200);
+
+    assertThat(answer.getLong("workspaceId"), is(rowId));
+    assertThat(answer.getBoolean("applied"), is(true));
+  }
+
+  /**
+   * <b>The verb this door must never perform.</b> A workspace whose container was never ensured
+   * has nothing to rename, and marking it blocked must not be the thing that ensures one, starts a
+   * container or launches an agent — a {@code ❗ } nobody can see yet is not worth a cold image
+   * pull. The fake daemon is not even listening for this workspace (no container exists for it at
+   * all), so a reaching call would fail anyway; what this proves is that nothing in this service
+   * ever tries.
+   */
+  @Test
+  public void markingBlockedNeverEnsuresAContainerOrLaunchesAnAgent() throws Exception {
+    String repoId = seedRepository();
+    String label = "ticket-no-container";
+    String branch = "ticket/no-container";
+    workspaceService.createWorkspace(repoId, label, "master", branch);
+    Long rowId = workspaceIds.of(repoId, label);
+    String containerName = containerRuntime.containerName(label, repoId);
+    assertFalse(
+        containerRuntime.exists(containerName), "the fixture must start with no container");
+
+    JsonPath answer = blocked(repoId, branch, true, 200);
+
+    assertThat(answer.getLong("workspaceId"), is(rowId));
+    assertThat(answer.getBoolean("applied"), is(false));
+    assertFalse(
+        containerRuntime.exists(containerName),
+        "marking blocked must never ensure a container that was never there");
+
+    // Nothing is on its way, either — not a "later", exactly the running-agent dispatch case above.
+    Thread.sleep(300);
+    assertNull(launches.get("/workspaces/container/" + rowId + "/agents"));
+    assertTrue(blockedCalls.isEmpty(), "an unreachable daemon was never actually called");
   }
 }
