@@ -2231,20 +2231,6 @@ public class WorkspaceService {
   }
 
   /**
-   * Deletes a workspace's container outright ({@code docker rm}) while keeping its durable branch
-   * and the ACTIVE workspace row. Where {@link #stopContainer} pauses in place (keeping the
-   * container and its {@code /workspace} volume for a lossless resume) and a plain recreate now
-   * <em>preserves</em> that volume, this is the one deliberate reset: it tears the container down
-   * <em>and removes the persistent {@code /workspace} volume</em>, so the next {@link
-   * #ensureContainer} re-creates an empty volume and re-clones a fresh checkout from the branch —
-   * losing every uncommitted working-tree change and any unpushed commit, as its Shift-guarded
-   * "loses uncommitted changes" contract promises. Distinct from {@link #discardWorkspace}
-   * (Abandon), which additionally deletes the branch and soft-deletes the row. Settles any live
-   * services first (immediate — the container is being torn down) and leaves the workspace {@code
-   * STOPPED} with no runtime error. No-op-safe if the container/volume are already gone (both
-   * best-effort). The container is removed before the volume (docker refuses an in-use volume).
-   */
-  /**
    * Best-effort graceful stop ahead of a {@link ContainerRuntime#rm}, used at every call site that
    * tears a container down. {@code containers.stop} is documented best-effort and never throws on
    * its own, but a fake or a future implementation might, and removal must never get stuck or fail
@@ -2262,6 +2248,20 @@ public class WorkspaceService {
     }
   }
 
+  /**
+   * Deletes a workspace's container outright ({@code docker rm}) while keeping its durable branch
+   * and the ACTIVE workspace row. Where {@link #stopContainer} pauses in place (keeping the
+   * container and its {@code /workspace} volume for a lossless resume) and a plain recreate now
+   * <em>preserves</em> that volume, this is the one deliberate reset: it tears the container down
+   * <em>and removes the persistent {@code /workspace} volume</em>, so the next {@link
+   * #ensureContainer} re-creates an empty volume and re-clones a fresh checkout from the branch —
+   * losing every uncommitted working-tree change and any unpushed commit, as its Shift-guarded
+   * "loses uncommitted changes" contract promises. Distinct from {@link #discardWorkspace}
+   * (Abandon), which additionally deletes the branch and soft-deletes the row. Settles any live
+   * services first (immediate — the container is being torn down) and leaves the workspace {@code
+   * STOPPED} with no runtime error. No-op-safe if the container/volume are already gone (both
+   * best-effort). The container is removed before the volume (docker refuses an in-use volume).
+   */
   @Transactional
   public void deleteContainer(Long id) {
     Workspace workspace = requireActive(id);
