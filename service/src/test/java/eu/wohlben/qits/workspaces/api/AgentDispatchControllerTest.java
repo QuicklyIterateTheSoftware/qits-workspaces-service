@@ -169,9 +169,18 @@ public class AgentDispatchControllerTest {
 
   /**
    * Whether the stub carries {@code /agents/entity}. False plays a daemon image older than the
-   * route, which answers it the stub's ordinary 404.
+   * route, which answers it the stub's ordinary 404 — or, when {@link #daemonRejectsEntityMethod}
+   * is also set, the 405 a daemon whose {@code /agents/*} router rejects the method before it
+   * resolves the path answers instead (qits-617; measured live against 2026.1001.72420).
    */
   private final AtomicBoolean daemonKnowsEntity = new AtomicBoolean(true);
+
+  /**
+   * When {@link #daemonKnowsEntity} is false, whether the stub answers {@code /agents/entity} with
+   * 405 rather than falling through to the ordinary 404. Plays the older daemon's router rejecting
+   * the method on a sub-path it does not know, before it ever resolves the path.
+   */
+  private final AtomicBoolean daemonRejectsEntityMethod = new AtomicBoolean(false);
 
   @BeforeEach
   void startFakeDaemon() throws Exception {
@@ -180,6 +189,7 @@ public class AgentDispatchControllerTest {
     blockedCalls.clear();
     entityCalls.clear();
     daemonKnowsEntity.set(true);
+    daemonRejectsEntityMethod.set(false);
     runningCommands.set("{\"entries\":[]}");
     daemonVertx = Vertx.vertx();
     daemonVertx
@@ -195,6 +205,14 @@ public class AgentDispatchControllerTest {
                           .putHeader("Content-Type", "application/json")
                           .end("{\"renamed\":1}");
                     });
+                return;
+              }
+              if (path.endsWith("/agents/entity")
+                  && !daemonKnowsEntity.get()
+                  && daemonRejectsEntityMethod.get()) {
+                req.response()
+                    .setStatusCode(405)
+                    .end("{\"message\":\"Method not allowed\"}");
                 return;
               }
               if (path.endsWith("/agents/blocked")) {
@@ -943,6 +961,32 @@ public class AgentDispatchControllerTest {
 
     JsonPath answer =
         entity(entityBody(repoId, "ticket/old-daemon", "Old", "REPORTED", true), 200);
+
+    assertThat(answer.getBoolean("applied"), is(true));
+    assertTrue(entityCalls.isEmpty());
+    assertThat(
+        blockedCalls
+            .get("/workspaces/container/" + rowId + "/agents/blocked")
+            .getBoolean("blocked"),
+        is(true));
+  }
+
+  /**
+   * The 405 sibling of {@link #anOldDaemonIsToldTheBlockedFlagOnTheRouteItHas}: a daemon whose
+   * {@code /agents/*} router rejects the method for a sub-path it does not know, answering 405
+   * rather than 404, still gets the same fallback (qits-617; measured live against
+   * 2026.1001.72420, where a 405 on {@code POST /agents/entity} was previously left unhandled and
+   * read as "did not take the subject facts").
+   */
+  @Test
+  public void aDaemonThatAnswers405OnEntityIsToldTheBlockedFlagOnTheRouteItHas() throws Exception {
+    String repoId = seedRepository();
+    Long rowId = workspaceWithContainer(repoId, "ticket-405-daemon", "ticket/405-daemon");
+    daemonKnowsEntity.set(false);
+    daemonRejectsEntityMethod.set(true);
+
+    JsonPath answer =
+        entity(entityBody(repoId, "ticket/405-daemon", "Old", "REPORTED", true), 200);
 
     assertThat(answer.getBoolean("applied"), is(true));
     assertTrue(entityCalls.isEmpty());

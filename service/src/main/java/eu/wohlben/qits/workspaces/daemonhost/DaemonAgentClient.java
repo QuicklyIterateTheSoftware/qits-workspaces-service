@@ -302,12 +302,19 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
    * {@link #setBlocked}'s successor, under its rules and its shorter {@link #blockedTimeoutMs}: no
    * ensure, no wait, a non-2xx is {@code false} at DEBUG.
    *
-   * <p><b>A 404 falls back to {@code POST /agents/blocked}</b> — the route an older daemon image
-   * does carry, so a container that has not been recreated onto a daemon that knows {@code /entity}
-   * still gets the {@code ❗} right. Only a 404: any other refusal is a daemon that has the route and
-   * said no, and asking it a narrower question would not change its mind. Each container asks again
-   * on every relay, rather than remembering which daemons are old, because a recreate can upgrade
-   * one between two relays under the same row id.
+   * <p><b>A 404 OR A 405 falls back to {@code POST /agents/blocked}</b> — the route an older daemon
+   * image does carry, so a container that has not been recreated onto a daemon that knows {@code
+   * /entity} still gets the {@code ❗} right. 404 is the straightforward absence; 405 is the same
+   * absence read a different way, measured live on 2026-10-01 against daemon 2026.1001.72420: its
+   * {@code /agents/*} router rejects a method it does not recognise for a sub-path before it ever
+   * resolves the path, so an old daemon answers {@code POST /agents/entity} with 405 rather than 404.
+   * Treating only 404 as "this daemon predates {@code /agents/entity}" left every such container
+   * falling through to the non-2xx branch below instead of the fallback, which is why qits-projects
+   * logged "did not take the subject facts" for a daemon that was in fact reachable and willing to
+   * take the blocked flag alone (qits-617). Any other refusal is a daemon that has the route and said
+   * no, and asking it a narrower question would not change its mind. Each container asks again on
+   * every relay, rather than remembering which daemons are old, because a recreate can upgrade one
+   * between two relays under the same row id.
    */
   @Override
   public boolean setEntity(Long workspaceRowId, EntityFacts facts) {
@@ -324,10 +331,11 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
     if (answer == null) {
       return false;
     }
-    if (answer.status() == 404) {
+    if (answer.status() == 404 || answer.status() == 405) {
       LOG.debugf(
-          "workspace %s's daemon has no agents/entity route; telling it the blocked flag alone",
-          workspaceRowId);
+          "workspace %s's daemon has no agents/entity route (status %s); telling it the blocked"
+              + " flag alone",
+          workspaceRowId, Integer.valueOf(answer.status()));
       return setBlocked(workspaceRowId, facts.blocked());
     }
     if (answer.status() < 200 || answer.status() >= 300) {
