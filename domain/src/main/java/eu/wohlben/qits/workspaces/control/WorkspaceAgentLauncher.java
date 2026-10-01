@@ -108,4 +108,23 @@ public interface WorkspaceAgentLauncher {
    *     neither is an error worth unwinding — only a WARN.
    */
   boolean setBlocked(Long workspaceRowId, boolean blocked);
+
+  /**
+   * Tell the daemon in {@code workspaceRowId} what its subject looks like now — title, status word
+   * and blocked flag — so it can rename the live sessions to {@code [❗]<status square> <entityId>
+   * <title>} (qits-617). {@link #setBlocked}'s successor and its rules exactly: never a reason to
+   * wake a container, false rather than an exception.
+   *
+   * <p><b>A daemon too old to carry the route still gets the part it understands.</b> The
+   * implementation falls back to {@link #setBlocked} when the daemon answers 404, so the {@code ❗}
+   * stays right on a container that has not been recreated onto a newer image yet.
+   *
+   * <p>A {@code default} so that a port written before this verb — a test double — keeps compiling
+   * and answers with the part it always could.
+   *
+   * @return whether the daemon took it, by either route
+   */
+  default boolean setEntity(Long workspaceRowId, EntityFacts facts) {
+    return setBlocked(workspaceRowId, facts.blocked());
+  }
 }

@@ -1,0 +1,32 @@
+-- The dispatched subject's title, status word and blocked flag, beside the qualified id V8 added
+-- (qits-617).
+--
+-- What they are FOR is the same thing entity_id is for, and read by the same reader: the
+-- in-container workspace-daemon names its agent sessions `[❗]<status square> <entityId> <title>`
+-- from them (QITS_WORKSPACE_DAEMON_ENTITY_TITLE / _STATUS / _BLOCKED, written by
+-- WorkspaceContainerFactory). This service renders none of it — the square is the daemon's, the
+-- status vocabulary is qits-projects'.
+--
+-- UNLIKE entity_id, these MOVE. qits-projects sends them at dispatch and again through
+-- POST /agent-dispatches/entity whenever the subject's title, status or blocked flag changes, and
+-- the row is updated whether or not a container is running — that is the point of storing them: a
+-- container that is stopped while the change happens, or recreated afterwards, boots with the
+-- current facts rather than whatever was true at its dispatch. The live rename of a running one is
+-- the relay's job, not this row's.
+--
+-- The cost of moving values on a column the container spec reads is recorded here because it is
+-- not obvious: environment is part of the spec, a stopped container is resumed by presenting its spec
+-- again under Recreate.ifChanged, so the first resume after a change REPLACES the container (its
+-- /workspace volume is reattached; its writable layer is not). A RUNNING container is never
+-- re-specced — ensureContainer short-circuits on a live one — so nothing here touches it.
+--
+-- Nullable, no backfill, no default, part of no constraint — V8's non-decision, for V8's reasons:
+-- an ad-hoc workspace names no subject, and every row that predates this file simply has none.
+-- entity_blocked is nullable rather than `not null default false` so that "never told" and "told
+-- unblocked" stay distinguishable on the row; every reader treats null as false.
+--
+-- text for the title (qits-projects' prose, not this context's to bound), varchar for the status
+-- word (an enum constant over there, e.g. REFINED; unbounded so a new word never fails a write).
+alter table workspace add column entity_title text;
+alter table workspace add column entity_status varchar;
+alter table workspace add column entity_blocked boolean;

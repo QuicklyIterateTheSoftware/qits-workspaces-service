@@ -413,6 +413,13 @@ public class WorkspaceContainerFactory {
    */
   @Inject Instance<EditorProjects> editorProjects;
 
+  /**
+   * The dispatched subject's title, status word and blocked flag, read off the row at every ensure
+   * (qits-617). A lookup rather than an argument, for {@link WorkspacePostures}'s reason, and
+   * optional for the reason every port here is: absent omits the three keys.
+   */
+  @Inject Instance<WorkspaceEntityFacts> entityFacts;
+
   /** The repo's project-scoped name, from an override resolver or the repository registry. */
   private Optional<RepositoryAddressResolver.ProjectScopedName> scopedName(String repoId) {
     if (nameResolver.isResolvable()) {
@@ -515,6 +522,27 @@ public class WorkspaceContainerFactory {
               + " will clone nothing until the next ensure that can read the registry",
           e);
       return "";
+    }
+  }
+
+  /**
+   * The row's subject facts, or none. A read that stumbles costs the session name its title and
+   * status, never the container — the credential's reading, and the same one {@link #projectIdFor}
+   * makes: these are enrichment, not a provisioning gate.
+   */
+  private Optional<EntityFacts> entityFacts(Long rowId) {
+    if (rowId == null || !entityFacts.isResolvable()) {
+      return Optional.empty();
+    }
+    try {
+      return entityFacts.get().forWorkspace(rowId);
+    } catch (RuntimeException e) {
+      LOG.warnf(
+          e,
+          "could not read the subject facts of workspace %s; launching it without a title, status"
+              + " or blocked flag",
+          rowId);
+      return Optional.empty();
     }
   }
 
@@ -747,7 +775,8 @@ public class WorkspaceContainerFactory {
    * {@link #forWorkspace(String, String, Long, String, String)} carrying the row's subject entity
    * id (qits-projects' qualified id, e.g. {@code qits-614} — {@code Workspace.entityId}, {@code V8})
    * as {@code QITS_WORKSPACE_DAEMON_ENTITY_ID} — the daemon names its agent sessions
-   * {@code <entityId>: <branch>} from the pair, and it is a column rather than a one-time launch
+   * {@code [❗]<status square> <entityId> <title>} from it and the row's subject facts (see {@link
+   * #entityFacts}), and it is a column rather than a one-time launch
    * argument because the orchestrator has no start verb: a value missing on the resume path would
    * make every resume a spec change.
    *
@@ -859,7 +888,7 @@ public class WorkspaceContainerFactory {
     container.env("QITS_WORKSPACE_DAEMON_BRANCH", editor || branch == null ? "" : branch);
     container.env("QITS_WORKSPACE_DAEMON_PARENT", editor || parent == null ? "" : parent);
     // The subject's qualified id (Workspace.entityId, V8). The daemon names its agent sessions
-    // `<entityId>: <branch>` from the pair — a column rather than a one-time launch argument, for
+    // `[❗]<status square> <entityId> <title>` from it and the facts below — a column rather than a one-time launch argument, for
     // BRANCH's own reason. UNLIKE BRANCH, this key is OMITTED rather than written blank when there
     // is none (the editor, an ad-hoc workspace, or any row that predates V8): BRANCH is on every
     // spec already, but this field is new, so writing it blank would add a key to the environment
@@ -868,6 +897,31 @@ public class WorkspaceContainerFactory {
     // every one of their containers once, on its next start, for a value that says nothing.
     if (!editor && entityId != null && !entityId.isBlank()) {
       container.env("QITS_WORKSPACE_DAEMON_ENTITY_ID", entityId);
+    }
+    // The same subject's title, status word and blocked flag (Workspace.entityTitle/-Status/
+    // -Blocked, V9, qits-617): the daemon names its sessions `[❗]<status square> <id> <title>` from
+    // them. Read off the ROW, which every relayed change updates, so a container that was stopped
+    // while the subject moved comes back up saying what is true now — and that is also their cost:
+    // environment is part of the spec, so the first resume of a STOPPED container after a change is
+    // a Recreate.ifChanged replacement (a RUNNING one is never re-specced; ensureContainer
+    // short-circuits it, and the live rename goes through POST /agents/entity instead). Each key is
+    // omitted when there is no value, ENTITY_ID's rule for ENTITY_ID's reason, and BLOCKED is
+    // written only as "true" — RefinementContainerFactory's spelling — so an unblocked subject's
+    // spec carries no key for it at all.
+    if (!editor) {
+      entityFacts(rowId)
+          .ifPresent(
+              facts -> {
+                if (facts.title() != null && !facts.title().isBlank()) {
+                  container.env("QITS_WORKSPACE_DAEMON_ENTITY_TITLE", facts.title());
+                }
+                if (facts.status() != null && !facts.status().isBlank()) {
+                  container.env("QITS_WORKSPACE_DAEMON_ENTITY_STATUS", facts.status());
+                }
+                if (facts.blocked()) {
+                  container.env("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED", "true");
+                }
+              });
     }
     // The project-scoped name the daemon self-clones under (/git/<projectId>/<name>), so committed
     // relative submodule urls resolve natively in-container. Blank when the repo has no project —

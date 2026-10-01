@@ -287,6 +287,28 @@ public class DispatchService {
       WorkspaceSubject subject,
       String instruction,
       List<String> gitRefs) {
+    return dispatch(
+        repositoryId, branch, branchTree, preamble, subject, instruction, gitRefs, null);
+  }
+
+  /**
+   * The same dispatch, carrying the subject's title, status word and blocked flag onto the row
+   * (qits-617) — the facts the container is told so the daemon can name its sessions.
+   *
+   * @param facts written on EVERY press, fresh or found, and before the container is ensured, so the
+   *     spec the container comes up on already carries them. Null — a caller that sent none of the
+   *     three — leaves the row as it is: an older qits-projects re-pressing must not wipe what a
+   *     newer relay stored through {@link #markEntity}
+   */
+  public Dispatch dispatch(
+      String repositoryId,
+      String branch,
+      boolean branchTree,
+      String preamble,
+      WorkspaceSubject subject,
+      String instruction,
+      List<String> gitRefs,
+      EntityFacts facts) {
     List<String> stated = gitRefs == null ? null : GitRefs.validated(gitRefs);
     RepositoryLookup.RepositoryView repository = repositories.require(repositoryId);
 
@@ -319,6 +341,9 @@ public class DispatchService {
               subject == null ? WorkspaceSubject.none() : subject,
               stated);
       rowId = created.id;
+    }
+    if (facts != null) {
+      storeFacts(rowId, facts);
     }
 
     return withAgent(rowId, fresh, instruction);
@@ -403,10 +428,7 @@ public class DispatchService {
     // and this verb answers "nobody to tell" for a branch it cannot find rather than failing. The
     // two shapes carry the same workspace slug by construction, so a hit on either is the same
     // workspace the dispatch made.
-    Long rowId =
-        activeOn(repositoryId, branch)
-            .or(() -> activeOn(repositoryId, dashShape(branch)))
-            .orElse(null);
+    Long rowId = findOnly(repositoryId, branch);
     if (rowId == null) {
       return new Delivery(
           null,
@@ -478,17 +500,87 @@ public class DispatchService {
    * best-effort cosmetic, qits-projects holds the intent (the subject's blocked state) and will say
    * it again the next time that state changes, so there is nothing here worth retrying or escalating.
    *
+   * <p><b>The flag is also written onto the row</b> (qits-617), before the daemon is asked and
+   * whether or not it answers — {@link #markEntity}'s first half, limited to the one fact this door
+   * carries — so the row agrees with whichever of the two doors spoke last and a container started
+   * later boots marked.
+   *
    * @param blocked whether the subject this workspace was dispatched for is now blocked
    */
   public BlockedMark markBlocked(String repositoryId, String branch, boolean blocked) {
-    Long rowId =
-        activeOn(repositoryId, branch)
-            .or(() -> activeOn(repositoryId, dashShape(branch)))
-            .orElse(null);
+    Long rowId = findOnly(repositoryId, branch);
     if (rowId == null) {
       return new BlockedMark(null, false);
     }
+    storeBlocked(rowId, blocked);
     return new BlockedMark(rowId, setBlocked(rowId, blocked));
+  }
+
+  /**
+   * Tell the workspace standing on {@code branch} of {@code repositoryId} what its subject looks
+   * like now — title, status word, blocked flag — so its daemon can name its agent sessions {@code
+   * [❗]<status square> <entityId> <title>} (qits-617). {@link #markBlocked}'s successor, which
+   * qits-projects calls on every transition, block and title edit.
+   *
+   * <p><b>Find-only, exactly {@link #markBlocked}'s lookup</b> — the requested branch, then the dash
+   * shape, as strings — and for its reason.
+   *
+   * <p><b>The row is written FIRST, and whatever the container is doing.</b> That half is the point
+   * of this verb over {@link #markBlocked}'s old shape: a relay that reached a stopped container was
+   * simply lost, so the container came back with whatever was true at its dispatch. Stored on the
+   * row, the next spec the container is presented with carries what is true now. What that costs a
+   * stopped container — a {@code Recreate.ifChanged} replacement at its next resume, since the
+   * environment changed — is recorded in {@code V9}'s header; a running one is never re-specced.
+   *
+   * <p><b>Then the live half, under {@link #markBlocked}'s rules exactly</b>: the daemon is asked only
+   * if it is already reachable, nothing is ensured, scheduled or launched, and a failure is one WARN.
+   * A daemon too old for {@code /agents/entity} is told the blocked flag through {@code
+   * /agents/blocked} instead — {@link WorkspaceAgentLauncher#setEntity}'s fallback.
+   *
+   * @return the row the facts were stored on (null when no workspace stands on the branch, and then
+   *     nothing was stored), and whether the daemon took them live
+   */
+  public BlockedMark markEntity(String repositoryId, String branch, EntityFacts facts) {
+    Long rowId = findOnly(repositoryId, branch);
+    if (rowId == null) {
+      return new BlockedMark(null, false);
+    }
+    EntityFacts normalized = facts.normalized();
+    storeFacts(rowId, normalized);
+    return new BlockedMark(rowId, setEntity(rowId, normalized));
+  }
+
+  /** {@link #deliver}'s lookup: the requested branch, then the dash shape, both as strings. */
+  private Long findOnly(String repositoryId, String branch) {
+    return activeOn(repositoryId, branch)
+        .or(() -> activeOn(repositoryId, dashShape(branch)))
+        .orElse(null);
+  }
+
+  /** The three V9 columns, in a transaction of their own. A row resolved meanwhile is skipped. */
+  private void storeFacts(Long rowId, EntityFacts facts) {
+    EntityFacts normalized = facts.normalized();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaceRepository
+                    .findActiveById(rowId)
+                    .ifPresent(
+                        workspace -> {
+                          workspace.entityTitle = normalized.title();
+                          workspace.entityStatus = normalized.status();
+                          workspace.entityBlocked = Boolean.valueOf(normalized.blocked());
+                        }));
+  }
+
+  /** {@link #storeFacts} for the one fact {@link #markBlocked} carries; title and status stay. */
+  private void storeBlocked(Long rowId, boolean blocked) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaceRepository
+                    .findActiveById(rowId)
+                    .ifPresent(workspace -> workspace.entityBlocked = Boolean.valueOf(blocked)));
   }
 
   /** The branch a dispatch would have fallen back to; see {@link #dispatchBranch}. */
@@ -854,6 +946,28 @@ public class DispatchService {
       LOG.warnf(
           "workspace %s's daemon did not take a blocked=%s marker; the rename was not applied",
           rowId, Boolean.valueOf(blocked));
+    }
+    return applied;
+  }
+
+  /** {@link #setBlocked}'s reading, for the whole set of facts. */
+  private boolean setEntity(Long rowId, EntityFacts facts) {
+    boolean applied;
+    if (!agents.isResolvable()) {
+      applied = false;
+    } else {
+      try {
+        applied = agents.get().setEntity(rowId, facts);
+      } catch (RuntimeException e) {
+        LOG.debugf(e, "could not tell workspace %s's daemon its subject facts", rowId);
+        applied = false;
+      }
+    }
+    if (!applied) {
+      LOG.warnf(
+          "workspace %s's daemon did not take the subject facts (status=%s, blocked=%s); they are"
+              + " stored on the row and the rename was not applied live",
+          rowId, facts.status(), Boolean.valueOf(facts.blocked()));
     }
     return applied;
   }
