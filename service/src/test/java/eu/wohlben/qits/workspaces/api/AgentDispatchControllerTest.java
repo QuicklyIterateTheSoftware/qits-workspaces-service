@@ -14,8 +14,11 @@ import eu.wohlben.qits.workspaces.control.FakeContainerRuntime;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.GitRefs;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
+import eu.wohlben.qits.workspaces.control.WorkspaceContainer;
+import eu.wohlben.qits.workspaces.control.WorkspaceContainerFactory;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
+import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
@@ -33,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.AfterEach;
@@ -135,6 +139,7 @@ public class AgentDispatchControllerTest {
   @Inject WorkspaceService workspaceService;
   @Inject WorkspaceRepository workspaceRepository;
   @Inject FakeContainerRuntime containerRuntime;
+  @Inject WorkspaceContainerFactory containerFactory;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -159,11 +164,22 @@ public class AgentDispatchControllerTest {
   /** Every blocked-marker call the stub received, by the path it arrived on. */
   private final Map<String, JsonObject> blockedCalls = new ConcurrentHashMap<>();
 
+  /** Every subject-facts call the stub received, by the path it arrived on. */
+  private final Map<String, JsonObject> entityCalls = new ConcurrentHashMap<>();
+
+  /**
+   * Whether the stub carries {@code /agents/entity}. False plays a daemon image older than the
+   * route, which answers it the stub's ordinary 404.
+   */
+  private final AtomicBoolean daemonKnowsEntity = new AtomicBoolean(true);
+
   @BeforeEach
   void startFakeDaemon() throws Exception {
     launches.clear();
     launchBearers.clear();
     blockedCalls.clear();
+    entityCalls.clear();
+    daemonKnowsEntity.set(true);
     runningCommands.set("{\"entries\":[]}");
     daemonVertx = Vertx.vertx();
     daemonVertx
@@ -171,6 +187,16 @@ public class AgentDispatchControllerTest {
         .requestHandler(
             req -> {
               String path = req.path();
+              if (path.endsWith("/agents/entity") && daemonKnowsEntity.get()) {
+                req.bodyHandler(
+                    buffer -> {
+                      entityCalls.put(path, new JsonObject(buffer.toString()));
+                      req.response()
+                          .putHeader("Content-Type", "application/json")
+                          .end("{\"renamed\":1}");
+                    });
+                return;
+              }
               if (path.endsWith("/agents/blocked")) {
                 req.bodyHandler(
                     buffer -> {
@@ -424,9 +450,9 @@ public class AgentDispatchControllerTest {
   /**
    * {@code entityId} is qits-projects' qualified id for the same subject {@code ticketId} names —
    * {@code <project-slug>-<number>}, e.g. {@code qits-614} — carried onto the row beside it so the
-   * in-container daemon can name its agent sessions {@code <entityId>: <branch>}. Not on
-   * {@link eu.wohlben.qits.workspaces.dto.WorkspaceDto}, so the row is read back directly rather than
-   * through the dispatch response.
+   * in-container daemon can name its agent sessions {@code [❗]<status square> <entityId> <title>}.
+   * Not on {@link eu.wohlben.qits.workspaces.dto.WorkspaceDto}, so the row is read back directly
+   * rather than through the dispatch response.
    */
   @Test
   public void aDispatchStoresTheEntityIdBesideTheTicket() throws Exception {
@@ -443,6 +469,55 @@ public class AgentDispatchControllerTest {
     assertThat(storedEntityId, is("qits-614"));
   }
 
+  /** The row read back in a transaction of its own, for the V9 columns no DTO carries. */
+  private Workspace storedRow(Long rowId) {
+    return QuarkusTransaction.requiringNew()
+        .call(() -> workspaceRepository.findActiveById(rowId).orElseThrow());
+  }
+
+  /**
+   * qits-617: the subject's title, status word and blocked flag ride the dispatch onto the row, which
+   * is where the container spec reads them from — so the spec the container first comes up on
+   * already names the session.
+   */
+  @Test
+  public void aDispatchStoresTheSubjectsTitleStatusAndBlockedFlag() throws Exception {
+    String repoId = seedRepository();
+    Map<String, Object> request = bodyForTicket(repoId, "ticket/facts", "t-57", "go");
+    request.put("entityId", "qits-555");
+    request.put("entityTitle", "Comments on every work entity");
+    request.put("entityStatus", "REFINED");
+    request.put("entityBlocked", Boolean.TRUE);
+
+    dispatch(request, 200);
+
+    Workspace row = storedRow(workspaceIds.of(repoId, "ticket-facts"));
+    assertThat(row.entityTitle, is("Comments on every work entity"));
+    assertThat(row.entityStatus, is("REFINED"));
+    assertThat(row.entityBlocked, is(true));
+  }
+
+  /**
+   * An older qits-projects sends none of the three. Its dispatch still works — and its re-press must
+   * not wipe what a newer relay already stored, so absent means "leave the row alone", not "null".
+   */
+  @Test
+  public void aDispatchWithoutTheFactsKeepsWhatTheRowAlreadyHas() throws Exception {
+    String repoId = seedRepository();
+    Map<String, Object> first = bodyForTicket(repoId, "ticket/old-caller", "t-58", "go");
+    first.put("entityTitle", "Stored once");
+    first.put("entityStatus", "IMPLEMENTED");
+    dispatch(first, 200);
+    Long rowId = workspaceIds.of(repoId, "ticket-old-caller");
+    assertThat(storedRow(rowId).entityBlocked, is(false));
+
+    dispatch(bodyForTicket(repoId, "ticket/old-caller", "t-58", "again"), 200);
+
+    Workspace row = storedRow(rowId);
+    assertThat(row.entityTitle, is("Stored once"));
+    assertThat(row.entityStatus, is("IMPLEMENTED"));
+  }
+
   /** Absent is the ordinary case — qits-projects' dispatch doors send the three fields together. */
   @Test
   public void aDispatchWithNoEntityIdStoresNull() throws Exception {
@@ -455,6 +530,10 @@ public class AgentDispatchControllerTest {
         QuarkusTransaction.requiringNew()
             .call(() -> workspaceRepository.findActiveById(rowId).orElseThrow().entityId);
     assertNull(storedEntityId);
+    Workspace row = storedRow(rowId);
+    assertNull(row.entityTitle);
+    assertNull(row.entityStatus);
+    assertNull(row.entityBlocked);
   }
 
   /**
@@ -721,9 +800,12 @@ public class AgentDispatchControllerTest {
     String path = "/workspaces/container/" + rowId + "/agents/blocked";
     assertThat(blockedCalls.get(path).getBoolean("blocked"), is(true));
 
+    assertThat(storedRow(rowId).entityBlocked, is(true));
+
     JsonPath cleared = blocked(repoId, "ticket/blocked", false, 200);
     assertThat(cleared.getBoolean("applied"), is(true));
     assertThat(blockedCalls.get(path).getBoolean("blocked"), is(false));
+    assertThat(storedRow(rowId).entityBlocked, is(false));
   }
 
   /**
@@ -775,5 +857,173 @@ public class AgentDispatchControllerTest {
     Thread.sleep(300);
     assertNull(launches.get("/workspaces/container/" + rowId + "/agents"));
     assertTrue(blockedCalls.isEmpty(), "an unreachable daemon was never actually called");
+  }
+
+  private JsonPath entity(Map<String, Object> body, int status) {
+    return given()
+        .contentType(ContentType.JSON)
+        .body(body)
+        .when()
+        .post("/workspaces/api/agent-dispatches/entity")
+        .then()
+        .statusCode(status)
+        .extract()
+        .jsonPath();
+  }
+
+  /** Nulls are members of the contract, so a HashMap rather than {@code Map.of}. */
+  private static Map<String, Object> entityBody(
+      String repositoryId, String branch, String title, String status, Object blocked) {
+    Map<String, Object> body = new HashMap<>();
+    body.put("repositoryId", repositoryId);
+    body.put("branch", branch);
+    body.put("title", title);
+    body.put("status", status);
+    body.put("blocked", blocked);
+    return body;
+  }
+
+  /** {@link #markingBlockedWithNoWorkspaceAnswersNullAndNotApplied}'s case, on the successor door. */
+  @Test
+  public void markingTheEntityWithNoWorkspaceAnswersNullAndNotApplied() throws Exception {
+    String repoId = seedRepository();
+
+    JsonPath answer =
+        entity(entityBody(repoId, "ticket/never-dispatched", "T", "REFINED", false), 200);
+
+    assertNull(answer.getObject("workspaceId", Long.class));
+    assertThat(answer.getBoolean("applied"), is(false));
+  }
+
+  /**
+   * Both halves with a reachable daemon: the row holds the facts, and the daemon was told all three
+   * on {@code /agents/entity} — and not on the old route, which is only the fallback.
+   */
+  @Test
+  public void markingTheEntityStoresTheFactsAndTellsAReachableDaemon() throws Exception {
+    String repoId = seedRepository();
+    Long rowId = workspaceWithContainer(repoId, "ticket-entity", "ticket/entity");
+
+    JsonPath answer =
+        entity(
+            entityBody(
+                repoId, "ticket/entity", "Comments on every work entity", "IMPLEMENTED", true),
+            200);
+
+    assertThat(answer.getLong("workspaceId"), is(rowId));
+    assertThat(answer.getBoolean("applied"), is(true));
+    JsonObject told = entityCalls.get("/workspaces/container/" + rowId + "/agents/entity");
+    assertThat(told.getString("title"), is("Comments on every work entity"));
+    assertThat(told.getString("status"), is("IMPLEMENTED"));
+    assertThat(told.getBoolean("blocked"), is(true));
+    assertTrue(blockedCalls.isEmpty(), "a daemon that knows /entity is not asked the old way");
+    Workspace row = storedRow(rowId);
+    assertThat(row.entityTitle, is("Comments on every work entity"));
+    assertThat(row.entityStatus, is("IMPLEMENTED"));
+    assertThat(row.entityBlocked, is(true));
+
+    // Null title and status are members of the contract: unknown now, so cleared on the row.
+    entity(entityBody(repoId, "ticket/entity", null, null, false), 200);
+    row = storedRow(rowId);
+    assertNull(row.entityTitle);
+    assertNull(row.entityStatus);
+    assertThat(row.entityBlocked, is(false));
+  }
+
+  /**
+   * A daemon image older than {@code /agents/entity} answers it 404, and is then told the one fact
+   * it understands on {@code /agents/blocked} — so the {@code ❗} stays right on a container that
+   * has not been recreated yet.
+   */
+  @Test
+  public void anOldDaemonIsToldTheBlockedFlagOnTheRouteItHas() throws Exception {
+    String repoId = seedRepository();
+    Long rowId = workspaceWithContainer(repoId, "ticket-old-daemon", "ticket/old-daemon");
+    daemonKnowsEntity.set(false);
+
+    JsonPath answer =
+        entity(entityBody(repoId, "ticket/old-daemon", "Old", "REPORTED", true), 200);
+
+    assertThat(answer.getBoolean("applied"), is(true));
+    assertTrue(entityCalls.isEmpty());
+    assertThat(
+        blockedCalls
+            .get("/workspaces/container/" + rowId + "/agents/blocked")
+            .getBoolean("blocked"),
+        is(true));
+  }
+
+  /**
+   * <b>The point of storing them.</b> No container: the row is updated anyway — so the container
+   * that comes up later is specced with what is true now — and, {@link
+   * #markingBlockedNeverEnsuresAContainerOrLaunchesAnAgent}'s rule, nothing is ensured or launched.
+   */
+  @Test
+  public void markingTheEntityWithNoContainerStoresTheFactsAndStartsNothing() throws Exception {
+    String repoId = seedRepository();
+    String label = "ticket-entity-cold";
+    String branch = "ticket/entity-cold";
+    workspaceService.createWorkspace(repoId, label, "master", branch);
+    Long rowId = workspaceIds.of(repoId, label);
+    String containerName = containerRuntime.containerName(label, repoId);
+
+    JsonPath answer = entity(entityBody(repoId, branch, "Cold", "VERIFIED", true), 200);
+
+    assertThat(answer.getLong("workspaceId"), is(rowId));
+    assertThat(answer.getBoolean("applied"), is(false));
+    Workspace row = storedRow(rowId);
+    assertThat(row.entityTitle, is("Cold"));
+    assertThat(row.entityStatus, is("VERIFIED"));
+    assertThat(row.entityBlocked, is(true));
+    assertFalse(containerRuntime.exists(containerName), "the facts must never ensure a container");
+    Thread.sleep(300);
+    assertNull(launches.get("/workspaces/container/" + rowId + "/agents"));
+    assertTrue(entityCalls.isEmpty() && blockedCalls.isEmpty());
+  }
+
+  /**
+   * The seam between the two halves, through the shipped beans: what the door stored is what the
+   * NEXT container spec for that row says — the persisted port read by the real factory — so a
+   * container started after the relay boots with the facts and the {@code ❗}.
+   */
+  @Test
+  public void theStoredFactsAreWhatTheNextContainerSpecCarries() throws Exception {
+    String repoId = seedRepository();
+    String label = "ticket-entity-spec";
+    String branch = "ticket/entity-spec";
+    workspaceService.createWorkspace(repoId, label, "master", branch);
+    Long rowId = workspaceIds.of(repoId, label);
+
+    entity(entityBody(repoId, branch, "Boots marked", "REFINED", true), 200);
+
+    WorkspaceContainer spec =
+        containerFactory.forWorkspace(repoId, label, rowId, branch, "master", "qits-617");
+    assertEquals("Boots marked", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_TITLE"));
+    assertEquals("REFINED", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_STATUS"));
+    assertEquals("true", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
+
+    entity(entityBody(repoId, branch, "Boots marked", "REFINED", false), 200);
+    assertNull(
+        containerFactory
+            .forWorkspace(repoId, label, rowId, branch, "master", "qits-617")
+            .env()
+            .get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
+  }
+
+  /**
+   * {@code blocked} is required: a body without it would otherwise read as {@code false} and clear
+   * a real {@code ❗}. Missing and non-boolean are both a 400, as is a blank branch.
+   */
+  @Test
+  public void markingTheEntityRefusesAMissingOrNonBooleanBlockedFlag() throws Exception {
+    String repoId = seedRepository();
+    Map<String, Object> missing = entityBody(repoId, "ticket/x", "T", "REFINED", null);
+    missing.remove("blocked");
+
+    entity(missing, 400);
+    entity(entityBody(repoId, "ticket/x", "T", "REFINED", null), 400);
+    entity(entityBody(repoId, "ticket/x", "T", "REFINED", "maybe"), 400);
+    entity(entityBody(repoId, "ticket/x", "T", "REFINED", Map.of("no", 1)), 400);
+    entity(entityBody(repoId, " ", "T", "REFINED", true), 400);
   }
 }

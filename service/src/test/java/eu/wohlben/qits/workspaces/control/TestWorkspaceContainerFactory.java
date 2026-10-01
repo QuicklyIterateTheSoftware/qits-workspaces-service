@@ -151,6 +151,8 @@ public final class TestWorkspaceContainerFactory {
     // what a platform with no workspaces in it yet answers. An ordinary workspace is told nothing
     // regardless, so this is invisible to every case but the editor's.
     f.editorProjects = StubInstance.empty();
+    // No subject facts — a workspace nobody dispatched, so none of the three keys is written.
+    f.entityFacts = StubInstance.empty();
     return f;
   }
 

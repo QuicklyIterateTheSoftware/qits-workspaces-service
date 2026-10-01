@@ -166,8 +166,8 @@ class WorkspaceContainersTest {
   @Test
   void theEnsureRequestCarriesTheEntityIdBesideTheBranch() {
     // Workspace.entityId (V8), threaded through the 6-argument ensureRequest exactly as
-    // branch/parent already are — the daemon names its agent sessions `<entityId>: <branch>` from
-    // the pair.
+    // branch/parent already are — the daemon names its agent sessions
+    // `[❗]<status square> <entityId> <title>` from it and the row's subject facts.
     Spec spec =
         adapter().ensureRequest(REPO, "work", 1L, "main", "0parent", "qits-614").spec();
 

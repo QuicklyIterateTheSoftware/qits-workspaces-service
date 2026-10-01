@@ -229,8 +229,8 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
    * rows those two are null for.
    *
    * <p><b>Read-side only, and the reader is the daemon rather than this service.</b> The in-container
-   * workspace-daemon names its agent sessions {@code <entityId>: <branch>} from it
-   * ({@code QITS_WORKSPACE_DAEMON_ENTITY_ID}, written by {@link
+   * workspace-daemon names its agent sessions {@code [❗]<status square> <entityId> <title>} from it
+   * and the three facts below ({@code QITS_WORKSPACE_DAEMON_ENTITY_ID}, written by {@link
    * eu.wohlben.qits.workspaces.control.WorkspaceContainerFactory}), and it is a column — rather than
    * an argument threaded through only the provision path — because the orchestrator has no start
    * verb: a stopped container is started by presenting its spec again, and a value present on
@@ -239,6 +239,27 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
    */
   @Column(name = "entity_id", columnDefinition = "text")
   public String entityId;
+
+  /**
+   * The same subject's title, status word (qits-projects' enum constant, e.g. {@code REFINED}) and
+   * blocked flag ({@code V9}, qits-617) — what the daemon puts after the id and in front of it. Null
+   * for every row {@link #entityId} is null for, and for every row that predates {@code V9}; a null
+   * {@link #entityBlocked} reads as not blocked.
+   *
+   * <p><b>Unlike {@link #entityId}, these move.</b> The dispatch writes them, and so does {@code
+   * DispatchService.markEntity} every time qits-projects relays a change — whether or not a container
+   * is running, so a stopped or recreated one boots with what is true now. Written through those two
+   * and nothing else; read by {@code PersistedWorkspaceEntityFacts} for the container spec. What a
+   * change costs a STOPPED container (a replacement at its next resume) is in {@code V9}'s header.
+   */
+  @Column(name = "entity_title", columnDefinition = "text")
+  public String entityTitle;
+
+  @Column(name = "entity_status")
+  public String entityStatus;
+
+  @Column(name = "entity_blocked")
+  public Boolean entityBlocked;
 
   /**
    * The Git refs this workspace's container may push, as a JSON array ({@code V6}). Read and written

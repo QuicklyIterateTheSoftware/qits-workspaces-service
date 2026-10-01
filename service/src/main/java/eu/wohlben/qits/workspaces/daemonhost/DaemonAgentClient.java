@@ -2,6 +2,7 @@ package eu.wohlben.qits.workspaces.daemonhost;
 
 import eu.wohlben.qits.workspaces.control.ContainerProxyPath;
 import eu.wohlben.qits.workspaces.control.DaemonProxyTargets;
+import eu.wohlben.qits.workspaces.control.EntityFacts;
 import eu.wohlben.qits.workspaces.control.ProxyOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceAgentLauncher;
 import io.vertx.core.Future;
@@ -289,6 +290,49 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
     if (answer.status() < 200 || answer.status() >= 300) {
       LOG.debugf(
           "workspace %s's daemon answered %s to a blocked-marker update",
+          workspaceRowId, Integer.valueOf(answer.status()));
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * {@code POST /agents/entity} — <b>rename the sessions after the subject as it is now</b>: {@code
+   * {"title": …, "status": …, "blocked": …}}, title and status null when unknown (qits-617).
+   * {@link #setBlocked}'s successor, under its rules and its shorter {@link #blockedTimeoutMs}: no
+   * ensure, no wait, a non-2xx is {@code false} at DEBUG.
+   *
+   * <p><b>A 404 falls back to {@code POST /agents/blocked}</b> — the route an older daemon image
+   * does carry, so a container that has not been recreated onto a daemon that knows {@code /entity}
+   * still gets the {@code ❗} right. Only a 404: any other refusal is a daemon that has the route and
+   * said no, and asking it a narrower question would not change its mind. Each container asks again
+   * on every relay, rather than remembering which daemons are old, because a recreate can upgrade
+   * one between two relays under the same row id.
+   */
+  @Override
+  public boolean setEntity(Long workspaceRowId, EntityFacts facts) {
+    Route route = route(workspaceRowId);
+    if (route == null) {
+      return false;
+    }
+    JsonObject body =
+        new JsonObject()
+            .put("title", facts.title())
+            .put("status", facts.status())
+            .put("blocked", facts.blocked());
+    Answer answer = send(route, HttpMethod.POST, "agents/entity", body, blockedTimeoutMs);
+    if (answer == null) {
+      return false;
+    }
+    if (answer.status() == 404) {
+      LOG.debugf(
+          "workspace %s's daemon has no agents/entity route; telling it the blocked flag alone",
+          workspaceRowId);
+      return setBlocked(workspaceRowId, facts.blocked());
+    }
+    if (answer.status() < 200 || answer.status() >= 300) {
+      LOG.debugf(
+          "workspace %s's daemon answered %s to a subject-facts update",
           workspaceRowId, Integer.valueOf(answer.status()));
       return false;
     }

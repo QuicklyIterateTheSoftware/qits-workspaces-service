@@ -1,12 +1,14 @@
 package eu.wohlben.qits.workspaces.api;
 
 import eu.wohlben.qits.workspaces.control.DispatchService;
+import eu.wohlben.qits.workspaces.control.EntityFacts;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.control.WorkspaceSubject;
 import eu.wohlben.qits.workspaces.dto.WorkspaceSubjectRefDto;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -81,7 +83,14 @@ public class AgentDispatchController {
    * @param entityId the subject's qualified id as qits-projects spells it — {@code
    *     <project-slug>-<number>}, e.g. {@code qits-614}. Carried onto the workspace beside {@code
    *     ticketId}/{@code epicId}, exactly the same way: optional, resolved by nothing here. Read
-   *     back by the in-container daemon to name its agent sessions {@code <entityId>: <branch>}
+   *     back by the in-container daemon to name its agent sessions {@code [❗]<status square>
+   *     <entityId> <title>}, with the three fields below
+   * @param entityTitle the same subject's title (qits-617). Optional; stored on the row and handed
+   *     to the container as {@code QITS_WORKSPACE_DAEMON_ENTITY_TITLE}
+   * @param entityStatus the subject's status word, qits-projects' enum constant (e.g. {@code
+   *     REFINED}). Optional and uninterpreted here — the daemon picks the square
+   * @param entityBlocked whether the subject is blocked; null reads as false. A caller that sends
+   *     none of the three (an older qits-projects) leaves whatever the row already holds untouched
    * @param instruction the agent's first turn. It rides into the launch and is stored nowhere: this
    *     is the opening of one conversation, not the statement of the work
    * @param gitRefs the Git refs the workspace's container may push (contract C4): exact refs such
@@ -99,6 +108,9 @@ public class AgentDispatchController {
       String ticketId,
       String epicId,
       String entityId,
+      String entityTitle,
+      String entityStatus,
+      Boolean entityBlocked,
       String instruction,
       List<String> gitRefs) {}
 
@@ -139,7 +151,25 @@ public class AgentDispatchController {
         request.preamble(),
         new WorkspaceSubject(request.ticketId(), request.epicId(), request.entityId()),
         request.instruction(),
-        request.gitRefs());
+        request.gitRefs(),
+        entityFactsOf(request));
+  }
+
+  /**
+   * The three subject facts, or null when the caller sent none of them — an older qits-projects,
+   * whose re-press must not wipe what a newer relay already stored on the row.
+   */
+  private static EntityFacts entityFactsOf(
+      DispatchAgentRequest request) {
+    if (request.entityTitle() == null
+        && request.entityStatus() == null
+        && request.entityBlocked() == null) {
+      return null;
+    }
+    return new EntityFacts(
+        request.entityTitle(),
+        request.entityStatus(),
+        Boolean.TRUE.equals(request.entityBlocked()));
   }
 
   /**
@@ -231,6 +261,10 @@ public class AgentDispatchController {
    * something other than success (including the 404 an older daemon image gives a route it does
    * not carry yet). None of them is retried from this side — qits-projects holds the subject's
    * blocked state and will say so again the next time it changes.
+   *
+   * <p><b>Superseded by {@link #entity}, and kept while qits-projects still sends it.</b> It now also
+   * writes the flag onto the workspace row (qits-617), so the row and the daemon agree whichever door
+   * said it last, and a container started later boots marked.
    */
   @POST
   @Path("/blocked")
@@ -247,6 +281,61 @@ public class AgentDispatchController {
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   public DispatchService.BlockedMark blocked(@Valid MarkBlockedRequest request) {
     return dispatches.markBlocked(request.repositoryId(), request.branch(), request.blocked());
+  }
+
+  /**
+   * @param repositoryId the catalog id of the repository the branch is in. Resolved by nothing here,
+   *     {@link MarkBlockedRequest#repositoryId()}'s reason
+   * @param branch the branch whose workspace is to be told. A branch with no ACTIVE workspace is
+   *     answered, not refused
+   * @param title the subject's title now, or null when the caller has none
+   * @param status the subject's status word now (e.g. {@code IMPLEMENTED}), or null
+   * @param blocked whether the subject is blocked now. Required — a boxed {@code Boolean} so that a
+   *     body without it is a 400 rather than a silent {@code false} that would clear a real {@code ❗}
+   */
+  public static record MarkEntityRequest(
+      @NotBlank String repositoryId,
+      @NotBlank String branch,
+      String title,
+      String status,
+      @NotNull Boolean blocked) {}
+
+  /**
+   * <b>Tell the workspace what its subject looks like now</b> — title, status and blocked flag at
+   * once — so its daemon can rename the agent sessions to {@code [❗]<status square> <id> <title>}
+   * (qits-617). The successor of {@link #blocked}: qits-projects relays every transition, block and
+   * title edit here, and the blocked flag is one of the three facts rather than a door of its own.
+   *
+   * <p><b>Two halves, and the first one does not depend on a container.</b> The facts are written
+   * onto the ACTIVE workspace row whatever its container is doing, so a stopped container — or one
+   * recreated later — boots with what is true now rather than what was true at its dispatch. Then,
+   * only if the daemon is already reachable, it is told live through {@code POST /agents/entity},
+   * falling back to {@code POST /agents/blocked} on the 404 an older daemon image answers.
+   *
+   * <p><b>Never creates a workspace, never ensures a container, never launches an agent</b> — {@link
+   * #blocked}'s rule, for its reason. {@code applied} reports the live half only: {@code false} with
+   * a non-null {@code workspaceId} means the row was updated and the daemon was not reachable or did
+   * not take it.
+   */
+  @POST
+  @Path("/entity")
+  @APIResponse(
+      responseCode = "200",
+      description =
+          "Answered. `workspaceId: null` means no workspace stands on that branch and nothing was"
+              + " stored; otherwise the facts are stored on the workspace, and `applied` says whether"
+              + " its daemon also took them live. Never creates a workspace, ensures a container or"
+              + " starts an agent.")
+  @APIResponse(
+      responseCode = "400",
+      description = "A blank repository or branch, or a missing or non-boolean `blocked`.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
+  public DispatchService.BlockedMark entity(@Valid MarkEntityRequest request) {
+    return dispatches.markEntity(
+        request.repositoryId(),
+        request.branch(),
+        new EntityFacts(
+            request.title(), request.status(), request.blocked().booleanValue()));
   }
 
   public static record ListSubjectRefsRequest() {

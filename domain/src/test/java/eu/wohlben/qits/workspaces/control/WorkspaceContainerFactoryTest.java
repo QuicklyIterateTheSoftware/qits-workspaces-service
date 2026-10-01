@@ -139,6 +139,9 @@ class WorkspaceContainerFactoryTest {
     // what a platform with no workspaces in it yet answers. An ordinary workspace is told nothing
     // regardless, so this is invisible to every case but the editor's.
     f.editorProjects = StubInstance.empty();
+    // No subject facts either — every workspace nobody dispatched, and every test written before
+    // qits-617. The cases that carry some set this themselves.
+    f.entityFacts = StubInstance.empty();
     return f;
   }
 
@@ -895,9 +898,9 @@ class WorkspaceContainerFactoryTest {
 
   @Test
   void theEntityIdRidesAsDaemonEnvBesideTheBranch() {
-    // The daemon names its agent sessions `<entityId>: <branch>` from this pair (Workspace.entityId,
-    // V8) — a column rather than a one-time launch argument, for QITS_WORKSPACE_DAEMON_BRANCH's own
-    // reason.
+    // The daemon names its agent sessions `[❗]<status square> <entityId> <title>` from this
+    // (Workspace.entityId, V8) — a column rather than a one-time launch argument, for
+    // QITS_WORKSPACE_DAEMON_BRANCH's own reason.
     WorkspaceContainerFactory f = factory();
     f.postures = StubInstance.of(editorRow(false));
 
@@ -919,6 +922,81 @@ class WorkspaceContainerFactoryTest {
     WorkspaceContainer c = factory().forWorkspace("repo12345678abc", "work", 1L, "main", "0parent");
 
     assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_ID"));
+  }
+
+  @Test
+  void theSubjectFactsRideAsDaemonEnvBesideTheEntityId() {
+    // qits-617: the title and status word the daemon names its sessions with, and the blocked flag
+    // as "true" — RefinementContainerFactory's spelling — read off the row at every ensure.
+    WorkspaceContainerFactory f = factory();
+    f.entityFacts =
+        StubInstance.of(
+            rowId -> Optional.of(new EntityFacts("Comments on every work entity", "REFINED", true)));
+
+    WorkspaceContainer c =
+        f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main", "qits-555");
+
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_ID", "qits-555");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_TITLE", "Comments on every work entity");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_STATUS", "REFINED");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED", "true");
+  }
+
+  @Test
+  void anUnblockedSubjectCarriesNoBlockedKeyAndAnUnknownFactNoKeyOfItsOwn() {
+    // Omitted rather than "false" or blank, ENTITY_ID's rule: an unblocked subject's spec, and one
+    // whose title or status the caller did not know, adds no key it has nothing to say with.
+    WorkspaceContainerFactory f = factory();
+    f.entityFacts = StubInstance.of(rowId -> Optional.of(new EntityFacts(null, "DONE", false)));
+
+    WorkspaceContainer c =
+        f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main", "qits-555");
+
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_STATUS", "DONE");
+    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_TITLE"));
+    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
+  }
+
+  @Test
+  void aRowWithNoSubjectFactsOrAFailingLookupCarriesNoneOfTheKeys() {
+    // Every ad-hoc workspace and every row older than V9: no key at all, so its spec is the one it
+    // had before the columns existed. A lookup that throws costs the name its facts, never the
+    // container.
+    for (Instance<WorkspaceEntityFacts> lookup :
+        List.<Instance<WorkspaceEntityFacts>>of(
+            StubInstance.empty(),
+            StubInstance.of(rowId -> Optional.empty()),
+            StubInstance.of(
+                rowId -> {
+                  throw new IllegalStateException("database blinked");
+                }))) {
+      WorkspaceContainerFactory f = factory();
+      f.entityFacts = lookup;
+
+      WorkspaceContainer c =
+          f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main", "qits-555");
+
+      assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_TITLE"));
+      assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_STATUS"));
+      assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
+    }
+  }
+
+  @Test
+  void theSubjectFactsAreOmittedForTheEditor() {
+    // The editor belongs to no subject, ENTITY_ID's exemption — and the lookup is not even asked.
+    WorkspaceContainerFactory f = factory();
+    f.postures = StubInstance.of(editorRow(true));
+    f.entityFacts =
+        StubInstance.of(
+            rowId -> {
+              throw new AssertionError("the editor's subject facts must not be looked up");
+            });
+
+    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null, null);
+
+    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_TITLE"));
+    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
   }
 
   @Test
