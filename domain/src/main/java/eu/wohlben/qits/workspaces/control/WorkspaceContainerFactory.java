@@ -36,6 +36,16 @@ public class WorkspaceContainerFactory {
   String observabilityUrl;
 
   /**
+   * qits-platform-access-mcp-service's base — the one central MCP server the qits CLI is served as
+   * (epic qits-630). Same shape as {@link #observabilityUrl} above: an environment-qualified default,
+   * because it too is an environment service rather than a platform-wide singleton.
+   */
+  @ConfigProperty(
+      name = "qits.workspaces.platform-mcp-url",
+      defaultValue = "http://${QITS_ENVIRONMENT:dev}-qits-platform-access-mcp-service:8080")
+  String platformMcpUrl;
+
+  /**
    * The registry host and path of the image every workspace container runs — the released toolchain
    * with the workspace-daemon as its entrypoint ({@code registry.dev.localhost:8080/qits/workspace}).
    * It is the fixed half of the reference: {@link #imageVersion} carries the calver tag, and {@link
@@ -837,9 +847,12 @@ public class WorkspaceContainerFactory {
     // MCP servers are owned by sibling services, not by the control-socket authority above.
     // Tell the daemon each address outright so a direct qits-workspaces control socket is never
     // mistaken for a gateway. The daemon adds the project/repository/workspace query scope later.
+    // QITS_PLATFORM_MCP_URL is the central qits CLI MCP server (epic qits-630) and carries no such
+    // scope — it is the one address every workspace container gets regardless of repository.
     container.env("QITS_REPOSITORY_MCP_URL", serviceBase(projectsUrl) + "/projects/mcp");
     container.env(
         "QITS_OBSERVABILITY_MCP_URL", serviceBase(observabilityUrl) + "/observability/mcp");
+    container.env("QITS_PLATFORM_MCP_URL", serviceBase(platformMcpUrl) + "/mcp");
     // The git base the daemon self-clones from, told outright — never derived. The daemon's
     // fallback derives the pre-split address (/artifacts/git off the dial-home authority) and
     // 404s on a platform whose git host is qits-githost: the first real workspace on the
