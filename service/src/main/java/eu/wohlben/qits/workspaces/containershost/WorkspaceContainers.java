@@ -189,7 +189,7 @@ public class WorkspaceContainers implements ContainerRuntime {
 
   @Override
   public String run(String repoId, String workspaceId, Long rowId, String branch, String parent) {
-    return run(repoId, workspaceId, rowId, branch, parent, null);
+    return run(repoId, workspaceId, rowId, branch, parent, null, null);
   }
 
   @Override
@@ -200,8 +200,20 @@ public class WorkspaceContainers implements ContainerRuntime {
       String branch,
       String parent,
       Consumer<String> onLine) {
+    return run(repoId, workspaceId, rowId, branch, parent, null, onLine);
+  }
+
+  @Override
+  public String run(
+      String repoId,
+      String workspaceId,
+      Long rowId,
+      String branch,
+      String parent,
+      String entityId,
+      Consumer<String> onLine) {
     String name = containerName(workspaceId, repoId);
-    EnsureRequest request = ensureRequest(repoId, workspaceId, rowId, branch, parent);
+    EnsureRequest request = ensureRequest(repoId, workspaceId, rowId, branch, parent, entityId);
     // The image the SPEC carries, not the factory's plain pin: a wrapper-main workspace runs the
     // editor image, and a provision log that named the other one would be the one line a reader
     // trusts to say which image a container is coming up on.
@@ -335,8 +347,19 @@ public class WorkspaceContainers implements ContainerRuntime {
    */
   EnsureRequest ensureRequest(
       String repoId, String workspaceId, Long rowId, String branch, String parent) {
+    return ensureRequest(repoId, workspaceId, rowId, branch, parent, null);
+  }
+
+  /** {@link #ensureRequest(String, String, Long, String, String)} carrying the subject entity id. */
+  EnsureRequest ensureRequest(
+      String repoId,
+      String workspaceId,
+      Long rowId,
+      String branch,
+      String parent,
+      String entityId) {
     WorkspaceContainer described =
-        containerFactory.forWorkspace(repoId, workspaceId, rowId, branch, parent);
+        containerFactory.forWorkspace(repoId, workspaceId, rowId, branch, parent, entityId);
 
     Set<String> shared = sharedVolumeNames();
     List<VolumeMount> own = new ArrayList<>();
@@ -491,7 +514,18 @@ public class WorkspaceContainers implements ContainerRuntime {
    */
   @Override
   public void start(String repoId, String workspaceId, Long rowId, String branch, String parent) {
-    run(repoId, workspaceId, rowId, branch, parent);
+    start(repoId, workspaceId, rowId, branch, parent, null);
+  }
+
+  @Override
+  public void start(
+      String repoId,
+      String workspaceId,
+      Long rowId,
+      String branch,
+      String parent,
+      String entityId) {
+    run(repoId, workspaceId, rowId, branch, parent, entityId, null);
   }
 
   @Override

@@ -164,6 +164,26 @@ class WorkspaceContainersTest {
   }
 
   @Test
+  void theEnsureRequestCarriesTheEntityIdBesideTheBranch() {
+    // Workspace.entityId (V8), threaded through the 6-argument ensureRequest exactly as
+    // branch/parent already are — the daemon names its agent sessions `<entityId>: <branch>` from
+    // the pair.
+    Spec spec =
+        adapter().ensureRequest(REPO, "work", 1L, "main", "0parent", "qits-614").spec();
+
+    assertEquals("qits-614", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_ID"));
+  }
+
+  @Test
+  void theEnsureRequestWithNoEntityIdLeavesItBlank() {
+    // The 5-argument overload is every existing caller, and it must still mean "no entity id" —
+    // blank, like QITS_WORKSPACE_DAEMON_BRANCH's own absence, never a null entry.
+    Spec spec = adapter().ensureRequest(REPO, "work", 1L, "main", "0parent").spec();
+
+    assertEquals("", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_ID"));
+  }
+
+  @Test
   void theAdminPostureAddsTheSocketAndChangesNothingElse() {
     Spec ordinary = adapter().ensureRequest(REPO, "work", 1L, "main", "0parent").spec();
     Spec admin =

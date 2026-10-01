@@ -1,0 +1,26 @@
+-- The qualified id qits-projects spells its subject with — `<project-slug>-<number>`, e.g.
+-- `qits-614` — beside the ticket_id/epic_id V5 already carries.
+--
+-- Why a THIRD column rather than deriving it from the two V5 already has: ticket_id/epic_id are
+-- the row ids in qits-projects' own store, and this context cannot turn one into the other's
+-- human-readable form — that grammar belongs to qits-projects, which is also the side that already
+-- composes it for its own doors. So qits-projects sends it once, at dispatch, exactly as it already
+-- sends ticket_id/epic_id, and this column is where it lands.
+--
+-- What it is FOR is read-side only: the in-container workspace-daemon names its agent sessions
+-- `<entityId>: <branch>` from it (QITS_WORKSPACE_DAEMON_ENTITY_ID, written by
+-- WorkspaceContainerFactory). It is stored on the row — not threaded through as a one-time launch
+-- argument — for the reason every other per-row container fact is a column here: the orchestrator
+-- has no start verb, so a stopped container is started by presenting its spec again, and a value
+-- missing on that path would make every resume a spec change and therefore a replacement.
+--
+-- Nullable, no backfill, no default, part of no constraint — the same non-decision V5's header
+-- already made for ticket_id/epic_id, for the same reasons: a workspace created by a person through
+-- the ad-hoc door names none of the three, and every workspace that predates this file simply has
+-- none.
+--
+-- NOT a foreign key, for the same reason ticket_id/epic_id are not: qits-projects owns the row this
+-- names, in its own database.
+--
+-- text, not varchar(n): qits-projects' format to shape, not this context's to constrain.
+alter table workspace add column entity_id text;

@@ -894,6 +894,41 @@ class WorkspaceContainerFactoryTest {
   }
 
   @Test
+  void theEntityIdRidesAsDaemonEnvBesideTheBranch() {
+    // The daemon names its agent sessions `<entityId>: <branch>` from this pair (Workspace.entityId,
+    // V8) — a column rather than a one-time launch argument, for QITS_WORKSPACE_DAEMON_BRANCH's own
+    // reason.
+    WorkspaceContainerFactory f = factory();
+    f.postures = StubInstance.of(editorRow(false));
+
+    WorkspaceContainer c =
+        f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main", "qits-614");
+
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_ID", "qits-614");
+  }
+
+  @Test
+  void theEntityIdIsBlankWhenTheRowHasNone() {
+    // The 5-argument overload is every existing caller, and it must still mean "no entity id" —
+    // never a null entry that reads differently from BRANCH's own absence.
+    WorkspaceContainer c = factory().forWorkspace("repo12345678abc", "work", 1L, "main", "0parent");
+
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_ID", "");
+  }
+
+  @Test
+  void theEntityIdIsBlankForTheEditor() {
+    // THE EDITOR IS EXEMPT, same as every other per-repository/per-branch fact: it belongs to no
+    // ticket and no epic, so it is told nothing about either.
+    WorkspaceContainerFactory f = factory();
+    f.postures = StubInstance.of(editorRow(true));
+
+    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null, "qits-614");
+
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_ID", "");
+  }
+
+  @Test
   void thePostureIsReproducibleAcrossEnsures() {
     // THE SPEC-HASH RULE, from the outside. The orchestrator has no start verb: a stopped container
     // is resumed by presenting its spec AGAIN under Recreate.ifChanged, so a spec that differs is a

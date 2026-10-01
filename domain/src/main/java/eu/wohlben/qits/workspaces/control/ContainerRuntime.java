@@ -119,6 +119,23 @@ public interface ContainerRuntime {
   }
 
   /**
+   * {@link #run} with the workspace's subject entity id (qits-projects' qualified id, e.g. {@code
+   * qits-614}) carried onto the daemon's env alongside {@code branch}/{@code parent} — see {@code
+   * Workspace.entityId}. The default ignores it and delegates to the tapped {@link #run} above, so
+   * nothing besides the real adapter has to know this overload exists.
+   */
+  default String run(
+      String repoId,
+      String workspaceId,
+      Long rowId,
+      String branch,
+      String parent,
+      String entityId,
+      java.util.function.Consumer<String> onLine) {
+    return run(repoId, workspaceId, rowId, branch, parent, onLine);
+  }
+
+  /**
    * The exec argv <em>prefix</em> up to and including the container name — the caller appends the
    * command to run. Same standing as {@link #exec}: no production caller, refused by the
    * implementation, kept because the fakes are its real implementors.
@@ -146,6 +163,16 @@ public interface ContainerRuntime {
    * the spec is derived from the workspace — so the arguments are {@link #run}'s. Throws on failure.
    */
   void start(String repoId, String workspaceId, Long rowId, String branch, String parent);
+
+  /**
+   * {@link #start} with the subject entity id carried the same way {@link #run}'s tapped overload
+   * carries it — see that overload's javadoc. The default ignores it and delegates to {@link
+   * #start} above.
+   */
+  default void start(
+      String repoId, String workspaceId, Long rowId, String branch, String parent, String entityId) {
+    start(repoId, workspaceId, rowId, branch, parent);
+  }
 
   /**
    * Gracefully stops a running container (SIGTERM + grace) <em>without</em> removing it, so the

@@ -224,6 +224,23 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public String epicId;
 
   /**
+   * The same subject's qualified id as qits-projects spells it — {@code <project-slug>-<number>},
+   * e.g. {@code qits-614} — beside {@link #ticketId}/{@link #epicId} ({@code V8}). Null for the same
+   * rows those two are null for.
+   *
+   * <p><b>Read-side only, and the reader is the daemon rather than this service.</b> The in-container
+   * workspace-daemon names its agent sessions {@code <entityId>: <branch>} from it
+   * ({@code QITS_WORKSPACE_DAEMON_ENTITY_ID}, written by {@link
+   * eu.wohlben.qits.workspaces.control.WorkspaceContainerFactory}), and it is a column — rather than
+   * an argument threaded through only the provision path — because the orchestrator has no start
+   * verb: a stopped container is started by presenting its spec again, and a value present on
+   * provision but missing on resume would make every resume a spec change and therefore a
+   * replacement.
+   */
+  @Column(name = "entity_id", columnDefinition = "text")
+  public String entityId;
+
+  /**
    * The Git refs this workspace's container may push, as a JSON array ({@code V6}). Read and written
    * through {@link eu.wohlben.qits.workspaces.control.GitRefs}, never by hand.
    *

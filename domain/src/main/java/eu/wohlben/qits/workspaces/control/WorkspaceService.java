@@ -268,6 +268,7 @@ public class WorkspaceService {
       Long rowId,
       String branch,
       String parentBranch,
+      String entityId,
       WorkspaceProcessTracker.Handle process) {
     // A fresh container gets a fresh credential, and it is minted BEFORE anything is started: a
     // commissioning failure must cost a launch that has not happened yet, never leave a container
@@ -279,7 +280,8 @@ public class WorkspaceService {
     }
     Consumer<String> runLines =
         process == null ? null : line -> process.appendLine("container", line);
-    String container = containers.run(repoId, workspaceId, rowId, branch, parentBranch, runLines);
+    String container =
+        containers.run(repoId, workspaceId, rowId, branch, parentBranch, entityId, runLines);
     if (process != null) {
       process.settleSegment("container", true);
       process.openSegment("clone");
@@ -1243,6 +1245,7 @@ public class WorkspaceService {
     WorkspaceSubject named = subject == null ? WorkspaceSubject.none() : subject.normalized();
     workspace.ticketId = named.ticketId();
     workspace.epicId = named.epicId();
+    workspace.entityId = named.entityId();
     // What the container may push (contract C4): the stated list, or its own branch. Never the
     // default branch: it moves only through a release request, never by an agent's push.
     String defaultBranch = defaultMainBranch(repo);
@@ -1815,12 +1818,13 @@ public class WorkspaceService {
   }
 
   /**
-   * What an ensure needs off the row: the branch to check and provision from, the parent, and
-   * whether this is the editor's row — the one workspace that has no branch and must not be read as
-   * having lost one. See {@link #ensureContainer(String, String, Long,
-   * WorkspaceProcessTracker.Handle)}.
+   * What an ensure needs off the row: the branch to check and provision from, the parent, whether
+   * this is the editor's row — the one workspace that has no branch and must not be read as having
+   * lost one — and the subject's entity id, carried along so the daemon's env is reproducible on the
+   * resume path exactly as {@code branch}/{@code parent} already are. See {@link
+   * #ensureContainer(String, String, Long, WorkspaceProcessTracker.Handle)}.
    */
-  private record BranchParent(String branch, String parent, boolean editor) {}
+  private record BranchParent(String branch, String parent, boolean editor, String entityId) {}
 
   /** A resolved workspace reduced to what the container/path machinery addresses it by. */
   private record WorkspaceRef(String repoId, String workspaceId) {}
@@ -2005,7 +2009,7 @@ public class WorkspaceService {
                     wt.runtimeError = null;
                     return null; // already running — nothing to provision
                   }
-                  return new BranchParent(wt.branch, wt.parent, wt.editor);
+                  return new BranchParent(wt.branch, wt.parent, wt.editor, wt.entityId);
                 });
     if (snapshot == null) {
       observeClientLiveness(repoId, workspaceId, rowId);
@@ -2032,7 +2036,8 @@ public class WorkspaceService {
         if (process != null) {
           process.openSegment("container-start");
         }
-        containers.start(repoId, workspaceId, rowId, snapshot.branch(), snapshot.parent());
+        containers.start(
+            repoId, workspaceId, rowId, snapshot.branch(), snapshot.parent(), snapshot.entityId());
         if (process != null) {
           process.appendLine(
               "container-start",
@@ -2106,7 +2111,14 @@ public class WorkspaceService {
     QuarkusTransaction.requiringNew()
         .run(() -> markRuntime(repoId, workspaceId, WorkspaceRuntimeStatus.PROVISIONING, null));
     try {
-      provisionContainer(repoId, workspaceId, rowId, snapshot.branch(), snapshot.parent(), process);
+      provisionContainer(
+          repoId,
+          workspaceId,
+          rowId,
+          snapshot.branch(),
+          snapshot.parent(),
+          snapshot.entityId(),
+          process);
       if (process != null) {
         process.finishProvision(true);
       }

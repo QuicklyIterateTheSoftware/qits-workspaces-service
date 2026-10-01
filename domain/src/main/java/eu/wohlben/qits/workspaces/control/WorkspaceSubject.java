@@ -18,10 +18,15 @@ package eu.wohlben.qits.workspaces.control;
  *
  * @param ticketId the ticket a dispatch was about, or {@code null}
  * @param epicId the epic a dispatch was about, or {@code null}
+ * @param entityId the subject's qualified id as qits-projects spells it — {@code
+ *     <project-slug>-<number>}, e.g. {@code qits-614} — or {@code null}. It names the same row
+ *     {@code ticketId}/{@code epicId} names, in the human-readable form qits-projects' own doors use;
+ *     this context resolves nothing from it and carries it for exactly one reason — see {@code
+ *     Workspace.entityId}
  */
-public record WorkspaceSubject(String ticketId, String epicId) {
+public record WorkspaceSubject(String ticketId, String epicId, String entityId) {
 
-  private static final WorkspaceSubject NONE = new WorkspaceSubject(null, null);
+  private static final WorkspaceSubject NONE = new WorkspaceSubject(null, null, null);
 
   /** No subject — the ad-hoc create, and every workspace that predates the fields. */
   public static WorkspaceSubject none() {
@@ -33,7 +38,7 @@ public record WorkspaceSubject(String ticketId, String epicId) {
    * a caller does not read as "this workspace is about a ticket whose id is nothing".
    */
   public WorkspaceSubject normalized() {
-    return new WorkspaceSubject(trimmed(ticketId), trimmed(epicId));
+    return new WorkspaceSubject(trimmed(ticketId), trimmed(epicId), trimmed(entityId));
   }
 
   private static String trimmed(String value) {

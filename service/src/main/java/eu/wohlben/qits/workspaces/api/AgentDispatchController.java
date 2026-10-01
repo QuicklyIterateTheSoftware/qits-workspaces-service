@@ -78,6 +78,10 @@ public class AgentDispatchController {
    * @param epicId the caller's epic this dispatch is about, the same way. Both are independent and
    *     both may be absent; a caller naming both is not refused, because "at most one" is a fact
    *     about the callers and not a rule this schema enforces
+   * @param entityId the subject's qualified id as qits-projects spells it — {@code
+   *     <project-slug>-<number>}, e.g. {@code qits-614}. Carried onto the workspace beside {@code
+   *     ticketId}/{@code epicId}, exactly the same way: optional, resolved by nothing here. Read
+   *     back by the in-container daemon to name its agent sessions {@code <entityId>: <branch>}
    * @param instruction the agent's first turn. It rides into the launch and is stored nowhere: this
    *     is the opening of one conversation, not the statement of the work
    * @param gitRefs the Git refs the workspace's container may push (contract C4): exact refs such
@@ -94,6 +98,7 @@ public class AgentDispatchController {
       String preamble,
       String ticketId,
       String epicId,
+      String entityId,
       String instruction,
       List<String> gitRefs) {}
 
@@ -132,7 +137,7 @@ public class AgentDispatchController {
         request.branch(),
         request.branchTree(),
         request.preamble(),
-        new WorkspaceSubject(request.ticketId(), request.epicId()),
+        new WorkspaceSubject(request.ticketId(), request.epicId(), request.entityId()),
         request.instruction(),
         request.gitRefs());
   }

@@ -406,6 +406,42 @@ public class AgentDispatchControllerTest {
   }
 
   /**
+   * {@code entityId} is qits-projects' qualified id for the same subject {@code ticketId} names —
+   * {@code <project-slug>-<number>}, e.g. {@code qits-614} — carried onto the row beside it so the
+   * in-container daemon can name its agent sessions {@code <entityId>: <branch>}. Not on
+   * {@link eu.wohlben.qits.workspaces.dto.WorkspaceDto}, so the row is read back directly rather than
+   * through the dispatch response.
+   */
+  @Test
+  public void aDispatchStoresTheEntityIdBesideTheTicket() throws Exception {
+    String repoId = seedRepository();
+    Map<String, Object> request = bodyForTicket(repoId, "ticket/name-the-entity", "t-55", "go");
+    request.put("entityId", "qits-614");
+
+    dispatch(request, 200);
+
+    Long rowId = workspaceIds.of(repoId, "ticket-name-the-entity");
+    String storedEntityId =
+        QuarkusTransaction.requiringNew()
+            .call(() -> workspaceRepository.findActiveById(rowId).orElseThrow().entityId);
+    assertThat(storedEntityId, is("qits-614"));
+  }
+
+  /** Absent is the ordinary case — qits-projects' dispatch doors send the three fields together. */
+  @Test
+  public void aDispatchWithNoEntityIdStoresNull() throws Exception {
+    String repoId = seedRepository();
+
+    dispatch(bodyForTicket(repoId, "ticket/no-entity", "t-56", "go"), 200);
+
+    Long rowId = workspaceIds.of(repoId, "ticket-no-entity");
+    String storedEntityId =
+        QuarkusTransaction.requiringNew()
+            .call(() -> workspaceRepository.findActiveById(rowId).orElseThrow().entityId);
+    assertNull(storedEntityId);
+  }
+
+  /**
    * The read back: qits-projects asks which workspaces name its rows, for a screenful of rows at
    * once. Both parameters repeat and both are optional, and an id nothing was dispatched onto
    * answers nothing rather than everything. Each row states its own status, so a caller reading one
