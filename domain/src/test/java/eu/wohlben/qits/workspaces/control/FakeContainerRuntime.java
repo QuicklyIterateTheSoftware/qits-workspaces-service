@@ -228,8 +228,35 @@ public class FakeContainerRuntime implements ContainerRuntime {
     }
   }
 
+  // Call order recorded for both stop() and rm(), newest last — "stop:<name>" / "rm:<name>" —
+  // the proof a caller stopped a container before removing it. A test that wants stop() to fail
+  // (to prove the caller tolerates it and removes anyway) names the container here first.
+  private final java.util.List<String> teardownCalls =
+      java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+  private final Set<String> throwOnStop = ConcurrentHashMap.newKeySet();
+
+  /** Test hook: the next {@link #stop} call against this container throws instead of pausing it. */
+  public void throwOnNextStop(String container) {
+    throwOnStop.add(container);
+  }
+
+  /** Every {@code stop:<name>} / {@code rm:<name>} call this fake saw, in call order. */
+  public java.util.List<String> teardownCalls() {
+    synchronized (teardownCalls) {
+      return java.util.List.copyOf(teardownCalls);
+    }
+  }
+
+  public void clearTeardownCalls() {
+    teardownCalls.clear();
+  }
+
   @Override
   public void stop(String container) {
+    teardownCalls.add("stop:" + container);
+    if (throwOnStop.remove(container)) {
+      throw new RuntimeException("fake stop failure for " + container);
+    }
     // Pause in place: keep the container present (in byName) and its /workspace clone on disk, just
     // mark it Exited — so a subsequent start() is verifiably lossless, mirroring `docker stop`.
     if (byName.containsKey(container)) {
@@ -263,6 +290,7 @@ public class FakeContainerRuntime implements ContainerRuntime {
 
   @Override
   public void rm(String container) {
+    teardownCalls.add("rm:" + container);
     stopped.remove(container);
     Info info = byName.remove(container);
     if (info == null) {
