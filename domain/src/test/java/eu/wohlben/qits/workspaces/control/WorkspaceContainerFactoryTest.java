@@ -80,6 +80,7 @@ class WorkspaceContainerFactoryTest {
     f.editorPort = 13339;
     f.projectsUrl = "http://qits-projects:8080/";
     f.observabilityUrl = "http://dev-qits-observability:8080/";
+    f.platformMcpUrl = "http://dev-qits-platform-access-mcp-service:8080/";
     f.network = "qits-net";
     f.claudeVolume = "qits_shared_dot_claude";
     f.claudeMount = "/claude-home";
@@ -208,6 +209,11 @@ class WorkspaceContainerFactoryTest {
         c,
         "QITS_OBSERVABILITY_MCP_URL",
         "http://dev-qits-observability:8080/observability/mcp");
+    // The one central MCP server (epic qits-630), the qits CLI served over HTTP.
+    assertEnv(
+        c,
+        "QITS_PLATFORM_MCP_URL",
+        "http://dev-qits-platform-access-mcp-service:8080/mcp");
     // The self-clone base, told rather than left to the daemon's pre-split derivation
     // (/artifacts/git), which 404s now that the git host is qits-githost under /git.
     assertEnv(c, "QITS_WORKSPACE_DAEMON_GIT_BASE_URL", "http://qits-platform-edge:8080/git");
@@ -343,6 +349,19 @@ class WorkspaceContainerFactoryTest {
     assertEnv(c, "GIT_AUTHOR_EMAIL", "qits-bot@example.com");
     assertEnv(c, "GIT_COMMITTER_NAME", "qits-bot");
     assertEnv(c, "GIT_COMMITTER_EMAIL", "qits-bot@example.com");
+  }
+
+  @Test
+  void aConfiguredPlatformMcpUrlOverridesTheDefault() {
+    WorkspaceContainerFactory f = factory();
+    f.platformMcpUrl = "http://qits-platform-access-mcp-service.example:9090";
+
+    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
+
+    assertEnv(
+        c,
+        "QITS_PLATFORM_MCP_URL",
+        "http://qits-platform-access-mcp-service.example:9090/mcp");
   }
 
   @Test
