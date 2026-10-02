@@ -145,8 +145,8 @@ public class AgentDispatchController {
       description = "No such repository. Nothing was created.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   // The operationId is the name a consumer pact uses for this door as the TRIGGER of the calls it
-  // makes downstream (pacts/qits-workspaces-qits-projects.json, `qits-trigger`). Renaming it
-  // renames the trigger there.
+  // makes downstream (pacts/qits-workspaces-service_qits-projects-service.json,
+  // `qits-trigger`). Renaming it renames the trigger there.
   @Operation(operationId = "dispatchAgent")
   public DispatchService.Dispatch dispatch(@Valid DispatchAgentRequest request) {
     return dispatches.dispatch(

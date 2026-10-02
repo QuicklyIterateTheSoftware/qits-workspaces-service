@@ -185,8 +185,8 @@ public class WorkspaceController {
 
   @POST
   // The operationId is the name a consumer pact uses for this door as the TRIGGER of the calls it
-  // makes downstream (pacts/qits-workspaces-qits-projects.json, `qits-trigger`). Renaming it
-  // renames the trigger there.
+  // makes downstream (pacts/qits-workspaces-service_qits-projects-service.json,
+  // `qits-trigger`). Renaming it renames the trigger there.
   @Operation(operationId = "createWorkspace")
   public CreateWorkspaceRequest.Response create(@Valid CreateWorkspaceRequest request) {
     var wt =
@@ -331,8 +331,8 @@ public class WorkspaceController {
       description = "No such workspace.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   // The operationId is the name a consumer pact uses for this door as the TRIGGER of the calls it
-  // makes downstream (pacts/qits-workspaces-qits-projects.json, `qits-trigger`). Renaming it
-  // renames the trigger there.
+  // makes downstream (pacts/qits-workspaces-service_qits-projects-service.json,
+  // `qits-trigger`). Renaming it renames the trigger there.
   @Operation(operationId = "mergeWorkspace")
   public MergeWorkspaceRequest.Response merge(
       @PathParam("id") Long id,

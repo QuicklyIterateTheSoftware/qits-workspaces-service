@@ -1558,8 +1558,9 @@ everything else — `archetype: SERVICE`, `backupUrl`, `declared`, the listing's
 the recording's). The deliberately malformed answers in `HttpRepositoryLookupTest` (no name, an
 unknown field, a 500, not JSON) stay hand-written: they are what the provider does not say.
 
-**Out: the consumer pact, `pacts/qits-workspaces-qits-projects.json`.** Consumer `qits-workspaces`,
-provider `qits-projects`, Pact V4. Three test classes in `service/…/wiring/`:
+**Out: the consumer pact, `pacts/qits-workspaces-service_qits-projects-service.json`.** Consumer
+`qits-workspaces-service`, provider `qits-projects-service`: repository names, so a frontend and a
+backend of one component stay apart. Pact V4. Three test classes in `service/…/wiring/`:
 
 - `ProjectsContract` — the table, one row per **(trigger, call)**. The trigger is the workspaces
   entry point that reaches `RepositoryLookup`, named by its openapi `operationId`, and it is what

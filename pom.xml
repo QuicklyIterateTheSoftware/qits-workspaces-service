@@ -102,8 +102,8 @@
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
         <qits.projects-golden-masters.version>2026.1001.154547</qits.projects-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
-             pact against qits-projects (pacts/qits-workspaces-qits-projects.json). An external
-             library, so it moves by hand, not by a maintenance bump. -->
+             pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json).
+             An external library, so it moves by hand, not by a maintenance bump. -->
         <pact-jvm.version>4.6.21</pact-jvm.version>
         <qits.maven.repository.url>http://registry.dev.localhost:8080/artifacts/maven/maven</qits.maven.repository.url>
         <maven.compiler.release>25</maven.compiler.release>
