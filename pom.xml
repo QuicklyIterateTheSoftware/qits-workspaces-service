@@ -65,8 +65,8 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1002.11614</qits.workspace-daemon-protocol.version>
-        <qits.workspace-editor-image.version>2026.1002.13205</qits.workspace-editor-image.version>
+        <qits.workspace-daemon-protocol.version>2026.1002.154925</qits.workspace-daemon-protocol.version>
+        <qits.workspace-editor-image.version>2026.1002.160125</qits.workspace-editor-image.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -74,13 +74,13 @@
              daemon that produces those files and the service that reads them off the shared volume
              after the container is gone. Framework-free — vertx-core and qits-commands are its only
              compile dependencies, and nothing here imports either. -->
-        <qits.coding-agents.version>2026.1001.205400</qits.coding-agents.version>
-        <qits.eventstream.version>2026.929.142419</qits.eventstream.version>
+        <qits.coding-agents.version>2026.1002.170855</qits.coding-agents.version>
+        <qits.eventstream.version>2026.1002.104319</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
-        <qits.db-core.version>2026.929.140626</qits.db-core.version>
-        <qits.arch-rules.version>2026.929.140626</qits.arch-rules.version>
-        <qits.auth-core.version>2026.929.140626</qits.auth-core.version>
-        <qits.containers-client.version>2026.930.164812</qits.containers-client.version>
+        <qits.db-core.version>2026.1002.70617</qits.db-core.version>
+        <qits.arch-rules.version>2026.1002.70617</qits.arch-rules.version>
+        <qits.auth-core.version>2026.1002.70617</qits.auth-core.version>
+        <qits.containers-client.version>2026.1002.105409</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
@@ -88,19 +88,19 @@
              beside the steps, OBSERVED rather than narrated. This version is the one that ships
              NetworkTaps.restAssured, which replaced the hand-copied StoryNetworkFilter this repo
              used to keep beside its IT. Nothing in src/main knows any of it exists. -->
-        <qits.userflows.version>2026.922.190204</qits.userflows.version>
+        <qits.userflows.version>2026.1002.72731</qits.userflows.version>
         <!-- The recording service mocks that IT boots against (the generic MockService plus
              idp.MockIdp), released out of libs/qits-integrations-quarkus like qits-db-core and
              qits-auth-core above — the same-string policy applies the day this repo consumes a
              newer reactor of it. -->
-        <qits.service-mock.version>2026.929.140626</qits.service-mock.version>
+        <qits.service-mock.version>2026.1002.70617</qits.service-mock.version>
         <!-- THE PROVIDER'S GOLDEN MASTERS (epic qits-546), test scope: qits-projects records what it
              answers for each provider state, and this repository's fakes and pact test read those
              recordings off the classpath (testing/contracts/GoldenMasters) instead of hand-written
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1001.154547</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1002.74001</qits.projects-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-qits-projects.json). An external
              library, so it moves by hand, not by a maintenance bump. -->
