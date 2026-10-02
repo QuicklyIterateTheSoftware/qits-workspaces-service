@@ -70,8 +70,8 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1001.141750</qits.workspace-daemon-protocol.version>
-        <qits.workspace-editor-image.version>2026.1002.2329</qits.workspace-editor-image.version>
+        <qits.workspace-daemon-protocol.version>2026.1002.11614</qits.workspace-daemon-protocol.version>
+        <qits.workspace-editor-image.version>2026.1002.13205</qits.workspace-editor-image.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -79,7 +79,7 @@
              daemon that produces those files and the service that reads them off the shared volume
              after the container is gone. Framework-free — vertx-core and qits-commands are its only
              compile dependencies, and nothing here imports either. -->
-        <qits.coding-agents.version>2026.1001.130950</qits.coding-agents.version>
+        <qits.coding-agents.version>2026.1001.205400</qits.coding-agents.version>
         <qits.eventstream.version>2026.929.142419</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.929.140626</qits.db-core.version>
@@ -105,7 +105,7 @@
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1001.130912</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1001.154547</qits.projects-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-qits-projects.json). An external
              library, so it moves by hand, not by a maintenance bump. -->
