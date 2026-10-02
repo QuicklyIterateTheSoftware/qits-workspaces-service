@@ -10,9 +10,10 @@ import java.util.function.UnaryOperator;
 
 /**
  * <b>The compare-or-rewrite switch for this module's committed contract files</b> — today the
- * consumer pact {@code pacts/qits-workspaces-qits-projects.json}. A copy of qits-projects'
- * {@code contracts/GoldenFiles} (the provider side of epic qits-546), so both ends of the contract
- * answer to the SAME switch: the two repositories share no test library to put it in.
+ * consumer pact {@code pacts/qits-workspaces-service_qits-projects-service.json}. A copy of
+ * qits-projects' {@code contracts/GoldenFiles} (the provider side of epic qits-546), so both ends
+ * of the contract answer to the SAME switch: the two repositories share no test library to put it
+ * in.
  *
  * <p>By default a test <em>compares</em>: the file it would write is checked against the committed
  * one and a difference fails with a unified diff. It rewrites only when asked, with {@code

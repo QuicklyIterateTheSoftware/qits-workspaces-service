@@ -89,8 +89,8 @@ public class EditorController {
   @APIResponse(responseCode = "201", description = "The editor was started by this call.")
   @APIResponse(responseCode = "200", description = "The editor was already there.")
   // The operationId is the name a consumer pact uses for this door as the TRIGGER of the calls it
-  // makes downstream (pacts/qits-workspaces-qits-projects.json, `qits-trigger`). Renaming it
-  // renames the trigger there.
+  // makes downstream (pacts/qits-workspaces-service_qits-projects-service.json,
+  // `qits-trigger`). Renaming it renames the trigger there.
   @Operation(operationId = "ensureEditor")
   public Response ensure() {
     EditorService.EditorSession session = editors.ensure();

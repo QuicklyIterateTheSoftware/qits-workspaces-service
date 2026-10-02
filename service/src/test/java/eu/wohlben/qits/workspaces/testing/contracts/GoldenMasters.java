@@ -66,11 +66,14 @@ import java.util.regex.Pattern;
  */
 public final class GoldenMasters {
 
-  /** The consumer, as the pact names it. */
-  public static final String CONSUMER = "qits-workspaces";
+  /** The consumer, as the pact names it: the repository name, never the bare application name. */
+  public static final String CONSUMER = "qits-workspaces-service";
 
-  /** The provider whose recordings these are. */
-  public static final String PROVIDER = "qits-projects";
+  /** The provider, as the pact names it: the repository name, never the bare application name. */
+  public static final String PROVIDER = "qits-projects-service";
+
+  /** The provider as the golden-master index names it: the application name. */
+  public static final String INDEX_PROVIDER = "qits-projects";
 
   /** Where the jar puts the tree on the classpath. */
   public static final String ROOT = "golden-masters/";
@@ -538,9 +541,13 @@ public final class GoldenMasters {
             "golden-masters/index.json is formatVersion " + loaded.path("formatVersion")
                 + "; GoldenMasters reads formatVersion 1");
       }
-      if (!PROVIDER.equals(loaded.path("provider").asText())) {
+      if (!INDEX_PROVIDER.equals(loaded.path("provider").asText())) {
         throw new IllegalStateException(
-            "golden-masters/index.json is " + loaded.path("provider") + "'s, not " + PROVIDER + "'s");
+            "golden-masters/index.json is "
+                + loaded.path("provider")
+                + "'s, not "
+                + INDEX_PROVIDER
+                + "'s");
       }
       index = loaded;
     }

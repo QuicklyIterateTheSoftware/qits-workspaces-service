@@ -1,17 +1,17 @@
 {
   "consumer": {
-    "name": "qits-workspaces"
+    "name": "qits-workspaces-service"
   },
   "interactions": [
     {
       "comments": {
         "references": {
           "qits-call": {
-            "app": "qits-projects",
+            "app": "qits-projects-service",
             "operationId": "getRepository"
           },
           "qits-trigger": {
-            "app": "qits-workspaces",
+            "app": "qits-workspaces-service",
             "kind": "operation",
             "operationId": "captureWorkspace"
           }
@@ -135,11 +135,11 @@
       "comments": {
         "references": {
           "qits-call": {
-            "app": "qits-projects",
+            "app": "qits-projects-service",
             "operationId": "getRepository"
           },
           "qits-trigger": {
-            "app": "qits-workspaces",
+            "app": "qits-workspaces-service",
             "kind": "operation",
             "operationId": "createWorkspace"
           }
@@ -263,11 +263,11 @@
       "comments": {
         "references": {
           "qits-call": {
-            "app": "qits-projects",
+            "app": "qits-projects-service",
             "operationId": "getRepository"
           },
           "qits-trigger": {
-            "app": "qits-workspaces",
+            "app": "qits-workspaces-service",
             "kind": "operation",
             "operationId": "dispatchAgent"
           }
@@ -391,11 +391,11 @@
       "comments": {
         "references": {
           "qits-call": {
-            "app": "qits-projects",
+            "app": "qits-projects-service",
             "operationId": "getRepository"
           },
           "qits-trigger": {
-            "app": "qits-workspaces",
+            "app": "qits-workspaces-service",
             "kind": "operation",
             "operationId": "dispatchAgent"
           }
@@ -467,11 +467,11 @@
       "comments": {
         "references": {
           "qits-call": {
-            "app": "qits-projects",
+            "app": "qits-projects-service",
             "operationId": "listProjectRepositories"
           },
           "qits-trigger": {
-            "app": "qits-workspaces",
+            "app": "qits-workspaces-service",
             "kind": "operation",
             "operationId": "dispatchAgent"
           }
@@ -732,11 +732,11 @@
       "comments": {
         "references": {
           "qits-call": {
-            "app": "qits-projects",
+            "app": "qits-projects-service",
             "operationId": "getRepository"
           },
           "qits-trigger": {
-            "app": "qits-workspaces",
+            "app": "qits-workspaces-service",
             "kind": "operation",
             "operationId": "ensureEditor"
           }
@@ -860,11 +860,11 @@
       "comments": {
         "references": {
           "qits-call": {
-            "app": "qits-projects",
+            "app": "qits-projects-service",
             "operationId": "listProjectRepositories"
           },
           "qits-trigger": {
-            "app": "qits-workspaces",
+            "app": "qits-workspaces-service",
             "kind": "operation",
             "operationId": "ensureEditor"
           }
@@ -1125,11 +1125,11 @@
       "comments": {
         "references": {
           "qits-call": {
-            "app": "qits-projects",
+            "app": "qits-projects-service",
             "operationId": "getRepository"
           },
           "qits-trigger": {
-            "app": "qits-workspaces",
+            "app": "qits-workspaces-service",
             "kind": "operation",
             "operationId": "mergeWorkspace"
           }
@@ -1257,6 +1257,6 @@
     "plugins": []
   },
   "provider": {
-    "name": "qits-projects"
+    "name": "qits-projects-service"
   }
 }

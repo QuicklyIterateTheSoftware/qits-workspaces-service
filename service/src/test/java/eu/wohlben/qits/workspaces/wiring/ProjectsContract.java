@@ -18,8 +18,8 @@ import java.util.Map;
 /**
  * <b>What qits-workspaces asks qits-projects, and why</b> — the one table both {@code
  * ProjectsConsumerPactTest} (each row against a pact mock server) and {@code ProjectsPactFileTest}
- * (the committed {@code pacts/qits-workspaces-qits-projects.json}) are built from, so the file and
- * the verified behaviour cannot drift apart.
+ * (the committed {@code pacts/qits-workspaces-service_qits-projects-service.json}) are built
+ * from, so the file and the verified behaviour cannot drift apart.
  *
  * <p><b>One row per (trigger, call).</b> {@link HttpRepositoryLookup} makes two calls — {@code
  * getRepository} behind {@code find}/{@code require} and {@code listProjectRepositories} behind

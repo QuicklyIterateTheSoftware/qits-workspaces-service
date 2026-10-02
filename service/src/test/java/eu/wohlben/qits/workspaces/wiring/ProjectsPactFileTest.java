@@ -28,9 +28,9 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * <b>The committed consumer pact, {@code pacts/qits-workspaces-qits-projects.json}</b>, and the
- * references every interaction in it must carry. Plain JUnit: building and writing a pact needs no
- * application.
+ * <b>The committed consumer pact, {@code
+ * pacts/qits-workspaces-service_qits-projects-service.json}</b>, and the references every
+ * interaction in it must carry. Plain JUnit: building and writing a pact needs no application.
  *
  * <p><b>Compare by default.</b> pact-jvm writes the pact {@link ProjectsContract} describes (to
  * {@code service/target/pacts/}, raw, for inspection); the test normalises it — interactions sorted
@@ -42,7 +42,7 @@ import org.junit.jupiter.api.Test;
  */
 public class ProjectsPactFileTest {
 
-  static final String FILE = "qits-workspaces-qits-projects.json";
+  static final String FILE = "qits-workspaces-service_qits-projects-service.json";
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
