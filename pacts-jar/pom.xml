@@ -30,7 +30,7 @@
          from the newest published jar's (`.config/qits/published-tree-changed.sh`). -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-workspaces-pacts-qits-projects</artifactId>
-    <version>2026.1002.5800</version>
+    <version>2026.1002.34905</version>
     <packaging>jar</packaging>
     <name>qits-workspaces :: pacts :: qits-projects</name>
     <description>qits-workspaces' consumer pact against qits-projects (pacts/qits-workspaces-qits-projects.json, Pact V4)</description>
