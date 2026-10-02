@@ -1597,13 +1597,12 @@ every key, so `GoldenMasters.interaction` puts the group there directly; no post
 written JSON. `ProjectsPactFileTest.everyInteractionCarriesBothReferences` is what notices if a
 pact-jvm upgrade stops writing it. `trigger` is required: a null one throws.
 
-**Published only on change.** `pacts-jar/` is a parentless module (qits-projects' `golden-masters-jar/`
-shape) packaging the file as `pacts/qits-workspaces-qits-projects.json`, released as
-`eu.wohlben.qits:qits-workspaces-pacts-qits-projects` by the second step of
-`.config/qits/release.yml` — and only when `.config/qits/published-tree-changed.sh` (copied from
-qits-projects) finds the `pacts/` tree differs from the newest published jar's. Step one of that file
-is the java-service archetype's release step verbatim; re-copy it when the archetype's changes.
-`pacts/` holds this one pact today — the gate compares the whole directory, so split it per provider
+**Published only on change.** `release.yml` declares
+`contracts: { application: qits-workspaces, pacts: { qits-projects: { from: pacts/, packages: [maven] } } }`.
+qits-ci packages `pacts/` itself as `eu.wohlben.qits:qits-workspaces-pacts-qits-projects` and
+publishes it only when the tree changed since the newest published jar — there is no repository-side
+gate or module anymore; `pacts-jar/` and `published-tree-changed.sh` are gone. `pacts/` holds this
+one pact today — the coordinate rule packages the whole `from:` directory, so split it per provider
 before a second pact lands.
 
 ## Tests

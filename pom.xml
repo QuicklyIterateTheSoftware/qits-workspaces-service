@@ -46,11 +46,6 @@
         <module>gitmirror</module>
         <module>domain</module>
         <module>service</module>
-        <!-- The consumer pact against qits-projects as a published jar (epic qits-546). Code-free
-             and PARENTLESS — this root is never published, so a child naming it would not resolve
-             for a consumer — and listed here only so the release commit's version bump reaches its
-             pom. See its own pom. -->
-        <module>pacts-jar</module>
     </modules>
 
     <properties>
