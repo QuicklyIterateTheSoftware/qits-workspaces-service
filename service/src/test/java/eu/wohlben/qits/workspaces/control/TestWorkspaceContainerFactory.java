@@ -96,6 +96,7 @@ public final class TestWorkspaceContainerFactory {
     f.editorPort = EDITOR_PORT;
     f.projectsUrl = "http://qits-projects:8080";
     f.observabilityUrl = "http://dev-qits-observability:8080";
+    f.platformMcpUrl = "http://dev-qits-platform-access-mcp-service:8080";
     f.network = "qits-net";
     f.claudeVolume = "qits_shared_dot_claude";
     f.claudeMount = "/claude-home";
