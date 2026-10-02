@@ -85,7 +85,15 @@ navigation-entries: services.details.Workspaces:8, daemons.details.Workspaces:8,
 # Nothing in the deployer is workspaces-specific: an application maps the generic variables in its
 # own config defaults, which the domain jar's META-INF/microprofile-config.properties does for the
 # first and the qits-eventstream jar does for the second.
-resources: postgresql:db, postgresql:eventstream:qits_workspaces_eventstream
+#
+# idp:client ASKS QITS-DEPLOYMENTS TO PROVISION THIS APPLICATION'S OWN QITS-IDP SERVICE CLIENT — id
+# `dev-qits-workspaces` (derived from env + application), roles `qits:system`, fixed in qits-idp
+# code. The deployer stores the secret the way it stores a database password, and injects
+# QITS_RESOURCE_IDP_URL, QITS_RESOURCE_IDP_CLIENT_ID and QITS_RESOURCE_IDP_CLIENT_SECRET, which the
+# `qits` oidc client reads before its old fallback keys.
+#
+# Ticket qits-162, epic qits-540 contract C3.
+resources: postgresql:db, postgresql:eventstream:qits_workspaces_eventstream, idp:client
 
 # THE STORAGE THIS SERVICE NEEDS, declared the same way the databases above are: the application
 # says what it needs, the deployer attaches it. Two entries, and they are different KINDS of thing.
