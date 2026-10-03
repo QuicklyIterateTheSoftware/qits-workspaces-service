@@ -73,6 +73,11 @@ class GoldenMasterRecordingTest {
               ProviderStates.A_WORK_ITEM_WITH_NO_WORKSPACES,
               "listWorkItemWorkspaces",
               "/workspaces/api/work/{improvementTicketId}/workspaces",
+              null),
+          new Interaction(
+              ProviderStates.NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE,
+              "listOpenWorkspaces",
+              "/workspaces/api/work/workspaces",
               null));
 
   private static final ObjectMapper JSON = new ObjectMapper();

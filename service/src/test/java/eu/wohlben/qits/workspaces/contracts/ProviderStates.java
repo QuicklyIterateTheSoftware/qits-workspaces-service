@@ -44,6 +44,8 @@ public class ProviderStates {
   public static final String A_PROJECT_WITH_WORKSPACES_BOUND_TO_WORK_ITEMS =
       "a project with workspaces bound to work items";
   public static final String A_WORK_ITEM_WITH_NO_WORKSPACES = "a work item with no workspaces";
+  public static final String NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE =
+      "no work item has an open workspace";
 
   static final String PROJECT_ID = "00000000-0000-4000-8000-00000000000f";
   static final String BUG_TICKET_ID = "00000000-0000-4000-8000-000000000001";
@@ -71,7 +73,10 @@ public class ProviderStates {
   @Inject WorkspaceRepository workspaces;
 
   public Set<String> names() {
-    return Set.of(A_PROJECT_WITH_WORKSPACES_BOUND_TO_WORK_ITEMS, A_WORK_ITEM_WITH_NO_WORKSPACES);
+    return Set.of(
+        A_PROJECT_WITH_WORKSPACES_BOUND_TO_WORK_ITEMS,
+        A_WORK_ITEM_WITH_NO_WORKSPACES,
+        NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE);
   }
 
   public Map<String, String> params(String state) {
@@ -83,6 +88,7 @@ public class ProviderStates {
     return switch (state) {
       case A_PROJECT_WITH_WORKSPACES_BOUND_TO_WORK_ITEMS -> boundToWorkItems();
       case A_WORK_ITEM_WITH_NO_WORKSPACES -> new Setup(params(), List.of());
+      case NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE -> noOpenWorkspace();
       default -> throw new IllegalArgumentException("No provider state named '" + state + "'");
     };
   }
@@ -112,6 +118,19 @@ public class ProviderStates {
     params.put("repositoryId", WRAPPER_REPOSITORY_ID);
     params.put("taskId", TASK_ID);
     return params;
+  }
+
+  /**
+   * No ACTIVE workspace bound to a work item, so the open list is empty. Other tests leave such
+   * rows in the shared store, so this state removes every one of them, not only its own.
+   */
+  private Setup noOpenWorkspace() {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaces.delete(
+                    "workId is not null and status = ?1", WorkspaceStatus.ACTIVE));
+    return new Setup(params(), List.of());
   }
 
   /**
