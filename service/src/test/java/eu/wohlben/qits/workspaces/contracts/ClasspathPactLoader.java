@@ -33,10 +33,8 @@ import java.util.stream.Stream;
  * <p>It asks the class loader for every {@code pacts/} directory, then lists each one: a {@code jar:}
  * URL by walking the jar's entries, a {@code file:} URL by listing the directory.
  *
- * <p><b>Finding nothing answers an empty list</b>, unlike qits-projects' loader, which fails. No
- * consumer has published a pact against qits-workspaces yet, so an empty classpath is the honest
- * state today. Once the first consumer pact jar is pinned in {@code service/pom.xml}, make this
- * throw again so a lost dependency cannot pass as "nothing to verify".
+ * <p><b>Finding nothing fails</b>, as qits-projects' loader does: the consumer pact jars are pinned
+ * in {@code service/pom.xml}, so a lost dependency must not pass as "nothing to verify".
  */
 public class ClasspathPactLoader implements PactLoader {
 
@@ -66,6 +64,16 @@ public class ClasspathPactLoader implements PactLoader {
       }
     } catch (IOException e) {
       throw new UncheckedIOException(e);
+    }
+    if (found.isEmpty()) {
+      throw new IllegalStateException(
+          "No consumer pact against "
+              + providerName
+              + " on the test classpath (looked for "
+              + DIRECTORY
+              + "*"
+              + suffix
+              + ") — the pinned consumer pact test dependencies are missing");
     }
     List<Pact> pacts = new ArrayList<>();
     for (URL url : found.values()) {
