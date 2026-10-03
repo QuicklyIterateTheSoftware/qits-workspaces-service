@@ -56,7 +56,7 @@ import java.util.Map;
  *       running its peers open on qits-net behind forward-auth is a supported posture. Turning it on
  *       is what puts this service's own machine credential in the diagram — the bearer sent to
  *       qits-containers, to qits-githost and to qits-projects, and the Basic pair the commission call
- *       presents to qits-idp, all one client now (service-client-identity-plan.md, C4). For git it is
+ *       presents to qits-idp, all one client now (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C4). For git it is
  *       not optional at all: {@code RepoMirror.platformArgv} <b>refuses to run any http(s) git
  *       argv</b> without a bearer to hang on {@code -c http.extraHeader}.
  *   <li><b>{@code qits.eventstream.enabled=true}</b> — the bus, which {@code %dev} and {@code %test}

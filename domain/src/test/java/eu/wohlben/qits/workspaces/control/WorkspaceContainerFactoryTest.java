@@ -427,7 +427,7 @@ class WorkspaceContainerFactoryTest {
     assertEnv(c, "GIT_CONFIG_GLOBAL", "/etc/qits-gitconfig");
     assertEnv(c, "QITS_GIT_AUTH_HOST", "qits-platform-edge:8080");
     assertEnv(c, "QITS_GIT_AUTH_TOKEN_URL", "http://qits-idp:8080/idp/token");
-    // One platform-wide audience for both (service-client-identity-plan.md, C4) — no longer
+    // One platform-wide audience for both (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C4) — no longer
     // qits-githost-specific or environment-qualified.
     assertEnv(c, "QITS_GIT_AUTH_AUDIENCE", "qits-platform");
     assertEnv(c, "QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL", "http://qits-idp:8080/idp/token");

@@ -72,9 +72,9 @@ public class ContainersClientProducer {
    * it for anything. Deliberately required — a deployment that deletes the shipped line fails to
    * start instead of quietly dropping the credential off every outbound call.
    *
-   * <p>{@code qits}, the one named client every outbound identity this service has now shares
-   * (service-client-identity-plan.md, C4) — not the unnamed default client, which stays disabled and
-   * exists only so {@code qits}'s own keys have an old env name to fall back to.
+   * <p>{@code qits}, the one named client every outbound identity this service has now shares (epic
+   * qits-540 dossier, 'Plan (as of 2026-09-13)', C4) — not the unnamed default client, which stays
+   * disabled and exists only because the container still carries env names that mint its map key.
    */
   @ConfigProperty(name = "quarkus.oidc-client.qits.client-enabled")
   boolean tokensEnabled;

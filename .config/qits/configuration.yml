@@ -11,10 +11,10 @@
 # Nothing on this side parses it.
 #
 # WHY THIS FILE EXISTS. qits-configuration marks a stored entry `orphaned` only when the application
-# has a declaration that does not list the key. With no file, nothing of qits-workspaces' is ever
-# marked, so the keys the one-client change (service-client-identity-plan.md, C4) left unused cannot
-# be found or removed. With this file, every stored entry it does not list shows as `orphaned`, and a
-# person can remove it in the configuration UI.
+# has a declaration that does not list the key. With no file, none of qits-workspaces' leftover
+# entries can be flagged, so none can be removed from the configuration UI. With it, every stored
+# qits-workspaces entry not listed below shows as orphaned — and those are exactly the keys nothing
+# reads any more (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C9 and C10).
 #
 # SO THE LIST MUST BE COMPLETE. Every key the service still reads is here — env keys and the /data
 # mount alike. A key left out is a key the UI invites somebody to delete. Add a key here in the
@@ -30,22 +30,14 @@
 # platform and refuses a stored value, so declaring one would turn every hand-set address into an
 # ignored row. That change belongs to the config-declarations work, one application at a time.
 #
-# THE `qits` CLIENT'S FALLBACK KEYS. `QUARKUS_OIDC_CLIENT_CLIENT_ID`, `_CREDENTIALS_SECRET`,
-# `_AUTH_SERVER_URL` and `_CLIENT_ENABLED` are the old unnamed client's env names, and the `qits`
-# client reads them as its fallback (`application.properties`). They stay declared until this
-# repository's `idp:client` cutover (service-client-identity-plan.md, C5) retires the fallback.
-#
-# WHAT IS DELIBERATELY NOT HERE, and therefore shows as `orphaned`:
-#   * QUARKUS_OIDC_CLIENT_GRANT_OPTIONS_CLIENT_AUDIENCE. The `qits` client asks for the fixed
-#     audience `qits-platform`; nothing reads this name.
-#   * QUARKUS_OIDC_CLIENT_GITHOST_* and QUARKUS_OIDC_CLIENT_PROJECTS_* (five each). The two old named
-#     clients, which no code injects. These are NOT inert: an environment variable alone mints the
-#     `quarkus.oidc-client.<name>` map key, and the environment source outranks the shipped
-#     properties, so ..._CLIENT_ENABLED=true genuinely overrides the `client-enabled=false` this
-#     service ships and Quarkus builds a client nobody asked for at boot. `application.properties`
-#     pins `discovery-enabled=false` and a `token-path` for both so that costs no idp round trip in
-#     front of the HTTP listener. They stay OUT of the list on purpose — showing as `orphaned` is
-#     how a person is invited to delete them, which is the only thing that retires those six lines.
+# DELIBERATELY NOT HERE (these show as orphaned):
+#   * QUARKUS_OIDC_CLIENT_* and QUARKUS_OIDC_CLIENT_{GITHOST,PROJECTS}_* (five each) — the old
+#     unnamed, `githost` and `projects` clients. The `qits` client reads QITS_RESOURCE_IDP_* alone,
+#     which the deployer injects because .config/qits/deployments.yml declares `idp:client`; nothing
+#     binds these. `application.properties` still neutralises all three names while the variables
+#     reach the container.
+#   * QITS_AUTH_MACHINE_AUDIENCE — the inbound audience is the platform's one, qits-platform, read by
+#     the shared guard from its own shipped `qits.auth.machine.platform-audience`.
 #   * QITS_GITHOST_AUDIENCE. The audience a workspace container asks for is the constant
 #     `WorkspaceContainerFactory.CONTAINER_TOKEN_AUDIENCE` now; the `qits.githost.audience` key is gone.
 #   * QITS_RESOURCE_*. The deployer injects those from its own resource registry, the one authority
@@ -104,28 +96,6 @@ keys:
     type: boolean
     description: "The machine gate. On, an inbound machine token is validated; off, there is no OIDC tenant at all."
 
-  env.QITS_AUTH_MACHINE_AUDIENCE:
-    type: string
-    description: "The audience an inbound machine token must carry. It is the one platform audience, qits-platform, which every token this platform's idp mints carries; the service ships that value and nothing needs to set this."
-
   env.QUARKUS_OIDC_AUTH_SERVER_URL:
     type: string
     description: "The issuer whose JWKS validates inbound tokens."
-
-  # --- the `qits` client's fallback: the old unnamed client's env names, until the C5 cutover ---
-
-  env.QUARKUS_OIDC_CLIENT_CLIENT_ENABLED:
-    type: boolean
-    description: "The switch for the `qits` client. Off, the service holds no secret, sends no bearer and commissions no container credential."
-
-  env.QUARKUS_OIDC_CLIENT_AUTH_SERVER_URL:
-    type: string
-    description: "The idp the `qits` client mints its bearer at, and the base of the commission API. QITS_RESOURCE_IDP_URL wins when set."
-
-  env.QUARKUS_OIDC_CLIENT_CLIENT_ID:
-    type: string
-    description: "The `qits` client's id, and the owner name on every container this service starts. QITS_RESOURCE_IDP_CLIENT_ID wins when set."
-
-  env.QUARKUS_OIDC_CLIENT_CREDENTIALS_SECRET:
-    type: string
-    description: "The `qits` client's secret. A secret: never written here, never logged. QITS_RESOURCE_IDP_CLIENT_SECRET wins when set."
