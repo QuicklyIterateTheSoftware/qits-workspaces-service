@@ -31,7 +31,7 @@
          and the mandatory -Dqits.variant=oauth|forwardauth|local auth profiles. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-workspaces</artifactId>
-    <version>2026.1002.180336</version>
+    <version>2026.1003.62137</version>
     <packaging>pom</packaging>
     <name>qits-workspaces</name>
 
@@ -65,8 +65,8 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1002.154925</qits.workspace-daemon-protocol.version>
-        <qits.workspace-editor-image.version>2026.1002.160125</qits.workspace-editor-image.version>
+        <qits.workspace-daemon-protocol.version>2026.1002.194431</qits.workspace-daemon-protocol.version>
+        <qits.workspace-editor-image.version>2026.1002.221812</qits.workspace-editor-image.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -100,7 +100,7 @@
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1002.74001</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1002.225915</qits.projects-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json).
              An external library, so it moves by hand, not by a maintenance bump. -->
