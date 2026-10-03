@@ -94,6 +94,38 @@
           }
         }
       ]
+    },
+    {
+      "name": "no work item has an open workspace",
+      "slug": "no-work-item-has-an-open-workspace",
+      "params": {
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "bugTicketQualifiedId": "contract-00000001-10",
+        "epicId": "00000000-0000-4000-8000-000000000006",
+        "featureId": "00000000-0000-4000-8000-000000000007",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000b",
+        "improvementTicketQualifiedId": "contract-00000001-11",
+        "projectId": "00000000-0000-4000-8000-00000000000f",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "taskId": "00000000-0000-4000-8000-000000000011"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listOpenWorkspaces",
+          "method": "GET",
+          "path": "/workspaces/api/work/workspaces",
+          "status": 200,
+          "file": "no-work-item-has-an-open-workspace/listOpenWorkspaces.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
     }
   ]
 }

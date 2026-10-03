@@ -108,4 +108,9 @@ class ConsumerPactVerificationTest {
   Map<String, String> aWorkItemWithNoWorkspaces() {
     return states.params(ProviderStates.A_WORK_ITEM_WITH_NO_WORKSPACES);
   }
+
+  @State(ProviderStates.NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE)
+  Map<String, String> noWorkItemHasAnOpenWorkspace() {
+    return states.params(ProviderStates.NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE);
+  }
 }
