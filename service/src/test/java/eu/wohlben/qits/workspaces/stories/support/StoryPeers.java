@@ -129,8 +129,16 @@ public final class StoryPeers {
   /** {@code EventsPublisher.EVENTS_PATH} — one PUT per published event, keyed by its id. */
   public static final String EVENTS_PATH = "/events/api/events/";
 
-  /** The owner every container call is scoped by: {@code quarkus.oidc-client.qits.client-id}. */
-  public static final String OWNER = "qits-workspaces";
+  /**
+   * The owner every container call is scoped by: {@code quarkus.oidc-client.qits.client-id}. The
+   * profile supplies no {@code QITS_RESOURCE_IDP_CLIENT_ID} (modelling "no deployer resource yet"
+   * is not this catalogue's job — {@code QitsOidcClientShippedConfigTest} and
+   * {@code PhantomOidcClientsNeutralisedTest} already pin that config resolution directly), so the
+   * launched process falls to the shipped literal default, {@code dev-qits-workspaces}
+   * (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C3/C5: the deployer's resource id is
+   * {@code <env>-qits-workspaces}, and {@code dev} is this file's own `QITS_ENVIRONMENT` fallback).
+   */
+  public static final String OWNER = "dev-qits-workspaces";
 
   /** The workload segment a workspace container lives under. */
   public static final String WORKLOAD = "workspace";
