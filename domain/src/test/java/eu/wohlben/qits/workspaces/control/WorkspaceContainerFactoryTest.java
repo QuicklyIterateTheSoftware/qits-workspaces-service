@@ -58,16 +58,6 @@ class WorkspaceContainerFactoryTest {
 
   private static final String EDITOR_IMAGE = EDITOR_IMAGE_REPO + ":" + EDITOR_IMAGE_VERSION;
 
-  /**
-   * The Maven Central pull-through the service ships, read from config rather than written down for
-   * the reason the image halves are: a deployment may blank it (the off switch) or move it, and a
-   * literal here would go red on a change that works as intended. {@link
-   * #shipsTheMirrorAsTheCentralDefault} pins the exact shipped value once; every other case reuses
-   * this so it asserts the factory injects what config carries.
-   */
-  private static final String MAVEN_CENTRAL_URL =
-      ConfigProvider.getConfig().getValue("qits.workspace.maven-central-url", String.class);
-
   private WorkspaceContainerFactory factory() {
     WorkspaceContainerFactory f = new WorkspaceContainerFactory();
     f.imageRepo = IMAGE_REPO;
@@ -86,19 +76,9 @@ class WorkspaceContainerFactoryTest {
     f.claudeMount = "/claude-home";
     f.mavenVolume = "qits_shared_m2";
     f.pnpmVolume = "qits_shared_pnpm";
-    // The shipped posture is the three registry keys BLANK, so the default factory here carries
-    // none, and the test that wants them sets them itself. (The npm proxy's blank means "derive
-    // from the domain", which the domain line below leaves empty.)
-    f.mavenRepositoryUrl = Optional.empty();
-    f.npmRegistryUrl = Optional.empty();
-    // No public domain, which is what the suites pin (%test.qits.workspace.domain is empty): with
-    // it the npm proxy is DERIVED, and the cases that want that derivation set a domain themselves.
+    // No public domain, which is what the suites pin (%test.qits.workspace.domain is empty): the
+    // cases that want QITS_DOMAIN handed on set a domain themselves.
     f.domain = Optional.empty();
-    // …and the fourth registry key is the one that DOES ship an address, so the default factory
-    // carries it: qits-platform-mirror's address is DERIVED from QITS_ENVIRONMENT rather than a
-    // deployment's own topology, which is exactly why a default is possible here and was not for the
-    // three above.
-    f.mavenCentralUrl = Optional.of(MAVEN_CENTRAL_URL);
     f.timezone = Optional.empty();
     // Mirrors the shipped default: a 4g memory cap with an 8g memory+swap total on every
     // container, pids/cpus off.
@@ -489,30 +469,58 @@ class WorkspaceContainerFactoryTest {
   }
 
   @Test
-  void tellsTheContainerWhereThePlatformRegistriesAreWhenItHasBeenTold() {
+  void handsTheContainerThePublicDomainAndNoRegistryUrl() {
+    // QITS_DOMAIN is the ONLY registry input: the workspace image derives
+    // https://registry.qits.<domain> and https://mirror.qits.<domain> from it in code. The name is
+    // the CONTRACT, asserted literally — the image's npm shim and Maven settings read it, and a
+    // rename sends every workspace build to the fallback domain silently.
     WorkspaceContainerFactory f = factory();
-    f.mavenRepositoryUrl = Optional.of("http://dev-qits-artifacts:8080/artifacts/maven/maven");
-    f.npmRegistryUrl = Optional.of("http://dev-qits-artifacts:8080/artifacts/npm/npm/");
-    // The npm mirror is never explicit; it derives from the domain whenever one is set.
     f.domain = Optional.of("wohlben.eu");
 
     WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
 
-    // The names are the CONTRACT and not an implementation detail, which is why they are asserted
-    // literally: the two npm keys are npm's own environment form (npm_config_*), which is what
-    // outranks the .npmrc every SPA commits, and the Maven key is what the image's profile snippet
-    // reads before it adds its -s. Rename any of the three here and a workspace goes back to
-    // resolving the public internet, silently, with a green build.
-    assertEquals(
-        "http://dev-qits-artifacts:8080/artifacts/maven/maven", c.env().get("QITS_MAVEN_REPOSITORY_URL"));
-    assertEquals(
-        "https://mirror.qits.wohlben.eu/npm/npmjs/", c.env().get("npm_config_registry"));
-    assertEquals(
-        "http://dev-qits-artifacts:8080/artifacts/npm/npm/",
-        c.env().get("QITS_WORKSPACE_NPM_REGISTRY_URL"));
-    // The name qits-containers would REFUSE. Asserted absent because the refusal is a 400 that
-    // fails the whole container launch, not a dropped variable — a workspace simply never starts.
-    assertNull(c.env().get("npm_config_@qits:registry"));
+    assertEnv(c, "QITS_DOMAIN", "wohlben.eu");
+    assertNoRegistryUrl(c);
+  }
+
+  @Test
+  void handsOnTheDomainTrimmed() {
+    WorkspaceContainerFactory f = factory();
+    f.domain = Optional.of("  wohlben.eu ");
+
+    assertEnv(
+        f.forWorkspace("repo12345678abc", "work", 1L, "main", null), "QITS_DOMAIN", "wohlben.eu");
+  }
+
+  @Test
+  void injectsNoDomainWhenNoneIsSet() {
+    // Unset or blank ⇒ nothing, and the image falls back to the platform's own domain. Never an
+    // empty value: that is not the same thing as absent to a shell's ${QITS_DOMAIN:-…}.
+    for (Optional<String> domain : List.of(Optional.<String>empty(), Optional.of(" "))) {
+      WorkspaceContainerFactory f = factory();
+      f.domain = domain;
+
+      WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
+
+      assertFalse(c.env().containsKey("QITS_DOMAIN"), "domain " + domain);
+      assertNoRegistryUrl(c);
+    }
+  }
+
+  /**
+   * No registry address of any spelling rides the spec: every one of them used to be an internal
+   * URL ({@code dev-qits-artifacts:8080}) that ended up committed in lockfiles.
+   */
+  private static void assertNoRegistryUrl(WorkspaceContainer c) {
+    for (String key : c.env().keySet()) {
+      assertFalse(
+          key.endsWith("_URL") && (key.contains("MAVEN") || key.contains("NPM")),
+          "registry URL variable injected: " + key);
+    }
+    assertNull(c.env().get("npm_config_registry"));
+    assertNull(c.env().get("QITS_MAVEN_REPOSITORY_URL"));
+    assertNull(c.env().get("QITS_MAVEN_CENTRAL_URL"));
+    assertNull(c.env().get("QITS_WORKSPACE_NPM_REGISTRY_URL"));
   }
 
   @Test
@@ -520,8 +528,6 @@ class WorkspaceContainerFactoryTest {
     // Every key on a container spec must be POSIX-shaped: qits-containers validates them and
     // answers 400 INVALID, which surfaces as a workspace stuck in FAILED with no container at all.
     WorkspaceContainerFactory f = factory();
-    f.mavenRepositoryUrl = Optional.of("http://a/maven");
-    f.npmRegistryUrl = Optional.of("http://c/npm/");
     f.domain = Optional.of("wohlben.eu");
 
     for (String key : f.forWorkspace("repo12345678abc", "work", 1L, "main", null).env().keySet()) {
@@ -532,106 +538,18 @@ class WorkspaceContainerFactoryTest {
   }
 
   @Test
-  void tellsTheContainerNothingAboutRegistriesItWasNotToldAbout() {
-    // Absent is a supported configuration, not a misconfiguration: a deployment that wires neither
-    // maven key, and has no public domain to derive the npm mirror from, gets a container identical
-    // to the one it got before these keys existed. Asserted because the alternative — a guessed
-    // address — would point builds at a host that does not exist on that deployment, which is worse
-    // than leaving them as they were.
-    WorkspaceContainer c = factory().forWorkspace("repo12345678abc", "work", 1L, "main", null);
-
-    assertNull(c.env().get("QITS_MAVEN_REPOSITORY_URL"));
-    assertNull(c.env().get("npm_config_registry"));
-    assertNull(c.env().get("npm_config_@qits:registry"));
-  }
-
-  @Test
-  void derivesTheNpmProxyFromThePublicDomainThroughTheEdge() {
-    // No deployment config at all: QITS_DOMAIN alone names the mirror's public host, under the edge
-    // grammar <app>.qits.<domain> — the platform project carries no environment label — and the
-    // npmjs cache sits at the root of that host. https, because this is the edge, not qits-net.
-    WorkspaceContainerFactory f = factory();
-    f.domain = Optional.of("wohlben.eu");
-
-    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
-
-    assertEnv(c, "npm_config_registry", "https://mirror.qits.wohlben.eu/npm/npmjs/");
-  }
-
-  @Test
-  void normalisesTheDomainTheWayQitsCiDoes() {
-    // Case and stray dots are the same domain; the value must still be one constant per process.
-    WorkspaceContainerFactory f = factory();
-    f.domain = Optional.of(" .Wohlben.EU. ");
-
-    assertEquals(Optional.of("https://mirror.qits.wohlben.eu/npm/npmjs/"), f.npmProxy());
-  }
-
-  @Test
-  void injectsNoNpmProxyWithoutADomain() {
-    // No domain ⇒ nothing, exactly as before the key existed. A dotless domain is a developer's
-    // `localhost`, which names no public host, so it counts as none.
-    for (Optional<String> domain :
-        List.of(Optional.<String>empty(), Optional.of(""), Optional.of("localhost"))) {
-      WorkspaceContainerFactory f = factory();
-      f.domain = domain;
-
-      WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
-
-      assertNull(c.env().get("npm_config_registry"), "domain " + domain);
-    }
-  }
-
-  @Test
-  void routesMavenCentralThroughTheMirrorByDefault() {
-    // The name is the CONTRACT, asserted literally for the reason the three above are: the workspace
-    // image's /etc/qits/maven-settings.xml activates its central-proxy profile on the PRESENCE of a
-    // non-empty QITS_MAVEN_CENTRAL_URL and mirrors the qits-central repository to its value. Rename
-    // it and every workspace build silently goes back out to repo1.maven.org, green.
-    WorkspaceContainer c = factory().forWorkspace("repo12345678abc", "work", 1L, "main", null);
-
-    assertEnv(c, "QITS_MAVEN_CENTRAL_URL", MAVEN_CENTRAL_URL);
-  }
-
-  @Test
-  void shipsTheMirrorAsTheCentralDefault() {
-    // The one place the shipped address is written down, and it is a STEP-PLANE address: a workspace
-    // container sits on qits-net, where the mirror answers under its own service alias on its own
-    // /mirror route. A published host name (mirror.<env>.<domain>) would resolve to nothing in
-    // there, and the /artifacts route belongs to the hosted registry, which does not proxy Central.
-    // QITS_ENVIRONMENT is unset in this suite, so the shipped default's own fallback applies: dev.
-    assertEquals("http://dev-qits-platform-mirror:8080/mirror/maven/central", MAVEN_CENTRAL_URL);
-  }
-
-  @Test
-  void tellsTheContainerNothingAboutCentralWhenTheKeyIsBlanked() {
-    // Blanking the key is the OFF SWITCH and the only one. Nothing injected ⇒ the image's profile
-    // never activates (it is a property-presence activation, and an empty environment value does not
-    // activate one — measured on Maven 3.9) ⇒ the build resolves Maven Central directly, exactly as
-    // it did before this key existed. Asserted because the alternative — injecting an empty string —
-    // looks identical in a deployment's env and is NOT the same thing to a settings file.
-    WorkspaceContainerFactory f = factory();
-    f.mavenCentralUrl = Optional.of("");
-
-    assertNull(
-        f.forWorkspace("repo12345678abc", "work", 1L, "main", null)
-            .env()
-            .get("QITS_MAVEN_CENTRAL_URL"));
-  }
-
-  @Test
-  void answersTheSameCentralAddressOnEveryEnsure() {
+  void answersTheSameDomainOnEveryEnsure() {
     // The value rides the SPEC, and a spec that differs from the running container's is a
-    // Recreate.ifChanged REPLACEMENT — so an address derived per call would turn every resume into a
+    // Recreate.ifChanged REPLACEMENT — so a value derived per call would turn every resume into a
     // destroyed container. Two calls for two workspaces on one factory must carry the identical
     // string, which is what "a constant off config" means here.
     WorkspaceContainerFactory f = factory();
+    f.domain = Optional.of("wohlben.eu");
 
     WorkspaceContainer first = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
     WorkspaceContainer second = f.forWorkspace("repo12345678abc", "other", 2L, "feature", null);
 
-    assertEquals(
-        first.env().get("QITS_MAVEN_CENTRAL_URL"), second.env().get("QITS_MAVEN_CENTRAL_URL"));
+    assertEquals(first.env().get("QITS_DOMAIN"), second.env().get("QITS_DOMAIN"));
   }
 
   // --- the admin posture ------------------------------------------------------------------------

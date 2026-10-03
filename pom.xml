@@ -31,7 +31,7 @@
          and the mandatory -Dqits.variant=oauth|forwardauth|local auth profiles. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-workspaces</artifactId>
-    <version>2026.1003.62137</version>
+    <version>2026.1003.85326</version>
     <packaging>pom</packaging>
     <name>qits-workspaces</name>
 
@@ -65,8 +65,8 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1002.194431</qits.workspace-daemon-protocol.version>
-        <qits.workspace-editor-image.version>2026.1002.221812</qits.workspace-editor-image.version>
+        <qits.workspace-daemon-protocol.version>2026.1003.54034</qits.workspace-daemon-protocol.version>
+        <qits.workspace-editor-image.version>2026.1003.71915</qits.workspace-editor-image.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -75,12 +75,12 @@
              after the container is gone. Framework-free — vertx-core and qits-commands are its only
              compile dependencies, and nothing here imports either. -->
         <qits.coding-agents.version>2026.1002.170855</qits.coding-agents.version>
-        <qits.eventstream.version>2026.1002.104319</qits.eventstream.version>
+        <qits.eventstream.version>2026.1003.44717</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
         <qits.arch-rules.version>2026.1002.70617</qits.arch-rules.version>
         <qits.auth-core.version>2026.1002.70617</qits.auth-core.version>
-        <qits.containers-client.version>2026.1002.105409</qits.containers-client.version>
+        <qits.containers-client.version>2026.1003.55209</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
@@ -105,7 +105,7 @@
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json).
              An external library, so it moves by hand, not by a maintenance bump. -->
         <pact-jvm.version>4.6.21</pact-jvm.version>
-        <qits.maven.repository.url>http://registry.dev.localhost:8080/artifacts/maven/maven</qits.maven.repository.url>
+        <qits.maven.repository.url>https://registry.qits.wohlben.eu/artifacts/maven/maven</qits.maven.repository.url>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
@@ -406,11 +406,24 @@
                              because a child <argLine> replaces this element rather than adding to
                              it. -->
                         <argLine>${test-jvm-memory.argLine}</argLine>
+                        <!-- The platform injects QITS_DOMAIN into CI steps and agent containers; a
+                             test JVM that inherits it picks up the live domain instead of the
+                             suite's domain-less default. Keep it out. -->
+                        <excludedEnvironmentVariables>
+                            <excludedEnvironmentVariable>QITS_DOMAIN</excludedEnvironmentVariable>
+                        </excludedEnvironmentVariables>
                     </configuration>
                 </plugin>
                 <plugin>
                     <artifactId>maven-failsafe-plugin</artifactId>
                     <version>${failsafe-plugin.version}</version>
+                    <configuration>
+                        <!-- Same reasoning as the surefire plugin above: don't let the platform's
+                             QITS_DOMAIN leak into the forked test JVM. -->
+                        <excludedEnvironmentVariables>
+                            <excludedEnvironmentVariable>QITS_DOMAIN</excludedEnvironmentVariable>
+                        </excludedEnvironmentVariables>
+                    </configuration>
                 </plugin>
                 <plugin>
                     <groupId>io.smallrye</groupId>

@@ -9,7 +9,6 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.ZoneId;
-import java.util.Locale;
 import java.util.Optional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -170,104 +169,29 @@ public class WorkspaceContainerFactory {
   String pnpmVolume;
 
   /**
-   * The platform's own package registries, as a workspace container must dial them — told outright,
-   * never derived, the same rule {@code qits.workspace.container-git-url} follows and for the same
-   * reason. Every qits pom and every SPA lockfile names the DEPLOYMENT HOST's published address
-   * ({@code registry.dev.localhost:8080}, {@code localhost:8081}); inside a container on qits-net
-   * that resolves to loopback, where nothing listens, so a build that is told nothing fails with
-   * "Blocked mirror" (Maven refuses plain http) or installs the public internet's packages instead
-   * of the platform's. CI has always been told these three addresses — {@code
-   * QITS_ARTIFACTS_MAVEN_REGISTRY_URL} and friends — and a workspace was not; that asymmetry is
-   * what this closes.
-   *
-   * <p><b>Absent is a supported configuration.</b> Unset, nothing is injected and the container
-   * behaves exactly as it did before: the image's profile snippet adds no {@code -s} without a
-   * Maven address, and npm keeps whatever the repository's own {@code .npmrc} says. A wrong guess
-   * would be worse than silence — there is no address to derive, because the artifacts alias
-   * carries the environment name and the npm proxy is a platform service that does not.
-   *
-   * <p>The npm proxy has since left this rule: it is reached through the public edge, whose name
-   * IS derivable from {@code QITS_DOMAIN} with nothing guessed — see {@link #npmProxy()}.
-   */
-  @ConfigProperty(name = "qits.workspace.maven-repository-url")
-  Optional<String> mavenRepositoryUrl;
-
-  /** The hosted {@code @qits} npm scope — qits-artifacts. See {@link #mavenRepositoryUrl}. */
-  @ConfigProperty(name = "qits.workspace.npm-registry-url")
-  Optional<String> npmRegistryUrl;
-
-  /**
    * The platform's public domain, {@code QITS_DOMAIN}, which qits-deployments writes into every
-   * service container — the same key qits-ci reads as {@code qits.ci.domain}. Used for one thing:
-   * the npm mirror's public origin, {@code https://mirror.qits.<domain>} ({@link #npmProxy()}).
+   * service container — the same key qits-ci reads as {@code qits.ci.domain}. Handed on to every
+   * workspace container under the same name, and it is the ONLY registry input a container gets:
+   * the workspace image derives every package host from it in code — {@code
+   * https://registry.qits.<domain>} (qits-artifacts: the {@code @qits} npm scope, the hosted Maven
+   * repository) and {@code https://mirror.qits.<domain>} (qits-mirror: the npmjs and Maven Central
+   * caches) — through the public edge, authenticated by the container's commissioned client pair.
+   * No URL is configured here and none is injected: a URL handed out by the deployment is how
+   * internal addresses ({@code dev-qits-artifacts:8080}) used to leak into committed lockfiles.
+   *
+   * <p>Unset or blank injects nothing, and the image falls back to the platform's own domain.
+   *
+   * <p><b>It rides the spec, so it obeys the spec-hash rule</b> the editor and credential blocks
+   * carry: environment is part of the spec, and a spec that differs from the running container's
+   * is a {@code Recreate.ifChanged} REPLACEMENT. The value is therefore a CONSTANT off config,
+   * never derived per call.
    */
   @ConfigProperty(name = "qits.workspace.domain")
   Optional<String> domain;
 
-  /** The platform's own project label in a public hostname, {@code <app>.qits.<domain>}. */
-  static final String PLATFORM_PROJECT = "qits";
-
-  /** qits-platform-mirror's host label under the platform project. */
-  static final String MIRROR_HOST = "mirror";
-
-  /** Where qits-platform-mirror serves its npmjs pull-through cache, at the root of its host. */
-  static final String NPM_PROXY_PATH = "/npm/npmjs/";
-
-  /**
-   * The npm registry a workspace installs public packages from, or empty to inject nothing.
-   *
-   * <p>Not configuration: it is always DERIVED from the public domain the way qits-ci derives
-   * every address it hands a runner ({@code RunnerAddresses.publicOrigin}): {@code
-   * https://mirror.qits.<domain>/npm/npmjs/} — through the edge, not the {@code qits-net} alias,
-   * because internal addressing is being retired platform-wide and a code default needs no
-   * deployment wiring. The edge authenticates the container by its commissioned client pair,
-   * which the workspace image's npm shim hands npm as that registry's {@code _auth}. The
-   * platform project carries no environment label, so {@code QITS_ENVIRONMENT} plays no part. A
-   * domain with no dot in it ({@code localhost}) or none at all names no public host, and then
-   * nothing is injected — the container behaves exactly as it did before either key existed.
-   *
-   * <p>Config, never per call, so the value stays a constant within one process and does not turn
-   * every ensure into a {@code Recreate.ifChanged} replacement.
-   */
-  Optional<String> npmProxy() {
-    return set(domain)
-        .map(value -> value.toLowerCase(Locale.ROOT).replaceAll("^\\.+|\\.+$", ""))
-        .filter(value -> value.indexOf('.') > 0)
-        .map(
-            value ->
-                "https://" + MIRROR_HOST + "." + PLATFORM_PROJECT + "." + value + NPM_PROXY_PATH);
-  }
-
   private static Optional<String> set(Optional<String> value) {
     return value == null ? Optional.empty() : value.map(String::trim).filter(v -> !v.isEmpty());
   }
-
-  /**
-   * Maven Central through qits-platform-mirror's pull-through cache — npm's proxy above, for the
-   * other package manager. Injected as {@code QITS_MAVEN_CENTRAL_URL}, which the workspace image's
-   * {@code /etc/qits/maven-settings.xml} activates its central-proxy profile on; blank injects
-   * nothing and a build resolves {@code repo1.maven.org} directly, exactly as before this key
-   * existed. That is the off switch, and it is the whole switch — the profile activates on a
-   * NON-EMPTY value (measured on Maven 3.9: an empty environment value does not activate a
-   * property-presence profile), so no call site needs a guard beyond the blank filter below.
-   *
-   * <p><b>Unlike the three keys above, this one SHIPS A DEFAULT.</b> Their addresses carry an
-   * environment name ({@code dev-qits-artifacts}), so a default would be a guess at the
-   * deployment's topology; qits-platform-mirror is a platform service deployed once, under a name
-   * with no environment in it, and a workspace container sits on qits-net — so the address is the
-   * same everywhere and nothing is being guessed. The mirror plane is on by default platform-wide
-   * (qits-ci ships its own two equivalents non-empty), and a workspace was the last builder still
-   * reaching Central directly.
-   *
-   * <p><b>It rides the spec, so it obeys the spec-hash rule</b> the editor and credential blocks
-   * carry: environment is part of the spec, and a spec that differs from the running container's is
-   * a {@code Recreate.ifChanged} REPLACEMENT. The value is therefore a CONSTANT off config, never
-   * derived per call — a per-call value would make every ensure a replacement. Adding it replaces
-   * each existing workspace container once, on its next ensure; {@code /workspace} is a volume and
-   * survives that.
-   */
-  @ConfigProperty(name = "qits.workspace.maven-central-url")
-  Optional<String> mavenCentralUrl;
 
   /**
    * Name prefix for the per-workspace {@code /workspace} volume — {@code prefix + workspaceId} (the
@@ -1106,31 +1030,12 @@ public class WorkspaceContainerFactory {
       container.volume(pnpmVolume, PNPM_MOUNT);
       container.env("npm_config_store_dir", PNPM_MOUNT + "/store");
     }
-    // The registries those caches fill FROM. Environment, not a file: npm ranks a project
-    // .npmrc above ~/.npmrc, so every SPA's committed .npmrc — which names the deployment host's
-    // port — would outrank anything written into HOME, and npm_config_* outranks both. Maven is
-    // told the address only; the -s that makes it usable lives in the image, because the settings
-    // file is the image's to own and the address is the deployment's.
-    mavenRepositoryUrl
-        .filter(url -> !url.isBlank())
-        .ifPresent(url -> container.env("QITS_MAVEN_REPOSITORY_URL", url));
-    // Maven Central through the platform's pull-through cache, the npm proxy's counterpart. The
-    // image's settings file already declares the mirror entry and the profile that switches Central
-    // over; this address is the only thing it is missing, and while it is missing the profile stays
-    // inert and the build resolves repo1.maven.org. Non-blank ⇒ mirrored, blank ⇒ direct.
-    mavenCentralUrl
-        .filter(url -> !url.isBlank())
-        .ifPresent(url -> container.env("QITS_MAVEN_CENTRAL_URL", url));
-    npmProxy().ifPresent(url -> container.env("npm_config_registry", url));
-    // NOT `npm_config_@qits:registry`, which is npm's own spelling and what this line used to be:
-    // qits-containers refuses that name outright (`Invalid environment key`) because its env keys
-    // are POSIX-shaped, and it is right to — `@` and `:` are not an environment variable's
-    // business. The container spec therefore carries the ADDRESS under a POSIX name and the
-    // workspace image's npm shim spells the scope, which is also the only place that outranks the
-    // .npmrc every SPA commits. Renaming this breaks that shim silently: keep the two matched.
-    npmRegistryUrl
-        .filter(url -> !url.isBlank())
-        .ifPresent(url -> container.env("QITS_WORKSPACE_NPM_REGISTRY_URL", url));
+    // The registries those caches fill FROM, as the one input they are derived from. The image's
+    // npm shim and Maven settings compose https://registry.qits.<domain> and
+    // https://mirror.qits.<domain> from QITS_DOMAIN and authenticate them, so a lockfile written
+    // in here only ever names those public hosts. No *_URL variable rides alongside it: a URL is
+    // configuration the deployment can get wrong, and an internal one ends up committed.
+    set(domain).ifPresent(value -> container.env("QITS_DOMAIN", value));
     // The per-workspace /workspace volume: the workspace's checkout, persisted across container
     // recreation instead of dying with the writable layer. The first mount populates the empty
     // volume from the image's world-writable /workspace (docker copies the image dir's contents AND

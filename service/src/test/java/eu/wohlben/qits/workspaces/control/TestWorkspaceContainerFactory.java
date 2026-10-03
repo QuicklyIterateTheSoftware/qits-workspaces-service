@@ -46,13 +46,6 @@ public final class TestWorkspaceContainerFactory {
   /** The loopback port the fixture's editor is told to serve on — the shipped default. */
   public static final int EDITOR_PORT = 13339;
 
-  /**
-   * The Maven Central pull-through every fixture container is told about. Invented like the image
-   * reference, and present rather than empty because this key ships non-empty: a fixture with it
-   * blank would model the off switch instead of the shipped posture.
-   */
-  public static final String MAVEN_CENTRAL_URL = "http://mirror.test:8080/mirror/maven/central";
-
   private TestWorkspaceContainerFactory() {}
 
   /** A factory with the per-workspace {@code /workspace} volume on — the shipped default. */
@@ -102,19 +95,9 @@ public final class TestWorkspaceContainerFactory {
     f.claudeMount = "/claude-home";
     f.mavenVolume = "qits_shared_m2";
     f.pnpmVolume = "qits_shared_pnpm";
-    // The registry addresses a deployment tells the factory. Empty here, which is the shipped
-    // posture, and enough to keep every container this
-    // builder makes identical to one built before these keys existed.
-    f.mavenRepositoryUrl = Optional.empty();
-    f.npmRegistryUrl = Optional.empty();
-    // No public domain, the suites' pinned posture: without one the npm proxy is not derived
-    // (https://mirror.qits.<domain>/npm/npmjs/), so containers here carry no npm_config_registry.
+    // No public domain, the suites' pinned posture: containers here carry no QITS_DOMAIN, the only
+    // registry input a workspace container is ever handed.
     f.domain = Optional.empty();
-    // Maven Central's pull-through, which unlike the three above IS shipped non-empty — the mirror
-    // is a platform service with no environment in its name, so the address is the same on every
-    // deployment. Set here so this fixture carries the shipped posture; the address itself is
-    // invented, for the reason the image reference above is.
-    f.mavenCentralUrl = Optional.of(MAVEN_CENTRAL_URL);
     f.workspaceVolumePrefix = "qits_workspace_";
     f.persistWorkspace = persistWorkspace;
     f.timezone = Optional.of("UTC");
