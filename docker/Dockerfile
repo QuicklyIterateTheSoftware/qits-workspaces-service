@@ -223,7 +223,7 @@ RUN --mount=type=secret,id=qits-client-id \
     QITS_MAVEN_REPOSITORY_URL="https://registry.qits.$QITS_DOMAIN/artifacts/maven/maven" \
     QITS_MAVEN_CENTRAL_URL="https://mirror.qits.$QITS_DOMAIN/mirror/maven/central" \
     ./mvnw -B -ntp -s .qits-maven-settings.xml -pl service -am package -Dnative -DskipTests \
-      -Dqits.maven.repository.url="$QITS_MAVEN_REPOSITORY_URL" \
+      -Dqits.maven.repository.url="https://registry.qits.$QITS_DOMAIN/artifacts/maven/maven" \
       -Dquarkus.native.native-image-xmx=4g \
       -Dquarkus.quinoa.package-manager-install=true \
       -Dquarkus.quinoa.package-manager-install.node-version=22.22.0 \
