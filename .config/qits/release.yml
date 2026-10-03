@@ -4,5 +4,5 @@ artifacts:
 contracts:
   application: qits-workspaces
   pacts:
-    qits-projects: { from: pacts/, packages: [maven] }
+    qits-projects-service: { packages: [maven] }
 userflows: qits-workspaces
