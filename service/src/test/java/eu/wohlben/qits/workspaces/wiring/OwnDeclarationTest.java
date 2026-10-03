@@ -125,7 +125,8 @@ class OwnDeclarationTest {
     // report as orphaned forever, which is exactly the confusion the rest of this test prevents.
     // QITS_DOMAIN is the third, for the identical reason: qits-deployments writes the platform's
     // public domain into every container, and the shipped config reads it (qits.workspace.domain) to
-    // derive the npm mirror's edge address rather than being told it. qits-ci reads it the same way.
+    // hand on to every workspace container, whose image derives its registry hosts from it. qits-ci
+    // reads it the same way.
     Set<String> declared = new TreeSet<>(declaredKeys());
     Set<String> missing = new TreeSet<>();
     for (String file : CONFIG_FILES) {

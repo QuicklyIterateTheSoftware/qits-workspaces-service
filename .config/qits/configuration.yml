@@ -94,14 +94,6 @@ keys:
     type: string
     description: "The git host address a workspace container clones and pushes through."
 
-  env.QITS_WORKSPACE_MAVEN_REPOSITORY_URL:
-    type: string
-    description: "The platform Maven repository handed to each workspace container."
-
-  env.QITS_WORKSPACE_NPM_REGISTRY_URL:
-    type: string
-    description: "The platform npm registry (the @qits scope) handed to each workspace container."
-
   env.QITS_WORKSPACE_GIT_HOST:
     type: string
     description: "The host name workspace daemons dial back on for the control socket. It must name qits-workspaces itself; the default `auto` is wrong in a container."
