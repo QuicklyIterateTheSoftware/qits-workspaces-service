@@ -1260,6 +1260,11 @@ public class WorkspaceService {
     if (workspaceRepository.existsActiveByRepositoryAndBranch(repoId, newBranch)) {
       throw new ConflictException("Branch already has an active workspace: " + newBranch);
     }
+    // At most one ACTIVE workspace per work item (uq_workspace_active_work, V11). Checked here,
+    // before the branch is pushed, so a refused create leaves no branch behind. The index is what
+    // holds under a race.
+    WorkspaceSubject named = subject == null ? WorkspaceSubject.none() : subject.normalized();
+    refuseSecondActiveForWork(named.workId());
 
     // Only the durable state is created here: the branch, PUSHED to the git host (so ahead/behind
     // and the merge-tree conflict probe both have a ref to read, and so the ordinary post-receive
@@ -1289,7 +1294,6 @@ public class WorkspaceService {
     workspace.admin = admin;
     // What this workspace is for, where a dispatch said so. Blanks normalise to null: an empty id
     // is not a subject, and a row claiming one would render a link to nothing.
-    WorkspaceSubject named = subject == null ? WorkspaceSubject.none() : subject.normalized();
     workspace.ticketId = named.ticketId();
     workspace.epicId = named.epicId();
     workspace.entityId = named.entityId();
@@ -1322,6 +1326,13 @@ public class WorkspaceService {
     workspaceMetadata.write(repoId, metadata);
 
     return workspace;
+  }
+
+  /** 409 when the work item already has an ACTIVE workspace; nothing for a null work id. */
+  private void refuseSecondActiveForWork(String workId) {
+    if (workspaceRepository.existsActiveByWorkId(workId)) {
+      throw new ConflictException("Work item already has an active workspace: " + workId);
+    }
   }
 
   /**
@@ -1492,6 +1503,8 @@ public class WorkspaceService {
               if (workspaceRepository.existsActiveByRepositoryAndBranch(repoId, newBranch)) {
                 throw new ConflictException("Branch already has an active workspace: " + newBranch);
               }
+              refuseSecondActiveForWork(
+                  subject == null ? null : subject.normalized().workId());
             });
     createBranchTree(root, newBranch, parentBranch);
     return QuarkusTransaction.requiringNew()

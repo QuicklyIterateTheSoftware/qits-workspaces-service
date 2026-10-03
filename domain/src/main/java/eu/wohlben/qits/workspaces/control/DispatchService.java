@@ -335,19 +335,35 @@ public class DispatchService {
       // repository's main branch, and the goal becomes the preamble. Never adopting: a dispatch
       // onto a branch that exists but has no workspace should create the ref it was told to work
       // on, and a typo must fail loudly rather than silently attach to somebody else's branch.
-      Workspace created =
-          workspaces.createWorkspace(
-              repositoryId,
-              WorkspaceService.toWorkspaceSlug(target),
-              repository.mainBranch(),
-              target,
-              preamble,
-              false,
-              branchTree,
-              false,
-              subject == null ? WorkspaceSubject.none() : subject,
-              stated);
-      rowId = created.id;
+      try {
+        Workspace created =
+            workspaces.createWorkspace(
+                repositoryId,
+                WorkspaceService.toWorkspaceSlug(target),
+                repository.mainBranch(),
+                target,
+                preamble,
+                false,
+                branchTree,
+                false,
+                subject == null ? WorkspaceSubject.none() : subject,
+                stated);
+        rowId = created.id;
+      } catch (RuntimeException refused) {
+        // Two dispatches for one work item can both find nothing above and both create. The loser
+        // is refused (the pre-check's 409, or uq_workspace_active_work at commit). When the
+        // winner's workspace is in this repository, answer it, as a re-press would. Otherwise the
+        // refusal stands.
+        Optional<Long> winner = activeForWork(repositoryId, workId);
+        if (winner.isEmpty()) {
+          throw refused;
+        }
+        LOG.infof(
+            "dispatch for work item %s lost a race to workspace %d; answering that one",
+            workId, winner.get());
+        rowId = winner.get();
+        fresh = false;
+      }
     }
     if (facts != null) {
       storeFacts(rowId, facts);

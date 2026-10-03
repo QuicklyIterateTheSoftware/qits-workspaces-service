@@ -73,7 +73,8 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
 
   /**
    * The active workspace bound to this work item ({@code Workspace.workId}) in this repository, if
-   * any. The newest one, should there ever be two: nothing in the schema stops it.
+   * any. There is at most one in all repositories together ({@code uq_workspace_active_work},
+   * {@code V11}).
    */
   public Optional<Workspace> findActiveByRepositoryAndWorkId(String repositoryId, String workId) {
     if (workId == null || workId.isBlank()) {
@@ -94,6 +95,18 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
    */
   public List<Workspace> findOpenBoundToWork() {
     return list("status = ?1 and workId is not null order by id", WorkspaceStatus.ACTIVE);
+  }
+
+  /**
+   * Whether this work item already has an active workspace, in any repository — see {@code
+   * uq_workspace_active_work} ({@code V11}). False for a null or blank id: those are not
+   * constrained.
+   */
+  public boolean existsActiveByWorkId(String workId) {
+    if (workId == null || workId.isBlank()) {
+      return false;
+    }
+    return count("workId = ?1 and status = ?2", workId.trim(), WorkspaceStatus.ACTIVE) > 0;
   }
 
   /** Whether {@code branch} already has an active workspace — see {@link
