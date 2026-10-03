@@ -1668,19 +1668,13 @@ public class WorkspaceService {
 
       `qits events` and `qits observe` are the other two an agent reaches for; `qits --help` lists everything, and `qits help skill` prints the whole surface as a SKILL.md. The credential is `qits:agent`: reads answer, and an operator write comes back `403 - this credential is qits:agent, which reads but does not write`. That is the credential doing its job, not a misconfiguration — a write that matters goes through the release request above, or through a person.
 
-      The three shell helpers keep their jobs: `qits-git-credential` is git's credential helper, `qits-token qits-platform` mints the bearer for a hand-written `curl`, and `qits-npm-ci` is the lockfile-safe `npm ci`.
+      The two shell helpers keep their jobs: `qits-git-credential` is git's credential helper, and `qits-token qits-platform` mints the bearer for a hand-written `curl`.
 
       ## Toolchain notes
 
-      - Run builds in a login shell (`bash -lc '...'`): `/etc/profile.d/qits-workspace.sh` gives the container uid a passwd entry (embedded-postgres suites need it) and adds `-s /etc/qits/maven-settings.xml` to `MAVEN_ARGS`, which is what lets Maven reach the platform's plain-http repository. `QITS_MAVEN_REPOSITORY_URL` names it; a pom's `registry.dev.localhost` default is dead in here, so pass `-Dqits.maven.repository.url=$QITS_MAVEN_REPOSITORY_URL` where a build asks for it. The local repository is `/caches/m2` (`MAVEN_OPTS`). The same settings file routes **Maven Central** through the platform's pull-through cache whenever `QITS_MAVEN_CENTRAL_URL` is set (it is, by default); unset or empty and Central is dialled directly, which is the only difference.
-      - `npm` on PATH is a shim that points the `@qits` scope at the platform registry and the rest at the npm mirror (`$npm_config_registry`, reached through the public edge at `https://mirror.qits.<domain>/npm/npmjs/`; the shim authenticates it with this container's commissioned client pair, so no `.npmrc` token is needed). The one thing it cannot fix is a `package-lock.json` whose `resolved` URLs name a developer host (`mirror.dev.localhost:8080`, `localhost:8082`): npm fetches tarballs by that URL and never asks the registry. Do what CI does — swap the origins and keep the paths (the integrity hashes keep it safe), install, then restore the lockfile before committing anything:
-
-            sed -i -E -e 's#("resolved": ")https?://[^/"]+#\\1'"$(printf '%s' "$npm_config_registry" | sed -E 's#^(https?://[^/]+).*#\\1#')"'#' -e 's#("resolved": ")https?://[^/"]+(/artifacts/npm/npm/)#\\1'"$(printf '%s' "$QITS_WORKSPACE_NPM_REGISTRY_URL" | sed -E 's#^(https?://[^/]+).*#\\1#')"'\\2#' package-lock.json
-            npm ci --no-audit --no-fund
-            git checkout -- package-lock.json
-
-        Order matters: the broad mirror swap first, the path-anchored `@qits` correction second. A service's `mvn verify` runs that same install inside `service/src/main/webui` (Quinoa), so install there first and the package step passes.
-      - qits-projects, CI and every other platform API sit on the platform network at the aliases above; the public edge (`https://...`) wants a browser session, not this container's bearer — the npm mirror is the one exception, and the `npm` shim handles it.
+      - Run builds in a login shell (`bash -lc '...'`): `/etc/profile.d/qits-workspace.sh` gives the container uid a passwd entry (embedded-postgres suites need it) and adds `-s /etc/qits/maven-settings.xml` to `MAVEN_ARGS`. The local repository is `/caches/m2` (`MAVEN_OPTS`).
+      - Package registries are derived from `QITS_DOMAIN` and nothing else: the platform's own packages (the `@qits` npm scope, the hosted Maven repository) at `https://registry.qits.<domain>`, npmjs and Maven Central through the caches at `https://mirror.qits.<domain>`. The `npm` shim on PATH and the Maven settings file authenticate both with this container's commissioned client pair, so no `.npmrc` token and no `-D` repository override is needed — plain `npm ci` / `npm install` and `mvn` just work. A lockfile committed from here only ever names those public https hosts; never rewrite its `resolved` URLs. A service's `mvn verify` runs the same install inside `service/src/main/webui` (Quinoa).
+      - qits-projects, CI and every other platform API sit on the platform network at the aliases above; the public edge (`https://...`) wants a browser session, not this container's bearer — the package registries are the exception, and the `npm` shim and Maven settings handle them.
       """;
 
   /**
