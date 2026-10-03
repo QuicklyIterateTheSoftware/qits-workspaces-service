@@ -76,7 +76,7 @@ import java.util.concurrent.Executors;
  * <h2>The credential is minted ONCE, and that is why one diagram carries it</h2>
  *
  * <p>quarkus-oidc-client caches the token it acquires and re-mints only when it expires, and this
- * service has <b>one</b> named client, {@code qits} (service-client-identity-plan.md, C4) — the
+ * service has <b>one</b> named client, {@code qits} (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C4) — the
  * bearer sent to qits-containers, to qits-githost and to qits-projects, and the Basic pair the
  * commission call presents to qits-idp, all sharing the one credential. The token here says {@code
  * expires_in: 3600}, so the one mint lands in the first story that needs it and never again — and

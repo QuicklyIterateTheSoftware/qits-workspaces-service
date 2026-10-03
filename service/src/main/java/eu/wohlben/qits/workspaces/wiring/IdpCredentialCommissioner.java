@@ -61,7 +61,7 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
    * rather than quietly stop commissioning.
    *
    * <p>{@code qits}, the one named client every outbound identity this service has now shares
-   * (service-client-identity-plan.md, C4). This class never asks {@code quarkus-oidc-client} for a
+   * (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C4). This class never asks {@code quarkus-oidc-client} for a
    * token on that client — the idp's commissioning door takes HTTP Basic, not a bearer — so it reads
    * the client's id and secret directly rather than injecting the client bean itself.
    */

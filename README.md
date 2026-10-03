@@ -240,7 +240,7 @@ partial set cannot authenticate and is never a valid container specification. Th
 `QITS_WORKSPACE_DAEMON_API_TOKEN`, which points the **other** way — that one is the host proving
 itself to the in-container API, this set is the container proving itself to the platform. The daemon
 uses the token URL and audience with its client pair to authenticate its dial-home control socket;
-Git asks for the same one platform audience now (service-client-identity-plan.md, C4) rather than a
+Git asks for the same one platform audience now (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C4) rather than a
 qits-githost-specific one. The socket takes `qits:system` or `qits:agent`; a token with `qits:agent`
 alone opens only the socket of the workspace whose commissioned client is its `sub`, and any other
 path is a 403.
@@ -296,12 +296,12 @@ token is fetched for qits-containers. Off, nothing is commissioned and no contai
 variables — exactly what every workspace did before. Where the commission API answers is derived from
 `quarkus.oidc-client.qits.auth-server-url`, so the two can never name different idps.
 
-    QUARKUS_OIDC_CLIENT_CLIENT_ENABLED=true
-    QUARKUS_OIDC_CLIENT_CREDENTIALS_SECRET=<the secret qits-idp holds for this environment>
-
-(Or, once this repository declares `resources: idp:client` — service-client-identity-plan.md, C5 —
-`QITS_RESOURCE_IDP_CLIENT_ID`/`_SECRET`/`_URL`, which qits-deployments injects and which the `qits`
-client's keys read first.)
+**The credential is the deployer's `idp:client` resource, and configuring nothing is the normal
+state.** `.config/qits/deployments.yml` declares it, and the deployer injects `QITS_RESOURCE_IDP_URL`,
+`QITS_RESOURCE_IDP_CLIENT_ID` and `QITS_RESOURCE_IDP_CLIENT_SECRET`; every deployment has the
+resource, so `client-enabled` ships **true** (off under `%dev`/`%test`) and there is no switch to
+flip by hand. Configuring `QUARKUS_OIDC_CLIENT_*` sets nothing — the old unnamed-client fallback is
+gone.
 
 **A commissioning failure fails the launch**, after holding through
 `qits.workspace.commission.patience` (30s, for an idp mid-redeploy). A workspace is never launched

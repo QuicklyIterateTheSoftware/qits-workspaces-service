@@ -542,7 +542,7 @@ public class WorkspaceContainerFactory {
 
   /**
    * The audience a container's Git helper AND the daemon's dial-home control socket bearer both
-   * request: the one platform audience (service-client-identity-plan.md, C4), never a
+   * request: the one platform audience (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C4), never a
    * qits-githost-specific or an environment-qualified one. Every receiver on this platform accepts
    * it and nothing else, and judges the caller on its roles from there. A literal rather than a
    * config key: the value is the platform's own name, the same string in every service, so there is

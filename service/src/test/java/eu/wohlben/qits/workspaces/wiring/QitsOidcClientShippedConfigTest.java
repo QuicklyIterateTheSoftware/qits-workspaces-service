@@ -11,13 +11,12 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The one named oidc client, {@code qits}, as the shipped {@code application.properties} resolves
- * it with no {@code QITS_RESOURCE_IDP_*} or old extras env set — the "nothing configured" arm every
- * clone-alone build and every other test in this repo runs on (service-client-identity-plan.md, C4).
+ * it with no {@code QITS_RESOURCE_IDP_*} env set — the "no deployer" arm every clone-alone build and
+ * every other test in this repo runs on (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C4).
  *
- * <p>{@link QitsOidcClientOldExtrasFallbackTest} and {@link
- * QitsOidcClientResourceOverridesOldExtrasTest} hold the other two arms — the old extras keys alone,
- * and the new resource keys winning over them — each in its own {@code @QuarkusTest} because a
- * {@code @TestProfile}'s config overrides are fixed for the life of one boot.
+ * <p>The deployed arm — the deployer's {@code QITS_RESOURCE_IDP_*} read, and the old {@code
+ * QUARKUS_OIDC_CLIENT_*} extras still in the container read by nothing — is {@link
+ * PhantomOidcClientsNeutralisedTest}, against a real environment source.
  */
 @QuarkusTest
 class QitsOidcClientShippedConfigTest {
@@ -31,8 +30,8 @@ class QitsOidcClientShippedConfigTest {
   void theQitsClientResolvesItsOwnLiteralDefaults() {
     // QITS_ENVIRONMENT is unset here, so the shipped default's own fallback applies: dev.
     assertEquals(
-        "http://dev-qits-platform-idp:8080/idp", value("quarkus.oidc-client.qits.auth-server-url"));
-    assertEquals("qits-workspaces", value("quarkus.oidc-client.qits.client-id"));
+        "http://dev-qits-idp:8080/idp", value("quarkus.oidc-client.qits.auth-server-url"));
+    assertEquals("dev-qits-workspaces", value("quarkus.oidc-client.qits.client-id"));
     // Empty, not absent — SmallRye reads a configured-empty String as null (the trap AGENTS.md
     // documents), so an empty secret reads as an empty Optional rather than as "" itself.
     Optional<String> secret =
@@ -46,9 +45,8 @@ class QitsOidcClientShippedConfigTest {
 
   @Test
   void theClientStaysDisabledUnderTest() {
-    // %test.quarkus.oidc-client.qits.client-enabled=false wins over the shipped expression
-    // regardless of what QUARKUS_OIDC_CLIENT_CLIENT_ENABLED says — the arm every test in this repo
-    // is on, so a suite never dials a real idp.
+    // %test.quarkus.oidc-client.qits.client-enabled=false wins over the shipped `true` — the arm
+    // every test in this repo is on, so a suite never dials a real idp.
     assertEquals("false", value("quarkus.oidc-client.qits.client-enabled"));
   }
 
@@ -71,6 +69,6 @@ class QitsOidcClientShippedConfigTest {
   void theContainersOwnerKeyFollowsTheQitsClientsId() {
     // qits.workspace.containers.owner reads quarkus.oidc-client.qits.client-id by default —
     // OwnerGuard compares this string to a machine token's `sub` once the gate is on.
-    assertEquals("qits-workspaces", value("qits.workspace.containers.owner"));
+    assertEquals("dev-qits-workspaces", value("qits.workspace.containers.owner"));
   }
 }

@@ -13,7 +13,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * Supplies the bearer for Workspaces' qits-projects REST client.
  *
  * <p>The same {@code qits} named client every outbound call this service makes now shares
- * (service-client-identity-plan.md, C4), asking one audience — {@code qits-platform} — rather than a
+ * (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C4), asking one audience — {@code qits-platform} — rather than a
  * qits-projects-specific one.
  */
 @ApplicationScoped
