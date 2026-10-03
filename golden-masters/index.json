@@ -1,0 +1,99 @@
+{
+  "formatVersion": 1,
+  "provider": "qits-workspaces",
+  "states": [
+    {
+      "name": "a project with workspaces bound to work items",
+      "slug": "a-project-with-workspaces-bound-to-work-items",
+      "params": {
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "bugTicketQualifiedId": "contract-00000001-10",
+        "epicId": "00000000-0000-4000-8000-000000000006",
+        "featureId": "00000000-0000-4000-8000-000000000007",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000b",
+        "improvementTicketQualifiedId": "contract-00000001-11",
+        "projectId": "00000000-0000-4000-8000-00000000000f",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "taskId": "00000000-0000-4000-8000-000000000011"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listOpenWorkspaces",
+          "method": "GET",
+          "path": "/workspaces/api/work/workspaces",
+          "status": 200,
+          "file": "a-project-with-workspaces-bound-to-work-items/listOpenWorkspaces.json",
+          "frozen": {
+            "ids": [
+              "$.entries[*].workspace.workId",
+              "$.entries[*].workspace.repositoryId"
+            ],
+            "instants": [
+              "$.entries[*].workspace.createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.entries[*].workspace.id"
+            ],
+            "listFilteredTo": "$.entries"
+          }
+        },
+        {
+          "operationId": "listWorkItemWorkspaces",
+          "method": "GET",
+          "path": "/workspaces/api/work/{bugTicketId}/workspaces",
+          "status": 200,
+          "file": "a-project-with-workspaces-bound-to-work-items/listWorkItemWorkspaces.json",
+          "frozen": {
+            "ids": [
+              "$.entries[*].workspace.workId",
+              "$.entries[*].workspace.repositoryId"
+            ],
+            "instants": [
+              "$.entries[*].workspace.createdAt",
+              "$.entries[*].workspace.resolvedAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.entries[*].workspace.id"
+            ],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a work item with no workspaces",
+      "slug": "a-work-item-with-no-workspaces",
+      "params": {
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "bugTicketQualifiedId": "contract-00000001-10",
+        "epicId": "00000000-0000-4000-8000-000000000006",
+        "featureId": "00000000-0000-4000-8000-000000000007",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000b",
+        "improvementTicketQualifiedId": "contract-00000001-11",
+        "projectId": "00000000-0000-4000-8000-00000000000f",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "taskId": "00000000-0000-4000-8000-000000000011"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listWorkItemWorkspaces",
+          "method": "GET",
+          "path": "/workspaces/api/work/{improvementTicketId}/workspaces",
+          "status": 200,
+          "file": "a-work-item-with-no-workspaces/listWorkItemWorkspaces.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    }
+  ]
+}

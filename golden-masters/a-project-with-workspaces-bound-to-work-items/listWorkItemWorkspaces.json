@@ -1,0 +1,46 @@
+{
+  "entries": [
+    {
+      "workspace": {
+        "id": 6,
+        "workId": "00000000-0000-4000-8000-000000000001",
+        "qualifiedId": "contract-00000001-10",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workspaceId": "ticket-invoice-totals-are-off-by-one-cent",
+        "branch": "ticket/invoice-totals-are-off-by-one-cent",
+        "status": "ACTIVE",
+        "runtimeStatus": "RUNNING",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "resolvedAt": null
+      }
+    },
+    {
+      "workspace": {
+        "id": 2,
+        "workId": "00000000-0000-4000-8000-000000000001",
+        "qualifiedId": "contract-00000001-10",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workspaceId": "ticket-invoice-totals-are-off-by-one-cent",
+        "branch": "ticket/invoice-totals-are-off-by-one-cent",
+        "status": "INTEGRATED",
+        "runtimeStatus": "STOPPED",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "resolvedAt": "2026-01-01T00:00:00Z"
+      }
+    },
+    {
+      "workspace": {
+        "id": 1,
+        "workId": "00000000-0000-4000-8000-000000000001",
+        "qualifiedId": "contract-00000001-10",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workspaceId": "ticket-invoice-totals-are-off-by-one-cent",
+        "branch": "ticket/invoice-totals-are-off-by-one-cent",
+        "status": "ABANDONED",
+        "runtimeStatus": "STOPPED",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "resolvedAt": "2026-01-01T00:00:00Z"
+      }
+    }
+  ]
+}

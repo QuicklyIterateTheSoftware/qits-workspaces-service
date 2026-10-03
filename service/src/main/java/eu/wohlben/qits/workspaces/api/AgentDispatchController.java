@@ -92,6 +92,10 @@ public class AgentDispatchController {
    *     REFINED}). Optional and uninterpreted here — the daemon picks the square
    * @param entityBlocked whether the subject is blocked; null reads as false. A caller that sends
    *     none of the three (an older qits-projects) leaves whatever the row already holds untouched
+   * @param workId the work item's entity id in qits-projects, for any archetype (qits-112).
+   *     Optional; when absent the workspace takes {@code ticketId}, else {@code epicId}. A dispatch
+   *     naming a work item that already has an ACTIVE workspace in this repository is answered with
+   *     that workspace, whatever branch it stands on
    * @param instruction the agent's first turn. It rides into the launch and is stored nowhere: this
    *     is the opening of one conversation, not the statement of the work
    * @param gitRefs the Git refs the workspace's container may push (contract C4): exact refs such
@@ -113,7 +117,8 @@ public class AgentDispatchController {
       String entityStatus,
       Boolean entityBlocked,
       String instruction,
-      List<String> gitRefs) {}
+      List<String> gitRefs,
+      String workId) {}
 
   /**
    * Dispatch an agent, or join the dispatch that is already under way.
@@ -154,7 +159,8 @@ public class AgentDispatchController {
         request.branch(),
         request.branchTree(),
         request.preamble(),
-        new WorkspaceSubject(request.ticketId(), request.epicId(), request.entityId()),
+        new WorkspaceSubject(
+            request.ticketId(), request.epicId(), request.entityId(), request.workId()),
         request.instruction(),
         request.gitRefs(),
         entityFactsOf(request));
@@ -187,12 +193,15 @@ public class AgentDispatchController {
    *     that cannot have been meant
    * @param compactFirst ask for a {@code /compact} turn ahead of it. Honoured only when {@code
    *     qits.workspace.agent-dispatch.compact-before-turn} is on, which it is not by default
+   * @param workId the work item the workspace is bound to (qits-112). Optional; when given, the
+   *     ACTIVE workspace bound to it is the one spoken to, and the branch is the fallback
    */
   public static record DeliverTurnRequest(
       @NotBlank String repositoryId,
       @NotBlank String branch,
       @NotBlank String text,
-      boolean compactFirst) {}
+      boolean compactFirst,
+      String workId) {}
 
   /**
    * <b>Say this to the workspace's agent</b> — the same thing a person would type into its chat tab.
@@ -232,7 +241,11 @@ public class AgentDispatchController {
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   public DispatchService.Delivery deliver(@Valid DeliverTurnRequest request) {
     return dispatches.deliver(
-        request.repositoryId(), request.branch(), request.text(), request.compactFirst());
+        request.repositoryId(),
+        request.workId(),
+        request.branch(),
+        request.text(),
+        request.compactFirst());
   }
 
   /**
@@ -243,9 +256,11 @@ public class AgentDispatchController {
    * @param branch the branch whose workspace is to be told. A branch with no ACTIVE workspace is
    *     answered, not refused
    * @param blocked whether the subject this workspace was dispatched for is now blocked
+   * @param workId the work item the workspace is bound to (qits-112). Optional; found first when
+   *     given
    */
   public static record MarkBlockedRequest(
-      @NotBlank String repositoryId, @NotBlank String branch, boolean blocked) {}
+      @NotBlank String repositoryId, @NotBlank String branch, boolean blocked, String workId) {}
 
   /**
    * <b>Tell the workspace's agent session whether its subject is blocked</b> — the fact qits-
@@ -285,7 +300,8 @@ public class AgentDispatchController {
       description = "A blank repository or branch.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   public DispatchService.BlockedMark blocked(@Valid MarkBlockedRequest request) {
-    return dispatches.markBlocked(request.repositoryId(), request.branch(), request.blocked());
+    return dispatches.markBlocked(
+        request.repositoryId(), request.workId(), request.branch(), request.blocked());
   }
 
   /**
@@ -297,13 +313,16 @@ public class AgentDispatchController {
    * @param status the subject's status word now (e.g. {@code IMPLEMENTED}), or null
    * @param blocked whether the subject is blocked now. Required — a boxed {@code Boolean} so that a
    *     body without it is a 400 rather than a silent {@code false} that would clear a real {@code ❗}
+   * @param workId the work item the workspace is bound to (qits-112). Optional; found first when
+   *     given
    */
   public static record MarkEntityRequest(
       @NotBlank String repositoryId,
       @NotBlank String branch,
       String title,
       String status,
-      @NotNull Boolean blocked) {}
+      @NotNull Boolean blocked,
+      String workId) {}
 
   /**
    * <b>Tell the workspace what its subject looks like now</b> — title, status and blocked flag at
@@ -338,6 +357,7 @@ public class AgentDispatchController {
   public DispatchService.BlockedMark entity(@Valid MarkEntityRequest request) {
     return dispatches.markEntity(
         request.repositoryId(),
+        request.workId(),
         request.branch(),
         new EntityFacts(
             request.title(), request.status(), request.blocked().booleanValue()));
@@ -386,9 +406,11 @@ public class AgentDispatchController {
   @GET
   @Path("/references")
   public ListSubjectRefsRequest.Response references(
-      @QueryParam("ticketId") List<String> ticketIds, @QueryParam("epicId") List<String> epicIds) {
+      @QueryParam("ticketId") List<String> ticketIds,
+      @QueryParam("epicId") List<String> epicIds,
+      @QueryParam("workId") List<String> workIds) {
     var entries =
-        workspaces.workspacesReferencing(ticketIds, epicIds).stream()
+        workspaces.workspacesReferencing(ticketIds, epicIds, workIds).stream()
             .map(ListSubjectRefsRequest.Response.Entry::new)
             .toList();
     return new ListSubjectRefsRequest.Response(entries);

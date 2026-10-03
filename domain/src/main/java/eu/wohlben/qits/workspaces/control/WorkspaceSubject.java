@@ -23,10 +23,19 @@ package eu.wohlben.qits.workspaces.control;
  *     {@code ticketId}/{@code epicId} names, in the human-readable form qits-projects' own doors use;
  *     this context resolves nothing from it and carries it for exactly one reason — see {@code
  *     Workspace.entityId}
+ * @param workId the work item's entity id in qits-projects, whatever its archetype (epic, ticket,
+ *     feature, task, campaign), or {@code null}. When it is not given, {@link #normalized()} takes
+ *     it from {@code ticketId} or {@code epicId}, which are the same kind of id. See {@code
+ *     Workspace.workId}
  */
-public record WorkspaceSubject(String ticketId, String epicId, String entityId) {
+public record WorkspaceSubject(String ticketId, String epicId, String entityId, String workId) {
 
-  private static final WorkspaceSubject NONE = new WorkspaceSubject(null, null, null);
+  private static final WorkspaceSubject NONE = new WorkspaceSubject(null, null, null, null);
+
+  /** The subject without an explicit work id: {@link #normalized()} derives it. */
+  public WorkspaceSubject(String ticketId, String epicId, String entityId) {
+    this(ticketId, epicId, entityId, null);
+  }
 
   /** No subject — the ad-hoc create, and every workspace that predates the fields. */
   public static WorkspaceSubject none() {
@@ -38,7 +47,13 @@ public record WorkspaceSubject(String ticketId, String epicId, String entityId) 
    * a caller does not read as "this workspace is about a ticket whose id is nothing".
    */
   public WorkspaceSubject normalized() {
-    return new WorkspaceSubject(trimmed(ticketId), trimmed(epicId), trimmed(entityId));
+    String ticket = trimmed(ticketId);
+    String epic = trimmed(epicId);
+    String work = trimmed(workId);
+    if (work == null) {
+      work = ticket != null ? ticket : epic;
+    }
+    return new WorkspaceSubject(ticket, epic, trimmed(entityId), work);
   }
 
   private static String trimmed(String value) {

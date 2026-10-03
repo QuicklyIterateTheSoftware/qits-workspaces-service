@@ -71,6 +71,31 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
         .firstResultOptional();
   }
 
+  /**
+   * The active workspace bound to this work item ({@code Workspace.workId}) in this repository, if
+   * any. The newest one, should there ever be two: nothing in the schema stops it.
+   */
+  public Optional<Workspace> findActiveByRepositoryAndWorkId(String repositoryId, String workId) {
+    if (workId == null || workId.isBlank()) {
+      return Optional.empty();
+    }
+    return find(
+            "repositoryId = ?1 and workId = ?2 and status = ?3 order by id desc",
+            repositoryId,
+            workId.trim(),
+            WorkspaceStatus.ACTIVE)
+        .firstResultOptional();
+  }
+
+  /**
+   * Every ACTIVE workspace bound to a work item, oldest first — the open workspaces a work list
+   * shows. Integrated and abandoned rows are left out, and so are workspaces bound to no work item
+   * (hand-made ones, and the editor's row).
+   */
+  public List<Workspace> findOpenBoundToWork() {
+    return list("status = ?1 and workId is not null order by id", WorkspaceStatus.ACTIVE);
+  }
+
   /** Whether {@code branch} already has an active workspace — see {@link
    * #findActiveByRepositoryAndBranch}. */
   public boolean existsActiveByRepositoryAndBranch(String repositoryId, String branch) {
@@ -219,6 +244,32 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
       return list("epicId in ?1", epics);
     }
     return list("ticketId in ?1 or epicId in ?2", tickets, epics);
+  }
+
+  /**
+   * Every workspace bound to one work item, whatever its status, newest first. {@code workRef} is
+   * the item's entity id ({@code work_id}) or its qualified id ({@code entity_id}, e.g. {@code
+   * qits-614}); a UUID-shaped value is read as the first, anything else as the second.
+   */
+  public List<Workspace> findByWorkRef(String workRef) {
+    if (workRef == null || workRef.isBlank()) {
+      return List.of();
+    }
+    String ref = workRef.trim();
+    if (UUID_SHAPE.matcher(ref).matches()) {
+      return list("workId = ?1 order by id desc", ref);
+    }
+    return list("entityId = ?1 order by id desc", ref);
+  }
+
+  private static final java.util.regex.Pattern UUID_SHAPE =
+      java.util.regex.Pattern.compile(
+          "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+
+  /** {@link #findBySubjects} for work ids: every workspace bound to one of them, any status. */
+  public List<Workspace> findByWorkIds(Collection<String> workIds) {
+    List<String> ids = nonNull(workIds);
+    return ids.isEmpty() ? List.of() : list("workId in ?1", ids);
   }
 
   private static List<String> nonNull(Collection<String> ids) {

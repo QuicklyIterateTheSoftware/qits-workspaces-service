@@ -1,8 +1,12 @@
 archetype: java-service
 artifacts:
   - { type: docker, name: qits/qits-workspaces, sbom: .sbom/sbom.json }
+# The provider golden masters (epic qits-112): the platform packages `golden-masters/` as
+# `eu.wohlben.qits:qits-workspaces-golden-masters` and `@qits/workspaces-golden-masters`, each
+# published only when its content changed. GoldenMasterRecordingTest keeps the directory current.
 contracts:
   application: qits-workspaces
+  golden-masters: { from: golden-masters/, packages: [maven, npm] }
   pacts:
     qits-projects-service: { packages: [maven] }
 userflows: qits-workspaces

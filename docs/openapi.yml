@@ -189,6 +189,8 @@ components:
           pattern: \S
         compactFirst:
           type: boolean
+        workId:
+          type: string
     Delivery:
       type: object
       properties:
@@ -251,6 +253,8 @@ components:
           type: array
           items:
             type: string
+        workId:
+          type: string
     Entry:
       type: object
       properties:
@@ -312,6 +316,8 @@ components:
           pattern: \S
         blocked:
           type: boolean
+        workId:
+          type: string
     MarkEntityRequest:
       type: object
       required:
@@ -331,6 +337,8 @@ components:
           type: string
         blocked:
           type: boolean
+        workId:
+          type: string
     MergeBranchRequest:
       type: object
       required:
@@ -647,6 +655,42 @@ components:
           type: string
         result:
           type: string
+    WorkItemWorkspaceDto:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        workId:
+          type: string
+        qualifiedId:
+          type: string
+        repositoryId:
+          type: string
+        workspaceId:
+          type: string
+        branch:
+          type: string
+        status:
+          type: string
+        runtimeStatus:
+          type: string
+        createdAt:
+          $ref: "#/components/schemas/Instant"
+        resolvedAt:
+          $ref: "#/components/schemas/Instant"
+    WorkItemWorkspaceEntry:
+      type: object
+      properties:
+        workspace:
+          $ref: "#/components/schemas/WorkItemWorkspaceDto"
+    WorkItemWorkspaces:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkItemWorkspaceEntry"
     WorkspaceDto:
       type: object
       properties:
@@ -833,6 +877,10 @@ components:
           type: string
         resolvedAt:
           $ref: "#/components/schemas/Instant"
+        workId:
+          type: string
+        entityId:
+          type: string
   securitySchemes:
     SecurityScheme:
       type: openIdConnect
@@ -999,6 +1047,12 @@ paths:
           items:
             type: string
       - name: ticketId
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+      - name: workId
         in: query
         schema:
           type: array
@@ -1429,6 +1483,56 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:agent
+  /workspaces/api/work/workspaces:
+    get:
+      operationId: listOpenWorkspaces
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkItemWorkspaces"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Open
+      tags:
+      - Work Item Workspaces Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
+        - qits:agent
+  /workspaces/api/work/{workRef}/workspaces:
+    get:
+      operationId: listWorkItemWorkspaces
+      parameters:
+      - name: workRef
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkItemWorkspaces"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Of Work Item
+      tags:
+      - Work Item Workspaces Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
         - qits:agent
   /workspaces/api/workspaces:
     get:
@@ -2135,4 +2239,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.1001.132659
+  version: 2026.1003.132436

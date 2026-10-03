@@ -317,7 +317,14 @@ public class DispatchService {
     // literal `ticket` blocks every `ticket/*` — but a literal ref created after a `ticket/x`
     // workspace existed would make the fallback the only branch consulted, and this door would
     // answer a second workspace where it should have answered the first one's.
-    Optional<Long> found = activeOn(repositoryId, branch);
+    //
+    // The work item comes first (qits-112): a work item has at most one ACTIVE workspace, and the
+    // branch name is derived from its slug over there, which can change. So the ACTIVE workspace
+    // bound to the same work id is the answer whatever branch it stands on, and the branch is only
+    // the fallback for a caller that names no work item.
+    String workId = subject == null ? null : subject.normalized().workId();
+    Optional<Long> found =
+        activeForWork(repositoryId, workId).or(() -> activeOn(repositoryId, branch));
     String target = found.isPresent() ? branch : dispatchBranch(repositoryId, branch);
     Long rowId = found.or(() -> activeOn(repositoryId, target)).orElse(null);
 
@@ -422,13 +429,22 @@ public class DispatchService {
    *     which it is not by default — see that field for what would justify turning it on
    */
   public Delivery deliver(String repositoryId, String branch, String text, boolean compactFirst) {
+    return deliver(repositoryId, null, branch, text, compactFirst);
+  }
+
+  /**
+   * {@link #deliver(String, String, String, boolean)}, finding the workspace by its work item first
+   * ({@code workId}, qits-112) and by the branch only when no workspace is bound to it.
+   */
+  public Delivery deliver(
+      String repositoryId, String workId, String branch, String text, boolean compactFirst) {
     // Find only. The requested branch first, then the dash shape a dispatch would have fallen back
     // to — computed as a string and NOT by asking the git host whether the literal first segment
     // exists, unlike dispatchBranch: that read is a network call that throws when the host is down,
     // and this verb answers "nobody to tell" for a branch it cannot find rather than failing. The
     // two shapes carry the same workspace slug by construction, so a hit on either is the same
     // workspace the dispatch made.
-    Long rowId = findOnly(repositoryId, branch);
+    Long rowId = findOnly(repositoryId, workId, branch);
     if (rowId == null) {
       return new Delivery(
           null,
@@ -508,7 +524,13 @@ public class DispatchService {
    * @param blocked whether the subject this workspace was dispatched for is now blocked
    */
   public BlockedMark markBlocked(String repositoryId, String branch, boolean blocked) {
-    Long rowId = findOnly(repositoryId, branch);
+    return markBlocked(repositoryId, null, branch, blocked);
+  }
+
+  /** {@link #markBlocked(String, String, boolean)}, finding the workspace by work id first. */
+  public BlockedMark markBlocked(
+      String repositoryId, String workId, String branch, boolean blocked) {
+    Long rowId = findOnly(repositoryId, workId, branch);
     if (rowId == null) {
       return new BlockedMark(null, false);
     }
@@ -541,7 +563,13 @@ public class DispatchService {
    *     nothing was stored), and whether the daemon took them live
    */
   public BlockedMark markEntity(String repositoryId, String branch, EntityFacts facts) {
-    Long rowId = findOnly(repositoryId, branch);
+    return markEntity(repositoryId, null, branch, facts);
+  }
+
+  /** {@link #markEntity(String, String, EntityFacts)}, finding the workspace by work id first. */
+  public BlockedMark markEntity(
+      String repositoryId, String workId, String branch, EntityFacts facts) {
+    Long rowId = findOnly(repositoryId, workId, branch);
     if (rowId == null) {
       return new BlockedMark(null, false);
     }
@@ -550,11 +578,28 @@ public class DispatchService {
     return new BlockedMark(rowId, setEntity(rowId, normalized));
   }
 
-  /** {@link #deliver}'s lookup: the requested branch, then the dash shape, both as strings. */
-  private Long findOnly(String repositoryId, String branch) {
-    return activeOn(repositoryId, branch)
+  /**
+   * {@link #deliver}'s lookup: the ACTIVE workspace bound to the work id, when one is named; else
+   * the requested branch, then the dash shape, both as strings.
+   */
+  private Long findOnly(String repositoryId, String workId, String branch) {
+    return activeForWork(repositoryId, workId)
+        .or(() -> activeOn(repositoryId, branch))
         .or(() -> activeOn(repositoryId, dashShape(branch)))
         .orElse(null);
+  }
+
+  /** The ACTIVE workspace bound to this work id, read in a transaction of its own. */
+  private Optional<Long> activeForWork(String repoId, String workId) {
+    if (workId == null || workId.isBlank()) {
+      return Optional.empty();
+    }
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                workspaceRepository
+                    .findActiveByRepositoryAndWorkId(repoId, workId)
+                    .map(workspace -> workspace.id));
   }
 
   /** The three V9 columns, in a transaction of their own. A row resolved meanwhile is skipped. */

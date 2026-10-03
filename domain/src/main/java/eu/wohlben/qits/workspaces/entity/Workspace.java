@@ -241,6 +241,23 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public String entityId;
 
   /**
+   * The work item this workspace is bound to: its entity id in qits-projects ({@code V10}). One
+   * field for every archetype — epic, ticket, feature, task, campaign — where {@link #ticketId} and
+   * {@link #epicId} name only two. Null for a workspace no dispatch bound.
+   *
+   * <p><b>The UUID, not the qualified id.</b> The UUID never changes. The qualified id ({@link
+   * #entityId}, e.g. {@code qits-614}) changes when the project slug changes or the item moves to
+   * another project, and this row would keep the old one. So lookups go by this field, and {@link
+   * #entityId} is kept for display and for the UI's links.
+   *
+   * <p>A work item has many workspaces over time (each integrated or abandoned one stays as a row),
+   * and at most one ACTIVE one: a dispatch answers the ACTIVE workspace with this id before it
+   * makes a new one. The schema does not enforce it.
+   */
+  @Column(name = "work_id", columnDefinition = "text")
+  public String workId;
+
+  /**
    * The same subject's title, status word (qits-projects' enum constant, e.g. {@code REFINED}) and
    * blocked flag ({@code V9}, qits-617) — what the daemon puts after the id and in front of it. Null
    * for every row {@link #entityId} is null for, and for every row that predates {@code V9}; a null

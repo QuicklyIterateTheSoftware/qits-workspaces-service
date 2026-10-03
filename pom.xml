@@ -102,7 +102,8 @@
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
         <qits.projects-golden-masters.version>2026.1003.103010</qits.projects-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
-             pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json).
+             pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
+             and ConsumerPactVerificationTest verifies consumers' pacts against this service.
              An external library, so it moves by hand, not by a maintenance bump. -->
         <pact-jvm.version>4.6.21</pact-jvm.version>
         <qits.maven.repository.url>https://registry.qits.wohlben.eu/artifacts/maven/maven</qits.maven.repository.url>
@@ -332,6 +333,13 @@
             </dependency>
             <dependency>
                 <groupId>au.com.dius.pact.consumer</groupId>
+                <artifactId>junit5</artifactId>
+                <version>${pact-jvm.version}</version>
+            </dependency>
+            <dependency>
+                <!-- The provider half: ConsumerPactVerificationTest verifies consumers' pacts
+                     against this service. Same pact-jvm version as the consumer half. -->
+                <groupId>au.com.dius.pact.provider</groupId>
                 <artifactId>junit5</artifactId>
                 <version>${pact-jvm.version}</version>
             </dependency>

@@ -1070,4 +1070,142 @@ public class AgentDispatchControllerTest {
     entity(entityBody(repoId, "ticket/x", "T", "REFINED", Map.of("no", 1)), 400);
     entity(entityBody(repoId, " ", "T", "REFINED", true), 400);
   }
+
+  // --- workId (qits-112) -----------------------------------------------------------------------
+
+  private static String newWorkId() {
+    return java.util.UUID.randomUUID().toString();
+  }
+
+  /** A dispatch naming only a ticket binds the workspace to that ticket as its work id. */
+  @Test
+  public void aDispatchTakesItsWorkIdFromTheTicket() throws Exception {
+    String repoId = seedRepository();
+    String ticketId = newWorkId();
+    dispatch(bodyForTicket(repoId, "ticket/work-from-ticket", ticketId, "go"), 200);
+
+    Long rowId = workspaceIds.of(repoId, "ticket-work-from-ticket");
+    assertThat(storedRow(rowId).workId, is(ticketId));
+  }
+
+  /** A feature, a task or a campaign has no field of its own: the work id is how it is named. */
+  @Test
+  public void aDispatchStoresAnExplicitWorkId() throws Exception {
+    String repoId = seedRepository();
+    String featureId = newWorkId();
+    Map<String, Object> request = body(repoId, "feature/work-explicit", null, "go");
+    request.put("workId", featureId);
+    request.put("entityId", "qits-900");
+
+    dispatch(request, 200);
+
+    Workspace row = storedRow(workspaceIds.of(repoId, "feature-work-explicit"));
+    assertThat(row.workId, is(featureId));
+    assertNull(row.ticketId);
+    assertNull(row.epicId);
+  }
+
+  /**
+   * The branch is derived from the work item's slug, which can change. A second dispatch for the
+   * same work item on a new branch answers the work item's ACTIVE workspace instead of making a
+   * second one: a work item has at most one.
+   */
+  @Test
+  public void aDispatchOnANewBranchAnswersTheWorkItemsActiveWorkspace() throws Exception {
+    String repoId = seedRepository();
+    String ticketId = newWorkId();
+
+    JsonPath first = dispatch(bodyForTicket(repoId, "ticket/old-slug", ticketId, "go"), 200);
+    JsonPath second = dispatch(bodyForTicket(repoId, "ticket/new-slug", ticketId, "go"), 200);
+
+    assertThat(second.getBoolean("fresh"), is(false));
+    assertThat(second.getLong("workspace.id"), is(first.getLong("workspace.id")));
+    assertThat(second.getString("workspace.branch"), is("ticket/old-slug"));
+    assertFalse(workspaceService.branchExists(repoId, "ticket/new-slug"));
+  }
+
+  /** The relay finds the workspace by its work id, even when the branch it names is not its own. */
+  @Test
+  public void markingTheEntityFindsTheWorkspaceByWorkId() throws Exception {
+    String repoId = seedRepository();
+    String ticketId = newWorkId();
+    JsonPath made = dispatch(bodyForTicket(repoId, "ticket/relay-by-work", ticketId, "go"), 200);
+
+    Map<String, Object> request =
+        entityBody(repoId, "ticket/renamed-since", "New title", "IMPLEMENTING", false);
+    request.put("workId", ticketId);
+    JsonPath answer = entity(request, 200);
+
+    assertThat(answer.getLong("workspaceId"), is(made.getLong("workspace.id")));
+    assertThat(storedRow(made.getLong("workspace.id")).entityTitle, is("New title"));
+  }
+
+  /** The references door also answers by work id, and carries the work id and the qualified id. */
+  @Test
+  public void theReferencesDoorAnswersByWorkId() throws Exception {
+    String repoId = seedRepository();
+    String taskId = newWorkId();
+    Map<String, Object> request = body(repoId, "task/referenced-by-work", null, "go");
+    request.put("workId", taskId);
+    request.put("entityId", "qits-901");
+    dispatch(request, 200);
+
+    JsonPath answer = references("?workId=" + taskId);
+
+    assertThat(answer.getList("entries").size(), is(1));
+    assertThat(answer.getString("entries[0].workspace.workId"), is(taskId));
+    assertThat(answer.getString("entries[0].workspace.entityId"), is("qits-901"));
+  }
+
+  /**
+   * {@code GET /work/workspaces} answers ACTIVE workspaces bound to a work item only, and {@code GET
+   * /work/{workRef}/workspaces} answers one work item's whole history, newest first, by its work id
+   * or its qualified id.
+   */
+  @Test
+  public void theWorkDoorsAnswerOpenWorkspacesAndOneWorkItemsHistory() throws Exception {
+    String repoId = seedRepository();
+    String ticketId = newWorkId();
+    String qualifiedId = "qits-" + Math.abs(ticketId.hashCode());
+    Map<String, Object> request = bodyForTicket(repoId, "ticket/history", ticketId, "go");
+    request.put("entityId", qualifiedId);
+
+    Long abandoned = dispatch(request, 200).getLong("workspace.id");
+    workspaceService.discardWorkspace(abandoned, null, true);
+    Long active = dispatch(request, 200).getLong("workspace.id");
+    workspaceService.createWorkspace(repoId, "hand-made-history", "master", "hand-made-history");
+
+    JsonPath open =
+        given().get("/workspaces/api/work/workspaces").then().statusCode(200).extract().jsonPath();
+    List<Long> openIds = open.getList("entries.workspace.id", Long.class);
+    assertTrue(openIds.contains(active), "the active workspace is not listed as open");
+    assertFalse(openIds.contains(abandoned), "an abandoned workspace is listed as open");
+    assertFalse(
+        open.getList("entries.workspace.workId", String.class).contains(null),
+        "a workspace bound to no work item is listed");
+
+    for (String ref : List.of(ticketId, qualifiedId)) {
+      JsonPath history =
+          given()
+              .get("/workspaces/api/work/" + ref + "/workspaces")
+              .then()
+              .statusCode(200)
+              .extract()
+              .jsonPath();
+      assertThat(history.getList("entries.workspace.id", Long.class), is(List.of(active, abandoned)));
+      assertThat(
+          history.getList("entries.workspace.status", String.class),
+          is(List.of("ACTIVE", "ABANDONED")));
+      assertThat(history.getString("entries[0].workspace.qualifiedId"), is(qualifiedId));
+    }
+
+    JsonPath none =
+        given()
+            .get("/workspaces/api/work/" + newWorkId() + "/workspaces")
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath();
+    assertTrue(none.getList("entries").isEmpty());
+  }
 }

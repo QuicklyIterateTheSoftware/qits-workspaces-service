@@ -256,6 +256,12 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <!-- The provider half: ConsumerPactVerificationTest (contracts/). Test scope. -->
+            <groupId>au.com.dius.pact.provider</groupId>
+            <artifactId>junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <!-- The store every @QuarkusTest here boots against — BOTH of this module's datasources,
                  `workspaces` and the qits-eventstream jar's `eventstream`. Zonky spawns real
                  postgres binaries as a child process, a maven dependency rather than a container,

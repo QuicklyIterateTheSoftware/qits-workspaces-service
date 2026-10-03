@@ -1,0 +1,60 @@
+{
+  "entries": [
+    {
+      "workspace": {
+        "id": 3,
+        "workId": "00000000-0000-4000-8000-000000000006",
+        "qualifiedId": "contract-00000001-2",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workspaceId": "epic-export-invoices-for-the-accountants",
+        "branch": "epic/export-invoices-for-the-accountants",
+        "status": "ACTIVE",
+        "runtimeStatus": "RUNNING",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "resolvedAt": null
+      }
+    },
+    {
+      "workspace": {
+        "id": 4,
+        "workId": "00000000-0000-4000-8000-000000000007",
+        "qualifiedId": "contract-00000001-6",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workspaceId": "feature-pdf-export",
+        "branch": "feature/pdf-export",
+        "status": "ACTIVE",
+        "runtimeStatus": "STOPPED",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "resolvedAt": null
+      }
+    },
+    {
+      "workspace": {
+        "id": 5,
+        "workId": "00000000-0000-4000-8000-000000000011",
+        "qualifiedId": "contract-00000001-5",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workspaceId": "task-download-button-on-the-invoice-list",
+        "branch": "task/download-button-on-the-invoice-list",
+        "status": "ACTIVE",
+        "runtimeStatus": "RUNNING",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "resolvedAt": null
+      }
+    },
+    {
+      "workspace": {
+        "id": 6,
+        "workId": "00000000-0000-4000-8000-000000000001",
+        "qualifiedId": "contract-00000001-10",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workspaceId": "ticket-invoice-totals-are-off-by-one-cent",
+        "branch": "ticket/invoice-totals-are-off-by-one-cent",
+        "status": "ACTIVE",
+        "runtimeStatus": "RUNNING",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "resolvedAt": null
+      }
+    }
+  ]
+}

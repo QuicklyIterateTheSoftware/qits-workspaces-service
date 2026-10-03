@@ -6,6 +6,7 @@ import eu.wohlben.qits.workspaces.error.IntegrateConflictException;
 import eu.wohlben.qits.workspaces.error.InternalServerErrorException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
+import eu.wohlben.qits.workspaces.dto.WorkItemWorkspaceDto;
 import eu.wohlben.qits.workspaces.dto.WorkspaceSubjectRefDto;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspaceEvent;
@@ -664,7 +665,19 @@ public class WorkspaceService {
    */
   public List<WorkspaceSubjectRefDto> workspacesReferencing(
       Collection<String> ticketIds, Collection<String> epicIds) {
-    return workspaceRepository.findBySubjects(ticketIds, epicIds).stream()
+    return workspacesReferencing(ticketIds, epicIds, List.of());
+  }
+
+  /**
+   * {@link #workspacesReferencing(Collection, Collection)}, also matching {@code workIds} — the
+   * work id of any archetype (qits-112). A row matched twice is answered once.
+   */
+  public List<WorkspaceSubjectRefDto> workspacesReferencing(
+      Collection<String> ticketIds, Collection<String> epicIds, Collection<String> workIds) {
+    java.util.Map<Long, Workspace> rows = new java.util.LinkedHashMap<>();
+    workspaceRepository.findBySubjects(ticketIds, epicIds).forEach(w -> rows.put(w.id, w));
+    workspaceRepository.findByWorkIds(workIds).forEach(w -> rows.putIfAbsent(w.id, w));
+    return rows.values().stream()
         .map(
             w ->
                 new WorkspaceSubjectRefDto(
@@ -675,8 +688,42 @@ public class WorkspaceService {
                     w.ticketId,
                     w.epicId,
                     w.status == null ? null : w.status.name(),
-                    w.resolvedAt))
+                    w.resolvedAt,
+                    w.workId,
+                    w.entityId))
         .toList();
+  }
+
+  /**
+   * Every open workspace bound to a work item, oldest first (qits-112): ACTIVE only, so integrated
+   * and abandoned ones are left out and a work item shows at most one here.
+   */
+  public List<WorkItemWorkspaceDto> openWorkspaces() {
+    return workspaceRepository.findOpenBoundToWork().stream().map(WorkspaceService::workItemView).toList();
+  }
+
+  /**
+   * Every workspace of one work item, whatever its status, newest first (qits-112). {@code workRef}
+   * is the item's entity id or its qualified id; see {@code WorkspaceRepository.findByWorkRef}.
+   */
+  public List<WorkItemWorkspaceDto> workItemWorkspaces(String workRef) {
+    return workspaceRepository.findByWorkRef(workRef).stream()
+        .map(WorkspaceService::workItemView)
+        .toList();
+  }
+
+  private static WorkItemWorkspaceDto workItemView(Workspace w) {
+    return new WorkItemWorkspaceDto(
+        w.id,
+        w.workId,
+        w.entityId,
+        w.repositoryId,
+        w.workspaceId,
+        w.branch,
+        w.status == null ? null : w.status.name(),
+        w.runtimeStatus == null ? null : w.runtimeStatus.name(),
+        w.createdAt,
+        w.resolvedAt);
   }
 
   /**
@@ -1246,6 +1293,7 @@ public class WorkspaceService {
     workspace.ticketId = named.ticketId();
     workspace.epicId = named.epicId();
     workspace.entityId = named.entityId();
+    workspace.workId = named.workId();
     // What the container may push (contract C4): the stated list, or its own branch. Never the
     // default branch: it moves only through a release request, never by an agent's push.
     String defaultBranch = defaultMainBranch(repo);

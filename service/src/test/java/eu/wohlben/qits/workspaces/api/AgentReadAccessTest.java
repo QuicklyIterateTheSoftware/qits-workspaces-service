@@ -198,4 +198,10 @@ class AgentReadAccessTest {
         .then()
         .statusCode(403);
   }
+
+  @Test
+  void workItemWorkspaceReadsAreOpen() {
+    asAgent().get("/workspaces/api/work/workspaces").then().statusCode(200);
+    asAgent().get("/workspaces/api/work/qits-0/workspaces").then().statusCode(200);
+  }
 }

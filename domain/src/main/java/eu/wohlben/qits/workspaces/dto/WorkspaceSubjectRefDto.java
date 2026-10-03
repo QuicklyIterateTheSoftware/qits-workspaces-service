@@ -32,6 +32,9 @@ import java.time.Instant;
  * @param resolvedAt when the workspace stopped being live, or {@code null} while it still is. The
  *     pair with {@code status}: a caller showing several resolved workspaces for one row wants the
  *     last one, and asking this service to order them would be deciding a presentation question here
+ * @param workId the work item's entity id, for any archetype (qits-112), or {@code null}
+ * @param entityId the work item's qualified id as it was at dispatch (e.g. {@code qits-614}), or
+ *     {@code null}
  */
 public record WorkspaceSubjectRefDto(
     Long workspaceRowId,
@@ -41,4 +44,6 @@ public record WorkspaceSubjectRefDto(
     String ticketId,
     String epicId,
     String status,
-    Instant resolvedAt) {}
+    Instant resolvedAt,
+    String workId,
+    String entityId) {}
