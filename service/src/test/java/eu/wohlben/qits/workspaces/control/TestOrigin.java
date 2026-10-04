@@ -123,9 +123,9 @@ public final class TestOrigin {
    * push-options.log} for every ref a push moves.
    *
    * <p>This is the only way to see a {@code --push-option} from outside the pushing process, and it
-   * is what makes "the trunk push carries {@code qits.no-ci} exactly when there is a deploy branch"
-   * an assertion about the argv that ships rather than about a field. Real receive-pack, real hook,
-   * real environment variables — the same ones the git host's own hook reads.
+   * is what makes an assertion about which push options a ref arrived under an assertion about the
+   * argv that ships rather than about a field. Real receive-pack, real hook, real environment
+   * variables — the same ones the git host's own hook reads.
    *
    * <p>Install it before the push under test; it records every push after that, workspace branch
    * creates included, so read it back by ref.

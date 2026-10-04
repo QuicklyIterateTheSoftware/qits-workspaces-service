@@ -138,8 +138,8 @@ one-endpoint problem.
 
 **The release door left this service on 2026-09-03**, and with it everything that was only a
 release's: `Mode.RELEASE`, the CalVer `VersionStamp`, the pom/package.json bumpers, the annotated
-tag, the `-o qits.release` push option (a branch create keeps its own `-o qits.no-ci`), the
-`SCMRelease` publication, and the
+tag, the `-o qits.release` push option (a branch create is an ordinary push now too — CI is gated
+only by release requests), the `SCMRelease` publication, and the
 promotion onto an `environment/*` entry branch (`qits.workspaces.release.entry-branch`, now an unset
 key). A release is a **release request in qits-projects**: it folds `main`, the named branches and
 every released-but-unmerged tag onto a `release/<id>` branch through qits-githost's git primitives,

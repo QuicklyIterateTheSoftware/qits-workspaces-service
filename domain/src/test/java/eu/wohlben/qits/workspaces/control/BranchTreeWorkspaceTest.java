@@ -53,10 +53,9 @@ public class BranchTreeWorkspaceTest {
             .contains("aggregate workspace"),
         "the hand-off document rides the wrapper's branch");
     assertTrue(
-        TestOrigin.pushOptionsFor(dataDir, library, "refs/heads/adhoc-changes")
-            .contains("qits.no-ci"),
-        "a branch create points at a commit the host already built — the push is quiet, or an"
-            + " aggregate tree queues one redundant run per registered repository");
+        TestOrigin.pushOptionsFor(dataDir, library, "refs/heads/adhoc-changes").isEmpty(),
+        "a branch create is an ordinary push — CI is gated only by release requests, so there is"
+            + " nothing left for a push to suppress");
   }
 
   /** An unregistered submodule is skipped rather than guessed at: nothing names it here. */

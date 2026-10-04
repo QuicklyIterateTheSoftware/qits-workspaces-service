@@ -558,12 +558,12 @@ Three kinds of git call, and the distinction decides correctness:
   `push HEAD:refs/heads/<target>`. There is no other door, which is the property the whole change
   exists to establish.
 
-**Only one push option is left, and it is not a release's.** `-o qits.release` went with the release
-door — the git host's protection hook guards the default branch alone, and nothing here writes one —
-and so did the `-o qits.no-ci` that quieted a release's trunk push. What survives is
-`RepoMirror.createBranch`'s own `-o qits.no-ci`: a branch create points at a commit the host already
-built, so a build for it would be a redundant run per created branch (an aggregate workspace creates
-one per registered submodule). The mirror is a **cache**: delete it and the next request re-clones.
+**No push option is left.** `-o qits.release` went with the release door — the git host's
+protection hook guards the default branch alone, and nothing here writes one — and so did the push
+option that used to quiet a release's trunk push and `RepoMirror.createBranch`'s own copy of it: CI
+is gated only by release requests now, so there is nothing left for a push to suppress, and every
+push this module makes, including a branch create, is an ordinary one. The mirror is a **cache**:
+delete it and the next request re-clones.
 
 ## The release door left, and what stayed
 

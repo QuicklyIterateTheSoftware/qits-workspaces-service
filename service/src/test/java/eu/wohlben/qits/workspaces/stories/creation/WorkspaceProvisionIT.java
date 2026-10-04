@@ -120,8 +120,7 @@ public class WorkspaceProvisionIT {
       the toolchain in it, and a checkout of that branch inside the container.
 
       The branch comes first, and it is created by a PUSH like every other ref this service moves —
-      `push refs/heads/<parent>:refs/heads/<new>`, quiet (`-o qits.no-ci`), because the new ref
-      points at a commit the host already holds and building it again is measurable waste. It used
+      `push refs/heads/<parent>:refs/heads/<new>`, an ordinary one, carrying no push option. It used
       to be a filesystem write into the served bare, which fired no post-receive and is why no
       workspace anybody ever created produced a CI run.
 
@@ -185,17 +184,17 @@ public class WorkspaceProvisionIT {
             StoryTarget.PROJECT, StoryTarget.WORKSPACE_REPO, StoryTarget.WORKSPACE_LABEL),
         "the workspace's branch is not at the parent's tip on the git host");
     assertEquals(
-        List.of("qits.no-ci"),
+        List.of(),
         StoryGitHost.pushOptionsFor(
             StoryTarget.PROJECT,
             StoryTarget.WORKSPACE_REPO,
             "refs/heads/" + StoryTarget.WORKSPACE_LABEL),
-        "the branch create was not a quiet push");
+        "the branch create was not an ordinary push");
     story
         .note(
-            "the branch exists on the git host at the parent's tip, and it got there by a PUSH"
-                + " carrying qits.no-ci — a create points at a commit the host already holds, so"
-                + " there is nothing new to build")
+            "the branch exists on the git host at the parent's tip, and it got there by an"
+                + " ordinary PUSH — CI is gated only by release requests now, so there is nothing"
+                + " left for a push to suppress")
         .as("branch-pushed");
 
     // The container. The verb answers at once with a technical process id — the work is a pull, a
