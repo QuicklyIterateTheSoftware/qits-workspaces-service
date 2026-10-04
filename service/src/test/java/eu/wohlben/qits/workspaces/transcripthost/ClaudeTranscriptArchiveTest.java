@@ -184,6 +184,32 @@ class ClaudeTranscriptArchiveTest {
     assertTrue(archive().sessionsFor(workspace()).isEmpty());
   }
 
+  /**
+   * The slack the mtime pre-filter carries for exactly this: mtime is the kernel's own, coarse
+   * clock, and it can trail the JVM's precise clock — the one {@code createdAt} is stamped with —
+   * by up to a tick, with some filesystems only keeping whole seconds besides. A session started at
+   * the very instant the workspace was created can therefore land with an mtime that reads a few
+   * milliseconds <em>earlier</em>, even though nothing about its content is actually outside the
+   * window. Without the slack this session would be skipped unopened and reported as missing.
+   */
+  @Test
+  void aFileWrittenWithinOneCoarseClockTickOfTheWorkspaceIsStillAttributed() throws IOException {
+    Path file =
+        writeSession(
+            "dddddddd-dddd-dddd-dddd-dddddddddddd",
+            line("user", CREATED.toString(), BRANCH, "right at the start"));
+    Files.setLastModifiedTime(file, FileTime.from(CREATED.minusMillis(3)));
+
+    List<ArchivedSessionDto> sessions =
+        archive().sessionsFor(new ClaudeTranscriptArchive.Attribution(BRANCH, CREATED, null));
+
+    assertEquals(
+        List.of("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+        sessions.stream().map(ArchivedSessionDto::sessionId).toList(),
+        "a session written within one coarse clock tick of workspace creation was skipped by the"
+            + " mtime pre-filter");
+  }
+
   /** A live workspace has no {@code resolvedAt}, and the window runs to now. */
   @Test
   void aLiveWorkspaceWindowRunsToNow() throws IOException {

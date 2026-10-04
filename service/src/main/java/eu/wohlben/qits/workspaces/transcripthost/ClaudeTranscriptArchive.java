@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -45,13 +46,19 @@ import org.jboss.logging.Logger;
  * <p>Four conditions, and all four are load-bearing:
  *
  * <ol>
- *   <li><b>An mtime pre-filter.</b> A file whose last write predates the workspace cannot be the
- *       workspace's, so it is skipped without being opened. The filter is deliberately one-sided: a
- *       session's mtime is its <em>last</em> write and therefore never earlier than its first
- *       record, so {@code mtime < createdAt} implies the window test below would reject it anyway —
- *       the pre-filter can only ever skip files the real rule also excludes. There is no upper mtime
- *       bound, because a session may legitimately keep writing after the workspace resolves and its
- *       mtime then sits outside the window while its first record does not.
+ *   <li><b>An mtime pre-filter.</b> A file whose last write predates the workspace by more than
+ *       {@link #MTIME_SLACK} cannot be the workspace's, so it is skipped without being opened. The
+ *       filter is deliberately one-sided: a session's mtime is its <em>last</em> write and therefore
+ *       never earlier than its first record, so in theory {@code mtime < createdAt} would imply the
+ *       window test below rejects it anyway. In practice mtime comes from the kernel's coarse clock,
+ *       which can trail the precise clock the workspace's {@code createdAt} is stamped with by up to
+ *       a tick, and some filesystems only store whole seconds — so a session written within that
+ *       slack of the workspace's creation can have an mtime that reads earlier than a timestamp it
+ *       in fact follows. The slack only ever lets more files past this pre-filter to be
+ *       <em>opened</em>; it decides nothing about attribution, so it can never let a file through
+ *       the real rule would otherwise have excluded. There is no upper mtime bound, because a
+ *       session may legitimately keep writing after the workspace resolves and its mtime then sits
+ *       outside the window while its first record does not.
  *   <li><b>Branch equality.</b> The first record carrying {@code gitBranch} names the branch the
  *       agent was working on; it must equal the workspace's branch exactly.
  *   <li><b>{@code HEAD} is never a match.</b> A project agent container's checkout is detached, so
@@ -119,6 +126,18 @@ public final class ClaudeTranscriptArchive {
 
   /** How far into a transcript a {@code gitBranch} is looked for. See the class javadoc. */
   static final int BRANCH_LOOKAHEAD_LINES = 20;
+
+  /**
+   * How far before the workspace's {@code createdAt} a file's mtime is still trusted by the mtime
+   * pre-filter. {@code createdAt} is stamped by the JVM's precise clock; a file's mtime is the
+   * kernel's own, coarse clock, which trails the precise one by up to a tick — about 4 ms at a
+   * 250 Hz {@code HZ} — and some filesystems store mtimes to the whole second regardless. Either
+   * one can place a real session's mtime a sliver before a workspace that in fact preceded it. The
+   * slack can only let the pre-filter pass more files on to the real rule — see {@link
+   * #writtenNoEarlierThan} — never attribute one: the window test below still decides, so widening
+   * this constant changes what gets opened and never what gets attributed.
+   */
+  static final Duration MTIME_SLACK = Duration.ofSeconds(2);
 
   /** The clamp the harness library applies to the same labels, repeated so the shapes match. */
   private static final int AGENT_TYPE_MAX = 255;
@@ -258,13 +277,17 @@ public final class ClaudeTranscriptArchive {
   }
 
   /**
-   * The mtime pre-filter. A file that has not been written since the workspace was created cannot
-   * carry a record from inside the window, so it is skipped unopened. An unreadable mtime keeps the
-   * file — the filter exists to save work, and must never be the reason a real session is lost.
+   * The mtime pre-filter. A file whose mtime sits more than {@link #MTIME_SLACK} before the
+   * workspace was created cannot carry a record from inside the window, so it is skipped unopened.
+   * The slack is there because mtime is the kernel's coarse clock — it can trail the precise clock
+   * {@code from} is stamped with by up to a tick, and some filesystems keep whole-second mtimes —
+   * so a file written within a tick of the workspace's creation must not be judged by a clock that
+   * can read it as slightly earlier than it was. An unreadable mtime keeps the file — the filter
+   * exists to save work, and must never be the reason a real session is lost.
    */
   private static boolean writtenNoEarlierThan(Path file, Instant from) {
     try {
-      return !Files.getLastModifiedTime(file).toInstant().isBefore(from);
+      return !Files.getLastModifiedTime(file).toInstant().isBefore(from.minus(MTIME_SLACK));
     } catch (IOException e) {
       return true;
     }
