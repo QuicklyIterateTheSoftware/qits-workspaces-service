@@ -65,8 +65,8 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1003.125623</qits.workspace-daemon-protocol.version>
-        <qits.workspace-editor-image.version>2026.1003.130418</qits.workspace-editor-image.version>
+        <qits.workspace-daemon-protocol.version>2026.1003.185745</qits.workspace-daemon-protocol.version>
+        <qits.workspace-editor-image.version>2026.1003.192016</qits.workspace-editor-image.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -80,7 +80,7 @@
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
         <qits.arch-rules.version>2026.1002.70617</qits.arch-rules.version>
         <qits.auth-core.version>2026.1002.70617</qits.auth-core.version>
-        <qits.containers-client.version>2026.1003.120245</qits.containers-client.version>
+        <qits.containers-client.version>2026.1003.203916</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
@@ -100,7 +100,7 @@
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1003.103010</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1003.182401</qits.projects-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
              and ConsumerPactVerificationTest verifies consumers' pacts against this service.
@@ -111,7 +111,7 @@
              ConsumerPactVerificationTest loads every such resource off the test classpath. Test
              scope at the declaration site; a pin in <properties> like every other qits jar, so
              qits-maintenance bumps it when the consumer releases a changed pact. -->
-        <qits.landing-app-pacts-qits-workspaces-service.version>2026.1003.164019</qits.landing-app-pacts-qits-workspaces-service.version>
+        <qits.landing-app-pacts-qits-workspaces-service.version>2026.1003.184026</qits.landing-app-pacts-qits-workspaces-service.version>
         <qits.maven.repository.url>https://registry.qits.wohlben.eu/artifacts/maven/maven</qits.maven.repository.url>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
