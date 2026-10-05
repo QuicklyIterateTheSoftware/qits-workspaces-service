@@ -113,7 +113,15 @@ class WorkspaceRunnerMapperTest {
         mapper.toDto(
             runner,
             new WorkspaceRunnerMapper.Live(
-                true, since, "2026.1005.54252", 2, 3, 1, "docker run … claude", "docker run … kimi login"));
+                true,
+                since,
+                "2026.1005.54252",
+                2,
+                3,
+                1,
+                "docker run … claude",
+                "docker run … kimi login",
+                false));
 
     assertTrue(live.connected());
     assertEquals(since, live.connectedSince());
@@ -123,6 +131,7 @@ class WorkspaceRunnerMapperTest {
     assertEquals(1, live.queued());
     assertEquals("docker run … claude", live.loginCommand());
     assertEquals("docker run … kimi login", live.kimiLoginCommand());
+    assertFalse(live.loginCommandPending());
 
     WorkspaceRunnerDto bare = mapper.toDto(runner);
     assertFalse(bare.connected());
@@ -130,5 +139,19 @@ class WorkspaceRunnerMapperTest {
     assertNull(bare.pinnedVersion());
     assertEquals(0, bare.owned());
     assertNull(bare.loginCommand());
+    assertFalse(bare.loginCommandPending());
+  }
+
+  /** The gate itself is {@code RunnerLoginCommand}'s; this is only the DTO carrying the flag. */
+  @Test
+  public void aPendingLiveReportsItOnTheDto() {
+    WorkspaceRunnerDto dto =
+        mapper.toDto(
+            runner(),
+            new WorkspaceRunnerMapper.Live(false, null, "2026.1005.54252", 0, 0, 0, null, null, true));
+
+    assertNull(dto.loginCommand());
+    assertNull(dto.kimiLoginCommand());
+    assertTrue(dto.loginCommandPending());
   }
 }

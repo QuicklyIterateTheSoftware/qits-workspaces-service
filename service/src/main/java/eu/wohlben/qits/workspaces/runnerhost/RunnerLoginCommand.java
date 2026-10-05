@@ -1,8 +1,10 @@
 package eu.wohlben.qits.workspaces.runnerhost;
 
+import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto;
 import eu.wohlben.qits.workspaces.error.DomainException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import java.time.Instant;
 import java.util.regex.Pattern;
 
 /**
@@ -24,6 +26,17 @@ import java.util.regex.Pattern;
  * null for a volume name docker would not accept: the command is pasted into a shell by a person,
  * so a name the runner reported is spliced in only when it is a plain docker volume name. A
  * deployment with no public domain has no image to name, and answers null too.
+ *
+ * <p><b>Null until the runner has proven the CURRENT pinned workspace image is on its node</b>
+ * (qits-859, the race an operator hit live 2026-10-05: the login command appeared the instant the
+ * volume was known, while the runner was still pulling the image, so the pasted command failed
+ * with "unauthorized: client credentials required" against the node's own unauthenticated
+ * docker). The only proof available without a protocol change is the runner's own login probe,
+ * which runs {@code docker run … <workspaceImage> auth status} and can only answer at all once
+ * that image is local — so a login that settled with at least one harness {@code PRESENT} or
+ * {@code ABSENT} (never both {@code UNKNOWN}, which means the probe could not run) at or after the
+ * runner's current session began is read as the image being there. "Session began" is the
+ * runner's latest {@code connectedSince}, or its registration when it holds no socket right now.
  */
 @ApplicationScoped
 public class RunnerLoginCommand {
@@ -36,18 +49,44 @@ public class RunnerLoginCommand {
 
   @Inject WorkspaceRunnerAddresses addresses;
 
-  /** The Claude login command for {@code dotClaudeVolume}, or null. */
-  public String claude(String dotClaudeVolume) {
-    return compose(dotClaudeVolume, "claude");
+  /**
+   * The Claude login command for {@code dotClaudeVolume}, or null while it is unknown, the login
+   * has not yet proven the current image is on the node, or the deployment has no public domain.
+   */
+  public String claude(
+      String dotClaudeVolume,
+      WorkspaceRunnerDto.Login login,
+      Instant connectedSince,
+      Instant registeredAt) {
+    return compose(dotClaudeVolume, "claude", login, connectedSince, registeredAt);
   }
 
-  /** The Kimi login command for {@code dotClaudeVolume}, or null. */
-  public String kimi(String dotClaudeVolume) {
-    return compose(dotClaudeVolume, "kimi login");
+  /** The Kimi login command for {@code dotClaudeVolume}, under the same conditions. */
+  public String kimi(
+      String dotClaudeVolume,
+      WorkspaceRunnerDto.Login login,
+      Instant connectedSince,
+      Instant registeredAt) {
+    return compose(dotClaudeVolume, "kimi login", login, connectedSince, registeredAt);
   }
 
-  private String compose(String volume, String command) {
-    if (!splicable(volume)) {
+  /**
+   * Whether the commands are withheld for a reported volume: known, but not yet proven. False when
+   * the volume is unknown — there is nothing to wait for, only something not yet reported.
+   */
+  public boolean pending(
+      String dotClaudeVolume, WorkspaceRunnerDto.Login login, Instant connectedSince,
+      Instant registeredAt) {
+    return splicable(dotClaudeVolume) && !proven(login, connectedSince, registeredAt);
+  }
+
+  private String compose(
+      String volume,
+      String command,
+      WorkspaceRunnerDto.Login login,
+      Instant connectedSince,
+      Instant registeredAt) {
+    if (!splicable(volume) || !proven(login, connectedSince, registeredAt)) {
       return null;
     }
     String image;
@@ -57,6 +96,27 @@ public class RunnerLoginCommand {
       return null;
     }
     return command(volume, image, command);
+  }
+
+  /**
+   * Whether {@code login} shows the runner successfully probed the CURRENT image: at least one
+   * harness answered {@code PRESENT} or {@code ABSENT} (both {@code UNKNOWN} means the probe could
+   * not run at all — no proof), checked at or after whichever of {@code connectedSince} /
+   * {@code registeredAt} is known to describe the runner's current session.
+   */
+  static boolean proven(WorkspaceRunnerDto.Login login, Instant connectedSince, Instant registeredAt) {
+    if (login == null || login.checkedAt() == null) {
+      return false;
+    }
+    if (!answered(login.claude()) && !answered(login.kimi())) {
+      return false;
+    }
+    Instant since = connectedSince != null ? connectedSince : registeredAt;
+    return since != null && !login.checkedAt().isBefore(since);
+  }
+
+  private static boolean answered(String harness) {
+    return "PRESENT".equals(harness) || "ABSENT".equals(harness);
   }
 
   /** Whether {@code volume} is a plain docker volume name, safe to splice into a shell line. */
