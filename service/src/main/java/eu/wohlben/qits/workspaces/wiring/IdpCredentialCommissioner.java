@@ -14,6 +14,8 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
@@ -106,12 +108,61 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
     if (authorization == null || rowId == null) {
       return Optional.empty();
     }
-    IdpClients.CommissionRequest request =
-        new IdpClients.CommissionRequest(
-            CONTEXT_KIND,
-            Long.toString(rowId),
-            claims(projectId),
-            gitRefs == null ? null : List.copyOf(gitRefs));
+    IdpClients.CommissionRequest[] request = {
+      new IdpClients.CommissionRequest(
+          CONTEXT_KIND,
+          Long.toString(rowId),
+          claims(projectId),
+          gitRefs == null ? null : List.copyOf(gitRefs))
+    };
+    return Optional.of(
+        patiently(
+            patience,
+            "a credential for workspace " + rowId,
+            () -> {
+              IdpClients.CommissionResponse issued = clients.commission(authorization, request[0]);
+              if (issued == null || blank(issued.clientId()) || blank(issued.secret())) {
+                throw new IllegalStateException(
+                    "qits-idp answered a commission for workspace "
+                        + rowId
+                        + " with no usable credential in it");
+              }
+              return new WorkspaceCredential(issued.clientId(), issued.secret());
+            },
+            failure -> {
+              if (request[0].gitRefs() == null
+                  || request[0].gitRefs().isEmpty()
+                  || status(failure) != 400) {
+                return false;
+              }
+              LOG.error(
+                  "qits-idp refused the Git refs of workspace "
+                      + rowId
+                      + " ("
+                      + reasonOf(failure)
+                      + "). Commissioning it with gitRefs [] instead: its container may push"
+                      + " nothing until the list is one qits-idp accepts.");
+              request[0] = request[0].pushingNothing();
+              return true;
+            }));
+  }
+
+  /**
+   * The patient loop every commission this service makes runs through: the workspace credential
+   * above and a runner's client and registration token ({@link IdpRunnerCommissioner}). It asks
+   * {@code attempt} until it answers, holding through the failures that are about the moment ({@link
+   * #holdThrough}) for {@code patience}, and throws naming {@code what} once the window is spent or
+   * a failure is an answer about the request.
+   *
+   * <p>{@code askAgainAtOnce} sees every failure first, and answering true asks again with no pause
+   * and no patience spent: the caller changed its request (the Git refs fallback above), so the next
+   * attempt is a different question rather than the same one repeated.
+   */
+  static <T> T patiently(
+      Duration patience,
+      String what,
+      Supplier<T> attempt,
+      Predicate<RuntimeException> askAgainAtOnce) {
     Instant giveUpAt = Instant.now().plus(patience);
     // Never pause past the window itself: a pause longer than the patience would make a short
     // patience mean one attempt while looking like a window.
@@ -120,40 +171,20 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
     while (true) {
       attempts++;
       try {
-        IdpClients.CommissionResponse issued = clients.commission(authorization, request);
-        if (issued == null || blank(issued.clientId()) || blank(issued.secret())) {
-          throw new IllegalStateException(
-              "qits-idp answered a commission for workspace "
-                  + rowId
-                  + " with no usable credential in it");
-        }
-        return Optional.of(new WorkspaceCredential(issued.clientId(), issued.secret()));
+        return attempt.get();
       } catch (RuntimeException failure) {
-        if (request.gitRefs() != null && !request.gitRefs().isEmpty() && status(failure) == 400) {
-          LOG.error(
-              "qits-idp refused the Git refs of workspace "
-                  + rowId
-                  + " ("
-                  + reasonOf(failure)
-                  + "). Commissioning it with gitRefs [] instead: its container may push nothing"
-                  + " until the list is one qits-idp accepts.");
-          request = request.pushingNothing();
+        if (askAgainAtOnce.test(failure)) {
           continue;
         }
         if (!holdThrough(failure) || !Instant.now().isBefore(giveUpAt) || !sleep(pause)) {
           throw new IllegalStateException(
-              "Could not commission a credential for workspace "
-                  + rowId
-                  + " after "
-                  + attempts
-                  + " attempt(s): "
-                  + failure,
+              "Could not commission " + what + " after " + attempts + " attempt(s): " + failure,
               failure);
         }
         LOG.infof(
-            "Attempt %d to commission a credential for workspace %s did not land (%s) — asking"
-                + " again, holding through the window",
-            attempts, rowId, failure.toString());
+            "Attempt %d to commission %s did not land (%s) — asking again, holding through the"
+                + " window",
+            attempts, what, failure.toString());
       }
     }
   }
@@ -205,7 +236,7 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
   }
 
   /** The HTTP status of a failed call, or -1 when nothing answered. */
-  private static int status(RuntimeException failure) {
+  static int status(RuntimeException failure) {
     return failure instanceof WebApplicationException http ? http.getResponse().getStatus() : -1;
   }
 
@@ -278,6 +309,15 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
    * the whole "not wired" condition, checked in one place so all three verbs answer it identically.
    */
   private String authorization() {
+    return authorization(enabled, clientId, clientSecret);
+  }
+
+  /**
+   * {@link #authorization()} for any holder of the three keys, so {@link IdpRunnerCommissioner}
+   * answers "not wired" by exactly the same rule.
+   */
+  static String authorization(
+      boolean enabled, Optional<String> clientId, Optional<String> clientSecret) {
     if (!enabled) {
       return null;
     }
@@ -311,7 +351,7 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
     return status == 401 || status == 403 || status >= 500;
   }
 
-  private static boolean blank(String value) {
+  static boolean blank(String value) {
     return value == null || value.isBlank();
   }
 
