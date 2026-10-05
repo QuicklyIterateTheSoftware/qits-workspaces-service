@@ -334,9 +334,12 @@ public class WorkspaceDaemonRegistry
    * <p>The target is a <b>name</b> and never a port: the host does not learn — and must not state —
    * an address inside the container, so it says <em>what</em> it wants and the daemon resolves that
    * against its own allow-list. {@link WorkspaceTunnels} is what keys the caller on a capability
-   * version high enough to understand the name it is about to be sent.
+   * version high enough to understand the name it is about to be sent. A {@link
+   * StreamTarget#SERVICE} names its dev server by {@code serviceId} the same way — an id, never a
+   * port — and the id is null for every other target, which the codec then leaves off the wire.
    */
-  void requestStream(Long workspaceId, String nonce, String path, StreamTarget target) {
+  void requestStream(
+      Long workspaceId, String nonce, String path, StreamTarget target, String serviceId) {
     DaemonConnection client = clients.get(workspaceId);
     if (client == null || !client.connection.isOpen()) {
       LOG.debugf("requestStream: no workspace-daemon live for %s", workspaceId);
@@ -344,7 +347,7 @@ public class WorkspaceDaemonRegistry
     }
     client
         .connection
-        .sendText(codec.encode(new OpenStream(nonce, path, target)))
+        .sendText(codec.encode(new OpenStream(nonce, path, target, serviceId)))
         .subscribe()
         .with(
             ignored -> {},

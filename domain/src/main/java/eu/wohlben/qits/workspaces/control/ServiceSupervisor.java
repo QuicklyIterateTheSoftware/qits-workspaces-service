@@ -10,9 +10,12 @@ import eu.wohlben.qits.workspaces.dto.ServiceEventDto;
 import eu.wohlben.qits.workspaces.dto.ServiceInstanceDto;
 import eu.wohlben.qits.workspaces.entity.ServiceEventKind;
 import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.ServiceEventSeverity;
 import eu.wohlben.qits.workspaces.entity.ServiceStatus;
 import eu.wohlben.qits.workspaces.mapper.ServiceDefinitionMapper;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -71,7 +74,9 @@ public class ServiceSupervisor {
     /**
      * Where the service web-view proxy connects to reach the daemon's {@code webView.port} inside
      * the container — its DNS name + port on the shared network. Null when the daemon isn't
-     * web-viewable; re-resolved each time the service reports READY.
+     * web-viewable, and always null on a RUNNER row, whose container has no address on this host
+     * (the proxy reaches it through the tunnel instead); re-resolved each time the service reports
+     * READY.
      */
     ProxyOrigin origin;
 
@@ -112,6 +117,9 @@ public class ServiceSupervisor {
   @Inject ServiceEventService events;
 
   @Inject ContainerRuntime containers;
+
+  /** A row's placement, read when a service turns READY (qits-625, qits-815). */
+  @Inject WorkspaceRepository workspaceRows;
 
   @Inject WorkspaceChangePublisher changePublisher;
 
@@ -306,11 +314,17 @@ public class ServiceSupervisor {
    * Resolve where the web-view proxy reaches a web-viewable service's port — the container's DNS
    * name on the shared network + the real container port. There is no create-time port constraint,
    * so this always resolves for a web-viewable service; null only when it isn't web-viewable.
+   *
+   * <p><b>Or when the row is RUNNER-placed</b> (qits-625, qits-815). Its container is on a runner's
+   * node, with no {@code qits-net} and no name this host could resolve, so there is no direct origin
+   * to record and the {@link ContainerRuntime} is never asked for one — on this host that name would
+   * reach nothing or, worse, somebody else's container. The web-view proxy reaches such a service
+   * through the daemon's reverse tunnel, by its id, and never reads this origin.
    */
-  private void resolveOrigin(Instance instance) {
+  private void resolveOrigin(Instance instance, boolean runner) {
     Integer httpPort =
         instance.definition.webView() != null ? instance.definition.webView().port() : null;
-    if (httpPort == null) {
+    if (httpPort == null || runner) {
       instance.origin = null;
       return;
     }
@@ -334,14 +348,40 @@ public class ServiceSupervisor {
         if (instance.definition.webView() == null) {
           return Optional.empty();
         }
-        return Optional.of(new ProxyTarget(instance.status, instance.origin));
+        Integer port = instance.definition.webView().port();
+        return Optional.of(
+            new ProxyTarget(instance.status, instance.origin, port == null ? 0 : port.intValue()));
       }
     }
     return Optional.empty();
   }
 
-  /** A web-viewable service instance as the proxy sees it: status + the container-port origin. */
-  public record ProxyTarget(ServiceStatus status, ProxyOrigin origin) {}
+  /**
+   * Whether {@code workspaceRowId} is a RUNNER row. A row that cannot be read is not one — every
+   * row was DIRECT before placement, and the direct path is what this answer leaves untouched. Its
+   * own transaction because the caller is the daemon's sink-dispatch thread, which holds none.
+   */
+  private boolean isRunnerRow(Long workspaceRowId) {
+    if (workspaceRowId == null) {
+      return false;
+    }
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                workspaceRows
+                    .findActiveById(workspaceRowId)
+                    .map(w -> w.placement == WorkspacePlacement.RUNNER)
+                    .orElse(Boolean.FALSE));
+  }
+
+  /**
+   * A web-viewable service instance as the proxy sees it: status + the container-port origin, and
+   * the declared web-view port itself. The port is what the dev server listens on inside its
+   * container; the proxy presents it in the {@code Host} it sends whichever way it reaches the
+   * server, so a tunnelled request (whose TCP target is a loopback tunnel port) looks to the dev
+   * server exactly like a direct one.
+   */
+  public record ProxyTarget(ServiceStatus status, ProxyOrigin origin, int webViewPort) {}
 
   private static boolean isLive(ServiceStatus status) {
     return status == ServiceStatus.STARTING
@@ -478,6 +518,9 @@ public class ServiceSupervisor {
         LOG.debugf("Ignoring unknown service state '%s' for '%s'", state, serviceName);
         return;
       }
+      // The placement is read before the monitor is taken: it is a row read, and nothing that
+      // blocks belongs inside the monitor (see start(Long, String)).
+      boolean runner = mapped == ServiceStatus.READY && isRunnerRow(workspaceRowId);
       synchronized (ServiceSupervisor.this) {
         Instance instance = findByName(workspaceRowId, serviceName);
         if (instance == null) {
@@ -496,7 +539,7 @@ public class ServiceSupervisor {
           instances.put(new Key(workspaceRowId, definition.id()), instance);
         }
         if (mapped == ServiceStatus.READY) {
-          resolveOrigin(instance); // the service is bound now — resolve the proxy target
+          resolveOrigin(instance, runner); // the service is bound now — resolve the proxy target
         }
         if (mapped == ServiceStatus.RESTARTING) {
           instance.restartCount++;

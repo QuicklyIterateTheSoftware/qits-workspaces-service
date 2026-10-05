@@ -3,7 +3,13 @@ package eu.wohlben.qits.workspaces.api;
 import eu.wohlben.qits.workspaces.control.ProxyOrigin;
 import eu.wohlben.qits.workspaces.control.ServiceProxyPath;
 import eu.wohlben.qits.workspaces.control.ServiceSupervisor;
+import eu.wohlben.qits.workspaces.daemonhost.WorkspaceTunnels;
+import eu.wohlben.qits.workspaces.daemonhost.WorkspaceTunnels.TunnelOrigin;
 import eu.wohlben.qits.workspaces.entity.ServiceStatus;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import eu.wohlben.qits.workspacedaemon.protocol.StreamTarget;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
@@ -18,6 +24,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import java.util.Optional;
+import java.util.OptionalInt;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
@@ -41,6 +48,17 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * this route requires an authenticated identity like the rest of the UI surface (the oauth session
  * cookie or the proxy's forward-auth headers ride along automatically, the iframe being
  * same-origin).
+ *
+ * <h2>A RUNNER row's dev server is reached through the tunnel (qits-625, qits-815)</h2>
+ *
+ * <p>Its container is on a runner's node with no {@code qits-net}, so there is no container name
+ * to dial and {@link ServiceSupervisor} records no origin for it. The proxy asks {@link
+ * WorkspaceTunnels} for a {@link StreamTarget#SERVICE} stream instead, naming the service by its
+ * id; the daemon resolves the id to its own supervised web-view port. Nothing else about the route
+ * changes — the tunnel carries raw bytes, so the {@code Host} rewrite and the HMR upgrade cross it
+ * as they cross the direct path. There is no direct fallback for such a row: an unconnected daemon
+ * answers that it is not connected, and one whose image predates the SERVICE target answers that
+ * the image must be recreated. A DIRECT row keeps the direct origin, untouched.
  */
 @ApplicationScoped
 public class ServiceProxyRoute {
@@ -48,6 +66,11 @@ public class ServiceProxyRoute {
   @Inject Vertx vertx;
 
   @Inject ServiceSupervisor supervisor;
+
+  @Inject WorkspaceTunnels tunnels;
+
+  /** The row's placement, read on the worker beside the supervisor lookup. */
+  @Inject WorkspaceRepository workspaces;
 
   /**
    * Only relevant when qits itself runs under a path prefix (a qits-in-qits service bridges {@code
@@ -113,15 +136,73 @@ public class ServiceProxyRoute {
     }
 
     // The request stays untouched while the supervisor lookup runs off the event loop (its monitor
-    // can be held for the duration of a service launch); the proxy resumes it when forwarding.
+    // can be held for the duration of a service launch); the proxy resumes it when forwarding. The
+    // placement read and a RUNNER row's tunnel resolution (a row read, then a bind on first use)
+    // ride the same worker.
     rc.request().pause();
     rc.vertx()
-        .executeBlocking(() -> supervisor.proxyTarget(workspaceId, serviceId))
+        .executeBlocking(() -> lookup(workspaceId, serviceId))
         .onFailure(e -> respond(rc, 502, "Service lookup failed."))
-        .onSuccess(target -> route(rc, target));
+        .onSuccess(lookup -> route(rc, lookup));
   }
 
-  private void route(RoutingContext rc, Optional<ServiceSupervisor.ProxyTarget> target) {
+  /**
+   * What the event loop needs to answer: the supervisor's target and, for a READY service on a
+   * RUNNER row, how the tunnel answered. {@code tunnel} is null for every DIRECT row.
+   */
+  private record Lookup(Optional<ServiceSupervisor.ProxyTarget> target, TunnelRoute tunnel) {}
+
+  /** A RUNNER row's way in: a tunnel origin, or the reason there is none. Exactly one is set. */
+  private record TunnelRoute(TunnelOrigin origin, String refusal) {}
+
+  static final String NOT_CONNECTED = "the workspace daemon is not connected";
+
+  static final String PREDATES_SERVICE_TUNNEL =
+      "this workspace's image predates tunnelled web views — recreate it";
+
+  /** Blocking: the supervisor monitor, a row read and possibly a tunnel bind. */
+  private Lookup lookup(Long workspaceId, String serviceId) {
+    Optional<ServiceSupervisor.ProxyTarget> target = supervisor.proxyTarget(workspaceId, serviceId);
+    // Only a READY service is ever forwarded, so only then does the placement matter.
+    if (target.isEmpty()
+        || target.get().status() != ServiceStatus.READY
+        || !isRunnerRow(workspaceId)) {
+      return new Lookup(target, null);
+    }
+    return new Lookup(target, tunnelRoute(workspaceId, serviceId));
+  }
+
+  private boolean isRunnerRow(Long workspaceId) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                workspaces
+                    .findActiveById(workspaceId)
+                    .map(w -> w.placement == WorkspacePlacement.RUNNER)
+                    .orElse(Boolean.FALSE));
+  }
+
+  /**
+   * A RUNNER row's tunnel to {@code serviceId}. The capability is read first because {@link
+   * WorkspaceTunnels#originFor} answers "no daemon" and "a daemon too old for SERVICE" alike, and
+   * the two need different answers: one is a blip, the other never heals without a new image.
+   */
+  private TunnelRoute tunnelRoute(Long workspaceId, String serviceId) {
+    OptionalInt capability = tunnels.daemonCapability(workspaceId);
+    if (capability.isEmpty()) {
+      return new TunnelRoute(null, NOT_CONNECTED);
+    }
+    if (capability.getAsInt() < WorkspaceTunnels.capabilityFor(StreamTarget.SERVICE)) {
+      return new TunnelRoute(null, PREDATES_SERVICE_TUNNEL);
+    }
+    return tunnels
+        .originFor(workspaceId, StreamTarget.SERVICE, serviceId)
+        .map(origin -> new TunnelRoute(origin, null))
+        .orElseGet(() -> new TunnelRoute(null, NOT_CONNECTED));
+  }
+
+  private void route(RoutingContext rc, Lookup lookup) {
+    Optional<ServiceSupervisor.ProxyTarget> target = lookup.target();
     if (target.isEmpty()) {
       respond(rc, 404, "No web-viewable service here.");
       return;
@@ -135,6 +216,10 @@ public class ServiceProxyRoute {
               502,
               "The service is not running (" + status + ") — start it from the workspace page.");
       case READY -> {
+        if (lookup.tunnel() != null) {
+          proxyThroughTunnel(rc, lookup.tunnel(), target.get().webViewPort());
+          return;
+        }
         ProxyOrigin origin = target.get().origin();
         if (origin == null) {
           respond(
@@ -152,6 +237,23 @@ public class ServiceProxyRoute {
             .handle(rc.request());
       }
     }
+  }
+
+  /**
+   * A RUNNER row's READY service: through the workspace's own SERVICE tunnel, over the client that
+   * tunnel owns (never the shared one — see {@link WorkspaceTunnels} on reused ephemeral ports). The
+   * {@code Host} is the one the direct path presents, {@code localhost:<webView port>}, so the dev
+   * server cannot tell the two transports apart.
+   */
+  private void proxyThroughTunnel(RoutingContext rc, TunnelRoute tunnel, int webViewPort) {
+    if (tunnel.origin() == null) {
+      respond(rc, 502, tunnel.refusal());
+      return;
+    }
+    HttpProxy.reverseProxy(tunnel.origin().client())
+        .origin(tunnel.origin().port(), "127.0.0.1")
+        .addInterceptor(hostRewrite(webViewPort))
+        .handle(rc.request());
   }
 
   /**
