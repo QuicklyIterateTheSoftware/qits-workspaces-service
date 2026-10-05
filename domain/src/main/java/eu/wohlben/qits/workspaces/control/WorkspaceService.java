@@ -1354,7 +1354,16 @@ public class WorkspaceService {
     workspace.parent = parentBranch;
     workspace.branch = newBranch;
     workspace.status = WorkspaceStatus.ACTIVE;
-    workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+    // A RUNNER row is written QUEUED: creating it IS the request (the qits-ci runner model this
+    // placement copies — the service keeps the list of requested workspaces, a runner takes from
+    // it and owns the state from there). queued_at is what the runners take the oldest by. A DIRECT
+    // row is written STOPPED and started by whoever created it; see createAndStartWorkspace.
+    if (placed == WorkspacePlacement.RUNNER) {
+      workspace.runtimeStatus = WorkspaceRuntimeStatus.QUEUED;
+      workspace.queuedAt = Instant.now();
+    } else {
+      workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+    }
     workspace.preamble = preamble;
     // The posture, written once and never again: no verb promotes a workspace to admin later, so
     // the socket a container gets is the one the request that created it asked for. See
@@ -1577,8 +1586,63 @@ public class WorkspaceService {
    * {@code DIRECT} or {@code RUNNER} (epic qits-624), null meaning DIRECT. A RUNNER request with
    * {@code admin} is a 400, and one with no eligible runner a 409 {@code NO_RUNNER}, both before any
    * ref is pushed. Every other overload delegates here with null.
+   *
+   * <p>A RUNNER row is written QUEUED with {@code queued_at}, and the runners are told once it
+   * committed: creating it is the request a runner takes. A DIRECT row is written STOPPED.
    */
   public Workspace createWorkspace(
+      String repoId,
+      String workspaceId,
+      String parent,
+      String branch,
+      String preamble,
+      boolean adoptExisting,
+      boolean branchTree,
+      boolean admin,
+      WorkspaceSubject subject,
+      List<String> gitRefs,
+      WorkspacePlacement placement) {
+    return queued(
+        recordPlaced(
+            repoId,
+            workspaceId,
+            parent,
+            branch,
+            preamble,
+            adoptExisting,
+            branchTree,
+            admin,
+            subject,
+            gitRefs,
+            placement));
+  }
+
+  /**
+   * Tells the runners a RUNNER row was just written QUEUED — after its transaction committed, so a
+   * runner that reserves on the signal finds the row. The signal is a nudge and never the record:
+   * the row is queued whether or not it arrives, and a runner's next reserve takes it all the same,
+   * so a failure to send it is logged rather than allowed to fail a create that already happened.
+   */
+  private Workspace queued(Workspace created) {
+    if (created.placement != WorkspacePlacement.RUNNER) {
+      return created;
+    }
+    if (runnerPlacement.isResolvable()) {
+      try {
+        runnerPlacement.get().backlogChanged(created);
+      } catch (RuntimeException e) {
+        LOG.warnf(
+            e,
+            "Workspace %s/%s was queued, but the runners could not be told",
+            created.repositoryId,
+            created.workspaceId);
+      }
+    }
+    return created;
+  }
+
+  /** {@link #createWorkspace}'s widest form up to the commit: the row as written, not yet signalled. */
+  private Workspace recordPlaced(
       String repoId,
       String workspaceId,
       String parent,
@@ -1654,6 +1718,83 @@ public class WorkspaceService {
                     subject,
                     stated,
                     placement));
+  }
+
+  /**
+   * What {@link #createAndStartWorkspace} answers: the row it recorded, and the start it ran on it —
+   * the process {@link #beginEnsureContainer} answered, or why that start was refused.
+   */
+  public record CreatedWorkspace(Workspace workspace, String technicalProcessId, String startError) {}
+
+  /**
+   * <b>Creating a workspace starts it</b> (qits-853, owner decision 2026-10-05: "the frontend
+   * requests a workspace — why is there a second REST call?"). The create door's method.
+   *
+   * <ul>
+   *   <li>A RUNNER row needs nothing more: {@link #createWorkspace} wrote it QUEUED and told the
+   *       runners, and a runner's reserve takes it from there. No process is answered — the row's
+   *       runtime status is its progress.
+   *   <li>A DIRECT row is started by {@link #beginEnsureContainer}, the start the {@code
+   *       ensure-container} door runs: the three-rung ladder, behind the process it answers.
+   * </ul>
+   *
+   * <p>Either way a later ensure-container is the no-op it is on a row already starting, so a client
+   * that still makes the second call keeps working.
+   *
+   * <p>Only the create door calls this. The domain's other creators decide for themselves whether
+   * and when to start — dispatch and the editor start the row they wrote once, themselves, and
+   * capture leaves it stopped — so the start is not folded into {@link #createWorkspace}, where it
+   * would double theirs.
+   *
+   * <p><b>A start refused after the row exists does not undo the create.</b> The refusal is answered
+   * in {@link CreatedWorkspace#startError} beside the row instead of thrown: the row is committed and
+   * real, and an error status would tell the caller the create failed when it is the start that
+   * did. A refusal before the row exists — every guard {@link #createWorkspace} runs — still throws
+   * as it always did. A start that fails later, on the worker, fails its process as an
+   * ensure-container's does.
+   */
+  public CreatedWorkspace createAndStartWorkspace(
+      String repoId,
+      String workspaceId,
+      String parent,
+      String branch,
+      String preamble,
+      boolean adoptExisting,
+      boolean branchTree,
+      boolean admin,
+      WorkspaceSubject subject,
+      List<String> gitRefs,
+      WorkspacePlacement placement) {
+    Workspace created =
+        createWorkspace(
+            repoId,
+            workspaceId,
+            parent,
+            branch,
+            preamble,
+            adoptExisting,
+            branchTree,
+            admin,
+            subject,
+            gitRefs,
+            placement);
+    if (created.placement == WorkspacePlacement.RUNNER) {
+      return new CreatedWorkspace(created, null, null);
+    }
+    try {
+      return new CreatedWorkspace(created, beginEnsureContainer(created.id), null);
+    } catch (RuntimeException refused) {
+      LOG.warnf(
+          refused,
+          "Workspace %s/%s was created but its start was refused",
+          repoId,
+          created.workspaceId);
+      String message = refused.getMessage();
+      return new CreatedWorkspace(
+          created,
+          null,
+          message == null || message.isBlank() ? refused.getClass().getSimpleName() : message);
+    }
   }
 
   /**
@@ -2071,6 +2212,17 @@ public class WorkspaceService {
     Workspace resolved = QuarkusTransaction.requiringNew().call(() -> requireActive(id));
     if (resolved.placement == WorkspacePlacement.RUNNER) {
       return beginRunnerStart(resolved);
+    }
+    // A start already under way is joined, not doubled. Creating a workspace starts it (qits-853),
+    // so a client that still presses ensure-container straight after the create lands here while
+    // that start is cloning — before its container exists, when the ladder below would provision a
+    // second one beside it. A FAILED row is the exception: its process is the one that failed.
+    if (resolved.runtimeStatus != WorkspaceRuntimeStatus.FAILED) {
+      Optional<String> running =
+          processes.isResolvable() ? processes.get().activeFor(resolved.id) : Optional.empty();
+      if (running.isPresent()) {
+        return running.get();
+      }
     }
     String repoId = resolved.repositoryId;
     String workspaceId = resolved.workspaceId;

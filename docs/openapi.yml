@@ -553,6 +553,10 @@ components:
       properties:
         workspace:
           $ref: "#/components/schemas/WorkspaceDto"
+        technicalProcessId:
+          type: string
+        startError:
+          type: string
     Response13:
       type: object
       properties:

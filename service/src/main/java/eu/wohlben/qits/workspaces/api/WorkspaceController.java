@@ -202,17 +202,36 @@ public class WorkspaceController {
       this(repositoryId, id, parent, branch, preamble, false, false, false, null);
     }
 
-    public record Response(WorkspaceDto workspace) {}
+    /**
+     * The created workspace and the start the create ran on it. {@code technicalProcessId} is a
+     * DIRECT row's start, the same process {@code ensure-container} answers — follow it at {@code
+     * /workspaces/api/technical-processes/{technicalProcessId}/events}. It is null for a RUNNER row,
+     * which the create wrote QUEUED and whose runtime status is its progress, and null when the
+     * start was refused or no process tracker is installed. {@code startError} is null unless the
+     * start was refused after the row was written: the row exists all the same, so the refusal is
+     * reported here rather than as an error status that would say the create failed.
+     */
+    public record Response(WorkspaceDto workspace, String technicalProcessId, String startError) {
+      /** A create with no start: the shape before create started the workspace. */
+      public Response(WorkspaceDto workspace) {
+        this(workspace, null, null);
+      }
+    }
   }
 
   @POST
   // The operationId is the name a consumer pact uses for this door as the TRIGGER of the calls it
   // makes downstream (pacts/qits-workspaces-service_qits-projects-service.json,
   // `qits-trigger`). Renaming it renames the trigger there.
+  //
+  // Creating a workspace starts it (qits-853), in WorkspaceService.createAndStartWorkspace: a RUNNER
+  // row is written QUEUED for a runner to take, a DIRECT row's container is started and the answer
+  // carries that start's process, so a client follows it and makes no second call. A start refused
+  // after the row exists answers 200 with the row and the refusal in startError — see the method.
   @Operation(operationId = "createWorkspace")
   public CreateWorkspaceRequest.Response create(@Valid CreateWorkspaceRequest request) {
-    var wt =
-        workspaceService.createWorkspace(
+    var created =
+        workspaceService.createAndStartWorkspace(
             request.repositoryId(),
             request.id(),
             request.parent(),
@@ -224,7 +243,12 @@ public class WorkspaceController {
             WorkspaceSubject.none(),
             null,
             request.placement());
-    return new CreateWorkspaceRequest.Response(workspaceMapper.toDto(wt));
+    // The thin view of the row as written, as before: a RUNNER row already reads QUEUED in it, and
+    // a DIRECT row's start is followed through the process, not through a re-read of the listing.
+    return new CreateWorkspaceRequest.Response(
+        workspaceMapper.toDto(created.workspace()),
+        created.technicalProcessId(),
+        created.startError());
   }
 
   public static record EnsureContainerRequest() {

@@ -25,6 +25,7 @@ public class FakeRunnerPlacement implements RunnerPlacement {
   private final Set<UUID> connected = ConcurrentHashMap.newKeySet();
   private final Set<UUID> timingOut = ConcurrentHashMap.newKeySet();
   private final List<String> calls = Collections.synchronizedList(new ArrayList<>());
+  private volatile RuntimeException backlogFailure;
 
   /** The runner is connected from now on. */
   public void connect(UUID runnerId) {
@@ -42,6 +43,11 @@ public class FakeRunnerPlacement implements RunnerPlacement {
     timingOut.add(runnerId);
   }
 
+  /** Every backlog signal from now on throws {@code failure}: a start that fails in-request. */
+  public void failBacklog(RuntimeException failure) {
+    backlogFailure = failure;
+  }
+
   /** Every call so far, newest last. */
   public List<String> calls() {
     synchronized (calls) {
@@ -49,16 +55,26 @@ public class FakeRunnerPlacement implements RunnerPlacement {
     }
   }
 
+  /** Forget the calls so far, keeping who is connected. */
+  public void clearCalls() {
+    calls.clear();
+  }
+
   /** Back to the shipped posture: nothing connected, nothing logged. */
   public void reset() {
     connected.clear();
     timingOut.clear();
     calls.clear();
+    backlogFailure = null;
   }
 
   @Override
   public void backlogChanged(Workspace row) {
     calls.add("backlog:" + row.id);
+    RuntimeException failure = backlogFailure;
+    if (failure != null) {
+      throw failure;
+    }
   }
 
   @Override

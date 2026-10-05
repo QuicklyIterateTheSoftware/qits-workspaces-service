@@ -52,14 +52,13 @@ public class BranchControllerTest {
     }
   }
 
+  /**
+   * Records the workspace and leaves it stopped. Not the create door: that starts the container too
+   * (qits-853), and a container with no daemon to report its tree clean refuses every landing — this
+   * suite is about the landing, not the start.
+   */
   private void createWorkspace(String repoId, String id, String parent, String branch) {
-    given()
-        .contentType(ContentType.JSON)
-        .body(new WorkspaceController.CreateWorkspaceRequest(repoId, id, parent, branch, null))
-        .when()
-        .post("/workspaces/api/workspaces")
-        .then()
-        .statusCode(Response.Status.OK.getStatusCode());
+    workspaceService.createWorkspace(repoId, id, parent, branch, null);
   }
 
   /** The branch names present in the repository's bare origin. */

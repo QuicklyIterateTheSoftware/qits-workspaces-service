@@ -124,7 +124,8 @@ public class WorkspaceProvisionIT {
       to be a filesystem write into the served bare, which fired no post-receive and is why no
       workspace anybody ever created produced a CI run.
 
-      Then the container. This process holds no docker socket: it asks qits-containers to put a
+      Then the container, in the same request — nobody asks twice. This process holds no docker
+      socket: it asks qits-containers to put a
       container at a place, under a spec it composes — the pinned workspace image, the volumes, the
       network, and the environment the daemon inside will read. Two things in that environment are
       the point. `QITS_WORKSPACE_DAEMON_URL` is the address the daemon dials back on, which is why
@@ -167,6 +168,10 @@ public class WorkspaceProvisionIT {
             // and the repository's default branch are all computed rather than stored, and none of
             // them is knowable at the instant a row is written. The full shape is the read below.
             .body("workspace.branch", org.hamcrest.Matchers.nullValue())
+            // Creating a workspace starts it (qits-853): the same answer carries the technical
+            // process the start streams over, so there is no second call to make.
+            .body("technicalProcessId", notNullValue())
+            .body("startError", org.hamcrest.Matchers.nullValue())
             .extract()
             .jsonPath();
     long rowId = created.getLong("workspace.id");
@@ -197,25 +202,14 @@ public class WorkspaceProvisionIT {
                 + " left for a push to suppress")
         .as("branch-pushed");
 
-    // The container. The verb answers at once with a technical process id — the work is a pull, a
-    // start and a clone, which is minutes and is the wrong thing to hold an HTTP request open for.
-    String process =
-        StoryIdentities.person(given())
-            // A body-less POST still has to declare one: the resource is @Consumes(APPLICATION_JSON)
-            // and RESTEasy answers 415 to a request that arrives without a content type.
-            .contentType(ContentType.JSON)
-            .when()
-            .post(StoryTarget.workspacePath(rowId) + "/ensure-container")
-            .then()
-            .statusCode(200)
-            .body("technicalProcessId", notNullValue())
-            .extract()
-            .path("technicalProcessId");
+    // The container. Nothing more is asked for: the create started it, and its answer already
+    // carried the technical process id — the work is a pull, a start and a clone, which is minutes
+    // and is the wrong thing to hold an HTTP request open for.
     story
         .note(
-            "the start answers 202-shaped — the workspace as it stands plus the id of the technical"
-                + " process the work streams over — because a pull and a clone are minutes of"
-                + " somebody else's work")
+            "the same request starts the container: the answer carries the id of the technical"
+                + " process the work streams over, because a pull and a clone are minutes of"
+                + " somebody else's work — the operator makes no second call")
         .as("provision-started");
 
     // What qits-containers was asked for. The story learns this from the far side's own recording:
@@ -312,11 +306,8 @@ public class WorkspaceProvisionIT {
     // What the operator sent. The polling loop is many requests and ONE arrow: the row id is a bare
     // number and the label is templated, so what the diagram says is that a provision is watched
     // over this route rather than how impatient the watching was.
+    // ONE door starts it: the create (qits-853). There is no ensure-container arrow any more.
     from(StoryIdentities.OPERATOR, NetworkEdge.HTTP, "POST " + StoryTarget.WORKSPACES_PATH + " -> 200");
-    from(
-        StoryIdentities.OPERATOR,
-        NetworkEdge.HTTP,
-        "POST " + StoryTarget.ENSURE_CONTAINER_LABEL_PATH + " -> 200");
     from(
         StoryIdentities.OPERATOR,
         NetworkEdge.HTTP,
@@ -384,12 +375,12 @@ public class WorkspaceProvisionIT {
         StoryIdentities.DAEMON,
         "ack");
 
-    // EIGHTEEN across four planes: four doors, one registry read, three git calls, one commission,
+    // SEVENTEEN across four planes: three doors, one registry read, three git calls, one commission,
     // one token, three container calls, one dial and four frames. The count is what would notice a
     // peer call creeping into a path that is supposed to be finished — a status poll after the
     // ensure, say, which the design deliberately does not make because the wait is on the socket
     // instead.
-    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, PROVISIONED_SLUG, 18);
+    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, PROVISIONED_SLUG, 17);
     ReportAssertions.assertOnlyEdgesFrom(
         CATEGORY_SLUG,
         PROVISIONED_SLUG,

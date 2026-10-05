@@ -1565,8 +1565,16 @@ RUNNER with no eligible runner is a 409 `NO_RUNNER`. The refusal codes live in `
 - **`stopContainer`/`deleteContainer` are no longer `@Transactional`**, so the RUNNER arm can wait up
   to 60 s for its runner's reply outside a transaction (Narayana's default timeout is also 60 s). The
   DIRECT body runs unchanged inside `QuarkusTransaction.joiningExisting()`.
-- **Start is pull.** A RUNNER start only marks the row QUEUED (a compare-and-swap); a runner's
-  `reserve` takes it (`RunnerClaims.reserveFor`, the CAS in `WorkspaceRepository.claimForRunner`).
+- **Start is pull, and creating a RUNNER row is its first start.** `recordWorkspace` writes a RUNNER
+  row QUEUED with `queued_at`, and the backlog is told once it committed — the qits-ci runner model:
+  the service keeps the list of requested workspaces, a runner takes from it. A later start (a row
+  stopped since) only marks the row QUEUED again (a compare-and-swap); a runner's `reserve` takes it
+  (`RunnerClaims.reserveFor`, the CAS in `WorkspaceRepository.claimForRunner`).
+- **The create door starts what it creates** (qits-853, `createAndStartWorkspace`): a DIRECT row's
+  container is started in the same request and the answer carries its `technicalProcessId`, so no
+  client makes a second call. Dispatch, the editor and capture create through `createWorkspace` and
+  start (or do not) on their own, which is why the start is not in `createWorkspace` itself. An
+  ensure-container right after a create joins the start still running instead of provisioning twice.
   Stop and delete are routed to the owning runner through the `RunnerPlacement` port; resolution
   never waits on one.
 - **RUNNER rows skip the qits-containers listing**: their persisted status is the runner's word, with
