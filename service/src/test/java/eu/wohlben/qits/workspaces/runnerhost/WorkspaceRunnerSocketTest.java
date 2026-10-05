@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.runner.protocol.Ack;
 import eu.wohlben.qits.runner.protocol.Backlog;
+import eu.wohlben.qits.runner.protocol.Heartbeat;
 import eu.wohlben.qits.runner.protocol.Nothing;
 import eu.wohlben.qits.runner.protocol.Quarantined;
 import eu.wohlben.qits.runner.protocol.Reinstated;
@@ -18,6 +19,7 @@ import eu.wohlben.qits.runner.protocol.Upgrade;
 import eu.wohlben.qits.workspaces.control.WorkspaceRunners;
 import eu.wohlben.qits.workspaces.daemonhost.DaemonControlSocketMachineAuthTest;
 import eu.wohlben.qits.workspaces.daemonhost.DaemonMachineTokens;
+import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspacesrunner.protocol.Estate;
@@ -25,6 +27,8 @@ import eu.wohlben.qits.workspacesrunner.protocol.HealthCheck;
 import eu.wohlben.qits.workspacesrunner.protocol.HealthChecked;
 import eu.wohlben.qits.workspacesrunner.protocol.HeldContainer;
 import eu.wohlben.qits.workspacesrunner.protocol.Inventory;
+import eu.wohlben.qits.workspacesrunner.protocol.LoginPresence;
+import eu.wohlben.qits.workspacesrunner.protocol.LoginState;
 import eu.wohlben.qits.workspacesrunner.protocol.WorkspacesRunnerBinary;
 import eu.wohlben.qits.workspacesrunner.protocol.WorkspacesRunnerProtocol;
 import io.quarkus.test.common.http.TestHTTPResource;
@@ -64,6 +68,8 @@ class WorkspaceRunnerSocketTest {
   @Inject Vertx vertx;
 
   @Inject WorkspaceRunnerRegistry registry;
+
+  @Inject WorkspaceRunnerViews views;
 
   @Inject WorkspaceRunners runners;
 
@@ -281,6 +287,42 @@ class WorkspaceRunnerSocketTest {
   }
 
   // --- what the runner reports --------------------------------------------------------------------
+
+  /**
+   * {@code loginState} and the inventory's agent home land on the row and stay there when the runner
+   * goes away: the page shows the last known login, and the login command, while it is offline.
+   */
+  @Test
+  void theLoginStateAndTheVolumeSurviveADisconnect() throws Exception {
+    WorkspaceRunner row = rows.eligible("wr-login-state", 1);
+    FakeWorkspacesRunner runner = greeted("wr-login-state");
+
+    runner.send(new Inventory(List.of(), List.of(), "qits-workspaces-runner-dot-claude-abcd1234"));
+    runner.send(new LoginState(LoginPresence.PRESENT, LoginPresence.ABSENT, "2026-10-05T06:00:00Z"));
+    runner.send(new Heartbeat());
+    long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+    WorkspaceRunnerDto seen = views.view(rows.runner(row.id));
+    while ((seen.login() == null || seen.dotClaudeVolume() == null)
+        && System.nanoTime() < deadline) {
+      Thread.sleep(50);
+      seen = views.view(rows.runner(row.id));
+    }
+    runner.close();
+    deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+    while (registry.connected(row.id) && System.nanoTime() < deadline) {
+      Thread.sleep(50);
+    }
+
+    WorkspaceRunnerDto offline = views.view(rows.runner(row.id));
+    assertFalse(offline.connected());
+    assertEquals("PRESENT", offline.login().claude());
+    assertEquals("ABSENT", offline.login().kimi());
+    assertEquals("qits-workspaces-runner-dot-claude-abcd1234", offline.dotClaudeVolume());
+    assertTrue(
+        offline.loginCommand().startsWith(
+            "docker run --rm -it -v qits-workspaces-runner-dot-claude-abcd1234:/claude-home"),
+        offline.loginCommand());
+  }
 
   /** The inventory reconciles the rows the runner owns: held running is RUNNING, not held STOPPED. */
   @Test

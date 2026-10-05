@@ -428,4 +428,48 @@ class WorkspaceRunnerControllerTest {
         .then()
         .statusCode(403);
   }
+
+  // --- the login command (qits-859) ---------------------------------------------------------------
+
+  /** Null until the runner reported its agent home; then exactly the feature's shape, both CLIs. */
+  @Test
+  void theLoginCommandAppearsOnceTheVolumeIsKnown() throws Exception {
+    WorkspaceRunner runner = rows.registered("wr-login", 1);
+    as("qits:admin")
+        .when()
+        .get(RUNNERS + "/" + runner.id)
+        .then()
+        .statusCode(200)
+        .body("loginCommand", nullValue())
+        .body("kimiLoginCommand", nullValue());
+
+    runners.recordCapabilities(
+        runner.id,
+        new ObjectMapper()
+            .readTree(
+                "{\"dotClaudeVolume\":\"qits-workspaces-runner-dot-claude-1234abcd\","
+                    + "\"login\":{\"claude\":\"ABSENT\",\"kimi\":\"UNKNOWN\","
+                    + "\"checkedAt\":\"2026-10-05T06:00:00Z\"}}"));
+
+    String image =
+        "registry.qits."
+            + DOMAIN
+            + "/qits/workspace:"
+            + containerFactory.imageVersion();
+    String prefix =
+        "docker run --rm -it -v qits-workspaces-runner-dot-claude-1234abcd:/claude-home"
+            + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home "
+            + image;
+    as("qits:agent")
+        .when()
+        .get(RUNNERS)
+        .then()
+        .statusCode(200)
+        .body("find { it.id == '" + runner.id + "' }.loginCommand", equalTo(prefix + " claude"))
+        .body(
+            "find { it.id == '" + runner.id + "' }.kimiLoginCommand",
+            equalTo(prefix + " kimi login"))
+        .body("find { it.id == '" + runner.id + "' }.login.claude", is("ABSENT"))
+        .body("find { it.id == '" + runner.id + "' }.dotClaudeVolume", notNullValue());
+  }
 }
