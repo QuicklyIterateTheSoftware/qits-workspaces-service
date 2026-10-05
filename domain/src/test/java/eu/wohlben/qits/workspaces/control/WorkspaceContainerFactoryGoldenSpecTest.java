@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
  */
 class WorkspaceContainerFactoryGoldenSpecTest {
 
-  private static WorkspaceContainerFactory factory() {
+  static WorkspaceContainerFactory factory() {
     WorkspaceContainerFactory f = new WorkspaceContainerFactory();
     f.imageRepo = "registry.dev.localhost:8080/qits/workspace";
     f.imageVersionOverride = Optional.of("2026.1001.120000");

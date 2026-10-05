@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.ZoneId;
 import java.util.Optional;
+import java.util.function.BiConsumer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -654,6 +655,42 @@ public class WorkspaceContainerFactory {
   }
 
   /**
+   * The platform's public domain ({@code QITS_DOMAIN}), trimmed, or empty when none is set. The
+   * runner spec composes the public image reference from it ({@link RunnerWorkspaceSpecs}).
+   */
+  public Optional<String> publicDomain() {
+    return set(domain);
+  }
+
+  /** Where the agent home volume is mounted, on every placement. */
+  public String claudeMount() {
+    return claudeMount;
+  }
+
+  /** The configured timezone, or this process's own when blank: the container's {@code TZ}. */
+  public String containerTimezone() {
+    return timezone();
+  }
+
+  /**
+   * The configured resource limits, each null when blank or unset: memory, memory+swap, pids, cpus,
+   * oom score. One reading for the DIRECT spec and the runner spec alike.
+   */
+  public RunnerLaunchSpec.Limits limits() {
+    return new RunnerLaunchSpec.Limits(
+        memoryLimit.filter(v -> !v.isBlank()).orElse(null),
+        memorySwapLimit.filter(v -> !v.isBlank()).orElse(null),
+        pidsLimit.filter(v -> !v.isBlank()).orElse(null),
+        cpus.filter(v -> !v.isBlank()).orElse(null),
+        oomScoreAdj);
+  }
+
+  /** The configured commit identity as environment, in its own order. */
+  public java.util.Map<String, String> gitIdentityEnv() {
+    return gitIdentity.envMap();
+  }
+
+  /**
    * The deterministic per-workspace {@code /workspace} volume name — {@code prefix + workspaceId}.
    */
   public String workspaceVolumeName(String workspaceId) {
@@ -798,110 +835,11 @@ public class WorkspaceContainerFactory {
     // verbatim service proxy 404'd the framed view). Same told-never-derived arrangement as the
     // API base path above.
     container.env("QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE", ServiceProxyPath.PREFIX + rowId);
-    container.env("QITS_WORKSPACE_DAEMON_WORKSPACE_ID", workspaceId);
-    // THE EDITOR BELONGS TO NO REPOSITORY, so it is told about none. Every name below is what the
-    // in-container daemon self-clones from — repository id, project-scoped name, branch, parent —
-    // and the editor's row carries a SENTINEL repository id (EditorWorkspace.REPOSITORY_ID) and no
-    // branch at all. Handing the daemon that sentinel would send it to clone `/git/editor`, which is
-    // nothing, and the failure would be a provision that never completes rather than a container
-    // with an empty /workspace. So the five names are written BLANK, which is the same value a
-    // repository the registry could not resolve already produces, and the two lookups behind them
-    // are not made: there is nothing to resolve and the sentinel would cost a round trip per ensure
-    // to learn that.
-    //
-    // WHAT THIS ONE CONTAINER NOW REACHES IS AN ACCEPTED CONSEQUENCE, decided deliberately by the
-    // epic and recorded here because it is the kind of thing that must not be rediscovered. It holds
-    // an ordinary `qits:agent` workspace credential — the same one every workspace container gets,
-    // no new client and no new audience — but it is no longer one project's container: everybody
-    // opens THIS one, so an unattended agent inside it acts on the whole platform rather than on the
-    // project whose page somebody came in through. Its commission is unscoped for the same reason
-    // the blanks above are blank (no repository ⇒ no project claim), so it READS every project.
-    //
-    // WHAT IT CLONES INSTEAD IS THE PROJECTS LIST, injected a few lines below: the daemon skips the
-    // root clone exactly when a container has no repository of its own AND carries a list, which is
-    // this container and only this container. An ordinary workspace is told no list and still fails
-    // loudly without a repository, which is the property that keeps the two cases apart.
-    container.env("QITS_WORKSPACE_DAEMON_REPOSITORY_ID", editor ? "" : repoId);
-    container.env("QITS_WORKSPACE_DAEMON_BRANCH", editor || branch == null ? "" : branch);
-    container.env("QITS_WORKSPACE_DAEMON_PARENT", editor || parent == null ? "" : parent);
-    // The subject's qualified id (Workspace.entityId, V8). The daemon names its agent sessions
-    // `[❗]<status square> <entityId> <title>` from it and the facts below — a column rather than a one-time launch argument, for
-    // BRANCH's own reason. UNLIKE BRANCH, this key is OMITTED rather than written blank when there
-    // is none (the editor, an ad-hoc workspace, or any row that predates V8): BRANCH is on every
-    // spec already, but this field is new, so writing it blank would add a key to the environment
-    // of every workspace alive today, and environment is part of the spec a stopped container is
-    // resumed by re-presenting under Recreate.ifChanged — adding even a blank key there replaces
-    // every one of their containers once, on its next start, for a value that says nothing.
-    if (!editor && entityId != null && !entityId.isBlank()) {
-      container.env("QITS_WORKSPACE_DAEMON_ENTITY_ID", entityId);
-    }
-    // The same subject's title, status word and blocked flag (Workspace.entityTitle/-Status/
-    // -Blocked, V9, qits-617): the daemon names its sessions `[❗]<status square> <id> <title>` from
-    // them. Read off the ROW, which every relayed change updates, so a container that was stopped
-    // while the subject moved comes back up saying what is true now — and that is also their cost:
-    // environment is part of the spec, so the first resume of a STOPPED container after a change is
-    // a Recreate.ifChanged replacement (a RUNNING one is never re-specced; ensureContainer
-    // short-circuits it, and the live rename goes through POST /agents/entity instead). Each key is
-    // omitted when there is no value, ENTITY_ID's rule for ENTITY_ID's reason, and BLOCKED is
-    // written only as "true" — RefinementContainerFactory's spelling — so an unblocked subject's
-    // spec carries no key for it at all.
-    if (!editor) {
-      entityFacts(rowId)
-          .ifPresent(
-              facts -> {
-                if (facts.title() != null && !facts.title().isBlank()) {
-                  container.env("QITS_WORKSPACE_DAEMON_ENTITY_TITLE", facts.title());
-                }
-                if (facts.status() != null && !facts.status().isBlank()) {
-                  container.env("QITS_WORKSPACE_DAEMON_ENTITY_STATUS", facts.status());
-                }
-                if (facts.blocked()) {
-                  container.env("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED", "true");
-                }
-              });
-    }
-    // The project-scoped name the daemon self-clones under (/git/<projectId>/<name>), so committed
-    // relative submodule urls resolve natively in-container. Blank when the repo has no project —
-    // the
-    // daemon then id-addresses (/git/<repositoryId>), mirroring cloneUrl's fallback.
-    Optional<RepositoryAddressResolver.ProjectScopedName> scopedName =
-        editor ? Optional.empty() : scopedName(repoId);
-    // The owning project id, also as a label so it mirrors the per-workspace volume's qits.project
-    // (the volume labels carry it for dangling-volume reconcile; the container carries it for
-    // symmetry). Resolved through projectIdFor — the RepositoryLookup fallback is what stopped
-    // this env var from shipping empty (D2). Blank only when no registry answers — and for the
-    // editor, which owns no project the way it owns no repository.
-    String projectId =
-        editor
-            ? ""
-            : scopedName
-                .map(RepositoryAddressResolver.ProjectScopedName::projectId)
-                .orElseGet(() -> projectIdFor(repoId));
-    container.label("qits.project", projectId);
-    container.env("QITS_WORKSPACE_DAEMON_PROJECT_ID", projectId);
-    container.env(
-        "QITS_WORKSPACE_DAEMON_REPO_NAME",
-        scopedName.map(RepositoryAddressResolver.ProjectScopedName::name).orElse(""));
-    // The bootstrap kill switch the daemon honours when it self-runs the chain on boot (Part 3).
-    container.env(
-        "QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN", String.valueOf(bootstrapAutorunEnabled));
-    // The auto-push kill switch the daemon honours when it pushes committed work on its own
-    // (docs/epics/qits-workspace-daemon/ bidirectional auto-sync).
-    container.env("QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED", String.valueOf(autoPushEnabled));
-    // Service (dev-server) supervision, self-run by the daemon as the boot-sequence tail (Part 4):
-    // the auto-start kill switch + the knobs the in-container ServiceSupervisor honours.
-    container.env(
-        "QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART", String.valueOf(servicesAutostartEnabled));
-    container.env(
-        "QITS_WORKSPACE_DAEMON_SERVICE_READY_GRACE_MS", String.valueOf(serviceReadyGraceMs));
-    container.env(
-        "QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_INITIAL_MS",
-        String.valueOf(serviceBackoffInitialMs));
-    container.env(
-        "QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_MAX_MS",
-        String.valueOf(serviceBackoffMaxMs));
-    container.env(
-        "QITS_WORKSPACE_DAEMON_SERVICE_STOP_GRACE_MS", String.valueOf(serviceStopGraceMs));
+    // The identity and behaviour half of the environment, shared with the runner spec
+    // (RunnerWorkspaceSpecs) so the two cannot drift. Written in place, in this order: env order is
+    // part of the spec, and WorkspaceContainerFactoryGoldenSpecTest pins it.
+    identityEnv(
+        repoId, workspaceId, rowId, branch, parent, entityId, editor, container::env, container::label);
     // The bearer the daemon's HTTP API requires. Without it WorkspaceApi does not bind at all —
     // fail-closed, because an omitted env is indistinguishable from a misconfiguration and serving
     // an untrusted checkout anonymously across the docker network would be silent. That is why this
@@ -1000,42 +938,23 @@ public class WorkspaceContainerFactory {
     // (docs/epics/qits-coding-agents/features/2026-07-04_container-agent-sessions.md).
     if (claudeVolume != null && !claudeVolume.isBlank()) {
       container.volume(claudeVolume, claudeMount);
-      // Point every in-container `claude` at the shared credential dir regardless of HOME. The
-      // image
-      // sets HOME=/workspace (container-local), so without this a `claude` that doesn't override
-      // HOME
-      // (an ad-hoc bash `claude`, or any missed code path) would store its login under
-      // /workspace/.claude — invisible to other containers. As a container env it is inherited by
-      // every `docker exec`, so cross-container persistence no longer relies on each launcher
-      // remembering the HOME overlay.
-      container.env("CLAUDE_CONFIG_DIR", claudeMount + "/.claude");
-      // Same for Kimi Code (the second harness —
-      // docs/epics/qits-coding-agents/features/2026-07-20_kimi-code-harness.md):
-      // KIMI_CODE_HOME relocates its entire data root (config.toml, credentials, sessions) onto the
-      // volume. Without it an in-container kimi would default to ~/.kimi-code =
-      // /workspace/.kimi-code
-      // (the image's HOME) — the clone, container-local and invisible to every other container.
-      container.env("KIMI_CODE_HOME", claudeMount + "/.kimi-code");
     }
     // Shared build caches (Maven repo + pnpm store), the same named volumes qits' devcontainer
     // mounts — so a dependency fetched by one build (a fixture `./mvnw`, an action, the agent, or
-    // qits itself) is reused by every other container. Point the tools at the fixed mount paths via
-    // env, inherited by every `docker exec` (HOME is /workspace, so the defaults would otherwise
-    // land in the clone and never be shared).
+    // qits itself) is reused by every other container.
     if (mavenVolume != null && !mavenVolume.isBlank()) {
       container.volume(mavenVolume, MAVEN_MOUNT);
-      container.env("MAVEN_OPTS", "-Dmaven.repo.local=" + MAVEN_MOUNT);
     }
     if (pnpmVolume != null && !pnpmVolume.isBlank()) {
       container.volume(pnpmVolume, PNPM_MOUNT);
-      container.env("npm_config_store_dir", PNPM_MOUNT + "/store");
     }
-    // The registries those caches fill FROM, as the one input they are derived from. The image's
-    // npm shim and Maven settings compose https://registry.qits.<domain> and
-    // https://mirror.qits.<domain> from QITS_DOMAIN and authenticate them, so a lockfile written
-    // in here only ever names those public hosts. No *_URL variable rides alongside it: a URL is
-    // configuration the deployment can get wrong, and an internal one ends up committed.
-    set(domain).ifPresent(value -> container.env("QITS_DOMAIN", value));
+    // The environment that points the tools at those mounts, and the domain the caches fill from:
+    // shared with the runner spec, which mounts the same four logical volumes on its node.
+    homeEnv(
+        claudeVolume != null && !claudeVolume.isBlank(),
+        mavenVolume != null && !mavenVolume.isBlank(),
+        pnpmVolume != null && !pnpmVolume.isBlank(),
+        container::env);
     // The per-workspace /workspace volume: the workspace's checkout, persisted across container
     // recreation instead of dying with the writable layer. The first mount populates the empty
     // volume from the image's world-writable /workspace (docker copies the image dir's contents AND
@@ -1089,6 +1008,181 @@ public class WorkspaceContainerFactory {
     // answered before it exists rather than by a flag inside it, which is why the editor is a second
     // image at all.
     return container.editor(editor).image(editor ? editorImage() : image());
+  }
+
+  /**
+   * The environment that goes with the agent home and the build caches — {@code CLAUDE_CONFIG_DIR},
+   * {@code KIMI_CODE_HOME}, {@code MAVEN_OPTS}, {@code npm_config_store_dir} — and {@code QITS_DOMAIN},
+   * each written when its mount is there. Shared with the runner spec for {@link #identityEnv}'s
+   * reason; the mounts themselves are each spec's own, because a runner's volumes are its node's.
+   */
+  public void homeEnv(boolean home, boolean maven, boolean pnpm, BiConsumer<String, String> env) {
+    if (home) {
+      // Point every in-container `claude` at the shared credential dir regardless of HOME. The
+      // image
+      // sets HOME=/workspace (container-local), so without this a `claude` that doesn't override
+      // HOME
+      // (an ad-hoc bash `claude`, or any missed code path) would store its login under
+      // /workspace/.claude — invisible to other containers. As a container env it is inherited by
+      // every `docker exec`, so cross-container persistence no longer relies on each launcher
+      // remembering the HOME overlay.
+      env.accept("CLAUDE_CONFIG_DIR", claudeMount + "/.claude");
+      // Same for Kimi Code (the second harness —
+      // docs/epics/qits-coding-agents/features/2026-07-20_kimi-code-harness.md):
+      // KIMI_CODE_HOME relocates its entire data root (config.toml, credentials, sessions) onto the
+      // volume. Without it an in-container kimi would default to ~/.kimi-code =
+      // /workspace/.kimi-code
+      // (the image's HOME) — the clone, container-local and invisible to every other container.
+      env.accept("KIMI_CODE_HOME", claudeMount + "/.kimi-code");
+    }
+    // Point the build tools at the fixed cache mount paths via env, inherited by every `docker
+    // exec` (HOME is /workspace, so the defaults would otherwise land in the clone and never be
+    // shared).
+    if (maven) {
+      env.accept("MAVEN_OPTS", "-Dmaven.repo.local=" + MAVEN_MOUNT);
+    }
+    if (pnpm) {
+      env.accept("npm_config_store_dir", PNPM_MOUNT + "/store");
+    }
+    // The registries those caches fill FROM, as the one input they are derived from. The image's
+    // npm shim and Maven settings compose https://registry.qits.<domain> and
+    // https://mirror.qits.<domain> from QITS_DOMAIN and authenticate them, so a lockfile written
+    // in here only ever names those public hosts. No *_URL variable rides alongside it: a URL is
+    // configuration the deployment can get wrong, and an internal one ends up committed.
+    set(domain).ifPresent(value -> env.accept("QITS_DOMAIN", value));
+  }
+
+  /**
+   * The identity and behaviour environment of a workspace container — who it is ({@code
+   * QITS_WORKSPACE_DAEMON_WORKSPACE_ID}/{@code _REPOSITORY_ID}/{@code _BRANCH}/{@code _PARENT}/{@code
+   * _PROJECT_ID}/{@code _REPO_NAME}/{@code _ENTITY_*}) and how its daemon behaves (the bootstrap,
+   * auto-push and service knobs) — plus the {@code qits.project} label resolved on the way.
+   *
+   * <p><b>Shared by the DIRECT spec and the runner spec</b> ({@link RunnerWorkspaceSpecs}, qits-851),
+   * so the two cannot drift: the runner spec is composed from the same row facts and must tell the
+   * daemon the same things. It is a move out of {@link #forWorkspace}, written through {@code env}
+   * and {@code label} in exactly the order it was written there; {@code
+   * WorkspaceContainerFactoryGoldenSpecTest} pins that order, because environment order is part of a
+   * spec the orchestrator compares.
+   *
+   * <p>What is deliberately NOT here is every address and credential: the dial-home URL, the MCP
+   * addresses, the git base, the proxy paths, the daemon API token and the commissioned pair. Those
+   * are the DIRECT spec's own, and a runner-placed workspace gets them only with qits-625.
+   */
+  public void identityEnv(
+      String repoId,
+      String workspaceId,
+      Long rowId,
+      String branch,
+      String parent,
+      String entityId,
+      boolean editor,
+      BiConsumer<String, String> env,
+      BiConsumer<String, String> label) {
+    env.accept("QITS_WORKSPACE_DAEMON_WORKSPACE_ID", workspaceId);
+    // THE EDITOR BELONGS TO NO REPOSITORY, so it is told about none. Every name below is what the
+    // in-container daemon self-clones from — repository id, project-scoped name, branch, parent —
+    // and the editor's row carries a SENTINEL repository id (EditorWorkspace.REPOSITORY_ID) and no
+    // branch at all. Handing the daemon that sentinel would send it to clone `/git/editor`, which is
+    // nothing, and the failure would be a provision that never completes rather than a container
+    // with an empty /workspace. So the five names are written BLANK, which is the same value a
+    // repository the registry could not resolve already produces, and the two lookups behind them
+    // are not made: there is nothing to resolve and the sentinel would cost a round trip per ensure
+    // to learn that.
+    //
+    // WHAT THIS ONE CONTAINER NOW REACHES IS AN ACCEPTED CONSEQUENCE, decided deliberately by the
+    // epic and recorded here because it is the kind of thing that must not be rediscovered. It holds
+    // an ordinary `qits:agent` workspace credential — the same one every workspace container gets,
+    // no new client and no new audience — but it is no longer one project's container: everybody
+    // opens THIS one, so an unattended agent inside it acts on the whole platform rather than on the
+    // project whose page somebody came in through. Its commission is unscoped for the same reason
+    // the blanks above are blank (no repository ⇒ no project claim), so it READS every project.
+    //
+    // WHAT IT CLONES INSTEAD IS THE PROJECTS LIST, injected a few lines below: the daemon skips the
+    // root clone exactly when a container has no repository of its own AND carries a list, which is
+    // this container and only this container. An ordinary workspace is told no list and still fails
+    // loudly without a repository, which is the property that keeps the two cases apart.
+    env.accept("QITS_WORKSPACE_DAEMON_REPOSITORY_ID", editor ? "" : repoId);
+    env.accept("QITS_WORKSPACE_DAEMON_BRANCH", editor || branch == null ? "" : branch);
+    env.accept("QITS_WORKSPACE_DAEMON_PARENT", editor || parent == null ? "" : parent);
+    // The subject's qualified id (Workspace.entityId, V8). The daemon names its agent sessions
+    // `[❗]<status square> <entityId> <title>` from it and the facts below — a column rather than a one-time launch argument, for
+    // BRANCH's own reason. UNLIKE BRANCH, this key is OMITTED rather than written blank when there
+    // is none (the editor, an ad-hoc workspace, or any row that predates V8): BRANCH is on every
+    // spec already, but this field is new, so writing it blank would add a key to the environment
+    // of every workspace alive today, and environment is part of the spec a stopped container is
+    // resumed by re-presenting under Recreate.ifChanged — adding even a blank key there replaces
+    // every one of their containers once, on its next start, for a value that says nothing.
+    if (!editor && entityId != null && !entityId.isBlank()) {
+      env.accept("QITS_WORKSPACE_DAEMON_ENTITY_ID", entityId);
+    }
+    // The same subject's title, status word and blocked flag (Workspace.entityTitle/-Status/
+    // -Blocked, V9, qits-617): the daemon names its sessions `[❗]<status square> <id> <title>` from
+    // them. Read off the ROW, which every relayed change updates, so a container that was stopped
+    // while the subject moved comes back up saying what is true now — and that is also their cost:
+    // environment is part of the spec, so the first resume of a STOPPED container after a change is
+    // a Recreate.ifChanged replacement (a RUNNING one is never re-specced; ensureContainer
+    // short-circuits it, and the live rename goes through POST /agents/entity instead). Each key is
+    // omitted when there is no value, ENTITY_ID's rule for ENTITY_ID's reason, and BLOCKED is
+    // written only as "true" — RefinementContainerFactory's spelling — so an unblocked subject's
+    // spec carries no key for it at all.
+    if (!editor) {
+      entityFacts(rowId)
+          .ifPresent(
+              facts -> {
+                if (facts.title() != null && !facts.title().isBlank()) {
+                  env.accept("QITS_WORKSPACE_DAEMON_ENTITY_TITLE", facts.title());
+                }
+                if (facts.status() != null && !facts.status().isBlank()) {
+                  env.accept("QITS_WORKSPACE_DAEMON_ENTITY_STATUS", facts.status());
+                }
+                if (facts.blocked()) {
+                  env.accept("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED", "true");
+                }
+              });
+    }
+    // The project-scoped name the daemon self-clones under (/git/<projectId>/<name>), so committed
+    // relative submodule urls resolve natively in-container. Blank when the repo has no project —
+    // the
+    // daemon then id-addresses (/git/<repositoryId>), mirroring cloneUrl's fallback.
+    Optional<RepositoryAddressResolver.ProjectScopedName> scopedName =
+        editor ? Optional.empty() : scopedName(repoId);
+    // The owning project id, also as a label so it mirrors the per-workspace volume's qits.project
+    // (the volume labels carry it for dangling-volume reconcile; the container carries it for
+    // symmetry). Resolved through projectIdFor — the RepositoryLookup fallback is what stopped
+    // this env var from shipping empty (D2). Blank only when no registry answers — and for the
+    // editor, which owns no project the way it owns no repository.
+    String projectId =
+        editor
+            ? ""
+            : scopedName
+                .map(RepositoryAddressResolver.ProjectScopedName::projectId)
+                .orElseGet(() -> projectIdFor(repoId));
+    label.accept("qits.project", projectId);
+    env.accept("QITS_WORKSPACE_DAEMON_PROJECT_ID", projectId);
+    env.accept(
+        "QITS_WORKSPACE_DAEMON_REPO_NAME",
+        scopedName.map(RepositoryAddressResolver.ProjectScopedName::name).orElse(""));
+    // The bootstrap kill switch the daemon honours when it self-runs the chain on boot (Part 3).
+    env.accept(
+        "QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN", String.valueOf(bootstrapAutorunEnabled));
+    // The auto-push kill switch the daemon honours when it pushes committed work on its own
+    // (docs/epics/qits-workspace-daemon/ bidirectional auto-sync).
+    env.accept("QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED", String.valueOf(autoPushEnabled));
+    // Service (dev-server) supervision, self-run by the daemon as the boot-sequence tail (Part 4):
+    // the auto-start kill switch + the knobs the in-container ServiceSupervisor honours.
+    env.accept(
+        "QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART", String.valueOf(servicesAutostartEnabled));
+    env.accept(
+        "QITS_WORKSPACE_DAEMON_SERVICE_READY_GRACE_MS", String.valueOf(serviceReadyGraceMs));
+    env.accept(
+        "QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_INITIAL_MS",
+        String.valueOf(serviceBackoffInitialMs));
+    env.accept(
+        "QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_MAX_MS",
+        String.valueOf(serviceBackoffMaxMs));
+    env.accept(
+        "QITS_WORKSPACE_DAEMON_SERVICE_STOP_GRACE_MS", String.valueOf(serviceStopGraceMs));
   }
 
   private static String serviceBase(String configured) {
