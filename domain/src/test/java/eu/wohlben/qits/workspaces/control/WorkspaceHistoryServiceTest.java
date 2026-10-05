@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import eu.wohlben.qits.workspaces.dto.WorkspaceHistoryDetailDto;
 import eu.wohlben.qits.workspaces.dto.WorkspaceHistoryDto;
 import eu.wohlben.qits.workspaces.entity.WorkspaceEventType;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -75,6 +76,7 @@ public class WorkspaceHistoryServiceTest {
     assertEquals(WorkspaceStatus.ABANDONED, detail.status());
     assertEquals("build the feature", detail.preamble());
     assertEquals("did not work out", detail.result());
+    assertEquals(WorkspacePlacement.DIRECT, detail.placement(), "where the container ran");
     assertTrue(detail.events().stream().anyMatch(e -> e.type() == WorkspaceEventType.CREATED));
     assertTrue(detail.events().stream().anyMatch(e -> e.type() == WorkspaceEventType.ABANDONED));
   }

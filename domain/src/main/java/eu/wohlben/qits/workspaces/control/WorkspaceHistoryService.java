@@ -68,7 +68,8 @@ public class WorkspaceHistoryService {
         workspace.result,
         workspace.createdAt,
         workspace.resolvedAt,
-        events);
+        events,
+        workspace.placement);
   }
 
   /**
