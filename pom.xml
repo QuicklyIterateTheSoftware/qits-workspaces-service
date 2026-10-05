@@ -31,7 +31,7 @@
          and the mandatory -Dqits.variant=oauth|forwardauth|local auth profiles. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-workspaces</artifactId>
-    <version>2026.1005.121910</version>
+    <version>2026.1005.134615</version>
     <packaging>pom</packaging>
     <name>qits-workspaces</name>
 
@@ -65,8 +65,8 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1003.185745</qits.workspace-daemon-protocol.version>
-        <qits.workspace-editor-image.version>2026.1003.192016</qits.workspace-editor-image.version>
+        <qits.workspace-daemon-protocol.version>2026.1005.130813</qits.workspace-daemon-protocol.version>
+        <qits.workspace-editor-image.version>2026.1005.131643</qits.workspace-editor-image.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -84,7 +84,7 @@
              (qits-runner-protocol), and the install script template plus RunnerIdentity
              (qits-runner-toolkit). One release carries both, so one property pins both. -->
         <qits.runner.version>2026.1004.235414</qits.runner.version>
-        <qits.coding-agents.version>2026.1003.125113</qits.coding-agents.version>
+        <qits.coding-agents.version>2026.1005.130142</qits.coding-agents.version>
         <qits.eventstream.version>2026.1003.44717</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
