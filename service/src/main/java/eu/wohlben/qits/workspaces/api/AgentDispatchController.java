@@ -131,13 +131,24 @@ public class AgentDispatchController {
    * <p>{@code technicalProcessId} is the container start this call began or joined, watchable at
    * {@code /workspaces/api/technical-processes/{id}/events}; null when no start was needed because
    * the daemon was already up.
+   *
+   * <p><b>A workspace on a workspace runner may answer {@code workspace.runtimeStatus: QUEUED}</b>
+   * (qits-626): its start put it in line for a runner slot, and {@code technicalProcessId} is that
+   * start. {@code agentLaunch} is still {@code SCHEDULED} — the launch is parked until a runner
+   * takes the workspace, and waits for its daemon from then on. A re-press while it is queued parks
+   * nothing more. A workspace whose runner is offline past the grace is refused with 409 {@code
+   * RUNNER_UNAVAILABLE} naming the runner.
    */
   @POST
   @APIResponse(
       responseCode = "200",
       description =
           "Dispatched. `fresh:false` means the branch already had a workspace and it was answered"
-              + " instead — the ordinary case on a re-press, and not an error.")
+              + " instead — the ordinary case on a re-press, and not an error. A workspace on a"
+              + " workspace runner may answer `workspace.runtimeStatus: QUEUED` with"
+              + " `agentLaunch: SCHEDULED`: it is waiting for a runner slot, `technicalProcessId` is"
+              + " the start that queued it, and the agent is launched once a runner takes it and its"
+              + " daemon answers. A re-press while it is queued schedules nothing more.")
   @APIResponse(
       responseCode = "400",
       description =
@@ -152,8 +163,10 @@ public class AgentDispatchController {
   @APIResponse(
       responseCode = "409",
       description =
-          "RUNNER_DISPATCH_UNSUPPORTED: the workspace already on that branch runs on a workspace"
-              + " runner, which a dispatch cannot wait for yet (qits-626). Nothing was started.",
+          "RUNNER_UNAVAILABLE: the workspace already on that branch is on a workspace runner that"
+              + " is offline past its reconnect grace; the message names the runner. Nothing was"
+              + " started or queued: the workspace is the runner's alone, so a dispatch fails"
+              + " rather than wait for it.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   // The operationId is the name a consumer pact uses for this door as the TRIGGER of the calls it
   // makes downstream (pacts/qits-workspaces-service_qits-projects-service.json,
@@ -240,7 +253,9 @@ public class AgentDispatchController {
       responseCode = "200",
       description =
           "Answered. `workspaceId: null` means no workspace stands on that branch — nothing was"
-              + " said and nothing was created, which is a normal outcome and not an error.")
+              + " said and nothing was created, which is a normal outcome and not an error. A"
+              + " workspace queued for a workspace runner answers both flags false: the text waits"
+              + " until a runner takes it and its daemon answers.")
   @APIResponse(
       responseCode = "400",
       description = "A blank repository, branch or text.",
@@ -248,8 +263,9 @@ public class AgentDispatchController {
   @APIResponse(
       responseCode = "409",
       description =
-          "RUNNER_DISPATCH_UNSUPPORTED: the workspace on that branch runs on a workspace runner,"
-              + " which a delivery cannot wait for yet (qits-626). Nothing was said or started.",
+          "RUNNER_UNAVAILABLE: the workspace on that branch is on a workspace runner that is"
+              + " offline past its reconnect grace; the message names the runner. Nothing was said,"
+              + " started or queued.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   public DispatchService.Delivery deliver(@Valid DeliverTurnRequest request) {
     return dispatches.deliver(

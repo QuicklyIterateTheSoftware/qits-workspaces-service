@@ -3,16 +3,24 @@ package eu.wohlben.qits.workspaces.control;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
+import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.error.RunnerRefusals;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
+import jakarta.enterprise.event.TransactionPhase;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -96,6 +104,43 @@ import org.jboss.logging.Logger;
  * parent, integrated, abandoned — and every entry in it is a statement about the branch's history.
  * An agent that did not start is not a thing that happened to the branch, and widening the timeline
  * vocabulary for it would put a non-event in the history record every reader of a workspace reads.
+ *
+ * <h2>A queued workspace parks its launch</h2>
+ *
+ * <p>A RUNNER row's start does not start anything: it marks the row QUEUED and a runner with a free
+ * slot takes it when it has one ({@link RunnerClaims#reserveFor}). That can be longer than any
+ * fixed window — a runner with one slot is busy until its workspace stops — so a launch that began
+ * waiting at the press would give up, with a WARN and no agent, on a workspace that was merely in
+ * line. <b>So the queue does not count against the window.</b> A launch (or a delivery) for a row
+ * that reads QUEUED is <em>parked</em>: held in {@link #parked} by row id, keeping its {@code
+ * pending} claim, on no thread at all. Two things release it:
+ *
+ * <ul>
+ *   <li><b>The claim</b> — {@link WorkspaceTaken}, fired after the reserve's compare-and-swap
+ *       committed. The parked wait is submitted then, and its window starts <em>from that
+ *       moment</em>: from the claim on it is the same wait as a DIRECT row's, an image pull and a
+ *       daemon dialling home, which is exactly what the window was sized for.
+ *   <li><b>Any other way out of the queue</b> — {@link WorkspaceUnqueued}: stopped while queued,
+ *       the container deleted, the workspace resolved or abandoned. No runner is going to take the
+ *       row, so the launch is dropped with an INFO naming why, and the {@code pending} claim goes
+ *       with it.
+ * </ul>
+ *
+ * <p><b>Parking is still in memory, for the reason the launch always was</b>: the caller holds the
+ * intent. A restart drops what is parked; a re-press finds the row still QUEUED and parks again —
+ * once, because the {@code pending} claim it re-takes is the same one-per-workspace slot. Nothing
+ * is persisted and no second ensure is made: a QUEUED row's start is already the one it waits on.
+ *
+ * <p><b>The race is closed by re-reading after parking.</b> A runner can take the row between the
+ * read that said QUEUED and the put, and its event then finds nothing to release. So the row is read
+ * again after the put; whichever side removes the entry from the map — the observer or that second
+ * read — owns it, and the map's atomic remove means exactly one does. A launch can therefore never
+ * be stranded on a row that is no longer queued.
+ *
+ * <p>A row whose runner is offline past the grace (UNAVAILABLE) is not parked: it is sticky to that
+ * runner and nothing else can take it, so dispatch and delivery answer 409 {@code
+ * RUNNER_UNAVAILABLE} naming the runner, and fail loudly rather than wait for a runner that may
+ * never return.
  */
 @ApplicationScoped
 public class DispatchService {
@@ -104,7 +149,10 @@ public class DispatchService {
 
   /** What the door did about the agent. */
   public enum AgentLaunch {
-    /** A launch is on its way — immediately, or as soon as the daemon answers. */
+    /**
+     * A launch is on its way — immediately, or as soon as the daemon answers; for a workspace queued
+     * for a runner, once a runner takes it and its daemon answers.
+     */
     SCHEDULED,
     /** An agent command was already running in the workspace, so nothing was started. */
     SKIPPED_RUNNING
@@ -165,6 +213,15 @@ public class DispatchService {
   @Inject WorkspaceRepository workspaceRepository;
 
   @Inject WorkspaceService workspaces;
+
+  /** The runner's name, for the 409 an UNAVAILABLE row answers. */
+  @Inject WorkspaceRunnerRepository runnerRepository;
+
+  /**
+   * Whether a row's runner is present — the UNAVAILABLE overlay's question. Optional, as everywhere:
+   * absent, no runner is present.
+   */
+  @Inject Instance<RunnerPlacement> runnerPlacement;
 
   /** The daemon's agent surface. Absent is a supported configuration; see the port. */
   @Inject Instance<WorkspaceAgentLauncher> agents;
@@ -242,8 +299,66 @@ public class DispatchService {
    */
   private final Set<Long> pending = ConcurrentHashMap.newKeySet();
 
+  /**
+   * A launch or a delivery held for a row QUEUED for a runner, by row id: what to say, and since
+   * when. Every key is also in {@link #pending} — the claim stays taken while parked, so a re-press
+   * cannot park a second one. See the class javadoc, "A queued workspace parks its launch".
+   */
+  private final Map<Long, ParkedLaunch> parked = new ConcurrentHashMap<>();
+
+  /**
+   * What a parked wait will do once released.
+   *
+   * @param text the instruction of a launch, or the text of a delivery
+   * @param delivery whether it is {@link #deliver}'s wait rather than {@link #dispatch}'s
+   * @param compactFirst a delivery's request for a {@code /compact} ahead of it; false for a launch
+   * @param parkedAt when it was parked, for the log line that releases or drops it
+   */
+  record ParkedLaunch(String text, boolean delivery, boolean compactFirst, Instant parkedAt) {
+
+    String what() {
+      return delivery ? "delivery" : "agent launch";
+    }
+  }
+
+  /**
+   * What a dispatch has to know about a row's placement before it schedules anything.
+   *
+   * @param placement DIRECT or RUNNER; DIRECT for a row that is not ACTIVE, which then behaves as
+   *     it always did
+   * @param status the runtime status as read — with {@code UNAVAILABLE} laid over a RUNNER row whose
+   *     runner is not present, as the listing lays it
+   * @param runner the runner's name (its id when the name cannot be read) when UNAVAILABLE; else null
+   */
+  record RunnerSide(WorkspacePlacement placement, WorkspaceRuntimeStatus status, String runner) {
+
+    static final RunnerSide DIRECT = new RunnerSide(WorkspacePlacement.DIRECT, null, null);
+
+    boolean queued() {
+      return placement == WorkspacePlacement.RUNNER && status == WorkspaceRuntimeStatus.QUEUED;
+    }
+
+    boolean unavailable() {
+      return placement == WorkspacePlacement.RUNNER
+          && status == WorkspaceRuntimeStatus.UNAVAILABLE;
+    }
+
+    /** A runner took it: its container is coming up or up. */
+    boolean taken() {
+      return placement == WorkspacePlacement.RUNNER
+          && (status == WorkspaceRuntimeStatus.PROVISIONING
+              || status == WorkspaceRuntimeStatus.RUNNING);
+    }
+  }
+
   @PreDestroy
   void shutdown() {
+    int dropped = parked.size();
+    parked.clear();
+    LOG.infof(
+        "shutting down with %d agent launch(es) parked for queued workspaces; dropped — a re-press"
+            + " recovers each",
+        Integer.valueOf(dropped));
     launchExecutor.shutdownNow();
   }
 
@@ -367,37 +482,55 @@ public class DispatchService {
         fresh = false;
       }
     }
-    // A workspace this door creates is always DIRECT; one it FOUND may be on a runner, and there
-    // the launch window below would drop the agent silently while the row waits in a queue. Refused
-    // before anything is written. qits-626 lifts this, when dispatch becomes queue-aware.
-    refuseRunnerPlaced(rowId);
+    // A workspace this door creates is always DIRECT; one it FOUND may be on a runner. A runner that
+    // is offline past the grace is refused here, before anything is written; a queued row is
+    // waited for (withAgent, and the class javadoc's "A queued workspace parks its launch").
+    RunnerSide side = runnerSide(rowId);
+    refuseUnavailable(rowId, side, "take an agent");
     if (facts != null) {
       storeFacts(rowId, facts);
     }
 
-    return withAgent(rowId, fresh, instruction);
+    return withAgent(rowId, fresh, instruction, side);
   }
 
-  /** Steps two and three: the container, and the agent that is to work in it. */
-  private Dispatch withAgent(Long rowId, boolean fresh, String instruction) {
+  /**
+   * Steps two and three: the container, and the agent that is to work in it.
+   *
+   * <p>For a RUNNER row the ensure is qits-624's start: a STOPPED or FAILED row is marked QUEUED,
+   * and a row already QUEUED is left alone — its start is the one already under way, and its process
+   * is the {@code technicalProcessId} answered. Either way the launch then parks until a runner
+   * takes the row.
+   */
+  private Dispatch withAgent(Long rowId, boolean fresh, String instruction, RunnerSide side) {
     WorkspaceAgentLauncher.AgentState state = agentState(rowId);
     if (state == WorkspaceAgentLauncher.AgentState.RUNNING) {
       // Somebody is already working here. Launching beside them would put two agents on one
       // checkout, which is a merge conflict with itself.
-      return new Dispatch(
-          workspaces.getWorkspace(rowId), fresh, AgentLaunch.SKIPPED_RUNNING, activeProcess(rowId));
+      return new Dispatch(view(rowId), fresh, AgentLaunch.SKIPPED_RUNNING, activeProcess(rowId));
     }
 
     String technicalProcessId = activeProcess(rowId);
-    if (state == WorkspaceAgentLauncher.AgentState.UNREACHABLE && technicalProcessId == null) {
+    if (state == WorkspaceAgentLauncher.AgentState.UNREACHABLE
+        && technicalProcessId == null
+        && !side.queued()) {
       // No daemon answering and nothing already bringing the container up: this is the start. A
       // daemon that IS answering needs no ensure at all — the same short-circuit EditorService
-      // makes, and for the same reason: this door is polled.
+      // makes, and for the same reason: this door is polled. A QUEUED row's start is already made.
       technicalProcessId = workspaces.beginEnsureContainer(rowId);
     }
     schedule(rowId, instruction);
-    return new Dispatch(
-        workspaces.getWorkspace(rowId), fresh, AgentLaunch.SCHEDULED, technicalProcessId);
+    return new Dispatch(view(rowId), fresh, AgentLaunch.SCHEDULED, technicalProcessId);
+  }
+
+  /**
+   * The answer's workspace, read in a transaction of its own and therefore from a session of its
+   * own. Outside a transaction the reads share the request's session, which by now holds this row
+   * as it was before the ensure ({@link #activeProcess} resolved it) — and a RUNNER row's runtime
+   * status is the persisted one, so the answer would say STOPPED for a row the start just QUEUED.
+   */
+  private WorkspaceDto view(Long rowId) {
+    return QuarkusTransaction.requiringNew().call(() -> workspaces.getWorkspace(rowId));
   }
 
   /**
@@ -478,16 +611,23 @@ public class DispatchService {
               + repositoryId
               + "; nothing was delivered and nothing was created");
     }
-    // Refused before the container is touched, for the dispatch's reason: the fallback arm below
-    // starts the container and waits a fixed window for its daemon, and a RUNNER row's start only
-    // queues it. qits-626 lifts this with the dispatch's refusal, when both become queue-aware.
-    refuseRunnerPlaced(rowId);
+    // Refused before the container is touched, for the dispatch's reason: a row whose runner is
+    // offline past the grace is sticky to it, and nothing else can take it.
+    RunnerSide side = runnerSide(rowId);
+    refuseUnavailable(rowId, side, "take a delivery");
 
     WorkspaceAgentLauncher.AgentState state = agentState(rowId);
-    if (state == WorkspaceAgentLauncher.AgentState.UNREACHABLE && activeProcess(rowId) == null) {
+    if (state == WorkspaceAgentLauncher.AgentState.UNREACHABLE
+        && activeProcess(rowId) == null
+        && !side.queued()) {
       // The dispatch door's ensure, verbatim and for its reason: a daemon that IS answering needs
-      // none, and a start already under way is the start this call would have made.
+      // none, and a start already under way is the start this call would have made. A QUEUED row's
+      // start is already made, and the wait below parks until a runner takes it.
       workspaces.beginEnsureContainer(rowId);
+      if (side.placement() == WorkspacePlacement.RUNNER) {
+        // A RUNNER row's start queued it; the answer below says so.
+        side = runnerSide(rowId);
+      }
     }
 
     if (!scheduleDelivery(rowId, text, compactFirst)) {
@@ -514,8 +654,11 @@ public class DispatchService {
               rowId,
               false,
               false,
-              "this workspace's container is not answering yet; it is being started and the text"
-                  + " will be delivered, or launched with, once it does");
+              side.queued()
+                  ? "this workspace is queued for a workspace runner; the text will be delivered, or"
+                      + " launched with, once a runner takes it and its daemon answers"
+                  : "this workspace's container is not answering yet; it is being started and the"
+                      + " text will be delivered, or launched with, once it does");
     };
   }
 
@@ -629,23 +772,54 @@ public class DispatchService {
   }
 
   /**
-   * 409 {@code RUNNER_DISPATCH_UNSUPPORTED} for a RUNNER-placed row. A dispatch schedules its agent
-   * launch inside a fixed window after the container comes up, and a RUNNER row's start only queues
-   * it: the window can close before any runner takes it, and the agent would never start, with
-   * nothing said. qits-626 makes dispatch queue-aware and lifts this refusal.
+   * 409 {@code RUNNER_UNAVAILABLE}, naming the runner, for a row whose runner is offline past the
+   * grace. Not parked: the row is sticky to that runner, nothing else can take it, and a launch
+   * held for a runner that may never return would be a silent wait where a loud refusal is due.
    */
-  private void refuseRunnerPlaced(Long rowId) {
-    boolean onRunner =
-        QuarkusTransaction.requiringNew()
-            .call(
-                () ->
-                    workspaceRepository
-                        .findActiveById(rowId)
-                        .map(workspace -> workspace.placement == WorkspacePlacement.RUNNER)
-                        .orElse(false));
-    if (onRunner) {
-      throw RunnerRefusals.dispatchUnsupported(rowId);
+  static void refuseUnavailable(Long rowId, RunnerSide side, String verb) {
+    if (side.unavailable()) {
+      throw RunnerRefusals.unavailableOn(rowId, side.runner(), verb);
     }
+  }
+
+  /**
+   * The row's placement and runtime status as a dispatch must read them, in a transaction of its
+   * own: a RUNNER row's persisted status with UNAVAILABLE laid over it when its runner is not
+   * present — {@code WorkspaceService}'s overlay, read the same way. Package-private so the
+   * parking can be driven without a database.
+   */
+  RunnerSide runnerSide(Long rowId) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                workspaceRepository
+                    .findActiveById(rowId)
+                    .map(
+                        row -> {
+                          if (row.placement != WorkspacePlacement.RUNNER) {
+                            return RunnerSide.DIRECT;
+                          }
+                          if (row.runnerId != null && !runnerPresent(row.runnerId)) {
+                            return new RunnerSide(
+                                WorkspacePlacement.RUNNER,
+                                WorkspaceRuntimeStatus.UNAVAILABLE,
+                                runnerName(row.runnerId));
+                          }
+                          return new RunnerSide(
+                              WorkspacePlacement.RUNNER, row.runtimeStatus, null);
+                        })
+                    .orElse(RunnerSide.DIRECT));
+  }
+
+  /** Whether the runner is connected or within its grace; false with no {@link RunnerPlacement}. */
+  private boolean runnerPresent(UUID runnerId) {
+    return runnerPlacement.isResolvable() && runnerPlacement.get().presence(runnerId);
+  }
+
+  /** The runner's name, or its id when the row is gone; called inside {@link #runnerSide}'s read. */
+  private String runnerName(UUID runnerId) {
+    String name = runnerRepository.namesById(Set.of(runnerId)).get(runnerId);
+    return name == null ? runnerId.toString() : name;
   }
 
   /** The three V9 columns, in a transaction of their own. A row resolved meanwhile is skipped. */
@@ -721,30 +895,135 @@ public class DispatchService {
   }
 
   /**
-   * Put a launch on a thread of our own, unless one is already waiting for this workspace.
+   * Put a launch on a thread of our own, unless one is already waiting for this workspace — or park
+   * it, when the workspace is queued for a runner.
    *
    * <p>The wait runs whether or not the daemon is up yet: a daemon that answers immediately makes it
    * one probe and a POST, and one that is still pulling an image makes it a poll. One path, so the
    * fresh dispatch and the re-dispatch differ in nothing but how long they take.
    */
-  private void schedule(Long rowId, String instruction) {
+  void schedule(Long rowId, String instruction) {
     if (!pending.add(rowId)) {
       LOG.debugf("a launch is already waiting for workspace %s; not queueing a second", rowId);
       return;
     }
+    holdOrSubmit(rowId, new ParkedLaunch(instruction, false, false, Instant.now()));
+  }
+
+  /**
+   * The step after a {@code pending} claim was taken: park the wait when the row is QUEUED for a
+   * runner, else submit it. The claim is kept while parked and released by whoever ends the wait.
+   *
+   * <p><b>The second read is what closes the race.</b> A runner may take the row between the first
+   * read and the put, and {@link #onTaken} then finds nothing to release. So the row is read again
+   * once the entry is in the map: still QUEUED, and whatever moves it later fires its event after
+   * this put and finds the entry; not QUEUED, and this method and the observer race to remove the
+   * one entry — the map's remove is atomic, so exactly one of them owns it. Owning it here, a row a
+   * runner took is submitted, and a row that left the queue any other way is dropped.
+   *
+   * @return whether a wait was parked or submitted; false only when the executor refused it
+   */
+  private boolean holdOrSubmit(Long rowId, ParkedLaunch wait) {
+    if (!runnerSide(rowId).queued()) {
+      return submit(rowId, wait);
+    }
+    parked.put(rowId, wait);
+    RunnerSide now = runnerSide(rowId);
+    if (now.queued()) {
+      LOG.infof(
+          "workspace %s is queued for a workspace runner; its %s is parked until a runner takes it",
+          rowId, wait.what());
+      return true;
+    }
+    if (!parked.remove(rowId, wait)) {
+      // An observer released or dropped it between the put and the second read.
+      return true;
+    }
+    if (now.taken()) {
+      return submit(rowId, wait);
+    }
+    pending.remove(rowId);
+    LOG.infof(
+        "workspace %s left the queue (now %s) before its %s could be parked; dropped — a re-press"
+            + " recovers it",
+        rowId, now.status(), wait.what());
+    return true;
+  }
+
+  /**
+   * Start a wait on a thread of our own; its window starts when it runs. The {@code pending} claim
+   * is released when it ends, or at once when the executor refuses it.
+   */
+  private boolean submit(Long rowId, ParkedLaunch wait) {
     try {
-      launchExecutor.submit(
+      execute(
           () -> {
             try {
-              awaitAndLaunch(rowId, instruction);
+              if (wait.delivery()) {
+                awaitAndDeliver(rowId, wait.text(), wait.compactFirst());
+              } else {
+                awaitAndLaunch(rowId, wait.text());
+              }
             } finally {
               pending.remove(rowId);
             }
           });
+      return true;
     } catch (RejectedExecutionException shuttingDown) {
       pending.remove(rowId);
-      LOG.warnf("could not schedule an agent launch for workspace %s: shutting down", rowId);
+      LOG.warnf("could not schedule a %s for workspace %s: shutting down", wait.what(), rowId);
+      return false;
     }
+  }
+
+  /** The launch executor's submit; package-private so a test can hold the runnable instead. */
+  void execute(Runnable wait) {
+    launchExecutor.submit(wait);
+  }
+
+  /**
+   * A runner took the row (after its claim committed): a wait parked on it is submitted now, and its
+   * window starts now — the time in the queue is not part of it.
+   */
+  void onTaken(@Observes(during = TransactionPhase.AFTER_SUCCESS) WorkspaceTaken taken) {
+    ParkedLaunch wait = parked.remove(taken.rowId());
+    if (wait == null) {
+      return;
+    }
+    LOG.infof(
+        "workspace %s was taken by runner %s after %s s in the queue; its %s waits for the daemon"
+            + " from now",
+        taken.rowId(),
+        taken.runnerId(),
+        Long.valueOf(Duration.between(wait.parkedAt(), Instant.now()).toSeconds()),
+        wait.what());
+    submit(taken.rowId(), wait);
+  }
+
+  /**
+   * The row left the queue other than by a claim: no runner will take it, so a wait parked on it is
+   * dropped and its {@code pending} claim released. A re-press is the recovery, as for a restart.
+   */
+  void onUnqueued(@Observes(during = TransactionPhase.AFTER_SUCCESS) WorkspaceUnqueued unqueued) {
+    ParkedLaunch wait = parked.remove(unqueued.rowId());
+    if (wait == null) {
+      return;
+    }
+    pending.remove(unqueued.rowId());
+    LOG.infof(
+        "workspace %s left the queue before a runner took it (%s); its parked %s is dropped — a"
+            + " re-press recovers it",
+        unqueued.rowId(), unqueued.reason(), wait.what());
+  }
+
+  /** Whether a wait is parked for {@code rowId}; for the tests. */
+  boolean isParked(Long rowId) {
+    return parked.containsKey(rowId);
+  }
+
+  /** Whether a wait — running or parked — holds {@code rowId}'s claim; for the tests. */
+  boolean isPending(Long rowId) {
+    return pending.contains(rowId);
   }
 
   /** Poll until the daemon answers, then launch — or give up loudly when the window closes. */
@@ -788,29 +1067,18 @@ public class DispatchService {
    * inside the milliseconds a first one takes against a live daemon is dropped rather than queued
    * behind it — stated in the answer, never silent.
    *
+   * <p>A row QUEUED for a runner parks the delivery exactly as {@link #schedule} parks a launch,
+   * under the same claim, and its window starts when a runner takes the row.
+   *
    * @return false when a wait was already claimed, which the caller reports
    */
-  private boolean scheduleDelivery(Long rowId, String text, boolean compactFirst) {
+  boolean scheduleDelivery(Long rowId, String text, boolean compactFirst) {
     if (!pending.add(rowId)) {
       LOG.infof(
           "a wait is already claimed for workspace %s; not queueing a delivery behind it", rowId);
       return false;
     }
-    try {
-      launchExecutor.submit(
-          () -> {
-            try {
-              awaitAndDeliver(rowId, text, compactFirst);
-            } finally {
-              pending.remove(rowId);
-            }
-          });
-      return true;
-    } catch (RejectedExecutionException shuttingDown) {
-      pending.remove(rowId);
-      LOG.warnf("could not schedule a delivery for workspace %s: shutting down", rowId);
-      return false;
-    }
+    return holdOrSubmit(rowId, new ParkedLaunch(text, true, compactFirst, Instant.now()));
   }
 
   /** What a compaction is asked for as — the slash command, exactly as a person would type it. */

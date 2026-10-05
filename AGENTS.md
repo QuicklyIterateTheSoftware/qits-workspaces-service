@@ -1308,6 +1308,15 @@ Five decisions, each of which is a way to get this wrong:
   WARN and nothing else; it is deliberately not a workspace event, because `WorkspaceEventType` is a
   five-value *lifecycle* vocabulary about the branch and an agent that did not start is not something
   that happened to the branch.
+- **A workspace queued for a runner PARKS its launch** (qits-626). The launch window starts when a
+  runner takes the row, not at the press: a QUEUED row's launch (or delivery) is held in memory by
+  row id under the same `pending` claim, on no thread, until `WorkspaceTaken` (fired by
+  `RunnerClaims` after the claim commits) submits it, or `WorkspaceUnqueued` (fired by
+  `RunnerClaims.abandonStart` — stop, delete, recreate, resolution) drops it with an INFO. The row is
+  re-read after parking, so a claim landing in between cannot strand it. Still in memory: a restart
+  drops it, a re-press parks it again (once). The answer is unchanged in shape — `SCHEDULED`,
+  `runtimeStatus: QUEUED`. A row whose runner is offline past the grace is 409 `RUNNER_UNAVAILABLE`
+  naming the runner, never parked.
 - **The instruction is not stored.** It rides into the launch and nowhere else; keeping it beside
   the goal would make one conversation's opening turn look like the statement of the work.
 - **What a dispatched workspace is for is a FIELD, not the preamble.** `ticketId`/`epicId` are two

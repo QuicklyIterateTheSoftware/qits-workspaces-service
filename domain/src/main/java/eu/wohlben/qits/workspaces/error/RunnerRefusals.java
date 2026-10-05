@@ -15,9 +15,6 @@ public final class RunnerRefusals {
   /** The row's runner did not answer a routed verb within its deadline; the row is unchanged. */
   public static final String RUNNER_TIMEOUT = "RUNNER_TIMEOUT";
 
-  /** An agent dispatch onto a RUNNER row, which dispatch cannot wait for yet (qits-626). */
-  public static final String RUNNER_DISPATCH_UNSUPPORTED = "RUNNER_DISPATCH_UNSUPPORTED";
-
   private RunnerRefusals() {}
 
   /** 409 {@link #NO_RUNNER}. */
@@ -51,12 +48,22 @@ public final class RunnerRefusals {
             + " in time; the workspace is unchanged");
   }
 
-  /** 409 {@link #RUNNER_DISPATCH_UNSUPPORTED}. */
-  public static ConflictException dispatchUnsupported(Long rowId) {
+  /**
+   * 409 {@link #RUNNER_UNAVAILABLE}, naming the runner as well: an agent dispatch or a delivery onto
+   * a row whose runner is offline past the grace (qits-626). It fails loudly rather than waiting,
+   * because the row is sticky to that runner and nothing else can take it.
+   *
+   * @param runner the runner's name, or its id when the name cannot be read
+   */
+  public static ConflictException unavailableOn(Long rowId, String runner, String verb) {
     return new ConflictException(
-        RUNNER_DISPATCH_UNSUPPORTED,
+        RUNNER_UNAVAILABLE,
         "Workspace "
             + rowId
-            + " runs on a workspace runner, and an agent dispatch cannot wait for a runner yet");
+            + " is on runner "
+            + runner
+            + ", which is offline; it cannot "
+            + verb
+            + " until the runner is back");
   }
 }

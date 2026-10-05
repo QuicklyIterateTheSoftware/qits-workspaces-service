@@ -10,6 +10,7 @@ import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.persistence.LockModeType;
@@ -59,6 +60,11 @@ import org.jboss.logging.Logger;
  *
  * <p>Each write is its own {@code requiringNew} transaction, and every hint and notification fires
  * after it commits.
+ *
+ * <p><b>Two in-process events say a row left the queue</b> (qits-626), for {@link DispatchService}'s
+ * parked launches: {@link WorkspaceTaken} when a runner took it — the claim, or an inventory that
+ * found it running — and {@link WorkspaceUnqueued} from {@link #abandonStart}, which every other
+ * way out passes through. Both are fired after the write committed.
  */
 @ApplicationScoped
 public class RunnerClaims {
@@ -95,6 +101,12 @@ public class RunnerClaims {
   /** How long, once it dialled home, it has to report its clone. */
   @ConfigProperty(name = "qits.workspace.provision.timeout-ms", defaultValue = "600000")
   long provisionTimeoutMs;
+
+  /** A queued row was taken; fired after the claim committed (qits-626). */
+  @Inject Event<WorkspaceTaken> taken;
+
+  /** A row's start ended other than by a claim; fired by {@link #abandonStart} (qits-626). */
+  @Inject Event<WorkspaceUnqueued> unqueued;
 
   private final Map<Long, WorkspaceProcessTracker.Handle> starts = new ConcurrentHashMap<>();
 
@@ -139,11 +151,21 @@ public class RunnerClaims {
   /**
    * Ends the start process open for {@code rowId}, if any, as failed with {@code message}: the row
    * left the queue or the node other than by a launch.
+   *
+   * <p>Also fires {@link WorkspaceUnqueued} with {@code message} as its reason, process or none: a
+   * row queued unnarrated (a create) has no process and may still have an agent launch parked on
+   * it. Every way a row leaves the queue other than a claim comes through here — stop while
+   * queued, delete-container, recreate, resolution and abandon, a failed launch, the runner's
+   * {@code deleted} — so this is the one place that has to say it. The observer runs after the
+   * caller's transaction commits, or at once when there is none.
    */
   public void abandonStart(Long rowId, String message) {
     WorkspaceProcessTracker.Handle process = rowId == null ? null : starts.remove(rowId);
     if (process != null) {
       process.failProvision(message);
+    }
+    if (rowId != null) {
+      unqueued.fire(new WorkspaceUnqueued(rowId, message));
     }
   }
 
@@ -197,6 +219,9 @@ public class RunnerClaims {
                   });
           changePublisher.runtimeChanged(row.repositoryId, row.id);
           backlogChanged(row);
+          // After the claim's transaction committed, so a claim that rolled back releases nothing:
+          // a dispatch parked on this row starts its launch window now (qits-626).
+          taken.fire(new WorkspaceTaken(row.id, runnerId));
         });
     return claimed;
   }
@@ -454,6 +479,9 @@ public class RunnerClaims {
         }
       }
     }
+    // Rows that were still QUEUED and are held running: taken without a claim (a sticky row whose
+    // runner came back holding its container), which a parked dispatch must hear as a take.
+    List<Long> runningFromQueue = new ArrayList<>();
     List<Workspace> changed =
         QuarkusTransaction.requiringNew()
             .call(
@@ -469,6 +497,9 @@ public class RunnerClaims {
                       // Launched, and its daemon is still being waited for: that wait settles it.
                       continue;
                     } else if (Boolean.TRUE.equals(running)) {
+                      if (was == WorkspaceRuntimeStatus.QUEUED) {
+                        runningFromQueue.add(row.id);
+                      }
                       row.runtimeStatus = WorkspaceRuntimeStatus.RUNNING;
                       row.runtimeError = null;
                       row.queuedAt = null;
@@ -508,6 +539,7 @@ public class RunnerClaims {
         .filter(row -> row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED)
         .findFirst()
         .ifPresent(this::backlogChanged);
+    runningFromQueue.forEach(rowId -> taken.fire(new WorkspaceTaken(rowId, runnerId)));
     return changed.stream().map(row -> row.id).toList();
   }
 

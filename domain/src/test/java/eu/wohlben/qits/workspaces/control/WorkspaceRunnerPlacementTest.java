@@ -39,7 +39,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Placement in {@link WorkspaceService} (qits-853), against a fake {@link RunnerPlacement}: the
  * create field and its two refusals, every row of the RUNNER verb table, the listing's RUNNER branch
- * and its UNAVAILABLE overlay, the dispatch refusal — and that a DIRECT row never reaches the port
+ * and its UNAVAILABLE overlay, dispatch and delivery onto a RUNNER row — and that a DIRECT row never reaches the port
  * and still does what it always did.
  */
 @QuarkusTest
@@ -721,37 +721,107 @@ public class WorkspaceRunnerPlacementTest {
 
   // --- dispatch -----------------------------------------------------------------------------------
 
+  /**
+   * A dispatch onto a STOPPED RUNNER row is qits-624's start — the row is QUEUED, the answer is
+   * {@code SCHEDULED} with {@code runtimeStatus: QUEUED} and the start's process — and the launch is
+   * parked until a runner takes it (qits-626). A re-press parks nothing more and starts nothing more;
+   * a stop while queued drops the parked launch and releases its claim.
+   */
   @Test
-  public void aDispatchOntoARunnerRowIs409() throws Exception {
+  public void aDispatchOntoAStoppedRunnerRowQueuesItAndParksTheLaunch() throws Exception {
     eligibleRunner();
     String repoId = repo();
     Workspace created = stoppedRunnerRow(repoId, "dispatched");
+
+    DispatchService.Dispatch answer =
+        dispatchService.dispatch(repoId, "dispatched", false, null, WorkspaceSubject.none(), "go");
+
+    assertEquals(DispatchService.AgentLaunch.SCHEDULED, answer.agentLaunch());
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, answer.workspace().runtimeStatus());
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(created.id).runtimeStatus);
+    assertNotNull(answer.technicalProcessId(), "the start that queued it");
+    assertEquals(
+        claims.trackedStart(created.id).orElseThrow().id(), answer.technicalProcessId());
+    assertTrue(dispatchService.isParked(created.id), "the launch waits for a runner");
+    assertEquals(1, placement.calls().stream().filter(c -> c.startsWith("backlog:")).count());
+
+    DispatchService.Dispatch again =
+        dispatchService.dispatch(repoId, "dispatched", false, null, WorkspaceSubject.none(), "go");
+
+    assertEquals(DispatchService.AgentLaunch.SCHEDULED, again.agentLaunch());
+    assertEquals(answer.technicalProcessId(), again.technicalProcessId(), "the same start");
+    assertEquals(
+        1,
+        placement.calls().stream().filter(c -> c.startsWith("backlog:")).count(),
+        "a re-press onto a queued row starts nothing more");
+    assertTrue(dispatchService.isParked(created.id));
+
+    workspaceService.stopContainer(created.id);
+
+    assertFalse(dispatchService.isParked(created.id), "the stop dropped the parked launch");
+    assertFalse(dispatchService.isPending(created.id), "and released its claim");
+  }
+
+  /** A row whose runner is offline past the grace is refused loudly, naming the runner. */
+  @Test
+  public void aDispatchOntoAnUnavailableRowIs409NamingTheRunner() throws Exception {
+    WorkspaceRunner runner = eligibleRunner();
+    String repoId = repo();
+    Workspace created = stoppedRunnerRow(repoId, "offline-dispatch");
+    update(created.id, w -> w.runnerId = runner.id);
 
     ConflictException refused =
         assertThrows(
             ConflictException.class,
             () ->
                 dispatchService.dispatch(
-                    repoId, "dispatched", false, null, WorkspaceSubject.none(), "go"));
-    assertEquals(RunnerRefusals.RUNNER_DISPATCH_UNSUPPORTED, refused.code());
+                    repoId, "offline-dispatch", false, null, WorkspaceSubject.none(), "go"));
+    assertEquals(RunnerRefusals.RUNNER_UNAVAILABLE, refused.code());
+    assertTrue(refused.getMessage().contains(runner.name), refused.getMessage());
     assertEquals(WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus);
+    assertFalse(dispatchService.isPending(created.id), "nothing was scheduled");
   }
 
   /**
-   * A delivery onto a RUNNER row is refused as a dispatch is, and for its reason: its fallback arm
-   * starts the container and waits a fixed window for the daemon, and a RUNNER start only queues.
+   * A delivery onto a STOPPED RUNNER row queues it as a dispatch does and parks the delivery; a
+   * delete-container while queued drops it.
    */
   @Test
-  public void aDeliveryOntoARunnerRowIs409AndStartsNothing() throws Exception {
+  public void aDeliveryOntoARunnerRowQueuesItAndParks() throws Exception {
     eligibleRunner();
     String repoId = repo();
     Workspace created = stoppedRunnerRow(repoId, "delivered");
 
+    DispatchService.Delivery answer =
+        dispatchService.deliver(repoId, "delivered", "next phase", false);
+
+    assertEquals(created.id, answer.workspaceId());
+    assertFalse(answer.delivered());
+    assertFalse(answer.launched());
+    assertTrue(answer.detail().contains("queued"), answer.detail());
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(created.id).runtimeStatus);
+    assertTrue(dispatchService.isParked(created.id));
+
+    workspaceService.deleteContainer(created.id);
+
+    assertFalse(dispatchService.isParked(created.id));
+    assertFalse(dispatchService.isPending(created.id));
+  }
+
+  /** A delivery onto an UNAVAILABLE row: 409, naming the runner, and nothing queued. */
+  @Test
+  public void aDeliveryOntoAnUnavailableRowIs409() throws Exception {
+    WorkspaceRunner runner = eligibleRunner();
+    String repoId = repo();
+    Workspace created = stoppedRunnerRow(repoId, "offline-delivery");
+    update(created.id, w -> w.runnerId = runner.id);
+
     ConflictException refused =
         assertThrows(
             ConflictException.class,
-            () -> dispatchService.deliver(repoId, "delivered", "next phase", false));
-    assertEquals(RunnerRefusals.RUNNER_DISPATCH_UNSUPPORTED, refused.code());
+            () -> dispatchService.deliver(repoId, "offline-delivery", "next phase", false));
+    assertEquals(RunnerRefusals.RUNNER_UNAVAILABLE, refused.code());
+    assertTrue(refused.getMessage().contains(runner.name), refused.getMessage());
     assertEquals(
         WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus, "nothing was queued");
   }

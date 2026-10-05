@@ -71,6 +71,21 @@ public final class RunnerRows {
         });
   }
 
+  /**
+   * An ACTIVE RUNNER row QUEUED on no runner, standing on {@code branch} of a repository the suite
+   * registered — the row a dispatch finds on that branch (qits-626).
+   */
+  public Long queuedOn(String repositoryId, String branch, Instant queuedAt) {
+    return insert(
+        w -> {
+          w.repositoryId = repositoryId;
+          w.branch = branch;
+          w.parent = "master";
+          w.runtimeStatus = WorkspaceRuntimeStatus.QUEUED;
+          w.queuedAt = queuedAt;
+        });
+  }
+
   /** An ACTIVE RUNNER row on {@code runnerId} in {@code status}. */
   public Long placedOn(UUID runnerId, WorkspaceRuntimeStatus status) {
     return insert(
