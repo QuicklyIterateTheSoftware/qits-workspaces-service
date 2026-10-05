@@ -14,13 +14,23 @@ import java.util.regex.Pattern;
  * workspace on that runner shares the result.
  *
  * <pre>
- * docker run --rm -it -v &lt;dotClaudeVolume&gt;:/claude-home -e HOME=/claude-home \
- *   -e CLAUDE_CONFIG_DIR=/claude-home &lt;registry.qits.&lt;d&gt;/qits/workspace:&lt;pin&gt;&gt; claude
+ * docker run --rm -it --user 1000 --entrypoint claude \
+ *   -v &lt;dotClaudeVolume&gt;:/claude-home -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home \
+ *   &lt;registry.qits.&lt;d&gt;/qits/workspace:&lt;pin&gt;&gt;
  * </pre>
  *
- * (one line). It is the same {@code claude} launch the in-workspace sign-in terminal runs; Kimi's
- * ends {@code kimi login} instead. The image is {@link WorkspaceRunnerAddresses#workspaceImage},
- * the one a {@code take} and an {@code estate} name.
+ * (one line). The workspace image's ENTRYPOINT is the Java workspace daemon, not a shell, so the
+ * launch overrides it with {@code --entrypoint claude} rather than naming {@code claude} as an
+ * argument — the mistake that shipped live 2026-10-05, which started the daemon with "claude" on
+ * its command line and left the operator staring at Java logs instead of a sign-in prompt.
+ * {@code --user 1000} matters for the same reason the image's lack of a {@code USER} does: the
+ * image runs as root by default, and a root-owned login would be unreadable by the uid-1000
+ * workspace containers that are meant to share it. Kimi's is the same shape with
+ * {@code --entrypoint kimi}, {@code KIMI_CODE_HOME} in place of {@code CLAUDE_CONFIG_DIR} (its
+ * value one segment deeper, {@code /claude-home/.kimi-code}, the mount point qits-coding-agents'
+ * {@code AgentLaunchService} hands every Kimi launch), and a trailing {@code login} argument. The
+ * image is {@link WorkspaceRunnerAddresses#workspaceImage}, the one a {@code take} and an
+ * {@code estate} name.
  *
  * <p><b>Null until the volume is known</b> — the runner reports it in its {@code inventory} — and
  * null for a volume name docker would not accept: the command is pasted into a shell by a person,
@@ -47,6 +57,12 @@ public class RunnerLoginCommand {
   /** A docker volume name: what a runner may report and still be spliced into a shell line. */
   private static final Pattern VOLUME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_.-]{0,254}");
 
+  /**
+   * Where Kimi's agent home is mounted beneath {@link #HOME}, as {@code AgentLaunchService}
+   * mounts it.
+   */
+  private static final String KIMI_CODE_HOME = HOME + "/.kimi-code";
+
   @Inject WorkspaceRunnerAddresses addresses;
 
   /**
@@ -58,7 +74,9 @@ public class RunnerLoginCommand {
       WorkspaceRunnerDto.Login login,
       Instant connectedSince,
       Instant registeredAt) {
-    return compose(dotClaudeVolume, "claude", login, connectedSince, registeredAt);
+    return compose(
+        dotClaudeVolume, "claude", "CLAUDE_CONFIG_DIR", HOME, null, login, connectedSince,
+        registeredAt);
   }
 
   /** The Kimi login command for {@code dotClaudeVolume}, under the same conditions. */
@@ -67,7 +85,9 @@ public class RunnerLoginCommand {
       WorkspaceRunnerDto.Login login,
       Instant connectedSince,
       Instant registeredAt) {
-    return compose(dotClaudeVolume, "kimi login", login, connectedSince, registeredAt);
+    return compose(
+        dotClaudeVolume, "kimi", "KIMI_CODE_HOME", KIMI_CODE_HOME, "login", login, connectedSince,
+        registeredAt);
   }
 
   /**
@@ -82,7 +102,10 @@ public class RunnerLoginCommand {
 
   private String compose(
       String volume,
-      String command,
+      String entrypoint,
+      String envKey,
+      String envValue,
+      String trailingArg,
       WorkspaceRunnerDto.Login login,
       Instant connectedSince,
       Instant registeredAt) {
@@ -95,7 +118,7 @@ public class RunnerLoginCommand {
     } catch (DomainException unconfigured) {
       return null;
     }
-    return command(volume, image, command);
+    return command(volume, image, entrypoint, envKey, envValue, trailingArg);
   }
 
   /**
@@ -124,19 +147,30 @@ public class RunnerLoginCommand {
     return volume != null && VOLUME.matcher(volume).matches();
   }
 
-  /** The command's one shape, for {@code volume}, {@code image} and the CLI's own words. */
-  static String command(String volume, String image, String command) {
-    return "docker run --rm -it -v "
-        + volume
-        + ":"
-        + HOME
-        + " -e HOME="
-        + HOME
-        + " -e CLAUDE_CONFIG_DIR="
-        + HOME
-        + " "
-        + image
-        + " "
-        + command;
+  /**
+   * The command's one shape, for {@code volume}, {@code image}, the overriding {@code entrypoint}
+   * and the harness's own agent-home env var ({@code envKey}={@code envValue}). {@code trailingArg}
+   * is appended after {@code image} when present (Kimi's {@code login}); null for Claude, whose
+   * entrypoint override needs no argument.
+   */
+  static String command(
+      String volume, String image, String entrypoint, String envKey, String envValue,
+      String trailingArg) {
+    String base =
+        "docker run --rm -it --user 1000 --entrypoint "
+            + entrypoint
+            + " -v "
+            + volume
+            + ":"
+            + HOME
+            + " -e HOME="
+            + HOME
+            + " -e "
+            + envKey
+            + "="
+            + envValue
+            + " "
+            + image;
+    return trailingArg == null ? base : base + " " + trailingArg;
   }
 }

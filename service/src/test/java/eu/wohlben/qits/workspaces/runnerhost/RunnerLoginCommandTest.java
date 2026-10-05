@@ -26,17 +26,19 @@ class RunnerLoginCommandTest {
   @Test
   void theCommandRendersExactlyForAVolumeAndAnImage() {
     assertEquals(
-        "docker run --rm -it -v qits-workspaces-runner-dot-claude-3f2b8f0e:/claude-home"
+        "docker run --rm -it --user 1000 --entrypoint claude -v"
+            + " qits-workspaces-runner-dot-claude-3f2b8f0e:/claude-home"
             + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home "
-            + IMAGE
-            + " claude",
-        RunnerLoginCommand.command(VOLUME, IMAGE, "claude"));
+            + IMAGE,
+        RunnerLoginCommand.command(VOLUME, IMAGE, "claude", "CLAUDE_CONFIG_DIR", "/claude-home", null));
     assertEquals(
-        "docker run --rm -it -v qits-workspaces-runner-dot-claude-3f2b8f0e:/claude-home"
-            + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home "
+        "docker run --rm -it --user 1000 --entrypoint kimi -v"
+            + " qits-workspaces-runner-dot-claude-3f2b8f0e:/claude-home"
+            + " -e HOME=/claude-home -e KIMI_CODE_HOME=/claude-home/.kimi-code "
             + IMAGE
-            + " kimi login",
-        RunnerLoginCommand.command(VOLUME, IMAGE, "kimi login"));
+            + " login",
+        RunnerLoginCommand.command(
+            VOLUME, IMAGE, "kimi", "KIMI_CODE_HOME", "/claude-home/.kimi-code", "login"));
   }
 
   @Test
@@ -101,12 +103,12 @@ class RunnerLoginCommandTest {
     RunnerLoginCommand command = withAddresses(IMAGE);
     WorkspaceRunnerDto.Login login = new WorkspaceRunnerDto.Login("ABSENT", "UNKNOWN", SINCE);
     assertEquals(
-        "docker run --rm -it -v " + VOLUME + ":/claude-home -e HOME=/claude-home"
-            + " -e CLAUDE_CONFIG_DIR=/claude-home " + IMAGE + " claude",
+        "docker run --rm -it --user 1000 --entrypoint claude -v " + VOLUME + ":/claude-home"
+            + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home " + IMAGE,
         command.claude(VOLUME, login, SINCE, null));
     assertEquals(
-        "docker run --rm -it -v " + VOLUME + ":/claude-home -e HOME=/claude-home"
-            + " -e CLAUDE_CONFIG_DIR=/claude-home " + IMAGE + " kimi login",
+        "docker run --rm -it --user 1000 --entrypoint kimi -v " + VOLUME + ":/claude-home"
+            + " -e HOME=/claude-home -e KIMI_CODE_HOME=/claude-home/.kimi-code " + IMAGE + " login",
         command.kimi(VOLUME, login, SINCE, null));
     assertFalse(command.pending(VOLUME, login, SINCE, null));
   }

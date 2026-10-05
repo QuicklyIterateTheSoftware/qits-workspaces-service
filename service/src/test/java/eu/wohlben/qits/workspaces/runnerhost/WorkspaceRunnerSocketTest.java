@@ -324,7 +324,8 @@ class WorkspaceRunnerSocketTest {
     assertEquals("qits-workspaces-runner-dot-claude-abcd1234", offline.dotClaudeVolume());
     assertTrue(
         offline.loginCommand().startsWith(
-            "docker run --rm -it -v qits-workspaces-runner-dot-claude-abcd1234:/claude-home"),
+            "docker run --rm -it --user 1000 --entrypoint claude -v"
+                + " qits-workspaces-runner-dot-claude-abcd1234:/claude-home"),
         offline.loginCommand());
   }
 

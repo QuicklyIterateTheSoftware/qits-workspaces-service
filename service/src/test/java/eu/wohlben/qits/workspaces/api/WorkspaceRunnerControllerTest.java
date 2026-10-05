@@ -491,19 +491,27 @@ class WorkspaceRunnerControllerTest {
             + DOMAIN
             + "/qits/workspace:"
             + containerFactory.imageVersion();
-    String prefix =
-        "docker run --rm -it -v qits-workspaces-runner-dot-claude-1234abcd:/claude-home"
+    String expectedLoginCommand =
+        "docker run --rm -it --user 1000 --entrypoint claude -v"
+            + " qits-workspaces-runner-dot-claude-1234abcd:/claude-home"
             + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home "
             + image;
+    String expectedKimiLoginCommand =
+        "docker run --rm -it --user 1000 --entrypoint kimi -v"
+            + " qits-workspaces-runner-dot-claude-1234abcd:/claude-home"
+            + " -e HOME=/claude-home -e KIMI_CODE_HOME=/claude-home/.kimi-code "
+            + image
+            + " login";
     as("qits:agent")
         .when()
         .get(RUNNERS)
         .then()
         .statusCode(200)
-        .body("find { it.id == '" + runner.id + "' }.loginCommand", equalTo(prefix + " claude"))
+        .body(
+            "find { it.id == '" + runner.id + "' }.loginCommand", equalTo(expectedLoginCommand))
         .body(
             "find { it.id == '" + runner.id + "' }.kimiLoginCommand",
-            equalTo(prefix + " kimi login"))
+            equalTo(expectedKimiLoginCommand))
         .body("find { it.id == '" + runner.id + "' }.login.claude", is("ABSENT"))
         .body("find { it.id == '" + runner.id + "' }.dotClaudeVolume", notNullValue())
         .body("find { it.id == '" + runner.id + "' }.loginCommandPending", is(false));
