@@ -52,6 +52,16 @@ public class BranchTreeWorkspaceTest {
         TestOrigin.fileAtBranch(dataDir, wrapper, "adhoc-changes", "WORKSPACE.md")
             .contains("aggregate workspace"),
         "the hand-off document rides the wrapper's branch");
+    String guide = TestOrigin.fileAtBranch(dataDir, wrapper, "adhoc-changes", "WORKSPACE.md");
+    // The guide tells the truth on both placements (qits-817): public names and this container's
+    // bearer, never a wire alias, a hand-minted pair token or a browser session.
+    assertTrue(guide.contains("PROJECTS=https://projects.qits.$QITS_DOMAIN/projects/api"), guide);
+    assertTrue(guide.contains("Authorization: Bearer $(qits-token qits-platform)"), guide);
+    assertTrue(guide.contains("https://ci.qits.$QITS_DOMAIN/ci/api/runs/active"), guide);
+    assertTrue(guide.contains("accepts this container's bearer on every service vhost"), guide);
+    assertFalse(guide.contains("browser session"), guide);
+    assertFalse(guide.contains("<tier>-qits-"), guide);
+    assertFalse(guide.contains("QITS_GIT_AUTH_TOKEN_URL"), guide);
     assertTrue(
         TestOrigin.pushOptionsFor(dataDir, library, "refs/heads/adhoc-changes").isEmpty(),
         "a branch create is an ordinary push — CI is gated only by release requests, so there is"

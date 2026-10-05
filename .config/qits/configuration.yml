@@ -78,7 +78,7 @@ keys:
 
   env.QITS_OBSERVABILITY_URL:
     type: string
-    description: "Where this service's OTLP telemetry goes, and the address handed to workspace containers for theirs."
+    description: "Where this service's own OTLP telemetry goes."
 
   # --- what each workspace container is handed ---------------------------------------------------
 
