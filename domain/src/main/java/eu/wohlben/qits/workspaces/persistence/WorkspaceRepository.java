@@ -1,10 +1,14 @@
 package eu.wohlben.qits.workspaces.persistence;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import io.quarkus.hibernate.orm.panache.PanacheRepository;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.persistence.LockModeType;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
@@ -318,5 +322,105 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
         .stream()
         .map(w -> w.id)
         .toList();
+  }
+
+  /**
+   * Start for a RUNNER row: STOPPED or FAILED becomes QUEUED, stamped {@code queuedAt}, keeping its
+   * runner. A compare-and-swap, so two starts and a start racing anything else change the row once:
+   * answers how many rows changed, 0 or 1.
+   */
+  public int queueForRunner(Long id, Instant queuedAt) {
+    return update(
+        "runtimeStatus = ?1, queuedAt = ?2, runtimeError = null where id = ?3 and status = ?4"
+            + " and placement = ?5 and runtimeStatus in ?6",
+        WorkspaceRuntimeStatus.QUEUED,
+        queuedAt,
+        id,
+        WorkspaceStatus.ACTIVE,
+        WorkspacePlacement.RUNNER,
+        List.of(WorkspaceRuntimeStatus.STOPPED, WorkspaceRuntimeStatus.FAILED));
+  }
+
+  /**
+   * Stop for a QUEUED RUNNER row: back to STOPPED with no frame, because nothing runs anywhere yet.
+   * A compare-and-swap against a runner's claim: 0 when a runner took the row first.
+   */
+  public int unqueueForRunner(Long id) {
+    return update(
+        "runtimeStatus = ?1, queuedAt = null where id = ?2 and status = ?3 and placement = ?4"
+            + " and runtimeStatus = ?5",
+        WorkspaceRuntimeStatus.STOPPED,
+        id,
+        WorkspaceStatus.ACTIVE,
+        WorkspacePlacement.RUNNER,
+        WorkspaceRuntimeStatus.QUEUED);
+  }
+
+  /**
+   * <b>Reserve is the claim</b> (qits-849): a QUEUED RUNNER row that is unplaced or already this
+   * runner's becomes PROVISIONING on it. The WHERE clause is the whole race: of two runners updating
+   * one never-placed row, the second re-reads it PROVISIONING after the first commits and changes
+   * nothing. Answers the changed-row count, 0 or 1.
+   */
+  public int claimForRunner(Long id, UUID runnerId) {
+    return update(
+        "runnerId = ?1, runtimeStatus = ?2, runtimeError = null where id = ?3 and status = ?4"
+            + " and placement = ?5 and runtimeStatus = ?6 and (runnerId is null or runnerId = ?1)",
+        runnerId,
+        WorkspaceRuntimeStatus.PROVISIONING,
+        id,
+        WorkspaceStatus.ACTIVE,
+        WorkspacePlacement.RUNNER,
+        WorkspaceRuntimeStatus.QUEUED);
+  }
+
+  /**
+   * The QUEUED rows a runner's reserve may take, in the order it takes them: its own sticky rows
+   * first, then never-placed ones, each oldest {@code queuedAt} first.
+   */
+  public List<Long> queuedCandidatesFor(UUID runnerId) {
+    List<Long> candidates = new ArrayList<>();
+    candidates.addAll(
+        getEntityManager()
+            .createQuery(
+                "select w.id from Workspace w where w.status = :active and w.placement = :runner"
+                    + " and w.runtimeStatus = :queued and w.runnerId = :r"
+                    + " order by w.queuedAt, w.id",
+                Long.class)
+            .setParameter("active", WorkspaceStatus.ACTIVE)
+            .setParameter("runner", WorkspacePlacement.RUNNER)
+            .setParameter("queued", WorkspaceRuntimeStatus.QUEUED)
+            .setParameter("r", runnerId)
+            .getResultList());
+    candidates.addAll(
+        getEntityManager()
+            .createQuery(
+                "select w.id from Workspace w where w.status = :active and w.placement = :runner"
+                    + " and w.runtimeStatus = :queued and w.runnerId is null"
+                    + " order by w.queuedAt, w.id",
+                Long.class)
+            .setParameter("active", WorkspaceStatus.ACTIVE)
+            .setParameter("runner", WorkspacePlacement.RUNNER)
+            .setParameter("queued", WorkspaceRuntimeStatus.QUEUED)
+            .getResultList());
+    return candidates;
+  }
+
+  /** A runner's backlog: the QUEUED RUNNER rows it may take, its own and the unplaced ones. */
+  public long countBacklogFor(UUID runnerId) {
+    return count(
+        "placement = ?1 and runtimeStatus = ?2 and status = ?3 and (runnerId is null or runnerId"
+            + " = ?4)",
+        WorkspacePlacement.RUNNER,
+        WorkspaceRuntimeStatus.QUEUED,
+        WorkspaceStatus.ACTIVE,
+        runnerId);
+  }
+
+  /** This runner's ACTIVE rows, locked for an update that has to see them as they are. */
+  public List<Workspace> lockActiveOnRunner(UUID runnerId) {
+    return find("runnerId = ?1 and status = ?2 order by id", runnerId, WorkspaceStatus.ACTIVE)
+        .withLock(LockModeType.PESSIMISTIC_WRITE)
+        .list();
   }
 }

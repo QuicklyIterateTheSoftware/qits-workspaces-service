@@ -24,4 +24,15 @@ public class WorkspaceChangePublisher {
   public void fire(String repoId, Long workspaceRowId, Topic topic) {
     event.fireAsync(new WorkspaceChangeHint(repoId, workspaceRowId, topic));
   }
+
+  /**
+   * A RUNNER-placed workspace's runtime status changed (QUEUED, taken, launched, stopped, ...) with
+   * no container event this host would otherwise announce. Fired as {@code GIT_STATUS} on the
+   * workspace's channel and its repository's, because that is the hint on which the SPA already
+   * re-reads the workspace row and the branch tree.
+   */
+  public void runtimeChanged(String repoId, Long workspaceRowId) {
+    fire(repoId, workspaceRowId, Topic.GIT_STATUS);
+    fire(repoId, null, Topic.GIT_STATUS);
+  }
 }
