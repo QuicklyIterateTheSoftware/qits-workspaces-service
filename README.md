@@ -222,6 +222,26 @@ is the qits-net alias. Set it when the bus lives somewhere else:
 
     QITS_EVENTS_URL=http://qits-events:8080
 
+### Where a workspace runs
+
+`Workspace.placement` (DIRECT or RUNNER, `V12`) is decided once, at create, and never changed
+afterwards (qits-837, epic qits-626). The rule, `WorkspacePlacements.forNewRow`:
+
+- **Admin and editor workspaces are always DIRECT.** An admin workspace holds the host's docker
+  socket and always runs on the platform host; the shared editor checks nothing out and never
+  consults a runner. Both ignore whatever the request stated.
+- **A stated placement on an ordinary workspace is honoured as stated.** An explicit RUNNER with no
+  eligible runner is still refused 409 `NO_RUNNER` before anything is written.
+- **Otherwise RUNNER is the default once an eligible workspace runner exists** — registered, with
+  slots, not quarantined (`WorkspaceRunnerRepository.existsEligible()`; a runner's live connection is
+  deliberately not consulted, only whether one *could* take the row) — **and DIRECT when none does.**
+  This is what makes a workspace runner the ordinary place new work lands rather than an opt-in.
+
+**Dropping every runner's slots to 0 is the rollback lever.** `existsEligible()` then answers false,
+so the very next workspace created states nothing and lands DIRECT, with no flag to flip and no
+redeploy. Nothing already written moves: an existing row's placement is fixed at its own create, so
+neither raising nor lowering the slot count ever relocates a workspace that is already running.
+
 ### The credential a workspace container holds
 
 A workspace container is a **dynamic context**, so it gets an idp client of its own rather than a

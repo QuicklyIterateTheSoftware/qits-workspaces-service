@@ -157,12 +157,30 @@ public class WorkspaceRunnerPlacementTest {
     assertEquals(runner.id, read(created.id).runnerId);
   }
 
+  /**
+   * A stated placement is honoured as stated, whatever the default would have answered: DIRECT
+   * stated with an eligible runner sitting right there stays DIRECT rather than being upgraded.
+   * {@code WorkspaceServicePlacementTest} covers the {@code forNewRow} default itself (qits-837) —
+   * this is about the explicit case only.
+   */
   @Test
-  public void everyCreateThatStatesNoPlacementIsDirect() throws Exception {
+  public void aStatedDirectPlacementStaysDirectEvenWithAnEligibleRunner() throws Exception {
     eligibleRunner();
     String repoId = repo();
 
-    Workspace created = workspaceService.createWorkspace(repoId, "plain", "master", "plain", null);
+    Workspace created =
+        workspaceService.createWorkspace(
+            repoId,
+            "plain",
+            "master",
+            "plain",
+            null,
+            false,
+            false,
+            false,
+            WorkspaceSubject.none(),
+            null,
+            WorkspacePlacement.DIRECT);
     rows.add(created.id);
 
     assertEquals(WorkspacePlacement.DIRECT, read(created.id).placement);
@@ -839,7 +857,21 @@ public class WorkspaceRunnerPlacementTest {
     WorkspaceRunner runner = eligibleRunner();
     placement.connect(runner.id);
     String repoId = repo();
-    Workspace created = workspaceService.createWorkspace(repoId, "direct", "master", "direct", null);
+    // Stated DIRECT explicitly (qits-837): an eligible runner is connected, so a create that stated
+    // nothing would now default to RUNNER, which is not what this test is about.
+    Workspace created =
+        workspaceService.createWorkspace(
+            repoId,
+            "direct",
+            "master",
+            "direct",
+            null,
+            false,
+            false,
+            false,
+            WorkspaceSubject.none(),
+            null,
+            WorkspacePlacement.DIRECT);
     rows.add(created.id);
     String container = containers.containerName("direct", repoId);
 
