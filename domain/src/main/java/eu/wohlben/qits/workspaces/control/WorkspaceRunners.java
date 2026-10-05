@@ -1,7 +1,9 @@
 package eu.wohlben.qits.workspaces.control;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto;
+import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerHealthDto;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunnerCapabilities;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
@@ -347,6 +349,35 @@ public class WorkspaceRunners {
   }
 
   /**
+   * What {@link #quarantineFor} did: the row as it now is (null for a runner that is gone), whether
+   * this call took it out of service, and whether its reason changed.
+   */
+  public record Quarantine(WorkspaceRunner runner, boolean began, boolean reasonChanged) {}
+
+  /**
+   * Keeps a runner out of service for {@code reason}: a runner in service is quarantined now, and
+   * one already out keeps its {@code quarantined_at} — so a health check's back-off schedule, which
+   * counts from it, carries on — and takes {@code reason} as the newest word on why (qits-850).
+   */
+  public Quarantine quarantineFor(UUID id, String reason) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              WorkspaceRunner runner = runners.findById(id, LockModeType.PESSIMISTIC_WRITE);
+              if (runner == null) {
+                return new Quarantine(null, false, false);
+              }
+              boolean began = !runner.quarantined();
+              boolean changed = !Objects.equals(runner.quarantineReason, reason);
+              if (began) {
+                runner.quarantinedAt = Instant.now();
+              }
+              runner.quarantineReason = reason;
+              return new Quarantine(runner, began, changed);
+            });
+  }
+
+  /**
    * Puts a runner back into service: an admin's greenlight, or a health check that passed. A runner
    * already in service is answered as it is.
    *
@@ -374,6 +405,15 @@ public class WorkspaceRunners {
    * @return the row as it now is, or null for a runner deleted meanwhile
    */
   public WorkspaceRunner recordHealthCheck(UUID id, boolean ok, Instant at) {
+    return recordHealthCheck(id, ok, at, null);
+  }
+
+  /**
+   * {@link #recordHealthCheck(UUID, boolean, Instant)}, keeping {@code report} — the check's whole
+   * answer, {@code {at, ok, detail, requestId, checks}} — as the capabilities' {@link
+   * WorkspaceRunnerCapabilities#HEALTH} key (qits-850). A null report leaves the last one stored.
+   */
+  public WorkspaceRunner recordHealthCheck(UUID id, boolean ok, Instant at, ObjectNode report) {
     return QuarkusTransaction.requiringNew()
         .call(
             () -> {
@@ -383,6 +423,10 @@ public class WorkspaceRunners {
               }
               runner.lastHealthCheckAt = at == null ? Instant.now() : at;
               runner.lastHealthCheckOk = ok;
+              if (report != null) {
+                runner.capabilities =
+                    WorkspaceRunnerCapabilities.withHealth(runner.capabilities, report);
+              }
               return runner;
             });
   }
@@ -451,6 +495,16 @@ public class WorkspaceRunners {
   /** The runner as an operator reads it, with what the service knows live about it. */
   public WorkspaceRunnerDto view(WorkspaceRunner runner, WorkspaceRunnerMapper.Live live) {
     return mapper.toDto(runner, live);
+  }
+
+  /**
+   * The runner's newest health check in full, every check's data included; null when none has
+   * settled yet (qits-850).
+   *
+   * @throws NotFoundException for no such runner
+   */
+  public WorkspaceRunnerHealthDto health(UUID id) {
+    return mapper.toHealthDto(get(id));
   }
 
   /** Every runner as an operator reads it, by name. */

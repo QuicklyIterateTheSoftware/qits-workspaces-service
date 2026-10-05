@@ -154,4 +154,29 @@ class WorkspaceRunnerMapperTest {
     assertNull(dto.kimiLoginCommand());
     assertTrue(dto.loginCommandPending());
   }
+
+  /** qits-850: the listing carries each check's verdict and never its data; the full read does. */
+  @Test
+  public void theHealthReportIsListedWithoutDataAndReadInFull() {
+    WorkspaceRunner runner = runner();
+    runner.capabilities =
+        "{\"health\":{\"at\":\"2026-10-05T08:02:00Z\",\"ok\":true,\"detail\":\"all passed\","
+            + "\"requestId\":\"r-9\",\"checks\":[{\"name\":\"docker\",\"ok\":true,"
+            + "\"detail\":\"27.1\",\"data\":{\"version\":\"27.1\"}},\"not a check\"]}}";
+
+    WorkspaceRunnerDto.Health listed = mapper.toDto(runner).health();
+    var full = mapper.toHealthDto(runner);
+
+    assertEquals(
+        new WorkspaceRunnerDto.Health(
+            Instant.parse("2026-10-05T08:02:00Z"),
+            true,
+            "all passed",
+            java.util.List.of(new WorkspaceRunnerDto.Check("docker", true, "27.1"))),
+        listed);
+    assertEquals("r-9", full.requestId());
+    assertEquals("27.1", full.checks().get(0).data().path("version").asText());
+    assertNull(mapper.toDto(runner()).health(), "no check has settled");
+    assertNull(mapper.toHealthDto(runner()));
+  }
 }

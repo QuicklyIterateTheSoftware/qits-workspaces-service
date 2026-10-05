@@ -188,7 +188,13 @@ class WorkspaceRunnerControllerTest {
     assertTrue(idp.lines("DELETE").contains("DELETE /api/tokens/t-1"), idp.lines().toString());
 
     as("qits:system").when().post(RUNNERS + "/" + id + "/greenlight").then().statusCode(403);
-    as("qits:system").when().post(RUNNERS + "/" + id + "/healthcheck").then().statusCode(403);
+    // The health check is open to the system role (qits-850): past the gate, 409 for no socket.
+    as("qits:system")
+        .when()
+        .post(RUNNERS + "/" + id + "/healthcheck")
+        .then()
+        .statusCode(409)
+        .body("code", is("RUNNER_UNAVAILABLE"));
     as("qits:system").when().post(RUNNERS + "/" + id + "/login-check").then().statusCode(403);
 
     as("qits:system").when().delete(RUNNERS + "/" + id).then().statusCode(204);
@@ -196,13 +202,22 @@ class WorkspaceRunnerControllerTest {
     as("qits:admin").when().get(RUNNERS + "/" + id).then().statusCode(404);
   }
 
-  /** {@code qits:agent} reads every runner and the script, and writes nothing. */
+  /**
+   * {@code qits:agent} reads every runner, its health report and the script, and writes nothing —
+   * the health check excepted (qits-850), which {@link
+   * eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerHealthTest} presses on a connected runner.
+   */
   @Test
   void anAgentReadsAndCannotWrite() {
     WorkspaceRunner runner = rows.registered("wr-agent-reads", 1);
 
     as("qits:agent").when().get(RUNNERS).then().statusCode(200);
     as("qits:agent").when().get(RUNNERS + "/" + runner.id).then().statusCode(200);
+    as("qits:agent")
+        .when()
+        .get(RUNNERS + "/" + runner.id + "/health")
+        .then()
+        .statusCode(204);
     as("qits:agent").when().get(RUNNERS + "/install.sh").then().statusCode(200);
 
     as("qits:agent")
@@ -223,6 +238,7 @@ class WorkspaceRunnerControllerTest {
         .statusCode(403);
     as("qits:agent").when().delete(RUNNERS + "/" + runner.id).then().statusCode(403);
     as("qits:agent").when().post(RUNNERS + "/" + runner.id + "/greenlight").then().statusCode(403);
+    as("qits:agent").when().post(RUNNERS + "/" + runner.id + "/login-check").then().statusCode(403);
   }
 
   @Test
@@ -239,7 +255,10 @@ class WorkspaceRunnerControllerTest {
         .body("eligible", is(true));
   }
 
-  /** Health check and login check need a socket: 409 RUNNER_UNAVAILABLE with none. */
+  /**
+   * Health check and login check need a socket: 409 RUNNER_UNAVAILABLE with none. An agent is past
+   * the health check's gate (qits-850) and not the login check's.
+   */
   @Test
   void theChecksOfARunnerThatIsNotConnectedAre409() {
     WorkspaceRunner runner = rows.registered("wr-offline", 1);
@@ -251,8 +270,16 @@ class WorkspaceRunnerControllerTest {
           .then()
           .statusCode(409)
           .body("code", is("RUNNER_UNAVAILABLE"));
-      as("qits:agent").when().post(RUNNERS + "/" + runner.id + "/" + check).then().statusCode(403);
     }
+    as("qits:agent")
+        .when()
+        .post(RUNNERS + "/" + runner.id + "/healthcheck")
+        .then()
+        .statusCode(409)
+        .body("code", is("RUNNER_UNAVAILABLE"));
+    as("qits:agent").when().post(RUNNERS + "/" + runner.id + "/login-check").then().statusCode(403);
+    as("qits:admin").when().post(RUNNERS + "/" + UUID.randomUUID() + "/healthcheck").then()
+        .statusCode(404);
   }
 
   /** The 409 names the rows, and links them: repository and branch beside each id. */

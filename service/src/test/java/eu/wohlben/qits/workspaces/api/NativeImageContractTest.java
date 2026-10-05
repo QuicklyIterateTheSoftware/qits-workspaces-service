@@ -144,8 +144,9 @@ public class NativeImageContractTest {
   }
 
   /**
-   * The runner create answers through a bare {@code Response}, so its record and the runner view it
-   * carries are on no signature the native build indexes — the editor door's defect, one door over.
+   * The runner create, health check and health report answer through a bare {@code Response}, so
+   * their records and the runner view they carry are on no signature the native build indexes — the
+   * editor door's defect, one door over.
    */
   @Test
   public void everyRunnerRegistrationRecordIsRegisteredForReflection() {
@@ -156,7 +157,12 @@ public class NativeImageContractTest {
         Stream.of(
                 WorkspaceRunnerController.RunnerRegistrationDto.class,
                 eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto.class,
-                eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto.Login.class)
+                eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto.Login.class,
+                eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto.Health.class,
+                eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto.Check.class,
+                WorkspaceRunnerController.HealthCheckRequested.class,
+                eu.wohlben.qits.workspaces.dto.WorkspaceRunnerHealthDto.class,
+                eu.wohlben.qits.workspaces.dto.WorkspaceRunnerHealthDto.CheckReport.class)
             .filter(c -> !registered.contains(c))
             .map(Class::getSimpleName)
             .toList();

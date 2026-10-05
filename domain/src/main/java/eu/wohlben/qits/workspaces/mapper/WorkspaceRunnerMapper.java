@@ -1,12 +1,16 @@
 package eu.wohlben.qits.workspaces.mapper;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto;
+import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerHealthDto;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunnerCapabilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * {@link WorkspaceRunner} to {@link WorkspaceRunnerDto}. Written by hand rather than with MapStruct,
@@ -87,7 +91,8 @@ public class WorkspaceRunnerMapper {
         known.queued(),
         known.loginCommand(),
         known.kimiLoginCommand(),
-        known.loginCommandPending());
+        known.loginCommandPending(),
+        health(said));
   }
 
   /** {@code login{claude,kimi,checkedAt}}, or null when the runner has not reported one. */
@@ -100,6 +105,75 @@ public class WorkspaceRunnerMapper {
         WorkspaceRunnerCapabilities.text(login, "claude"),
         WorkspaceRunnerCapabilities.text(login, "kimi"),
         instant(WorkspaceRunnerCapabilities.text(login, "checkedAt")));
+  }
+
+  /**
+   * The newest health check's verdicts, without the checks' data, or null when none has been
+   * recorded (qits-850).
+   */
+  public static WorkspaceRunnerDto.Health health(JsonNode said) {
+    JsonNode health = healthNode(said);
+    if (health == null) {
+      return null;
+    }
+    List<WorkspaceRunnerDto.Check> checks = new ArrayList<>();
+    for (JsonNode check : checks(health)) {
+      checks.add(
+          new WorkspaceRunnerDto.Check(
+              WorkspaceRunnerCapabilities.text(check, "name"),
+              check.path("ok").asBoolean(false),
+              WorkspaceRunnerCapabilities.text(check, "detail")));
+    }
+    return new WorkspaceRunnerDto.Health(
+        instant(WorkspaceRunnerCapabilities.text(health, "at")),
+        health.path("ok").asBoolean(false),
+        WorkspaceRunnerCapabilities.text(health, "detail"),
+        List.copyOf(checks));
+  }
+
+  /**
+   * The newest health check in full — every check's data included — or null when none has been
+   * recorded: {@code GET /runners/{id}/health}'s answer (qits-850).
+   */
+  public WorkspaceRunnerHealthDto toHealthDto(WorkspaceRunner runner) {
+    JsonNode health =
+        runner == null ? null : healthNode(WorkspaceRunnerCapabilities.decode(runner.capabilities));
+    if (health == null) {
+      return null;
+    }
+    List<WorkspaceRunnerHealthDto.CheckReport> checks = new ArrayList<>();
+    for (JsonNode check : checks(health)) {
+      JsonNode data = check.get("data");
+      checks.add(
+          new WorkspaceRunnerHealthDto.CheckReport(
+              WorkspaceRunnerCapabilities.text(check, "name"),
+              check.path("ok").asBoolean(false),
+              WorkspaceRunnerCapabilities.text(check, "detail"),
+              data != null && data.isObject() ? data : JsonNodeFactory.instance.objectNode()));
+    }
+    return new WorkspaceRunnerHealthDto(
+        instant(WorkspaceRunnerCapabilities.text(health, "at")),
+        health.path("ok").asBoolean(false),
+        WorkspaceRunnerCapabilities.text(health, "detail"),
+        WorkspaceRunnerCapabilities.text(health, "requestId"),
+        health.path(WorkspaceRunnerCapabilities.DATA_OMITTED).asBoolean(false),
+        List.copyOf(checks));
+  }
+
+  private static JsonNode healthNode(JsonNode said) {
+    JsonNode health = said == null ? null : said.get(WorkspaceRunnerCapabilities.HEALTH);
+    return health != null && health.isObject() ? health : null;
+  }
+
+  /** The report's checks that are objects; a malformed entry is skipped, never corrected. */
+  private static List<JsonNode> checks(JsonNode health) {
+    List<JsonNode> checks = new ArrayList<>();
+    for (JsonNode check : health.path("checks")) {
+      if (check.isObject()) {
+        checks.add(check);
+      }
+    }
+    return checks;
   }
 
   private static Instant instant(String text) {

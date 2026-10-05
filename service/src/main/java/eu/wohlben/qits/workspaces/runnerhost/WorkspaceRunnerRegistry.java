@@ -20,7 +20,6 @@ import eu.wohlben.qits.workspaces.error.DomainException;
 import eu.wohlben.qits.workspacesrunner.protocol.Deleted;
 import eu.wohlben.qits.workspacesrunner.protocol.Estate;
 import eu.wohlben.qits.workspacesrunner.protocol.Exited;
-import eu.wohlben.qits.workspacesrunner.protocol.HealthCheck;
 import eu.wohlben.qits.workspacesrunner.protocol.HealthChecked;
 import eu.wohlben.qits.workspacesrunner.protocol.HeldContainer;
 import eu.wohlben.qits.workspacesrunner.protocol.Inventory;
@@ -75,7 +74,7 @@ import org.jboss.logging.Logger;
  * <p><b>What a greeted connection is told, in order</b> (the dossier's sequence): {@code ack} with
  * the row's slots — 0 while the runner is quarantined, followed by {@code quarantined} — then
  * {@code estate}, then {@code backlog}; and {@code healthCheck} when the runner is still awaiting
- * its first one (it is quarantined from its registration until a health check passes). {@code
+ * its first one or has just come back ({@link WorkspaceRunnerHealth}, which owns every check). {@code
  * estate} is sent again whenever the set of rows a runner owns changes, and only ever from a
  * successful read: a list that could not be read is not sent, because the runner removes whatever
  * is not on it. {@code backlog} is recounted and pushed whenever a row enters or leaves the queue,
@@ -84,7 +83,10 @@ import org.jboss.logging.Logger;
  * <p><b>A dropped runner is still present for the reconnect grace</b>, {@link #RECONNECT_GRACE} —
  * qits-ci's value ({@code qits.ci.runner.reconnect-grace-seconds=60}), named here as a constant. A
  * socket that blinked (the edge restarting) leaves its workspaces as they are; after the grace they
- * read UNAVAILABLE ({@link #presence}), and every client watching them is told so.
+ * read UNAVAILABLE ({@link #presence}), and every client watching them is told so. A runner whose
+ * first socket comes after the grace has <b>come back</b>, and is quarantined until a health check
+ * passes ({@link WorkspaceRunnerHealth#cameBack}); one inside it, the rollover successor included,
+ * has not.
  *
  * <p><b>Nothing here waits without a deadline</b>: a frame is sent bounded at {@link
  * #SEND_TIMEOUT}, a close at {@link #CLOSE_TIMEOUT}, a routed verb's reply at the deadline its
@@ -118,9 +120,6 @@ public class WorkspaceRunnerRegistry {
   /** How long a backlog change waits for the ones right behind it before the count is pushed. */
   static final Duration BACKLOG_DEBOUNCE = Duration.ofMillis(250);
 
-  /** The source a greenlight by a passing health check is reported with in {@code reinstated}. */
-  static final String HEALTH_CHECK = "health check";
-
   @Inject WorkspaceRunnerMessageCodec codec;
 
   @Inject WorkspaceRunners runners;
@@ -132,6 +131,8 @@ public class WorkspaceRunnerRegistry {
   @Inject WorkspaceRunnerAddresses addresses;
 
   @Inject ObjectMapper objectMapper;
+
+  @Inject WorkspaceRunnerHealth health;
 
   /** Every open session of each runner, oldest first; mutated only inside {@code compute}. */
   private final ConcurrentHashMap<UUID, List<Session>> sessions = new ConcurrentHashMap<>();
@@ -272,8 +273,13 @@ public class WorkspaceRunnerRegistry {
           return List.copyOf(next);
         });
     if (first[0]) {
-      connectedSince.put(runner.id, Instant.now());
-      droppedAt.remove(runner.id);
+      Instant now = Instant.now();
+      connectedSince.put(runner.id, now);
+      Instant dropped = droppedAt.remove(runner.id);
+      if (dropped != null && !dropped.plus(reconnectGrace).isAfter(now)) {
+        // Away longer than the grace: a comeback, which is proved healthy before it takes work.
+        health.cameBack(runner.id, runner.name, Duration.between(dropped, now));
+      }
       // Its rows may have read UNAVAILABLE; whoever watches them reads them again.
       async(() -> claims.announceOwned(runner.id), "announce runner " + runner.name + " back");
     }
@@ -285,7 +291,8 @@ public class WorkspaceRunnerRegistry {
    * The runner said who it is: the version against the pin, then the capability, then what it said
    * is recorded, the same-version rule settled, and it is answered — {@link Upgrade} and {@code
    * ack{0}} for a runner not at the pin, else {@code ack}, {@code quarantined} if it is, {@code
-   * estate}, {@code backlog} and, while it awaits its first one, {@code healthCheck}. Every other
+   * estate}, {@code backlog} and, while it awaits its first one or has just come back, {@code
+   * healthCheck}. Every other
    * version's connection of the runner is retired after.
    *
    * <p>The slots are the row's, never the runner's ({@link Hello#slots()} is what its operator put
@@ -347,10 +354,7 @@ public class WorkspaceRunnerRegistry {
     session.greeted = true;
     sendEstate(session);
     sendBacklog(session);
-    if (row.quarantined()
-        && WorkspaceRunners.AWAITING_FIRST_HEALTH_CHECK.equals(row.quarantineReason)) {
-      send(session, new HealthCheck());
-    }
+    health.onGreeted(row);
     catchUp(session, row, slots);
     for (Session old : retiring) {
       LOG.infof(
@@ -488,31 +492,9 @@ public class WorkspaceRunnerRegistry {
     record(session, said);
   }
 
-  /**
-   * A health check settled. It is recorded first, whatever follows; a pass lifts a quarantine
-   * ({@code reinstated}, then {@code ack} with the row's slots and a fresh {@code backlog}), a
-   * failure begins one ({@code quarantined}, then {@code ack{0}}).
-   */
+  /** A health check settled: {@link WorkspaceRunnerHealth} records it and acts on it. */
   public void onHealthChecked(Session session, HealthChecked checked) {
-    WorkspaceRunner row = runners.recordHealthCheck(session.runnerId, checked.ok(), Instant.now());
-    if (row == null) {
-      return;
-    }
-    if (checked.ok()) {
-      if (row.quarantined()) {
-        runners.greenlight(session.runnerId);
-        LOG.infof("Runner %s passed its health check; it takes workspaces now", row.name);
-        reinstated(session.runnerId, HEALTH_CHECK);
-      }
-      return;
-    }
-    String detail = checked.detail() == null || checked.detail().isBlank() ? "" : checked.detail();
-    String reason = "health check failed" + (detail.isEmpty() ? "" : ": " + detail);
-    WorkspaceRunner quarantined = runners.quarantine(session.runnerId, truncate(reason));
-    LOG.warnf("Runner %s failed its health check: %s", row.name, detail);
-    if (quarantined != null) {
-      quarantined(session.runnerId, quarantined.quarantineReason, quarantined.quarantinedAt);
-    }
+    health.onHealthChecked(session.runnerId, checked);
   }
 
   public void onLaunched(Session session, Launched launched) {
@@ -747,6 +729,7 @@ public class WorkspaceRunnerRegistry {
           "the connection of deleted runner " + session.runnerName);
     }
     droppedAt.remove(runnerId);
+    health.forget(runnerId);
   }
 
   /**
@@ -856,7 +839,7 @@ public class WorkspaceRunnerRegistry {
   }
 
   /** The session a runner's slots are granted on — greeted, pinned, open — or null. */
-  private Session serving(UUID runnerId) {
+  Session serving(UUID runnerId) {
     Session session = current(runnerId);
     return session != null && session.greeted && !session.draining && session.isOpen()
         ? session
@@ -945,9 +928,5 @@ public class WorkspaceRunnerRegistry {
     } catch (RuntimeException e) {
       LOG.debugf("Closing the socket of %s did not complete: %s", what, e.getMessage());
     }
-  }
-
-  private static String truncate(String s) {
-    return s.length() <= 1000 ? s : s.substring(0, 1000);
   }
 }
