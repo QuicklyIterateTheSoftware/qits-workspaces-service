@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test;
  */
 @QuarkusTest
 @TestProfile(DaemonControlSocketMachineAuthTest.GateOn.class)
-class DaemonControlSocketMachineAuthTest {
+public class DaemonControlSocketMachineAuthTest {
 
   /** The one audience this service accepts, and the one every token this platform mints carries. */
   private static final String PLATFORM_AUDIENCE = "qits-platform";

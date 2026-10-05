@@ -368,6 +368,19 @@ public class RunnerClaims {
     return QuarkusTransaction.requiringNew().call(() -> workspaces.findActiveIdsOnRunner(runnerId));
   }
 
+  /**
+   * Tells every client watching one of {@code runnerId}'s ACTIVE rows that its state may read
+   * differently now, with no row written: the runner connected, or its reconnect grace ran out, so
+   * the UNAVAILABLE overlay came off or went on.
+   */
+  public void announceOwned(UUID runnerId) {
+    List<Workspace> owned =
+        QuarkusTransaction.requiringNew().call(() -> workspaces.findActiveOnRunner(runnerId));
+    for (Workspace row : owned) {
+      changePublisher.runtimeChanged(row.repositoryId, row.id);
+    }
+  }
+
   private void backlogChanged(Workspace row) {
     if (placement.isResolvable()) {
       placement.get().backlogChanged(row);

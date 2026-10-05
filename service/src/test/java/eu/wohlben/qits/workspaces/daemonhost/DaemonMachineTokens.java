@@ -8,29 +8,35 @@ import java.time.Duration;
 import java.util.Set;
 
 /** Test issuer for the machine bearer the workspace daemon presents to its control socket. */
-final class DaemonMachineTokens {
+public final class DaemonMachineTokens {
 
-  static final String SIGNING_KEY = "/machine-token-signing-key.pem";
-  static final String VERIFICATION_KEY = "/machine-token-verification-key.pem";
-  static final String ISSUER = "http://qits-platform-idp:8080/idp";
+  public static final String SIGNING_KEY = "/machine-token-signing-key.pem";
+  public static final String VERIFICATION_KEY = "/machine-token-verification-key.pem";
+  public static final String ISSUER = "http://qits-platform-idp:8080/idp";
 
-  static String token(String clientId, String... audiences) {
+  public static String token(String clientId, String... audiences) {
     return tokenWithRoles(clientId, Set.of("qits:system"), audiences);
   }
 
   /** A bearer for {@code clientId} carrying exactly {@code roles} — an agent's, for instance. */
-  static String tokenWithRoles(String clientId, Set<String> roles, String... audiences) {
+  public static String tokenWithRoles(String clientId, Set<String> roles, String... audiences) {
+    return tokenWithRoles(clientId, roles, Duration.ofMinutes(5), audiences);
+  }
+
+  /** {@link #tokenWithRoles(String, Set, String...)} that expires {@code lifetime} from now. */
+  public static String tokenWithRoles(
+      String clientId, Set<String> roles, Duration lifetime, String... audiences) {
     return Jwt.claims()
         .issuer(ISSUER)
         .subject(clientId)
         .groups(roles)
         .audience(Set.of(audiences))
-        .expiresIn(Duration.ofMinutes(5))
+        .expiresIn(lifetime)
         .jws()
         .sign(privateKey());
   }
 
-  static String pem(String resource) {
+  public static String pem(String resource) {
     try (var in = DaemonMachineTokens.class.getResourceAsStream(resource)) {
       return new String(in.readAllBytes(), StandardCharsets.UTF_8);
     } catch (Exception e) {

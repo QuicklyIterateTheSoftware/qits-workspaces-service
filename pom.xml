@@ -74,6 +74,16 @@
              daemon that produces those files and the service that reads them off the shared volume
              after the container is gone. Framework-free — vertx-core and qits-commands are its only
              compile dependencies, and nothing here imports either. -->
+        <!-- THE WORKSPACE RUNNER PIN (epic qits-624), the same shape as the two image pins above:
+             the jar carries the runner's wire frames AND WorkspacesRunnerBinary.VERSION, the tag of
+             the qits/qits-workspaces-runner image every runner is told to upgrade to, so the frames
+             this service speaks and the binary it hands out are one release. Moved by
+             qits-maintenance on maintenance/dependencies, gated here; never by hand. -->
+        <qits.workspaces-runner-protocol.version>2026.1005.54252</qits.workspaces-runner-protocol.version>
+        <!-- qits-runner-javalib (qits-771): the lifecycle frames and their codec
+             (qits-runner-protocol), and the install script template plus RunnerIdentity
+             (qits-runner-toolkit). One release carries both, so one property pins both. -->
+        <qits.runner.version>2026.1004.235414</qits.runner.version>
         <qits.coding-agents.version>2026.1003.125113</qits.coding-agents.version>
         <qits.eventstream.version>2026.1003.44717</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
@@ -274,6 +284,40 @@
                 <groupId>eu.wohlben.qits</groupId>
                 <artifactId>qits-workspace-editor-image</artifactId>
                 <version>${qits.workspace-editor-image.version}</version>
+            </dependency>
+            <!-- The workspaces runner's frames and its binary's version. Its one dependency is
+                 qits-runner-protocol, declared below at the same release it was built against. -->
+            <dependency>
+                <groupId>eu.wohlben.qits</groupId>
+                <artifactId>qits-workspaces-runner-protocol</artifactId>
+                <version>${qits.workspaces-runner-protocol.version}</version>
+            </dependency>
+            <!-- Both qits-runner-javalib jars with *:* exclusions, as a server takes them: only the
+                 lifecycle frames and RunnerCodec, and RunnerIdentity and install.InstallScript, are
+                 reachable from this service, and every one of them is java.*-only. The toolkit's
+                 runtime (Vert.x, the docker driver) is the runner's, never this process's. Both
+                 are pinned because RunnerIdentity carries the protocol's RunnerVocabulary. -->
+            <dependency>
+                <groupId>eu.wohlben.qits</groupId>
+                <artifactId>qits-runner-protocol</artifactId>
+                <version>${qits.runner.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>*</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>eu.wohlben.qits</groupId>
+                <artifactId>qits-runner-toolkit</artifactId>
+                <version>${qits.runner.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>*</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                </exclusions>
             </dependency>
             <!-- The reactor's own modules, so children depend on them version-less. -->
             <dependency>

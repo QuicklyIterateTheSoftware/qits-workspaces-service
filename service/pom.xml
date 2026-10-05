@@ -53,6 +53,23 @@
             <artifactId>qits-workspace-daemon-protocol</artifactId>
         </dependency>
         <dependency>
+            <!-- The workspace runners' wire (epic qits-624): the frames WorkspaceRunnerSocket speaks
+                 and WorkspacesRunnerBinary.VERSION, the runner pin. Versions and the *:* exclusions
+                 of the two qits-runner-javalib jars are the root pom's. -->
+            <groupId>eu.wohlben.qits</groupId>
+            <artifactId>qits-workspaces-runner-protocol</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>eu.wohlben.qits</groupId>
+            <artifactId>qits-runner-protocol</artifactId>
+        </dependency>
+        <dependency>
+            <!-- For RunnerIdentity and install.InstallScript, and nothing else: the install line and
+                 install.sh are rendered from the toolkit's own template, never a copy of it. -->
+            <groupId>eu.wohlben.qits</groupId>
+            <artifactId>qits-runner-toolkit</artifactId>
+        </dependency>
+        <dependency>
             <!-- The coding-agent harness library, for its path maths alone: where a Claude session's
                  JSONL and its subagents' sidechains sit under the harness config directory. Reading
                  an archived transcript off the shared /claude-home volume means spelling that layout

@@ -316,6 +316,23 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
     return count("runnerId = ?1 and status = ?2", runnerId, WorkspaceStatus.ACTIVE);
   }
 
+  /** The ACTIVE rows {@code runnerId} owns, by id. */
+  public List<Workspace> findActiveOnRunner(UUID runnerId) {
+    return list("runnerId = ?1 and status = ?2 order by id", runnerId, WorkspaceStatus.ACTIVE);
+  }
+
+  /**
+   * The QUEUED rows sticky to {@code runnerId}: placed on it before, and waiting for one of its
+   * slots. Never-placed rows any runner may take are not counted; they are no runner's yet.
+   */
+  public long countQueuedOnRunner(UUID runnerId) {
+    return count(
+        "runnerId = ?1 and status = ?2 and runtimeStatus = ?3",
+        runnerId,
+        WorkspaceStatus.ACTIVE,
+        WorkspaceRuntimeStatus.QUEUED);
+  }
+
   /** The row ids of the ACTIVE workspaces this runner owns, oldest first. */
   public List<Long> findActiveIdsOnRunner(UUID runnerId) {
     return list("runnerId = ?1 and status = ?2 order by id", runnerId, WorkspaceStatus.ACTIVE)

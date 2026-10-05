@@ -56,8 +56,19 @@ public class RunnerWorkspaceSpecs {
                     new IllegalStateException(
                         "qits.workspace.domain (QITS_DOMAIN) is unset, so there is no public"
                             + " registry a runner could pull the workspace image from"));
-    String image =
-        "registry.qits." + domain + "/" + WORKSPACE_IMAGE_PATH + ":" + factory.imageVersion();
+    return compose(
+        row, "registry.qits." + domain + "/" + WORKSPACE_IMAGE_PATH + ":" + factory.imageVersion());
+  }
+
+  /**
+   * The launch spec for {@code row}, pulling {@code image}: the public reference the caller's
+   * runner addresses compose ({@code WorkspaceRunnerAddresses.workspaceImage} in {@code service}),
+   * so the {@code take}, the {@code estate} and the login command name one image.
+   */
+  public RunnerLaunchSpec compose(Workspace row, String image) {
+    if (image == null || image.isBlank()) {
+      throw new IllegalStateException("A runner launch spec needs the workspace image to pull");
+    }
 
     Map<String, String> env = new LinkedHashMap<>();
     Map<String, String> labels = new LinkedHashMap<>();
