@@ -41,4 +41,13 @@ public class WorkspaceRunnerRepository implements PanacheRepositoryBase<Workspac
     }
     return names;
   }
+
+  /**
+   * Whether any runner could take a RUNNER workspace at all: registered, with slots, not
+   * quarantined ({@code WorkspaceRunner.eligible()}, as a query). Whether one is connected is not
+   * asked: a queued row waits for a runner that comes back.
+   */
+  public boolean existsEligible() {
+    return count("clientId is not null and slots > 0 and quarantinedAt is null") > 0;
+  }
 }

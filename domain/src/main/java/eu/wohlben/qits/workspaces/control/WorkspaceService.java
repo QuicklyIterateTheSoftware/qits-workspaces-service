@@ -5,6 +5,7 @@ import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.IntegrateConflictException;
 import eu.wohlben.qits.workspaces.error.InternalServerErrorException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
+import eu.wohlben.qits.workspaces.error.RunnerRefusals;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
 import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerRefDto;
 import eu.wohlben.qits.workspaces.dto.WorkItemWorkspaceDto;
@@ -12,6 +13,7 @@ import eu.wohlben.qits.workspaces.dto.WorkspaceSubjectRefDto;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspaceEvent;
 import eu.wohlben.qits.workspaces.entity.WorkspaceEventType;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.gitmirror.GitMirrorException;
@@ -90,6 +92,17 @@ public class WorkspaceService {
   @Inject GitRefScopes gitRefScopes;
 
   @Inject WorkspaceContainerEventPublisher containerEvents;
+
+  /**
+   * Optional: the runners' sockets, for the RUNNER-placed rows (epic qits-624). Absent reads as no
+   * runner connected — see {@link RunnerPlacement}. A DIRECT row never reaches it.
+   */
+  @Inject Instance<RunnerPlacement> runnerPlacement;
+
+  /** The runner session's writes, and the start processes a runner's launch settles. */
+  @Inject RunnerClaims runnerClaims;
+
+  @Inject WorkspaceChangePublisher changePublisher;
 
   /**
    * Optional: the technical-process framework is a cross-context streaming primitive owned by the
@@ -606,12 +619,16 @@ public class WorkspaceService {
                       && ab.ahead() > 0
                       && ab.behind() > 0
                       && wouldConflict(mirror, wt.parent, branch);
+              // A RUNNER row's container is not qits-containers', so that listing says nothing
+              // about it: its persisted status is the runner's word, under the UNAVAILABLE overlay.
               WorkspaceRuntimeStatus runtime =
-                  runningIds.contains(wt.workspaceId)
-                      ? WorkspaceRuntimeStatus.RUNNING
-                      : wt.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
-                          ? WorkspaceRuntimeStatus.STOPPED
-                          : wt.runtimeStatus;
+                  wt.placement == WorkspacePlacement.RUNNER
+                      ? runnerRuntime(wt)
+                      : runningIds.contains(wt.workspaceId)
+                          ? WorkspaceRuntimeStatus.RUNNING
+                          : wt.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
+                              ? WorkspaceRuntimeStatus.STOPPED
+                              : wt.runtimeStatus;
               // Clean/dirty is only knowable while the daemon is connected (RUNNING); otherwise it
               // stays null (unknown ⇒ no badge). The daemon re-reports on reconnect.
               Boolean clean =
@@ -873,6 +890,23 @@ public class WorkspaceService {
    */
   private static WorkspaceRunnerRefDto runnerRef(UUID runnerId, Map<UUID, String> names) {
     return runnerId == null ? null : new WorkspaceRunnerRefDto(runnerId, names.get(runnerId));
+  }
+
+  /**
+   * A RUNNER row's runtime status as read: the persisted one, with {@code UNAVAILABLE} laid over it
+   * when the row has a runner and that runner is not there (offline past the grace). Never written:
+   * a reconnect clears it with no write. A row with no runner waits for any and is never
+   * UNAVAILABLE.
+   */
+  private WorkspaceRuntimeStatus runnerRuntime(Workspace row) {
+    return row.runnerId != null && !runnerPresent(row.runnerId)
+        ? WorkspaceRuntimeStatus.UNAVAILABLE
+        : row.runtimeStatus;
+  }
+
+  /** Whether the runner is connected or within its grace; false with no {@link RunnerPlacement}. */
+  private boolean runnerPresent(UUID runnerId) {
+    return runnerPlacement.isResolvable() && runnerPlacement.get().presence(runnerId);
   }
 
   /**
@@ -1218,6 +1252,7 @@ public class WorkspaceService {
         adoptExisting,
         false,
         WorkspaceSubject.none(),
+        null,
         null);
   }
 
@@ -1248,7 +1283,8 @@ public class WorkspaceService {
       boolean adoptExisting,
       boolean admin,
       WorkspaceSubject subject,
-      List<String> gitRefs) {
+      List<String> gitRefs,
+      WorkspacePlacement placement) {
     var repo = repositories.require(repoId);
 
     // `workspaceId` becomes a path segment under the repo's workspaces dir, so it must be a strict
@@ -1257,6 +1293,11 @@ public class WorkspaceService {
     if (!workspaceId.matches("[A-Za-z0-9_-]{1,64}") || workspaceId.startsWith("-")) {
       throw new BadRequestException("Invalid workspace id: " + workspaceId);
     }
+
+    // Where the container runs, decided once and here: what the request stated, or DIRECT. Refused
+    // before the branch is pushed, so a placement that cannot be honoured costs nothing.
+    WorkspacePlacement placed = placementOf(placement);
+    refuseUnplaceable(placed, admin);
 
     RepoMirror mirror = mirrors.of(repoId);
 
@@ -1319,6 +1360,9 @@ public class WorkspaceService {
     // the socket a container gets is the one the request that created it asked for. See
     // Workspace.admin.
     workspace.admin = admin;
+    // Written once and never changed, like the posture above (Workspace.placement). A RUNNER row is
+    // placed on no runner yet: a runner takes it from the queue at its first start.
+    workspace.placement = placed;
     // What this workspace is for, where a dispatch said so. Blanks normalise to null: an empty id
     // is not a subject, and a row claiming one would render a link to nothing.
     workspace.ticketId = named.ticketId();
@@ -1353,6 +1397,35 @@ public class WorkspaceService {
     workspaceMetadata.write(repoId, metadata);
 
     return workspace;
+  }
+
+  /**
+   * The placement a new row is written with: the one the request stated, or DIRECT. The one place
+   * that decides it — qits-837 replaces it with {@code WorkspacePlacements.forNewRow}, and qits-774
+   * narrows it to RUNNER-only for regular rows. The editor and the main workspace are written by
+   * their own doors and are always DIRECT; so is every dispatch, which states nothing.
+   */
+  private static WorkspacePlacement placementOf(WorkspacePlacement stated) {
+    return stated == null ? WorkspacePlacement.DIRECT : stated;
+  }
+
+  /**
+   * Refuses a RUNNER placement that cannot be honoured: 400 for an admin workspace (it holds the
+   * host's docker socket and always runs on the platform host, {@code ck_workspace_runner_posture}),
+   * and 409 {@code NO_RUNNER} when no runner is eligible at all, so nothing waits forever unseen.
+   */
+  private void refuseUnplaceable(WorkspacePlacement placement, boolean admin) {
+    if (placement != WorkspacePlacement.RUNNER) {
+      return;
+    }
+    if (admin) {
+      throw new BadRequestException(
+          "An admin workspace holds the host's docker socket and always runs DIRECT; it cannot be"
+              + " placed on a runner");
+    }
+    if (!runnerRepository.existsEligible()) {
+      throw RunnerRefusals.noRunner();
+    }
   }
 
   /** 409 when the work item already has an ACTIVE workspace; nothing for a null work id. */
@@ -1468,8 +1541,7 @@ public class WorkspaceService {
   }
 
   /**
-   * The widest form: the posture, the subject and the Git refs together. Every other overload
-   * delegates here.
+   * The posture, the subject and the Git refs together, placed DIRECT.
    *
    * <p>{@code gitRefs} is what the workspace's container may push (contract C4) — exact refs and
    * trailing {@code /*} patterns. Null means the workspace's own branch. It is checked before any
@@ -1486,6 +1558,38 @@ public class WorkspaceService {
       boolean admin,
       WorkspaceSubject subject,
       List<String> gitRefs) {
+    return createWorkspace(
+        repoId,
+        workspaceId,
+        parent,
+        branch,
+        preamble,
+        adoptExisting,
+        branchTree,
+        admin,
+        subject,
+        gitRefs,
+        null);
+  }
+
+  /**
+   * The widest form and the only one that places: {@code placement} is where the container runs,
+   * {@code DIRECT} or {@code RUNNER} (epic qits-624), null meaning DIRECT. A RUNNER request with
+   * {@code admin} is a 400, and one with no eligible runner a 409 {@code NO_RUNNER}, both before any
+   * ref is pushed. Every other overload delegates here with null.
+   */
+  public Workspace createWorkspace(
+      String repoId,
+      String workspaceId,
+      String parent,
+      String branch,
+      String preamble,
+      boolean adoptExisting,
+      boolean branchTree,
+      boolean admin,
+      WorkspaceSubject subject,
+      List<String> gitRefs,
+      WorkspacePlacement placement) {
     List<String> stated = gitRefs == null ? null : GitRefs.validated(gitRefs);
     // A call on `this` never reaches the interceptor, so each delegation below opens its own
     // transaction explicitly rather than relying on the annotation of the method it calls.
@@ -1502,7 +1606,8 @@ public class WorkspaceService {
                       adoptExisting,
                       admin,
                       subject,
-                      stated));
+                      stated,
+                      placement));
     }
     if (adoptExisting) {
       throw new BadRequestException("A branch-tree workspace cannot adopt an existing branch");
@@ -1532,6 +1637,7 @@ public class WorkspaceService {
               }
               refuseSecondActiveForWork(
                   subject == null ? null : subject.normalized().workId());
+              refuseUnplaceable(placementOf(placement), admin);
             });
     createBranchTree(root, newBranch, parentBranch);
     return QuarkusTransaction.requiringNew()
@@ -1546,7 +1652,8 @@ public class WorkspaceService {
                     true,
                     admin,
                     subject,
-                    stated));
+                    stated,
+                    placement));
   }
 
   /**
@@ -1962,6 +2069,9 @@ public class WorkspaceService {
    */
   public String beginEnsureContainer(Long id) {
     Workspace resolved = QuarkusTransaction.requiringNew().call(() -> requireActive(id));
+    if (resolved.placement == WorkspacePlacement.RUNNER) {
+      return beginRunnerStart(resolved);
+    }
     String repoId = resolved.repositoryId;
     String workspaceId = resolved.workspaceId;
     Long rowId = resolved.id;
@@ -2012,6 +2122,9 @@ public class WorkspaceService {
    */
   public String beginRecreateContainer(Long id) {
     Workspace resolved = QuarkusTransaction.requiringNew().call(() -> requireActive(id));
+    if (resolved.placement == WorkspacePlacement.RUNNER) {
+      return beginRunnerRecreate(resolved);
+    }
     String repoId = resolved.repositoryId;
     String workspaceId = resolved.workspaceId;
     Long rowId = resolved.id;
@@ -2295,8 +2408,19 @@ public class WorkspaceService {
    * intact: uncommitted/untracked files and unpushed commits alike. This is a true pause, not a
    * teardown — the lossy {@link #rm} is reserved for discard (which deletes the branch afterward).
    */
-  @Transactional
   public void stopContainer(Long id) {
+    // Not @Transactional any more, and only so the RUNNER branch can wait for its runner outside a
+    // transaction: the DIRECT body below runs in the transaction it always ran in, joined or begun.
+    Workspace placed = QuarkusTransaction.joiningExisting().call(() -> requireActive(id));
+    if (placed.placement == WorkspacePlacement.RUNNER) {
+      stopOnRunner(placed);
+      return;
+    }
+    QuarkusTransaction.joiningExisting().run(() -> stopDirectContainer(id));
+  }
+
+  /** {@link #stopContainer} for a DIRECT row: the method body as it was before placement. */
+  private void stopDirectContainer(Long id) {
     Workspace workspace = requireActive(id);
     String repoId = workspace.repositoryId;
     String workspaceId = workspace.workspaceId;
@@ -2344,8 +2468,18 @@ public class WorkspaceService {
    * STOPPED} with no runtime error. No-op-safe if the container/volume are already gone (both
    * best-effort). The container is removed before the volume (docker refuses an in-use volume).
    */
-  @Transactional
   public void deleteContainer(Long id) {
+    // Not @Transactional any more, for stopContainer's reason; the DIRECT body is unchanged.
+    Workspace placed = QuarkusTransaction.joiningExisting().call(() -> requireActive(id));
+    if (placed.placement == WorkspacePlacement.RUNNER) {
+      deleteOnRunner(placed);
+      return;
+    }
+    QuarkusTransaction.joiningExisting().run(() -> deleteDirectContainer(id));
+  }
+
+  /** {@link #deleteContainer} for a DIRECT row: the method body as it was before placement. */
+  private void deleteDirectContainer(Long id) {
     Workspace workspace = requireActive(id);
     String repoId = workspace.repositoryId;
     String workspaceId = workspace.workspaceId;
@@ -3022,6 +3156,10 @@ public class WorkspaceService {
       String target,
       String commit,
       boolean deleteBranch) {
+    if (workspace.placement == WorkspacePlacement.RUNNER) {
+      discardOnRunner(repoId, workspace, resolution, result, target, commit, deleteBranch);
+      return;
+    }
     try {
       String branch = workspace.branch;
 
@@ -3082,6 +3220,292 @@ public class WorkspaceService {
       // Pre-launch composition state (prompt drafts, their attachments) is not a durable record
       // like the history events, and its FK cascade never fires because the workspace row is only
       // soft-deleted. Whoever owns those tables drops them on this event, in this transaction.
+      workspaceResolvedEvent.fire(
+          new WorkspaceResolved(repoId, workspace.workspaceId, workspace.id, resolution));
+      workspaceMetadata.delete(repoId, workspace.workspaceId);
+    } catch (InternalServerErrorException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new InternalServerErrorException("Git discard failed: " + e.getMessage());
+    }
+  }
+
+  // --- RUNNER placement (epic qits-624, qits-853) ----------------------------------------------
+  //
+  // Each container verb above branches ONCE, at its top, on Workspace.placement, and a RUNNER row
+  // comes here. Nothing below calls qits-containers: a RUNNER row's container is on a runner's node,
+  // reached through RunnerPlacement, and its persisted runtime status is the runner's word. What a
+  // RUNNER row does not do in this epic: no credential is commissioned, no daemon is waited for and
+  // no bootstrap chain is run (qits-625 adds all three).
+
+  /**
+   * Start, for a RUNNER row: <b>start is pull</b>. The row is marked QUEUED and waits for a runner's
+   * reserve to take it ({@link RunnerClaims#reserveFor}); nothing is pushed to any runner.
+   *
+   * <ul>
+   *   <li>a row whose runner is offline past the grace (UNAVAILABLE) → 409 {@code
+   *       RUNNER_UNAVAILABLE}: it is sticky to that runner and nothing else can start it;
+   *   <li>already RUNNING, PROVISIONING or QUEUED → nothing to do. The start process still open
+   *       for it is answered, so a second press joins the first;
+   *   <li>the durable branch is gone → abandoned and 404, as rung 3 of the DIRECT ladder does;
+   *   <li>STOPPED or FAILED → the compare-and-swap to QUEUED, {@code queuedAt} now, the runner
+   *       kept, and the backlog told.
+   * </ul>
+   *
+   * <p>The process it answers opens segment {@code queued} ("waiting for a slot on &lt;runner&gt;",
+   * or "waiting for a runner" for a row on none); the claim settles it and opens {@code container},
+   * and the runner's {@code launched} or {@code launchFailed} settles that.
+   */
+  private String beginRunnerStart(Workspace row) {
+    if (row.runnerId != null && !runnerPresent(row.runnerId)) {
+      throw RunnerRefusals.unavailable(row.id, "start");
+    }
+    if (row.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
+        || row.runtimeStatus == WorkspaceRuntimeStatus.PROVISIONING
+        || row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
+      Optional<WorkspaceProcessTracker.Handle> open = runnerClaims.trackedStart(row.id);
+      if (open.isPresent()) {
+        return open.get().id();
+      }
+      WorkspaceProcessTracker.Handle process = tracker(row.repositoryId, row.workspaceId, row.id);
+      if (process != null) {
+        process.completeNoOp(
+            RunnerClaims.QUEUED_SEGMENT,
+            "Already " + row.runtimeStatus.name().toLowerCase() + " — nothing to do.");
+      }
+      return process == null ? null : process.id();
+    }
+    if (row.branch == null || row.branch.isBlank() || !branchExists(row.repositoryId, row.branch)) {
+      abandonRunnerRow(row);
+    }
+
+    WorkspaceProcessTracker.Handle process = tracker(row.repositoryId, row.workspaceId, row.id);
+    if (process != null) {
+      process.openSegment(RunnerClaims.QUEUED_SEGMENT);
+      process.appendLine(RunnerClaims.QUEUED_SEGMENT, waitingFor(row.runnerId));
+      // Carried BEFORE the swap, so a runner that takes the row the instant it is queued finds the
+      // process to settle.
+      runnerClaims.track(row.id, process);
+    }
+    int queued =
+        QuarkusTransaction.requiringNew()
+            .call(() -> workspaceRepository.queueForRunner(row.id, Instant.now()));
+    if (queued == 0) {
+      // Something else moved the row between the read and the swap: a second start, or a stop.
+      runnerClaims.forget(row.id, process);
+      if (process != null) {
+        process.completeNoOp(
+            RunnerClaims.QUEUED_SEGMENT, "The workspace is not stopped any more — nothing to queue.");
+      }
+      return process == null ? null : process.id();
+    }
+    changePublisher.runtimeChanged(row.repositoryId, row.id);
+    if (runnerPlacement.isResolvable()) {
+      runnerPlacement.get().backlogChanged(row);
+    }
+    return process == null ? null : process.id();
+  }
+
+  /** The {@code queued} segment's line: which runner the row waits for, or that it waits for any. */
+  private String waitingFor(UUID runnerId) {
+    if (runnerId == null) {
+      return "waiting for a runner";
+    }
+    String name =
+        QuarkusTransaction.requiringNew()
+            .call(() -> runnerRepository.namesById(Set.of(runnerId)).get(runnerId));
+    return "waiting for a slot on " + (name == null ? runnerId.toString() : name);
+  }
+
+  /**
+   * Rung 3 of the ladder for a RUNNER row: its durable branch is gone, so it is abandoned and 404s,
+   * as a DIRECT row is. What differs is the teardown: the volume is on the runner's node, so a
+   * runner holding the row is told it is released instead of a volume being removed here.
+   */
+  private void abandonRunnerRow(Workspace row) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Workspace wt = requireActive(row.id);
+              wt.status = WorkspaceStatus.ABANDONED;
+              wt.resolvedAt = Instant.now();
+              wt.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+              wt.queuedAt = null;
+              recordEvent(wt, WorkspaceEventType.ABANDONED, wt.branch, null, null);
+              workspaceResolvedEvent.fire(
+                  new WorkspaceResolved(
+                      wt.repositoryId, wt.workspaceId, wt.id, WorkspaceStatus.ABANDONED));
+            });
+    releaseFromRunner(row);
+    decommissionFor(row.id);
+    throw new NotFoundException(
+        "Workspace '" + row.workspaceId + "' has no branch to recreate from; abandoned");
+  }
+
+  /**
+   * Stop, for a RUNNER row. A QUEUED row just goes back to STOPPED with no frame — nothing runs
+   * anywhere yet — unless a runner took it in the meantime, when it is stopped like a placed row. A
+   * row on no runner has nothing to stop. Otherwise {@code stop} is routed to its runner and awaited
+   * ({@link RunnerPlacement#stop}: 409 {@code RUNNER_UNAVAILABLE} offline, 504 {@code
+   * RUNNER_TIMEOUT} with the row unchanged), then the row is STOPPED.
+   */
+  private void stopOnRunner(Workspace row) {
+    Workspace current = row;
+    if (current.runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
+      int unqueued =
+          QuarkusTransaction.requiringNew().call(() -> workspaceRepository.unqueueForRunner(row.id));
+      if (unqueued == 1) {
+        runnerClaims.abandonStart(row.id, "Stopped before a runner took it.");
+        changePublisher.runtimeChanged(row.repositoryId, row.id);
+        if (runnerPlacement.isResolvable()) {
+          runnerPlacement.get().backlogChanged(row);
+        }
+        return;
+      }
+      current = QuarkusTransaction.requiringNew().call(() -> requireActive(row.id));
+    }
+    if (current.runnerId == null) {
+      return;
+    }
+    UUID runnerId = current.runnerId;
+    placement(current.id, "stop").stop(current);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaceRepository
+                    .findActiveById(row.id)
+                    .filter(wt -> runnerId.equals(wt.runnerId))
+                    .ifPresent(
+                        wt -> {
+                          wt.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                          wt.queuedAt = null;
+                        }));
+    runnerClaims.abandonStart(row.id, "Stopped.");
+    changePublisher.runtimeChanged(row.repositoryId, row.id);
+  }
+
+  /**
+   * Delete-container, for a RUNNER row: {@code delete} is routed to its runner and awaited (container
+   * and {@code -ws-<rowId>} volume), then the row is STOPPED with <b>no runner</b>. Nothing of it is
+   * left on that node, so stickiness ends and the next start may be taken by any runner. The row
+   * stays ACTIVE. A row on no runner has nothing on any node, and just goes STOPPED.
+   */
+  private void deleteOnRunner(Workspace row) {
+    UUID runnerId = row.runnerId;
+    if (runnerId != null) {
+      placement(row.id, "delete its container").delete(row);
+    }
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaceRepository
+                    .findActiveById(row.id)
+                    .filter(wt -> Objects.equals(runnerId, wt.runnerId))
+                    .ifPresent(
+                        wt -> {
+                          wt.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                          wt.runtimeError = null;
+                          wt.runnerId = null;
+                          wt.queuedAt = null;
+                        }));
+    runnerClaims.abandonStart(row.id, "The container was deleted.");
+    changePublisher.runtimeChanged(row.repositoryId, row.id);
+    if (runnerPlacement.isResolvable()) {
+      if (row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
+        runnerPlacement.get().backlogChanged(row);
+      }
+      if (runnerId != null) {
+        runnerPlacement.get().estateChanged(runnerId);
+      }
+    }
+  }
+
+  /**
+   * Recreate, for a RUNNER row: the clean-tree gate first, exactly the DIRECT one — and with no
+   * daemon reporting from a runner in this epic the tree is unknown, so it refuses (400). Once
+   * qits-625 gives a runner-placed workspace its daemon, a recreate that passes is delete-container
+   * then start.
+   */
+  private String beginRunnerRecreate(Workspace row) {
+    requireCleanForRecreate(row.workspaceId, row.id);
+    deleteOnRunner(row);
+    return beginRunnerStart(QuarkusTransaction.requiringNew().call(() -> requireActive(row.id)));
+  }
+
+  /** The port for a routed verb, or 409 {@code RUNNER_UNAVAILABLE} when there is none. */
+  private RunnerPlacement placement(Long rowId, String verb) {
+    if (!runnerPlacement.isResolvable()) {
+      throw RunnerRefusals.unavailable(rowId, verb);
+    }
+    return runnerPlacement.get();
+  }
+
+  /**
+   * A RUNNER row left the estate: a connected runner holding it is told to delete it, without
+   * waiting; an offline one drops it at its next estate. Never in the way of the resolution.
+   */
+  private void releaseFromRunner(Workspace row) {
+    runnerClaims.abandonStart(row.id, "The workspace was resolved.");
+    if (!runnerPlacement.isResolvable()) {
+      return;
+    }
+    try {
+      if (row.runnerId != null) {
+        runnerPlacement.get().released(row);
+        runnerPlacement.get().estateChanged(row.runnerId);
+      } else if (row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
+        runnerPlacement.get().backlogChanged(row);
+      }
+    } catch (RuntimeException e) {
+      LOG.debugf(e, "Could not tell a runner workspace %s resolved; its estate will", row.id);
+    }
+  }
+
+  /**
+   * {@link #doDiscard}'s teardown for a RUNNER row. The row resolves exactly as a DIRECT one does
+   * (the branch deletion, the status, the history event, the resolved event, the metadata) — the
+   * tail below is that method's, kept in step with it — and what differs is the container half:
+   * nothing here calls qits-containers, and resolution never waits on a runner ({@link
+   * #releaseFromRunner}).
+   */
+  private void discardOnRunner(
+      String repoId,
+      Workspace workspace,
+      WorkspaceStatus resolution,
+      String result,
+      String target,
+      String commit,
+      boolean deleteBranch) {
+    try {
+      String branch = workspace.branch;
+      releaseFromRunner(workspace);
+      workspace.commissionedClientSecret = null;
+      String commissioned = workspace.commissionedClientId;
+      workspace.commissionedClientId = null;
+      decommission(commissioned);
+
+      if (deleteBranch && branch != null && !branch.isBlank()) {
+        try {
+          mirrors.of(repoId).deleteBranch(branch);
+        } catch (GitMirrorException ignored) {
+          // the branch may already be gone, and the resolution is not conditional on the ref
+        }
+      }
+
+      workspace.status = resolution;
+      workspace.resolvedAt = Instant.now();
+      workspace.queuedAt = null;
+      if (result != null && !result.isBlank()) {
+        workspace.result = result;
+      }
+      recordEvent(
+          workspace,
+          resolution == WorkspaceStatus.INTEGRATED
+              ? WorkspaceEventType.INTEGRATED
+              : WorkspaceEventType.ABANDONED,
+          branch,
+          target,
+          commit);
       workspaceResolvedEvent.fire(
           new WorkspaceResolved(repoId, workspace.workspaceId, workspace.id, resolution));
       workspaceMetadata.delete(repoId, workspace.workspaceId);

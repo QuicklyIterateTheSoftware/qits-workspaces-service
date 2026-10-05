@@ -1549,6 +1549,33 @@ Who may ask is `WorkspaceController`'s standing `@RolesAllowed("qits:admin")`: c
 workspace already requires the platform admin role, and the socket is granted per workspace rather
 than per caller. A second role invented here would be a vocabulary qits-idp does not issue.
 
+## Placement: DIRECT and RUNNER (epic qits-624)
+
+A workspace's container runs either **DIRECT** (the platform host, through qits-containers — every
+workspace that existed before) or **RUNNER** (a workspace runner's node). `Workspace.placement` is
+written once, by `recordWorkspace` ("stated or DIRECT"), and only `POST /workspaces/api/workspaces`
+states it; the editor, the main workspace and every dispatch are DIRECT. RUNNER with `admin` is a 400;
+RUNNER with no eligible runner is a 409 `NO_RUNNER`. The refusal codes live in `error/RunnerRefusals`.
+
+- **One branch per verb, at its top.** `beginEnsureContainer`, `stopContainer`, `deleteContainer`,
+  `beginRecreateContainer` and `doDiscard` each test `placement == RUNNER` first and hand a RUNNER row
+  to a method in the "RUNNER placement" section of `WorkspaceService`; the DIRECT code below the
+  branch is what it was. `WorkspaceRunnerPlacementTest.aDirectRowNeverReachesThePortAndKeepsItsLadder`
+  is the seam's test: flip a branch and it fails.
+- **`stopContainer`/`deleteContainer` are no longer `@Transactional`**, so the RUNNER arm can wait up
+  to 60 s for its runner's reply outside a transaction (Narayana's default timeout is also 60 s). The
+  DIRECT body runs unchanged inside `QuarkusTransaction.joiningExisting()`.
+- **Start is pull.** A RUNNER start only marks the row QUEUED (a compare-and-swap); a runner's
+  `reserve` takes it (`RunnerClaims.reserveFor`, the CAS in `WorkspaceRepository.claimForRunner`).
+  Stop and delete are routed to the owning runner through the `RunnerPlacement` port; resolution
+  never waits on one.
+- **RUNNER rows skip the qits-containers listing**: their persisted status is the runner's word, with
+  `UNAVAILABLE` laid over it on read when the row's runner is not present. It is never stored.
+- **The runner spec shares the DIRECT spec's environment code**: `WorkspaceContainerFactory.identityEnv`
+  and `homeEnv`, written in place in `forWorkspace`. `WorkspaceContainerFactoryGoldenSpecTest` pins the
+  whole DIRECT spec, order included; `RunnerWorkspaceSpecs` composes the runner's from the same
+  methods and carries no address and no credential until qits-625.
+
 ## The contract with qits-projects: golden masters in, a pact out
 
 Epic qits-546. `HttpRepositoryLookup` makes two calls to qits-projects — `getRepository` behind

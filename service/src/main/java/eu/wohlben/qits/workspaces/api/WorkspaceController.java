@@ -2,7 +2,9 @@ package eu.wohlben.qits.workspaces.api;
 
 import eu.wohlben.qits.workspaces.control.WorkspaceProcessTracker;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
+import eu.wohlben.qits.workspaces.control.WorkspaceSubject;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.mapper.WorkspaceMapper;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -141,6 +143,12 @@ public class WorkspaceController {
    * workspace already requires the platform admin role, and the socket is granted per workspace
    * rather than per caller. A second role invented here would be a vocabulary the platform's idp
    * does not issue and a gate nothing could pass.
+   *
+   * <p>{@code placement} is where the container runs (epic qits-624): {@code DIRECT} on the platform
+   * host, or {@code RUNNER} on a workspace runner's node. Absent is DIRECT, which is what every
+   * existing client sends. RUNNER is an admin's explicit request in this epic; with {@code admin} it
+   * is a 400 (an admin workspace always runs DIRECT), and with no eligible runner a 409 {@code
+   * NO_RUNNER}, so nothing waits forever unseen. Decided here and never changed.
    */
   public static record CreateWorkspaceRequest(
       @NotBlank String repositoryId,
@@ -150,7 +158,21 @@ public class WorkspaceController {
       String preamble,
       boolean adoptExisting,
       boolean branchTree,
-      boolean admin) {
+      boolean admin,
+      WorkspacePlacement placement) {
+    /** The form before placement existed: a DIRECT workspace. */
+    public CreateWorkspaceRequest(
+        String repositoryId,
+        String id,
+        String parent,
+        String branch,
+        String preamble,
+        boolean adoptExisting,
+        boolean branchTree,
+        boolean admin) {
+      this(repositoryId, id, parent, branch, preamble, adoptExisting, branchTree, admin, null);
+    }
+
     /** The form before the admin posture existed: an ordinary, socket-free workspace. */
     public CreateWorkspaceRequest(
         String repositoryId,
@@ -160,7 +182,7 @@ public class WorkspaceController {
         String preamble,
         boolean adoptExisting,
         boolean branchTree) {
-      this(repositoryId, id, parent, branch, preamble, adoptExisting, branchTree, false);
+      this(repositoryId, id, parent, branch, preamble, adoptExisting, branchTree, false, null);
     }
 
     /** Backward-compatible form used before aggregate wrapper workspaces were introduced. */
@@ -171,13 +193,13 @@ public class WorkspaceController {
         String branch,
         String preamble,
         boolean adoptExisting) {
-      this(repositoryId, id, parent, branch, preamble, adoptExisting, false, false);
+      this(repositoryId, id, parent, branch, preamble, adoptExisting, false, false, null);
     }
 
     /** Backward-compatible "branch off" form: create a new branch, never adopt an existing one. */
     public CreateWorkspaceRequest(
         String repositoryId, String id, String parent, String branch, String preamble) {
-      this(repositoryId, id, parent, branch, preamble, false, false, false);
+      this(repositoryId, id, parent, branch, preamble, false, false, false, null);
     }
 
     public record Response(WorkspaceDto workspace) {}
@@ -198,7 +220,10 @@ public class WorkspaceController {
             request.preamble(),
             request.adoptExisting(),
             request.branchTree(),
-            request.admin());
+            request.admin(),
+            WorkspaceSubject.none(),
+            null,
+            request.placement());
     return new CreateWorkspaceRequest.Response(workspaceMapper.toDto(wt));
   }
 

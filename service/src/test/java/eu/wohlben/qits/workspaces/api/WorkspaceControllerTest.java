@@ -95,6 +95,60 @@ public class WorkspaceControllerTest {
         .body("success", equalTo(true));
   }
 
+  /**
+   * The create field {@code placement} (qits-853): absent is DIRECT, a RUNNER admin workspace is a
+   * 400, and a RUNNER workspace with no eligible runner (this suite registers none) is a 409 that
+   * names itself {@code NO_RUNNER}. Both refusals come before any branch is pushed.
+   */
+  @Test
+  public void testCreatePlacement() {
+    String repoId = createProjectAndRepository();
+
+    given()
+        .contentType(ContentType.JSON)
+        .body(
+            java.util.Map.of(
+                "repositoryId", repoId, "id", "plain-01", "parent", "master", "branch", "plain-01"))
+        .when()
+        .post("/workspaces/api/workspaces")
+        .then()
+        .statusCode(Response.Status.OK.getStatusCode())
+        .body("workspace.placement", equalTo("DIRECT"));
+
+    given()
+        .contentType(ContentType.JSON)
+        .body(
+            java.util.Map.of(
+                "repositoryId", repoId,
+                "id", "adm-01",
+                "parent", "master",
+                "branch", "adm-01",
+                "admin", true,
+                "placement", "RUNNER"))
+        .when()
+        .post("/workspaces/api/workspaces")
+        .then()
+        .statusCode(Response.Status.BAD_REQUEST.getStatusCode());
+
+    given()
+        .contentType(ContentType.JSON)
+        .body(
+            java.util.Map.of(
+                "repositoryId", repoId,
+                "id", "run-01",
+                "parent", "master",
+                "branch", "run-01",
+                "placement", "RUNNER"))
+        .when()
+        .post("/workspaces/api/workspaces")
+        .then()
+        .statusCode(Response.Status.CONFLICT.getStatusCode())
+        .body("code", equalTo("NO_RUNNER"));
+
+    org.junit.jupiter.api.Assertions.assertFalse(workspaceService.branchExists(repoId, "adm-01"));
+    org.junit.jupiter.api.Assertions.assertFalse(workspaceService.branchExists(repoId, "run-01"));
+  }
+
   @Test
   public void testCreateBranchTreeAddsWorkspaceGuide() throws Exception {
     String repoId = createProjectAndRepository();

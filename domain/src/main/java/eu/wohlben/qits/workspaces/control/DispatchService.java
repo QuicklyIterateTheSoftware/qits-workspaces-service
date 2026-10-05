@@ -2,6 +2,8 @@ package eu.wohlben.qits.workspaces.control;
 
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
 import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
+import eu.wohlben.qits.workspaces.error.RunnerRefusals;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.annotation.PreDestroy;
@@ -365,6 +367,10 @@ public class DispatchService {
         fresh = false;
       }
     }
+    // A workspace this door creates is always DIRECT; one it FOUND may be on a runner, and there
+    // the launch window below would drop the agent silently while the row waits in a queue. Refused
+    // before anything is written. qits-626 lifts this, when dispatch becomes queue-aware.
+    refuseRunnerPlaced(rowId);
     if (facts != null) {
       storeFacts(rowId, facts);
     }
@@ -616,6 +622,26 @@ public class DispatchService {
                 workspaceRepository
                     .findActiveByRepositoryAndWorkId(repoId, workId)
                     .map(workspace -> workspace.id));
+  }
+
+  /**
+   * 409 {@code RUNNER_DISPATCH_UNSUPPORTED} for a RUNNER-placed row. A dispatch schedules its agent
+   * launch inside a fixed window after the container comes up, and a RUNNER row's start only queues
+   * it: the window can close before any runner takes it, and the agent would never start, with
+   * nothing said. qits-626 makes dispatch queue-aware and lifts this refusal.
+   */
+  private void refuseRunnerPlaced(Long rowId) {
+    boolean onRunner =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () ->
+                    workspaceRepository
+                        .findActiveById(rowId)
+                        .map(workspace -> workspace.placement == WorkspacePlacement.RUNNER)
+                        .orElse(false));
+    if (onRunner) {
+      throw RunnerRefusals.dispatchUnsupported(rowId);
+    }
   }
 
   /** The three V9 columns, in a transaction of their own. A row resolved meanwhile is skipped. */
