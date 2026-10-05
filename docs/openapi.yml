@@ -553,6 +553,10 @@ components:
       properties:
         workspace:
           $ref: "#/components/schemas/WorkspaceDto"
+        technicalProcessId:
+          type: string
+        startError:
+          type: string
     Response13:
       type: object
       properties:
@@ -1080,6 +1084,8 @@ components:
           type: string
         kimiLoginCommand:
           type: string
+        loginCommandPending:
+          type: boolean
     WorkspaceRunnerRefDto:
       type: object
       properties:
@@ -2844,4 +2850,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.1004.215228
+  version: 2026.1005.74656

@@ -65,14 +65,13 @@ public class IntegrateControllerTest {
     return repoId;
   }
 
+  /**
+   * Records the workspace and leaves it stopped. Not the create door: that starts the container too
+   * (qits-853), and a container with no daemon to report its tree clean refuses every landing — this
+   * suite is about the landing, not the start.
+   */
   private void createWorkspace(String repoId, String label, String parent, String branch) {
-    given()
-        .contentType(ContentType.JSON)
-        .body(new WorkspaceController.CreateWorkspaceRequest(repoId, label, parent, branch, null))
-        .when()
-        .post("/workspaces/api/workspaces")
-        .then()
-        .statusCode(Response.Status.OK.getStatusCode());
+    workspaceService.createWorkspace(repoId, label, parent, branch, null);
   }
 
   /** The stack every case needs: {@code epic-b} off master, {@code task-b} off {@code epic-b}. */

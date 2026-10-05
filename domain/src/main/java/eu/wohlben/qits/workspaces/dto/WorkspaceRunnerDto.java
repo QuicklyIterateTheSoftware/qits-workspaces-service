@@ -36,8 +36,13 @@ import java.util.UUID;
  * @param owned the ACTIVE workspaces placed on it, whatever their runtime state
  * @param queued the workspaces sticky to it that wait for one of its slots (QUEUED)
  * @param loginCommand the one command that logs the node's agent home in to Claude, run on the
- *     node; null until the runner has reported its agent home volume
- * @param kimiLoginCommand the same for Kimi; null until the volume is known
+ *     node; null until the runner has reported its agent home volume AND proven — through its own
+ *     login probe, which can only run once the image is there — that the current pinned workspace
+ *     image is on its node
+ * @param kimiLoginCommand the same for Kimi; null under the same conditions
+ * @param loginCommandPending true when {@code dotClaudeVolume} is known but the commands above are
+ *     withheld because the proof above is not there yet: the SPA's cue that the runner is still
+ *     fetching the workspace image, not that nothing was reported
  */
 public record WorkspaceRunnerDto(
     UUID id,
@@ -65,7 +70,8 @@ public record WorkspaceRunnerDto(
     int owned,
     int queued,
     String loginCommand,
-    String kimiLoginCommand) {
+    String kimiLoginCommand,
+    boolean loginCommandPending) {
 
   /**
    * The node's agent login state, last known: kept while the runner is offline.

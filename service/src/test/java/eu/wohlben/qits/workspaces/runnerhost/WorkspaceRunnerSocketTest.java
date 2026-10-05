@@ -39,6 +39,7 @@ import io.vertx.core.Vertx;
 import jakarta.inject.Inject;
 import java.net.URI;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
@@ -298,7 +299,10 @@ class WorkspaceRunnerSocketTest {
     FakeWorkspacesRunner runner = greeted("wr-login-state");
 
     runner.send(new Inventory(List.of(), List.of(), "qits-workspaces-runner-dot-claude-abcd1234"));
-    runner.send(new LoginState(LoginPresence.PRESENT, LoginPresence.ABSENT, "2026-10-05T06:00:00Z"));
+    // Checked comfortably after this connection started, so it proves the current image is there.
+    runner.send(
+        new LoginState(
+            LoginPresence.PRESENT, LoginPresence.ABSENT, Instant.now().plusSeconds(60).toString()));
     runner.send(new Heartbeat());
     long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
     WorkspaceRunnerDto seen = views.view(rows.runner(row.id));
@@ -320,7 +324,8 @@ class WorkspaceRunnerSocketTest {
     assertEquals("qits-workspaces-runner-dot-claude-abcd1234", offline.dotClaudeVolume());
     assertTrue(
         offline.loginCommand().startsWith(
-            "docker run --rm -it -v qits-workspaces-runner-dot-claude-abcd1234:/claude-home"),
+            "docker run --rm -it --user 1000 --entrypoint claude -v"
+                + " qits-workspaces-runner-dot-claude-abcd1234:/claude-home"),
         offline.loginCommand());
   }
 

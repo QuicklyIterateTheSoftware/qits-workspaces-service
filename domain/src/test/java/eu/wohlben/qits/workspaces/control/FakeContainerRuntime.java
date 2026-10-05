@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -117,7 +118,18 @@ public class FakeContainerRuntime implements ContainerRuntime {
     }
     byName.put(name, new Info(repoId, workspaceId, branch, parent, dir));
     stopped.remove(name);
+    runs.add(name);
     return name;
+  }
+
+  /** Every {@code run}, by container name: how a test proves a start provisioned exactly once. */
+  private final List<String> runs = Collections.synchronizedList(new ArrayList<>());
+
+  /** How many times this container was {@code run}. */
+  public int runCount(String container) {
+    synchronized (runs) {
+      return (int) runs.stream().filter(container::equals).count();
+    }
   }
 
   /**

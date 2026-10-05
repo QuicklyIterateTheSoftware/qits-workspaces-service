@@ -27,8 +27,11 @@ public class WorkspaceRunnerMapper {
    * @param running RUNNING + PROVISIONING rows on it
    * @param owned ACTIVE rows on it
    * @param queued QUEUED rows sticky to it
-   * @param loginCommand the Claude login command, or null while the agent home volume is unknown
+   * @param loginCommand the Claude login command, or null while it is withheld (the volume is
+   *     unknown, or the runner has not yet proven the current workspace image is on its node)
    * @param kimiLoginCommand the Kimi one, likewise
+   * @param loginCommandPending whether the commands are withheld for a KNOWN volume: the SPA's cue
+   *     that the runner is still fetching the workspace image rather than that nothing was reported
    */
   public record Live(
       boolean connected,
@@ -38,10 +41,11 @@ public class WorkspaceRunnerMapper {
       int owned,
       int queued,
       String loginCommand,
-      String kimiLoginCommand) {
+      String kimiLoginCommand,
+      boolean loginCommandPending) {
 
-    /** Nothing known beyond the row: not connected, no pin, no counts, no commands. */
-    public static final Live NONE = new Live(false, null, null, 0, 0, 0, null, null);
+    /** Nothing known beyond the row: not connected, no pin, no counts, no commands, not pending. */
+    public static final Live NONE = new Live(false, null, null, 0, 0, 0, null, null, false);
   }
 
   /** The row alone, as {@link Live#NONE} reads it. */
@@ -82,11 +86,12 @@ public class WorkspaceRunnerMapper {
         known.owned(),
         known.queued(),
         known.loginCommand(),
-        known.kimiLoginCommand());
+        known.kimiLoginCommand(),
+        known.loginCommandPending());
   }
 
   /** {@code login{claude,kimi,checkedAt}}, or null when the runner has not reported one. */
-  static WorkspaceRunnerDto.Login login(JsonNode said) {
+  public static WorkspaceRunnerDto.Login login(JsonNode said) {
     JsonNode login = said == null ? null : said.get(WorkspaceRunnerCapabilities.LOGIN);
     if (login == null || !login.isObject()) {
       return null;

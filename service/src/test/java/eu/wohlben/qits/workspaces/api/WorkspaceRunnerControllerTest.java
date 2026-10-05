@@ -32,6 +32,7 @@ import io.restassured.http.ContentType;
 import io.restassured.path.json.JsonPath;
 import io.restassured.specification.RequestSpecification;
 import jakarta.inject.Inject;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -431,9 +432,13 @@ class WorkspaceRunnerControllerTest {
 
   // --- the login command (qits-859) ---------------------------------------------------------------
 
-  /** Null until the runner reported its agent home; then exactly the feature's shape, both CLIs. */
+  /**
+   * Null until the volume is known; still null, but PENDING, once it is known and the runner has
+   * not yet proven the current image is on its node; then exactly the feature's shape, both CLIs,
+   * once a login checked at or after registration answered at least one harness.
+   */
   @Test
-  void theLoginCommandAppearsOnceTheVolumeIsKnown() throws Exception {
+  void theLoginCommandAppearsOnlyOnceTheRunnerHasProvenTheImageIsThere() throws Exception {
     WorkspaceRunner runner = rows.registered("wr-login", 1);
     as("qits:admin")
         .when()
@@ -441,35 +446,74 @@ class WorkspaceRunnerControllerTest {
         .then()
         .statusCode(200)
         .body("loginCommand", nullValue())
-        .body("kimiLoginCommand", nullValue());
+        .body("kimiLoginCommand", nullValue())
+        .body("loginCommandPending", is(false));
 
+    // The volume is known, but the login has not yet been checked: pending, not merely absent.
+    runners.recordCapabilities(
+        runner.id,
+        new ObjectMapper()
+            .readTree("{\"dotClaudeVolume\":\"qits-workspaces-runner-dot-claude-1234abcd\"}"));
+    as("qits:admin")
+        .when()
+        .get(RUNNERS + "/" + runner.id)
+        .then()
+        .statusCode(200)
+        .body("loginCommand", nullValue())
+        .body("kimiLoginCommand", nullValue())
+        .body("loginCommandPending", is(true));
+
+    // A login probe that could not run (both UNKNOWN) is still no proof: still pending.
     runners.recordCapabilities(
         runner.id,
         new ObjectMapper()
             .readTree(
-                "{\"dotClaudeVolume\":\"qits-workspaces-runner-dot-claude-1234abcd\","
-                    + "\"login\":{\"claude\":\"ABSENT\",\"kimi\":\"UNKNOWN\","
-                    + "\"checkedAt\":\"2026-10-05T06:00:00Z\"}}"));
+                "{\"login\":{\"claude\":\"UNKNOWN\",\"kimi\":\"UNKNOWN\","
+                    + "\"checkedAt\":\"" + Instant.now().plusSeconds(60) + "\"}}"));
+    as("qits:admin")
+        .when()
+        .get(RUNNERS + "/" + runner.id)
+        .then()
+        .statusCode(200)
+        .body("loginCommand", nullValue())
+        .body("loginCommandPending", is(true));
+
+    // A login checked at or after registration, answering at least one harness, is proof.
+    runners.recordCapabilities(
+        runner.id,
+        new ObjectMapper()
+            .readTree(
+                "{\"login\":{\"claude\":\"ABSENT\",\"kimi\":\"UNKNOWN\","
+                    + "\"checkedAt\":\"" + Instant.now().plusSeconds(120) + "\"}}"));
 
     String image =
         "registry.qits."
             + DOMAIN
             + "/qits/workspace:"
             + containerFactory.imageVersion();
-    String prefix =
-        "docker run --rm -it -v qits-workspaces-runner-dot-claude-1234abcd:/claude-home"
+    String expectedLoginCommand =
+        "docker run --rm -it --user 1000 --entrypoint claude -v"
+            + " qits-workspaces-runner-dot-claude-1234abcd:/claude-home"
             + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home "
             + image;
+    String expectedKimiLoginCommand =
+        "docker run --rm -it --user 1000 --entrypoint kimi -v"
+            + " qits-workspaces-runner-dot-claude-1234abcd:/claude-home"
+            + " -e HOME=/claude-home -e KIMI_CODE_HOME=/claude-home/.kimi-code "
+            + image
+            + " login";
     as("qits:agent")
         .when()
         .get(RUNNERS)
         .then()
         .statusCode(200)
-        .body("find { it.id == '" + runner.id + "' }.loginCommand", equalTo(prefix + " claude"))
+        .body(
+            "find { it.id == '" + runner.id + "' }.loginCommand", equalTo(expectedLoginCommand))
         .body(
             "find { it.id == '" + runner.id + "' }.kimiLoginCommand",
-            equalTo(prefix + " kimi login"))
+            equalTo(expectedKimiLoginCommand))
         .body("find { it.id == '" + runner.id + "' }.login.claude", is("ABSENT"))
-        .body("find { it.id == '" + runner.id + "' }.dotClaudeVolume", notNullValue());
+        .body("find { it.id == '" + runner.id + "' }.dotClaudeVolume", notNullValue())
+        .body("find { it.id == '" + runner.id + "' }.loginCommandPending", is(false));
   }
 }

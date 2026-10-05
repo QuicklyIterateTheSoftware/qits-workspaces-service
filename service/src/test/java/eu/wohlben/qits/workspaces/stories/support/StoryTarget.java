@@ -65,9 +65,6 @@ public final class StoryTarget {
   /** One workspace, as the diagram carries it: a row id is a bare number, so it scrubs. */
   public static final String WORKSPACE_LABEL_PATH = WORKSPACES_PATH + "/{id}";
 
-  /** …and the on-demand container start, likewise templated. */
-  public static final String ENSURE_CONTAINER_LABEL_PATH = WORKSPACE_LABEL_PATH + "/ensure-container";
-
   /** The narrative record of what flowed through a repository. */
   public static final String HISTORY_PATH = API_PATH + "/history";
 

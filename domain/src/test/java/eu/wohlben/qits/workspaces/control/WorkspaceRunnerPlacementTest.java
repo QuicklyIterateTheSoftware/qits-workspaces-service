@@ -54,6 +54,7 @@ public class WorkspaceRunnerPlacementTest {
   @Inject FakeContainerRuntime containers;
   @Inject RunnerClaims claims;
   @Inject WorkspaceIds workspaceIds;
+  @Inject TechnicalProcessRegistry processes;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -104,9 +105,14 @@ public class WorkspaceRunnerPlacementTest {
     assertFalse(workspaceService.branchExists(repoId, "none"), "nothing was pushed");
   }
 
+  /**
+   * Creating a RUNNER row is the request a runner takes (the qits-ci runner model): it is written
+   * QUEUED with {@code queued_at}, on no runner, the backlog is told once it committed — and a
+   * runner's reserve can take it at once.
+   */
   @Test
-  public void aRunnerWorkspaceIsWrittenRunnerOnNoRunnerAndStopped() throws Exception {
-    eligibleRunner();
+  public void aRunnerWorkspaceIsWrittenQueuedOnNoRunnerAndTheBacklogTold() throws Exception {
+    WorkspaceRunner runner = eligibleRunner();
     String repoId = repo();
 
     Workspace created = createRunnerRow(repoId, "placed", false);
@@ -114,7 +120,15 @@ public class WorkspaceRunnerPlacementTest {
     Workspace row = read(created.id);
     assertEquals(WorkspacePlacement.RUNNER, row.placement);
     assertNull(row.runnerId);
-    assertEquals(WorkspaceRuntimeStatus.STOPPED, row.runtimeStatus);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
+    assertNotNull(row.queuedAt);
+    assertEquals(List.of("backlog:" + created.id), placement.calls());
+    assertTrue(claims.trackedStart(created.id).isEmpty(), "no process ceremony at create");
+
+    Workspace taken = claims.reserveFor(runner).orElseThrow();
+    assertEquals(created.id, taken.id);
+    assertEquals(WorkspaceRuntimeStatus.PROVISIONING, read(created.id).runtimeStatus);
+    assertEquals(runner.id, read(created.id).runnerId);
   }
 
   @Test
@@ -128,13 +142,92 @@ public class WorkspaceRunnerPlacementTest {
     assertEquals(WorkspacePlacement.DIRECT, read(created.id).placement);
   }
 
+  // --- create starts (qits-853) -------------------------------------------------------------------
+
+  /**
+   * The create door's RUNNER row: queued by the create itself, no process answered, and a following
+   * ensure-container is a no-op that queues nothing a second time.
+   */
+  @Test
+  public void creatingARunnerWorkspaceQueuesItAndAnEnsureAfterIsANoOp() throws Exception {
+    eligibleRunner();
+    String repoId = repo();
+
+    WorkspaceService.CreatedWorkspace created =
+        createAndStart(repoId, "made", WorkspacePlacement.RUNNER);
+
+    Long id = created.workspace().id;
+    Workspace row = read(id);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
+    assertNotNull(row.queuedAt);
+    assertNull(created.startError());
+    assertNull(created.technicalProcessId(), "the row's status is its progress");
+    assertEquals(List.of("backlog:" + id), placement.calls());
+
+    workspaceService.beginEnsureContainer(id);
+    assertEquals(List.of("backlog:" + id), placement.calls(), "the second call queued nothing");
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(id).runtimeStatus);
+    assertEquals(row.queuedAt, read(id).queuedAt);
+  }
+
+  /**
+   * Creating a DIRECT workspace starts the ladder on the platform host: one {@code run}, however
+   * soon an ensure-container follows — mid-start it joins the start's process, after it a no-op.
+   */
+  @Test
+  public void creatingADirectWorkspaceStartsItOnce() throws Exception {
+    String repoId = repo();
+    String container = containers.containerName("made-direct", repoId);
+
+    WorkspaceService.CreatedWorkspace created =
+        createAndStart(repoId, "made-direct", WorkspacePlacement.DIRECT);
+
+    Long id = created.workspace().id;
+    assertNull(created.startError());
+    assertNotNull(created.technicalProcessId());
+    assertEquals(
+        created.technicalProcessId(),
+        workspaceService.beginEnsureContainer(id),
+        "an ensure-container while the start runs joins it");
+
+    awaitRunning(repoId, id);
+    awaitTerminal(created.technicalProcessId());
+    String again = workspaceService.beginEnsureContainer(id);
+    awaitTerminal(again);
+
+    assertEquals(1, containers.runCount(container), "provisioned exactly once");
+    assertTrue(containers.isRunning(container));
+    assertEquals(List.of(), placement.calls(), "a DIRECT row never reaches RunnerPlacement");
+    containers.rm(container);
+  }
+
+  /**
+   * The backlog signal is a nudge, never the record: one that cannot be sent is logged, and the
+   * create and its queued row stand.
+   */
+  @Test
+  public void aBacklogSignalThatFailsKeepsTheQueuedRow() throws Exception {
+    eligibleRunner();
+    String repoId = repo();
+    placement.failBacklog(new IllegalStateException("the backlog is unreachable"));
+
+    WorkspaceService.CreatedWorkspace created =
+        createAndStart(repoId, "kept", WorkspacePlacement.RUNNER);
+
+    assertNull(created.startError());
+    Workspace row = read(created.workspace().id);
+    assertEquals(WorkspaceStatus.ACTIVE, row.status, "the create stands");
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
+    assertTrue(workspaceService.branchExists(repoId, "kept"));
+  }
+
   // --- start --------------------------------------------------------------------------------------
 
   @Test
   public void startQueuesAStoppedRowAndTellsTheBacklog() throws Exception {
     eligibleRunner();
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "start", false);
+    Workspace created = stoppedRunnerRow(repoId, "start");
 
     String processId = workspaceService.beginEnsureContainer(created.id);
 
@@ -158,7 +251,7 @@ public class WorkspaceRunnerPlacementTest {
     WorkspaceRunner runner = eligibleRunner();
     placement.connect(runner.id);
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "failed", false);
+    Workspace created = stoppedRunnerRow(repoId, "failed");
     update(
         created.id,
         w -> {
@@ -180,7 +273,7 @@ public class WorkspaceRunnerPlacementTest {
     WorkspaceRunner runner = eligibleRunner();
     placement.connect(runner.id);
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "live", false);
+    Workspace created = stoppedRunnerRow(repoId, "live");
     for (WorkspaceRuntimeStatus live :
         List.of(WorkspaceRuntimeStatus.RUNNING, WorkspaceRuntimeStatus.PROVISIONING)) {
       update(
@@ -201,7 +294,7 @@ public class WorkspaceRunnerPlacementTest {
   public void startOnAnUnavailableRowIs409() throws Exception {
     WorkspaceRunner runner = eligibleRunner();
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "gone", false);
+    Workspace created = stoppedRunnerRow(repoId, "gone");
     update(created.id, w -> w.runnerId = runner.id);
 
     ConflictException refused =
@@ -215,7 +308,7 @@ public class WorkspaceRunnerPlacementTest {
   public void startOnARowWhoseBranchIsGoneAbandonsIt() throws Exception {
     eligibleRunner();
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "lost", false);
+    Workspace created = stoppedRunnerRow(repoId, "lost");
     TestGit.exec(Path.of(dataDir, repoId, "origin").toFile(), "git", "branch", "-D", "lost");
 
     assertThrows(NotFoundException.class, () -> workspaceService.beginEnsureContainer(created.id));
@@ -229,7 +322,7 @@ public class WorkspaceRunnerPlacementTest {
   public void stoppingAQueuedRowSendsNoFrame() throws Exception {
     eligibleRunner();
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "unqueue", false);
+    Workspace created = stoppedRunnerRow(repoId, "unqueue");
     workspaceService.beginEnsureContainer(created.id);
 
     workspaceService.stopContainer(created.id);
@@ -246,7 +339,7 @@ public class WorkspaceRunnerPlacementTest {
     WorkspaceRunner runner = eligibleRunner();
     placement.connect(runner.id);
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "stop", false);
+    Workspace created = stoppedRunnerRow(repoId, "stop");
     running(created.id, runner.id);
 
     workspaceService.stopContainer(created.id);
@@ -261,7 +354,7 @@ public class WorkspaceRunnerPlacementTest {
   public void stoppingOnAnOfflineRunnerIs409AndChangesNothing() throws Exception {
     WorkspaceRunner runner = eligibleRunner();
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "offline", false);
+    Workspace created = stoppedRunnerRow(repoId, "offline");
     running(created.id, runner.id);
 
     ConflictException refused =
@@ -275,7 +368,7 @@ public class WorkspaceRunnerPlacementTest {
     WorkspaceRunner runner = eligibleRunner();
     placement.neverAnswer(runner.id);
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "silent", false);
+    Workspace created = stoppedRunnerRow(repoId, "silent");
     running(created.id, runner.id);
 
     DomainException refused =
@@ -298,7 +391,7 @@ public class WorkspaceRunnerPlacementTest {
     WorkspaceRunner runner = eligibleRunner();
     placement.connect(runner.id);
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "reset", false);
+    Workspace created = stoppedRunnerRow(repoId, "reset");
     running(created.id, runner.id);
 
     workspaceService.deleteContainer(created.id);
@@ -315,7 +408,7 @@ public class WorkspaceRunnerPlacementTest {
   public void deletingOnAnOfflineRunnerIs409() throws Exception {
     WorkspaceRunner runner = eligibleRunner();
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "offdel", false);
+    Workspace created = stoppedRunnerRow(repoId, "offdel");
     running(created.id, runner.id);
 
     ConflictException refused =
@@ -329,7 +422,7 @@ public class WorkspaceRunnerPlacementTest {
     WorkspaceRunner runner = eligibleRunner();
     placement.connect(runner.id);
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "recreate", false);
+    Workspace created = stoppedRunnerRow(repoId, "recreate");
     running(created.id, runner.id);
 
     assertThrows(
@@ -343,7 +436,7 @@ public class WorkspaceRunnerPlacementTest {
     WorkspaceRunner runner = eligibleRunner();
     placement.connect(runner.id);
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "discard", false);
+    Workspace created = stoppedRunnerRow(repoId, "discard");
     running(created.id, runner.id);
     containers.clearTeardownCalls();
 
@@ -360,7 +453,7 @@ public class WorkspaceRunnerPlacementTest {
   public void aResolutionOfARowOnAnOfflineRunnerStillResolves() throws Exception {
     WorkspaceRunner runner = eligibleRunner();
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "offdis", false);
+    Workspace created = stoppedRunnerRow(repoId, "offdis");
     running(created.id, runner.id);
 
     workspaceService.discardWorkspace(created.id, null, true);
@@ -374,8 +467,8 @@ public class WorkspaceRunnerPlacementTest {
   public void theListingTakesARunnerRowsOwnStatusAndOverlaysUnavailable() throws Exception {
     WorkspaceRunner runner = eligibleRunner();
     String repoId = repo();
-    Workspace onRunner = createRunnerRow(repoId, "listed", false);
-    Workspace unplaced = createRunnerRow(repoId, "unplaced", false);
+    Workspace onRunner = stoppedRunnerRow(repoId, "listed");
+    Workspace unplaced = stoppedRunnerRow(repoId, "unplaced");
     running(onRunner.id, runner.id);
     update(
         unplaced.id,
@@ -410,7 +503,7 @@ public class WorkspaceRunnerPlacementTest {
   public void aDispatchOntoARunnerRowIs409() throws Exception {
     eligibleRunner();
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "dispatched", false);
+    Workspace created = stoppedRunnerRow(repoId, "dispatched");
 
     ConflictException refused =
         assertThrows(
@@ -430,7 +523,7 @@ public class WorkspaceRunnerPlacementTest {
   public void aDeliveryOntoARunnerRowIs409AndStartsNothing() throws Exception {
     eligibleRunner();
     String repoId = repo();
-    Workspace created = createRunnerRow(repoId, "delivered", false);
+    Workspace created = stoppedRunnerRow(repoId, "delivered");
 
     ConflictException refused =
         assertThrows(
@@ -503,6 +596,48 @@ public class WorkspaceRunnerPlacementTest {
             WorkspacePlacement.RUNNER);
     rows.add(created.id);
     return created;
+  }
+
+  private WorkspaceService.CreatedWorkspace createAndStart(
+      String repoId, String label, WorkspacePlacement placed) {
+    WorkspaceService.CreatedWorkspace created =
+        workspaceService.createAndStartWorkspace(
+            repoId,
+            label,
+            "master",
+            label,
+            null,
+            false,
+            false,
+            false,
+            WorkspaceSubject.none(),
+            null,
+            placed);
+    rows.add(created.workspace().id);
+    return created;
+  }
+
+  private void awaitTerminal(String processId) throws InterruptedException {
+    long deadline = System.currentTimeMillis() + AWAIT_MILLIS;
+    while (!processes.find(processId).map(TechnicalProcess::isTerminal).orElse(true)
+        && System.currentTimeMillis() < deadline) {
+      Thread.sleep(50);
+    }
+    assertTrue(
+        processes.find(processId).map(TechnicalProcess::isTerminal).orElse(true),
+        "process " + processId + " ended in time");
+  }
+
+  /**
+   * A RUNNER row that was created (QUEUED) and stopped since — the state a start acts on. Stopped
+   * through the real verb, which unqueues a QUEUED row without a frame; the create's own backlog
+   * signal is cleared from the log so a test sees only what its own verbs did.
+   */
+  private Workspace stoppedRunnerRow(String repoId, String label) {
+    Workspace created = createRunnerRow(repoId, label, false);
+    workspaceService.stopContainer(created.id);
+    placement.clearCalls();
+    return read(created.id);
   }
 
   private WorkspaceRunner runner(int slots) {

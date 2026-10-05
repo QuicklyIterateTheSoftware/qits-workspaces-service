@@ -26,6 +26,14 @@ public class WorkspaceControllerTest {
   @jakarta.inject.Inject
   eu.wohlben.qits.workspaces.control.WorkspaceService workspaceService;
 
+  @jakarta.inject.Inject eu.wohlben.qits.workspaces.control.WorkspaceRunners runners;
+
+  @jakarta.inject.Inject
+  eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository runnerRepository;
+
+  @jakarta.inject.Inject
+  eu.wohlben.qits.workspaces.persistence.WorkspaceRepository workspaceRepository;
+
   /** An ISO-8601 instant, the shape every {@code Instant} in {@code WorkspaceDto} serializes to. */
   private static final String ISO_INSTANT = "\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z";
 
@@ -65,6 +73,12 @@ public class WorkspaceControllerTest {
         // The create response is a thin view, but createdAt is a plain row field and rides along:
         // the overview sorts on it, so a freshly created workspace must already carry one.
         .body("workspace.createdAt", matchesPattern(ISO_INSTANT));
+
+    // The create started the container (qits-853). This suite has no daemon to report its tree
+    // clean, and an unknown tree refuses a merge, so the container goes once the start is over —
+    // the row stays ACTIVE and nothing was written in it.
+    awaitProvisioned(repoId, "step-01");
+    deleteContainer(repoId, "step-01");
 
     // merge the workspace's branch into its parent, "feature". NOT into master: master is this
     // repository's default branch, which integrate alone writes now — that case is
@@ -147,6 +161,90 @@ public class WorkspaceControllerTest {
 
     org.junit.jupiter.api.Assertions.assertFalse(workspaceService.branchExists(repoId, "adm-01"));
     org.junit.jupiter.api.Assertions.assertFalse(workspaceService.branchExists(repoId, "run-01"));
+  }
+
+  /**
+   * Creating a workspace starts it (qits-853): the answer carries the start's process, and an
+   * ensure-container sent after it — what every client did before — still answers. That the second
+   * call joins the start rather than provisioning again is the domain's {@code
+   * WorkspaceRunnerPlacementTest.creatingADirectWorkspaceStartsItOnce}, which can count the runs.
+   */
+  @Test
+  public void testCreateStartsTheWorkspace() {
+    String repoId = createProjectAndRepository();
+
+    given()
+            .contentType(ContentType.JSON)
+            .body(
+                java.util.Map.of(
+                    "repositoryId", repoId, "id", "started-01", "parent", "master", "branch", "started-01"))
+            .when()
+            .post("/workspaces/api/workspaces")
+            .then()
+            .statusCode(Response.Status.OK.getStatusCode())
+            .body("workspace.workspaceId", equalTo("started-01"))
+            .body("workspace.createdAt", matchesPattern(ISO_INSTANT))
+            .body("technicalProcessId", notNullValue())
+            .body("startError", nullValue());
+
+    given()
+        .contentType(ContentType.JSON)
+        .when()
+        .post("/workspaces/api/workspaces/" + workspaceIds.of(repoId, "started-01") + "/ensure-container")
+        .then()
+        .statusCode(Response.Status.OK.getStatusCode())
+        .body("technicalProcessId", notNullValue());
+    awaitProvisioned(repoId, "started-01");
+    given()
+        .get("/workspaces/api/workspaces/" + workspaceIds.of(repoId, "started-01"))
+        .then()
+        .statusCode(200)
+        .body("workspace.runtimeStatus", equalTo("RUNNING"));
+  }
+
+  /**
+   * A RUNNER workspace's create is the request: the row comes back QUEUED, and no process is
+   * answered because there is none — the row's status is its progress.
+   */
+  @Test
+  public void testCreateQueuesARunnerWorkspace() {
+    String repoId = createProjectAndRepository();
+    java.util.UUID runnerId = java.util.UUID.randomUUID();
+    runners.create(runnerId, "r-" + runnerId.toString().substring(0, 8), null, 1, "token-" + runnerId, "sub-" + runnerId);
+    try {
+      runners.markRegistered(runnerId, "client-" + runnerId, null);
+      runners.greenlight(runnerId);
+
+      given()
+          .contentType(ContentType.JSON)
+          .body(
+              java.util.Map.of(
+                  "repositoryId", repoId,
+                  "id", "queued-01",
+                  "parent", "master",
+                  "branch", "queued-01",
+                  "placement", "RUNNER"))
+          .when()
+          .post("/workspaces/api/workspaces")
+          .then()
+          .statusCode(Response.Status.OK.getStatusCode())
+          .body("workspace.placement", equalTo("RUNNER"))
+          .body("workspace.runtimeStatus", equalTo("QUEUED"))
+          .body("workspace.queuedAt", matchesPattern(ISO_INSTANT))
+          .body("technicalProcessId", nullValue())
+          .body("startError", nullValue());
+    } finally {
+      // Abandoned outright, as the domain's placement test cleans up: a QUEUED row left behind
+      // would be a reservation for the next suite's fake runner to take.
+      Long rowId = workspaceIds.of(repoId, "queued-01");
+      io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
+          .run(
+              () -> {
+                workspaceRepository.findById(rowId).status =
+                    eu.wohlben.qits.workspaces.entity.WorkspaceStatus.ABANDONED;
+                runnerRepository.deleteById(runnerId);
+              });
+    }
   }
 
   @Test
@@ -552,6 +650,15 @@ public class WorkspaceControllerTest {
     throw new AssertionError("workspace " + workspaceId + " provision never completed");
   }
 
+  private void deleteContainer(String repoId, String workspaceId) {
+    given()
+        .contentType(ContentType.JSON)
+        .when()
+        .post("/workspaces/api/workspaces/" + workspaceIds.of(repoId, workspaceId) + "/delete-container")
+        .then()
+        .statusCode(Response.Status.OK.getStatusCode());
+  }
+
   private void commitFile(
       String repoId, String workspaceId, String file, String content, String msg) throws Exception {
     Path workspacePath = ensuredWorkspacePath(repoId, workspaceId);
@@ -813,15 +920,9 @@ public class WorkspaceControllerTest {
   @Test
   public void testGetWorkspaceIs404ForAResolvedOneAndForAnUnknownId() {
     String repoId = createProjectAndRepository();
-    given()
-        .contentType(ContentType.JSON)
-        .body(
-            new WorkspaceController.CreateWorkspaceRequest(
-                repoId, "detail-02", "feature", "detail-gone", null))
-        .post("/workspaces/api/workspaces")
-        .then()
-        .statusCode(Response.Status.OK.getStatusCode());
-    Long id = workspaceIds.of(repoId, "detail-02");
+    // Recorded and left stopped: the create door would start it, and a container with no daemon to
+    // report its tree clean refuses the discard below.
+    Long id = workspaceService.createWorkspace(repoId, "detail-02", "feature", "detail-gone").id;
 
     given().get("/workspaces/api/workspaces/" + id).then().statusCode(200);
 

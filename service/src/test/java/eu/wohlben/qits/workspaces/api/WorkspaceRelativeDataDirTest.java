@@ -87,6 +87,17 @@ public class WorkspaceRelativeDataDirTest {
         .then()
         .statusCode(Response.Status.OK.getStatusCode());
 
+    // The create started the container (qits-853). No daemon runs here to report its tree clean,
+    // and an unknown tree refuses the merge below, so the container goes once the start is over.
+    Long id = workspaceIds.of(repoId, "rel-01");
+    awaitNoActiveProcess(id);
+    given()
+        .contentType(ContentType.JSON)
+        .when()
+        .post("/workspaces/api/workspaces/" + id + "/delete-container")
+        .then()
+        .statusCode(Response.Status.OK.getStatusCode());
+
     // Workspace must be discoverable on disk: its forked branch resolves to "rel-branch".
     // This is the assertion that fails when the path is created nested under origin.
     given()
@@ -120,5 +131,28 @@ public class WorkspaceRelativeDataDirTest {
         .then()
         .statusCode(Response.Status.OK.getStatusCode())
         .body("success", equalTo(true));
+  }
+
+  private void awaitNoActiveProcess(Long id) {
+    long deadline = System.currentTimeMillis() + 15_000;
+    while (System.currentTimeMillis() < deadline) {
+      String processId =
+          given()
+              .get("/workspaces/api/workspaces/" + id + "/active-process")
+              .then()
+              .statusCode(Response.Status.OK.getStatusCode())
+              .extract()
+              .path("technicalProcessId");
+      if (processId == null) {
+        return;
+      }
+      try {
+        Thread.sleep(50);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException(e);
+      }
+    }
+    throw new AssertionError("the start of workspace " + id + " never ended");
   }
 }
