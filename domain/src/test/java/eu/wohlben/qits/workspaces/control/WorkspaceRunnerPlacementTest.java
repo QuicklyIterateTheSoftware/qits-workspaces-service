@@ -422,6 +422,25 @@ public class WorkspaceRunnerPlacementTest {
     assertEquals(WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus);
   }
 
+  /**
+   * A delivery onto a RUNNER row is refused as a dispatch is, and for its reason: its fallback arm
+   * starts the container and waits a fixed window for the daemon, and a RUNNER start only queues.
+   */
+  @Test
+  public void aDeliveryOntoARunnerRowIs409AndStartsNothing() throws Exception {
+    eligibleRunner();
+    String repoId = repo();
+    Workspace created = createRunnerRow(repoId, "delivered", false);
+
+    ConflictException refused =
+        assertThrows(
+            ConflictException.class,
+            () -> dispatchService.deliver(repoId, "delivered", "next phase", false));
+    assertEquals(RunnerRefusals.RUNNER_DISPATCH_UNSUPPORTED, refused.code());
+    assertEquals(
+        WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus, "nothing was queued");
+  }
+
   // --- the seam -----------------------------------------------------------------------------------
 
   /**

@@ -478,6 +478,10 @@ public class DispatchService {
               + repositoryId
               + "; nothing was delivered and nothing was created");
     }
+    // Refused before the container is touched, for the dispatch's reason: the fallback arm below
+    // starts the container and waits a fixed window for its daemon, and a RUNNER row's start only
+    // queues it. qits-626 lifts this with the dispatch's refusal, when both become queue-aware.
+    refuseRunnerPlaced(rowId);
 
     WorkspaceAgentLauncher.AgentState state = agentState(rowId);
     if (state == WorkspaceAgentLauncher.AgentState.UNREACHABLE && activeProcess(rowId) == null) {

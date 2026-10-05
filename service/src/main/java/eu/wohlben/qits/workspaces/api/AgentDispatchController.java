@@ -149,6 +149,12 @@ public class AgentDispatchController {
       responseCode = "404",
       description = "No such repository. Nothing was created.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @APIResponse(
+      responseCode = "409",
+      description =
+          "RUNNER_DISPATCH_UNSUPPORTED: the workspace already on that branch runs on a workspace"
+              + " runner, which a dispatch cannot wait for yet (qits-626). Nothing was started.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   // The operationId is the name a consumer pact uses for this door as the TRIGGER of the calls it
   // makes downstream (pacts/qits-workspaces-service_qits-projects-service.json,
   // `qits-trigger`). Renaming it renames the trigger there.
@@ -238,6 +244,12 @@ public class AgentDispatchController {
   @APIResponse(
       responseCode = "400",
       description = "A blank repository, branch or text.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @APIResponse(
+      responseCode = "409",
+      description =
+          "RUNNER_DISPATCH_UNSUPPORTED: the workspace on that branch runs on a workspace runner,"
+              + " which a delivery cannot wait for yet (qits-626). Nothing was said or started.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   public DispatchService.Delivery deliver(@Valid DeliverTurnRequest request) {
     return dispatches.deliver(
