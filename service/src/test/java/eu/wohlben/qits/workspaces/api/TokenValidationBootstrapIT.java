@@ -114,6 +114,10 @@ public class TokenValidationBootstrapIT {
       that no longer exists. So a fresh process asks what credentials this service still owns and
       gives back every one no active workspace claims. That is the whole of the reconcile's
       outbound half, and it happens before anybody has asked this service for anything.
+
+      A third question rides the same boot: a workspace runner's registration token is one more
+      credential a crash can orphan, so the reconcile also lists every commissioned token this
+      service holds and gives back the ones no runner row still names.
       """)
   @Order(1)
   void serviceBootFetchesJwksAndAcceptsPlatformTokens(Interactions story) {
@@ -172,6 +176,19 @@ public class TokenValidationBootstrapIT {
             "and at boot it also asks the idp which credentials it still holds for itself, so a"
                 + " container whose teardown crashed does not leave an identity behind forever")
         .as("commissions-reconciled");
+
+    // The same pass's second listing: a workspace runner's registration token is a credential
+    // too, and the reconcile asks what it still holds of those as well (qits-847).
+    assertTrue(
+        StoryPeers.awaitCall(
+            "GET " + StoryPeers.TOKENS_PATH,
+            java.time.Duration.ofSeconds(30)),
+        "the commission reconcile never asked qits-platform-idp which tokens this service holds");
+    story
+        .note(
+            "and it also asks which runner-registration tokens it still holds, so a crashed"
+                + " registration does not leave one behind forever")
+        .as("tokens-reconciled");
   }
 
   @UserStory(value = "A bearer cut for another audience opens nothing here", category = CATEGORY)
@@ -237,11 +254,22 @@ public class TokenValidationBootstrapIT {
         MockIdp.SERVICE_NAME,
         StoryPeers.read(
             StoryPeers.CLIENTS_PATH));
-    // THREE: one door, and the two questions a fresh process asks the idp before anybody arrives.
-    ReportAssertions.assertEdgeCount(CATEGORY, ACCEPTED_SLUG, 3);
+    // …and the reconcile's second listing, the runner registration tokens this service holds
+    // (qits-847).
+    ReportAssertions.assertEdge(
+        CATEGORY,
+        ACCEPTED_SLUG,
+        NetworkEdge.HTTP,
+        SERVICE,
+        MockIdp.SERVICE_NAME,
+        StoryPeers.read(
+            StoryPeers.TOKENS_PATH));
+    // FOUR: one door, and the three questions a fresh process asks the idp before anybody arrives.
+    ReportAssertions.assertEdgeCount(CATEGORY, ACCEPTED_SLUG, 4);
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "jwks-fetched");
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "history-served");
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "commissions-reconciled");
+    ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "tokens-reconciled");
 
     ReportAssertions.assertComplete(CATEGORY, DENIED_SLUG, UserflowReport.PASSED);
     ReportAssertions.assertEdge(

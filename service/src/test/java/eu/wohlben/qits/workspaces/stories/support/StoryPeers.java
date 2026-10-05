@@ -120,6 +120,9 @@ public final class StoryPeers {
   /** {@code IdpClients}' commission API, under the idp's own segment. */
   public static final String CLIENTS_PATH = "/idp/api/clients";
 
+  /** {@code IdpTokens}' commissioned-token API — the runner-registration-token reconcile's read. */
+  public static final String TOKENS_PATH = "/idp/api/tokens";
+
   /** {@code ContainersClient.CONTAINERS_PATH} plus the workspace workload segment. */
   public static final String CONTAINERS_PATH = "/containers/api/containers/";
 
@@ -328,6 +331,15 @@ public final class StoryPeers {
     if (path.startsWith(CLIENTS_PATH + "/") && "DELETE".equals(method)) {
       // Giving a credential back. 204, and 404 would mean the same thing.
       return new Answer(204, null);
+    }
+    if (TOKENS_PATH.equals(path)) {
+      // The registration-token reconcile's read, every boot. Empty: nothing in this catalogue
+      // commissions a runner's registration token, so an answer that claimed a live one would
+      // invite a reap nobody asked for — the same reasoning CLIENTS_PATH's GET carries.
+      return switch (method) {
+        case "GET" -> new Answer(200, "[]");
+        default -> new Answer(405, notFound("only GET lives here"));
+      };
     }
     if (path.startsWith(CONTAINERS_PATH)) {
       return containerRoute(method, path, request);
