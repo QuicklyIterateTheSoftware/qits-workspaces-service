@@ -14,4 +14,9 @@ public class ConflictException extends DomainException {
   public ConflictException(String message, Throwable cause) {
     super(409, message, cause);
   }
+
+  /** A 409 that names itself: {@code code} is answered beside the message. */
+  public ConflictException(String code, String message) {
+    super(409, code, message);
+  }
 }

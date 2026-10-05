@@ -6,6 +6,7 @@ import eu.wohlben.qits.workspaces.error.IntegrateConflictException;
 import eu.wohlben.qits.workspaces.error.InternalServerErrorException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
+import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerRefDto;
 import eu.wohlben.qits.workspaces.dto.WorkItemWorkspaceDto;
 import eu.wohlben.qits.workspaces.dto.WorkspaceSubjectRefDto;
 import eu.wohlben.qits.workspaces.entity.Workspace;
@@ -21,6 +22,7 @@ import eu.wohlben.qits.workspaces.gitmirror.PushSpec;
 import eu.wohlben.qits.workspaces.gitmirror.RepoMirror;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceEventRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -40,8 +42,10 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -57,6 +61,9 @@ public class WorkspaceService {
   @Inject RepositoryLookup repositories;
 
   @Inject WorkspaceRepository workspaceRepository;
+
+  /** The runners' names, for the workspaces placed on one. */
+  @Inject WorkspaceRunnerRepository runnerRepository;
 
   @Inject WorkspaceEventRepository workspaceEventRepository;
 
@@ -581,7 +588,12 @@ public class WorkspaceService {
     WorkspaceDaemonInfo.Info latestDaemon =
         daemonInfo.isResolvable() ? latestDaemon(daemonInfo.get().all()) : null;
     // The branch tree shows only live workspaces; resolved ones live in the history view.
-    return workspaceRepository.findActiveByRepositoryId(repoId).stream()
+    List<Workspace> rows = workspaceRepository.findActiveByRepositoryId(repoId);
+    // The runners' names, in one read, and none at all when no row is on a runner.
+    Map<UUID, String> runnerNames =
+        runnerRepository.namesById(
+            rows.stream().map(w -> w.runnerId).filter(Objects::nonNull).collect(Collectors.toSet()));
+    return rows.stream()
         .map(
             wt -> {
               String branch = wt.branch;
@@ -641,7 +653,10 @@ public class WorkspaceService {
                   info != null ? info.version() : null,
                   info != null ? info.buildTime() : null,
                   daemonOutdated(info, latestDaemon),
-                  wt.admin);
+                  wt.admin,
+                  wt.placement,
+                  runnerRef(wt.runnerId, runnerNames),
+                  wt.queuedAt);
             })
         .toList();
   }
@@ -845,7 +860,19 @@ public class WorkspaceService {
         info != null ? info.version() : null,
         info != null ? info.buildTime() : null,
         daemonOutdated(info, latestDaemon),
-        workspace.admin);
+        workspace.admin,
+        workspace.placement,
+        // The editor is always DIRECT (ck_workspace_runner_posture), so it is on no runner.
+        null,
+        workspace.queuedAt);
+  }
+
+  /**
+   * The runner a row is placed on, with its name from {@code names}; null when the row is on none.
+   * A runner row that is gone leaves the id with no name.
+   */
+  private static WorkspaceRunnerRefDto runnerRef(UUID runnerId, Map<UUID, String> names) {
+    return runnerId == null ? null : new WorkspaceRunnerRefDto(runnerId, names.get(runnerId));
   }
 
   /**

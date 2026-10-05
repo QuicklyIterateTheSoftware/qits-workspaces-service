@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.persistence;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import io.quarkus.hibernate.orm.panache.PanacheRepository;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -8,6 +9,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 @ApplicationScoped
 public class WorkspaceRepository implements PanacheRepository<Workspace> {
@@ -287,5 +289,34 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
 
   private static List<String> nonNull(Collection<String> ids) {
     return ids == null ? List.of() : ids.stream().filter(Objects::nonNull).distinct().toList();
+  }
+
+  // --- runner placement (V12) ---------------------------------------------------------------------
+  // Each over ACTIVE rows, which is what ix_workspace_runner covers.
+
+  /**
+   * How many of this runner's ACTIVE workspaces hold a slot right now: RUNNING, or PROVISIONING (a
+   * take the runner has not answered yet). The server's count of a runner's used slots, which wins
+   * over the runner's own.
+   */
+  public long countLiveOnRunner(UUID runnerId) {
+    return count(
+        "runnerId = ?1 and status = ?2 and runtimeStatus in ?3",
+        runnerId,
+        WorkspaceStatus.ACTIVE,
+        List.of(WorkspaceRuntimeStatus.RUNNING, WorkspaceRuntimeStatus.PROVISIONING));
+  }
+
+  /** How many ACTIVE workspaces this runner owns, whatever their containers are doing. */
+  public long countActiveOnRunner(UUID runnerId) {
+    return count("runnerId = ?1 and status = ?2", runnerId, WorkspaceStatus.ACTIVE);
+  }
+
+  /** The row ids of the ACTIVE workspaces this runner owns, oldest first. */
+  public List<Long> findActiveIdsOnRunner(UUID runnerId) {
+    return list("runnerId = ?1 and status = ?2 order by id", runnerId, WorkspaceStatus.ACTIVE)
+        .stream()
+        .map(w -> w.id)
+        .toList();
   }
 }

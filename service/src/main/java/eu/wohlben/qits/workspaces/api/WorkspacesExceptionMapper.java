@@ -2,6 +2,7 @@ package eu.wohlben.qits.workspaces.api;
 
 import eu.wohlben.qits.workspaces.error.DomainException;
 import eu.wohlben.qits.workspaces.error.IntegrateConflictException;
+import eu.wohlben.qits.workspaces.error.RunnerOwnsWorkspacesException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
@@ -27,6 +28,10 @@ import java.util.Map;
  * person does four different things about, and prose was the only channel carrying the difference —
  * so a client had to word-match it. A field is not a second envelope; it is the same one with the
  * discriminator the prose was already trying to encode.
+ *
+ * <p>A refusal that names itself ({@link DomainException#code()}, qits-ci's {@code code} member)
+ * adds {@code code} the same additive way, and {@link RunnerOwnsWorkspacesException} adds the
+ * {@code workspaceIds} the runner still owns.
  */
 @Provider
 public class WorkspacesExceptionMapper implements ExceptionMapper<DomainException> {
@@ -40,6 +45,12 @@ public class WorkspacesExceptionMapper implements ExceptionMapper<DomainExceptio
     }
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("message", message);
+    if (exception.code() != null) {
+      body.put("code", exception.code());
+    }
+    if (exception instanceof RunnerOwnsWorkspacesException owns) {
+      body.put("workspaceIds", owns.workspaceIds());
+    }
     if (exception instanceof IntegrateConflictException conflict) {
       body.put("reason", conflict.reason().name());
       if (!conflict.conflicts().isEmpty()) {

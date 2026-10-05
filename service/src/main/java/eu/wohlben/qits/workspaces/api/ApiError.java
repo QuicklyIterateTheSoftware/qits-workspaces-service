@@ -18,7 +18,9 @@ import org.eclipse.microprofile.openapi.annotations.media.Schema;
  * enum itself, so a new refusal mode reaches the document by being added to {@link
  * IntegrateConflictException.Reason} and nowhere else.
  */
-@Schema(name = "ApiError", description = "The error envelope: a message, plus a reason on a 409.")
+@Schema(
+    name = "ApiError",
+    description = "The error envelope: a message, plus a reason or a code on a 409.")
 public record ApiError(
     @Schema(description = "What went wrong, in words. Always present.") String message,
     @Schema(
@@ -28,4 +30,14 @@ public record ApiError(
                     + " as the message verbatim.")
         IntegrateConflictException.Reason reason,
     @Schema(description = "The conflicted paths. Present only for CONFLICT and MERGE_CONFLICT.")
-        List<String> conflicts) {}
+        List<String> conflicts,
+    @Schema(
+            description =
+                "The refusal's own name, where it has one (e.g. RUNNER_OWNS_WORKSPACES). Absent"
+                    + " otherwise.")
+        String code,
+    @Schema(
+            description =
+                "The ACTIVE workspace row ids a runner still owns. Present only with"
+                    + " RUNNER_OWNS_WORKSPACES.")
+        List<Long> workspaceIds) {}

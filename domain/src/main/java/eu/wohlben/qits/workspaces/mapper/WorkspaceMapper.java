@@ -22,5 +22,8 @@ public interface WorkspaceMapper {
   @Mapping(target = "daemonVersion", ignore = true)
   @Mapping(target = "daemonBuildTime", ignore = true)
   @Mapping(target = "daemonOutdated", ignore = true)
+  // The runner's name is another table's; this thin view carries none. A row is never placed on a
+  // runner at create anyway: a runner takes it later, from the queue.
+  @Mapping(target = "runner", ignore = true)
   WorkspaceDto toDto(Workspace entity);
 }

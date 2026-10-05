@@ -198,6 +198,32 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public boolean editor = false;
 
   /**
+   * Where this workspace's container runs ({@code V12}): {@link WorkspacePlacement#DIRECT} on the
+   * platform host through qits-containers, or {@link WorkspacePlacement#RUNNER} on a workspace
+   * runner's node. Decided at create and never changed, like {@link #admin} and {@link #editor}.
+   * Admin and editor rows are always DIRECT; {@code ck_workspace_runner_posture} keeps that.
+   */
+  @Enumerated(EnumType.STRING)
+  @Column(name = "placement", nullable = false, length = 16)
+  public WorkspacePlacement placement = WorkspacePlacement.DIRECT;
+
+  /**
+   * The {@link WorkspaceRunner} that holds this workspace, or null: always null on a DIRECT row
+   * ({@code ck_workspace_runner_placement}), and null on a RUNNER row no runner has taken yet. Sticky
+   * while it is set, because the workspace's volume lives on that runner's node. No foreign key; see
+   * {@code V12}.
+   */
+  @Column(name = "runner_id")
+  public UUID runnerId;
+
+  /**
+   * When this RUNNER row was last asked to start ({@link WorkspaceRuntimeStatus#QUEUED}), so runners
+   * take the oldest first. Null while the row is not waiting.
+   */
+  @Column(name = "queued_at")
+  public Instant queuedAt;
+
+  /**
    * What a <b>dispatched</b> workspace is for: the qits-projects ticket, or the epic, the dispatch
    * was about. Both null for every workspace a person created by hand, and for every workspace that
    * predates {@code V5}.

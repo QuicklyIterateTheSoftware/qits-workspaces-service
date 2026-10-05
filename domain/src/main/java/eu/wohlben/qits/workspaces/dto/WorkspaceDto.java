@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.dto;
 
 import eu.wohlben.qits.workspaces.control.AgentActivityState;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import java.time.Instant;
@@ -76,6 +77,12 @@ import java.time.Instant;
  *     current container. It is on the read model because a client that cannot see which workspaces
  *     are privileged cannot say so, and "which ones have the socket" is the question this whole
  *     posture exists to keep answerable
+ * @param placement where the workspace's container runs: {@code DIRECT} on the platform host, or
+ *     {@code RUNNER} on a workspace runner's node. Decided at create and never changed
+ * @param runner the runner a RUNNER workspace is placed on, with its name; null for every DIRECT
+ *     workspace and for a RUNNER workspace no runner has taken yet
+ * @param queuedAt when a RUNNER workspace was last asked to start, while it waits for a slot
+ *     ({@code runtimeStatus} {@code QUEUED}); null otherwise
  */
 public record WorkspaceDto(
     Long id,
@@ -101,4 +108,7 @@ public record WorkspaceDto(
     String daemonVersion,
     Instant daemonBuildTime,
     Boolean daemonOutdated,
-    boolean admin) {}
+    boolean admin,
+    WorkspacePlacement placement,
+    WorkspaceRunnerRefDto runner,
+    Instant queuedAt) {}

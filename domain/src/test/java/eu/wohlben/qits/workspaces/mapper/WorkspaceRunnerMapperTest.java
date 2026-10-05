@@ -1,0 +1,105 @@
+package eu.wohlben.qits.workspaces.mapper;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto;
+import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
+import java.time.Instant;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+
+/** {@link WorkspaceRunnerMapper}: the columns copied, and the capabilities read and never corrected. */
+class WorkspaceRunnerMapperTest {
+
+  private final WorkspaceRunnerMapper mapper = new WorkspaceRunnerMapper();
+
+  private static WorkspaceRunner runner() {
+    WorkspaceRunner runner = new WorkspaceRunner();
+    runner.id = UUID.fromString("3f2b8f0e-0000-4000-8000-000000000001");
+    runner.name = "node-1";
+    runner.description = "the CI VM";
+    runner.slots = 2;
+    runner.createdAt = Instant.parse("2026-10-05T08:00:00Z");
+    return runner;
+  }
+
+  @Test
+  public void aRegisteredHealthyRunnerReadsEveryFact() {
+    WorkspaceRunner runner = runner();
+    runner.clientId = "client-1";
+    runner.registeredAt = Instant.parse("2026-10-05T08:01:00Z");
+    runner.lastSeenAt = Instant.parse("2026-10-05T09:00:00Z");
+    runner.lastHealthCheckAt = Instant.parse("2026-10-05T08:02:00Z");
+    runner.lastHealthCheckOk = true;
+    runner.capabilities =
+        "{\"version\":\"2026.1005.1\",\"arch\":\"amd64\","
+            + "\"dotClaudeVolume\":\"qits-workspaces-runner-dot-claude-3f2b8f0e\","
+            + "\"login\":{\"claude\":\"PRESENT\",\"kimi\":\"ABSENT\","
+            + "\"checkedAt\":\"2026-10-05T08:30:00Z\"}}";
+
+    WorkspaceRunnerDto dto = mapper.toDto(runner);
+
+    assertEquals(runner.id, dto.id());
+    assertEquals("node-1", dto.name());
+    assertEquals("the CI VM", dto.description());
+    assertEquals(2, dto.slots());
+    assertEquals("2026.1005.1", dto.version());
+    assertEquals("amd64", dto.arch());
+    assertEquals("qits-workspaces-runner-dot-claude-3f2b8f0e", dto.dotClaudeVolume());
+    assertEquals(
+        new WorkspaceRunnerDto.Login("PRESENT", "ABSENT", Instant.parse("2026-10-05T08:30:00Z")),
+        dto.login());
+    assertTrue(dto.registered());
+    assertEquals(runner.registeredAt, dto.registeredAt());
+    assertFalse(dto.quarantined());
+    assertTrue(dto.eligible());
+    assertEquals(runner.lastSeenAt, dto.lastSeenAt());
+    assertEquals(runner.lastHealthCheckAt, dto.lastHealthCheckAt());
+    assertEquals(Boolean.TRUE, dto.lastHealthCheckOk());
+    assertEquals(runner.createdAt, dto.createdAt());
+  }
+
+  @Test
+  public void aFreshRunnerSaysNothingAndIsNotEligible() {
+    WorkspaceRunnerDto dto = mapper.toDto(runner());
+
+    assertNull(dto.version());
+    assertNull(dto.dotClaudeVolume());
+    assertNull(dto.login());
+    assertFalse(dto.registered());
+    assertFalse(dto.eligible());
+    assertNull(dto.lastHealthCheckOk());
+  }
+
+  @Test
+  public void aQuarantinedOrDrainedRunnerIsNotEligible() {
+    WorkspaceRunner quarantined = runner();
+    quarantined.clientId = "client-1";
+    quarantined.quarantinedAt = Instant.parse("2026-10-05T08:01:00Z");
+    quarantined.quarantineReason = "awaiting first health check";
+    WorkspaceRunnerDto dto = mapper.toDto(quarantined);
+    assertTrue(dto.quarantined());
+    assertEquals("awaiting first health check", dto.quarantineReason());
+    assertFalse(dto.eligible());
+
+    WorkspaceRunner drained = runner();
+    drained.clientId = "client-1";
+    drained.slots = 0;
+    assertFalse(mapper.toDto(drained).eligible());
+  }
+
+  @Test
+  public void whatTheRunnerSaidInAnotherShapeReadsAsNothing() {
+    WorkspaceRunner runner = runner();
+    runner.capabilities = "{\"version\":7,\"login\":\"PRESENT\"}";
+    WorkspaceRunnerDto dto = mapper.toDto(runner);
+    assertNull(dto.version());
+    assertNull(dto.login());
+
+    runner.capabilities = "not json";
+    assertNull(mapper.toDto(runner).version(), "an unreadable column costs the listing nothing");
+  }
+}

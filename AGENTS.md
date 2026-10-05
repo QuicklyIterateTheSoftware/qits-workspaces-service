@@ -160,6 +160,15 @@ push, and whether a narrowing has still to reach qits-idp. Columns on a `CausedR
 `ArchRulesTest` decision; no backfill, because null reads as the workspace's own branch (none for a
 main workspace). See "The Git refs a workspace may push".
 
+**`V12__workspace_runners.sql` adds the `workspace_runner` table and the placement columns**
+(epic qits-624). `WorkspaceRunner` is a new entity and takes the `ArchRulesTest` decision: **in**, a
+`CausedRow`, because an operator's request creates it, as qits-ci's `ci_runner`. On `workspace`:
+`placement` (`DIRECT` | `RUNNER`, default `DIRECT`), `runner_id` (no foreign key: a runner that owns
+an ACTIVE row is not deleted, and a resolved row keeps the id as history) and `queued_at`. Two checks
+hold the rules: only a RUNNER row names a runner, and an admin or editor row is never RUNNER. V1's
+inline `runtime_status` check is replaced by `ck_workspace_runtime_status`, which admits `QUEUED`;
+`UNAVAILABLE` is computed on read and the column refuses it.
+
 **The target is PostgreSQL 18.4** — the tag `components/qits-database/qits-database-oci` is built
 from, and the version the suites' embedded binaries are, so a migration is proved against the engine it ships on.
 Two H2 habits are gone with it: a rule that applies to some rows is a **partial unique index** now

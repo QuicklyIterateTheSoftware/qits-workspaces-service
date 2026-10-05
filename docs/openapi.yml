@@ -36,7 +36,7 @@ components:
       - SKIPPED_RUNNING
     ApiError:
       type: object
-      description: "The error envelope: a message, plus a reason on a 409."
+      description: "The error envelope: a message, plus a reason or a code on a 409."
       properties:
         message:
           type: string
@@ -52,6 +52,17 @@ components:
           items:
             type: string
           description: The conflicted paths. Present only for CONFLICT and MERGE_CONFLICT.
+        code:
+          type: string
+          description: "The refusal's own name, where it has one (e.g. RUNNER_OWNS_WORKSPACES).\
+            \ Absent otherwise."
+        workspaceIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+          description: The ACTIVE workspace row ids a runner still owns. Present only
+            with RUNNER_OWNS_WORKSPACES.
     ArchivedSessionDto:
       type: object
       properties:
@@ -648,6 +659,10 @@ components:
           type: string
         branch:
           type: string
+    UUID:
+      type: string
+      format: uuid
+      pattern: "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}"
     UpdateHistoryRequest:
       type: object
       properties:
@@ -745,6 +760,12 @@ components:
           type: boolean
         admin:
           type: boolean
+        placement:
+          $ref: "#/components/schemas/WorkspacePlacement"
+        runner:
+          $ref: "#/components/schemas/WorkspaceRunnerRefDto"
+        queuedAt:
+          $ref: "#/components/schemas/Instant"
     WorkspaceEventDto:
       type: object
       properties:
@@ -810,6 +831,11 @@ components:
           $ref: "#/components/schemas/Instant"
         resolvedAt:
           $ref: "#/components/schemas/Instant"
+    WorkspacePlacement:
+      type: string
+      enum:
+      - DIRECT
+      - RUNNER
     WorkspacePromptAttachmentDataDto:
       type: object
       properties:
@@ -844,6 +870,13 @@ components:
           type: string
         updatedAt:
           $ref: "#/components/schemas/Instant"
+    WorkspaceRunnerRefDto:
+      type: object
+      properties:
+        id:
+          $ref: "#/components/schemas/UUID"
+        name:
+          type: string
     WorkspaceRuntimeStatus:
       type: string
       enum:
@@ -851,6 +884,8 @@ components:
       - STOPPED
       - PROVISIONING
       - FAILED
+      - QUEUED
+      - UNAVAILABLE
     WorkspaceStatus:
       type: string
       enum:
@@ -884,7 +919,7 @@ components:
   securitySchemes:
     SecurityScheme:
       type: openIdConnect
-      openIdConnectUrl: http://dev-qits-platform-idp:8080/idp/.well-known/openid-configuration
+      openIdConnectUrl: http://dev-qits-idp:8080/idp/.well-known/openid-configuration
       description: Authentication
 paths:
   /workspaces/api/agent-dispatches:
@@ -2239,4 +2274,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.1003.132436
+  version: 2026.1004.215228
