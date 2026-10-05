@@ -403,7 +403,13 @@ public class WorkspaceRunners {
             () -> {
               WorkspaceRunner runner = found(id);
               if (workspaces.countActiveOnRunner(id) > 0) {
-                List<Long> owned = workspaces.findActiveIdsOnRunner(id);
+                List<RunnerOwnsWorkspacesException.OwnedWorkspace> owned =
+                    workspaces.findActiveOnRunner(id).stream()
+                        .map(
+                            row ->
+                                new RunnerOwnsWorkspacesException.OwnedWorkspace(
+                                    row.id, row.repositoryId, row.branch))
+                        .toList();
                 throw new RunnerOwnsWorkspacesException(
                     RunnerOwnsWorkspacesException.CODE
                         + ": runner "
@@ -411,7 +417,7 @@ public class WorkspaceRunners {
                         + " owns "
                         + owned.size()
                         + " active workspace(s) "
-                        + owned
+                        + owned.stream().map(RunnerOwnsWorkspacesException.OwnedWorkspace::id).toList()
                         + "; resolve them before deleting it",
                     owned);
               }
@@ -420,9 +426,31 @@ public class WorkspaceRunners {
             });
   }
 
+  /**
+   * What is on a runner right now, counted from the rows: its live containers (RUNNING +
+   * PROVISIONING), its ACTIVE workspaces, and its QUEUED sticky ones.
+   */
+  public record Counts(int running, int owned, int queued) {}
+
+  /** {@link Counts} for {@code id}, in one transaction. */
+  public Counts counts(UUID id) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                new Counts(
+                    (int) workspaces.countLiveOnRunner(id),
+                    (int) workspaces.countActiveOnRunner(id),
+                    (int) workspaces.countQueuedOnRunner(id)));
+  }
+
   /** The runner as an operator reads it. */
   public WorkspaceRunnerDto view(WorkspaceRunner runner) {
     return mapper.toDto(runner);
+  }
+
+  /** The runner as an operator reads it, with what the service knows live about it. */
+  public WorkspaceRunnerDto view(WorkspaceRunner runner, WorkspaceRunnerMapper.Live live) {
+    return mapper.toDto(runner, live);
   }
 
   /** Every runner as an operator reads it, by name. */

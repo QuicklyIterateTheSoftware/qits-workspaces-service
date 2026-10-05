@@ -102,4 +102,33 @@ class WorkspaceRunnerMapperTest {
     runner.capabilities = "not json";
     assertNull(mapper.toDto(runner).version(), "an unreadable column costs the listing nothing");
   }
+
+  /** What the service knows live lands beside the row; the row alone reads as not connected. */
+  @Test
+  public void theLiveFactsAreLaidBesideTheRow() {
+    WorkspaceRunner runner = runner();
+    Instant since = Instant.parse("2026-10-05T09:00:00Z");
+
+    WorkspaceRunnerDto live =
+        mapper.toDto(
+            runner,
+            new WorkspaceRunnerMapper.Live(
+                true, since, "2026.1005.54252", 2, 3, 1, "docker run … claude", "docker run … kimi login"));
+
+    assertTrue(live.connected());
+    assertEquals(since, live.connectedSince());
+    assertEquals("2026.1005.54252", live.pinnedVersion());
+    assertEquals(2, live.running());
+    assertEquals(3, live.owned());
+    assertEquals(1, live.queued());
+    assertEquals("docker run … claude", live.loginCommand());
+    assertEquals("docker run … kimi login", live.kimiLoginCommand());
+
+    WorkspaceRunnerDto bare = mapper.toDto(runner);
+    assertFalse(bare.connected());
+    assertNull(bare.connectedSince());
+    assertNull(bare.pinnedVersion());
+    assertEquals(0, bare.owned());
+    assertNull(bare.loginCommand());
+  }
 }

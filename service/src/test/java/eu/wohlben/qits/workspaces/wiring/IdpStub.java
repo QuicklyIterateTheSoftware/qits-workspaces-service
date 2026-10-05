@@ -24,13 +24,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>A route answers its list of answers in order and repeats the last one; a request no route
  * names answers 404.
  */
-final class IdpStub implements AutoCloseable {
+public final class IdpStub implements AutoCloseable {
 
-  record Answer(int status, String body) {}
+  public record Answer(int status, String body) {}
 
   /** One request as it arrived. */
-  record Request(String method, String path, String authorization, String body) {
-    String line() {
+  public record Request(String method, String path, String authorization, String body) {
+    public String line() {
       return method + " " + path;
     }
   }
@@ -40,7 +40,7 @@ final class IdpStub implements AutoCloseable {
   private final Map<String, AtomicInteger> served = new ConcurrentHashMap<>();
   private final List<Request> requests = new CopyOnWriteArrayList<>();
 
-  IdpStub() throws IOException {
+  public IdpStub() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
         "/",
@@ -68,35 +68,35 @@ final class IdpStub implements AutoCloseable {
   }
 
   /** Answer {@code "METHOD /path"} with these, in order. */
-  IdpStub on(String line, Answer... answers) {
+  public IdpStub on(String line, Answer... answers) {
     routes.put(line, List.of(answers));
     return this;
   }
 
-  List<Request> requests() {
+  public List<Request> requests() {
     return List.copyOf(requests);
   }
 
   /** Every request line, in order. */
-  List<String> lines() {
+  public List<String> lines() {
     return requests.stream().map(Request::line).toList();
   }
 
   /** The request lines of one method, in order. */
-  List<String> lines(String method) {
+  public List<String> lines(String method) {
     return requests.stream().filter(r -> r.method().equals(method)).map(Request::line).toList();
   }
 
-  String baseUrl() {
+  public String baseUrl() {
     return "http://127.0.0.1:" + server.getAddress().getPort();
   }
 
-  <T> T client(Class<T> type) {
+  public <T> T client(Class<T> type) {
     return QuarkusRestClientBuilder.newBuilder().baseUri(URI.create(baseUrl())).build(type);
   }
 
   /** {@link IdpCredentialCommissioner} wired against this stub, its patience a second. */
-  IdpCredentialCommissioner credentialCommissioner() {
+  public IdpCredentialCommissioner credentialCommissioner() {
     IdpCredentialCommissioner commissioner = new IdpCredentialCommissioner();
     commissioner.enabled = true;
     commissioner.clientId = Optional.of("dev-qits-workspaces");
@@ -107,7 +107,7 @@ final class IdpStub implements AutoCloseable {
   }
 
   /** {@link IdpRunnerCommissioner} wired against this stub, its patience a second. */
-  IdpRunnerCommissioner runnerCommissioner() {
+  public IdpRunnerCommissioner runnerCommissioner() {
     IdpRunnerCommissioner commissioner = new IdpRunnerCommissioner();
     commissioner.enabled = true;
     commissioner.clientId = Optional.of("dev-qits-workspaces");

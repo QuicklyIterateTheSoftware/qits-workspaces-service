@@ -40,4 +40,17 @@ public record ApiError(
             description =
                 "The ACTIVE workspace row ids a runner still owns. Present only with"
                     + " RUNNER_OWNS_WORKSPACES.")
-        List<Long> workspaceIds) {}
+        List<Long> workspaceIds,
+    @Schema(
+            description =
+                "The ACTIVE workspaces a runner still owns, each with its repository and branch so"
+                    + " a client can link it. Present only with RUNNER_OWNS_WORKSPACES.")
+        List<OwnedWorkspace> workspaces) {
+
+  /** One workspace a runner still owns, as the 409 names it. */
+  @Schema(name = "RunnerOwnedWorkspace")
+  public record OwnedWorkspace(
+      @Schema(description = "The workspace row id") Long id,
+      @Schema(description = "Its repository") String repositoryId,
+      @Schema(description = "Its branch, or null") String branch) {}
+}

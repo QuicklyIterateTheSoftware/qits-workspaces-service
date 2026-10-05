@@ -63,6 +63,12 @@ components:
             format: int64
           description: The ACTIVE workspace row ids a runner still owns. Present only
             with RUNNER_OWNS_WORKSPACES.
+        workspaces:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunnerOwnedWorkspace"
+          description: "The ACTIVE workspaces a runner still owns, each with its repository\
+            \ and branch so a client can link it. Present only with RUNNER_OWNS_WORKSPACES."
     ArchivedSessionDto:
       type: object
       properties:
@@ -158,6 +164,22 @@ components:
           pattern: \S
         result:
           type: string
+    CreateRunnerRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          description: "[a-z][a-z0-9-]{0,63}, unique"
+        description:
+          type: string
+          description: "Free text, at most 1024 characters"
+        slots:
+          type: integer
+          format: int32
+          description: How many workspaces it may run at once; 0 drains it. Default
+            1
     CreateWorkspaceRequest:
       type: object
       required:
@@ -297,6 +319,65 @@ components:
           type: string
           maxLength: 100
           pattern: \S
+    JsonNode:
+      type: object
+      properties:
+        empty:
+          type: boolean
+        valueNode:
+          type: boolean
+        containerNode:
+          type: boolean
+        missingNode:
+          type: boolean
+        array:
+          type: boolean
+        object:
+          type: boolean
+        nodeType:
+          $ref: "#/components/schemas/JsonNodeType"
+        pojo:
+          type: boolean
+        number:
+          type: boolean
+        integralNumber:
+          type: boolean
+        floatingPointNumber:
+          type: boolean
+        short:
+          type: boolean
+        int:
+          type: boolean
+        long:
+          type: boolean
+        float:
+          type: boolean
+        double:
+          type: boolean
+        bigDecimal:
+          type: boolean
+        bigInteger:
+          type: boolean
+        textual:
+          type: boolean
+        boolean:
+          type: boolean
+        "null":
+          type: boolean
+        binary:
+          type: boolean
+    JsonNodeType:
+      type: string
+      enum:
+      - ARRAY
+      - BINARY
+      - BOOLEAN
+      - MISSING
+      - "NULL"
+      - NUMBER
+      - OBJECT
+      - POJO
+      - STRING
     LaunchPin:
       type: object
       properties:
@@ -315,6 +396,15 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LaunchPin"
+    Login:
+      type: object
+      properties:
+        claude:
+          type: string
+        kimi:
+          type: string
+        checkedAt:
+          $ref: "#/components/schemas/Instant"
     MarkBlockedRequest:
       type: object
       required:
@@ -369,6 +459,16 @@ components:
       properties:
         target:
           type: string
+    PatchRunnerRequest:
+      type: object
+      properties:
+        slots:
+          type: integer
+          format: int32
+          description: 0 drains the runner; absent leaves it
+        description:
+          type: string
+          description: Blank clears it; absent leaves it
     PromptAttachmentSource:
       type: string
       enum:
@@ -383,6 +483,27 @@ components:
       - ALREADY_INTEGRATED
       - PUSH_REJECTED
       - RELEASE_REQUIRED
+    RegisterRunnerRequest:
+      type: object
+      properties:
+        capabilities:
+          $ref: "#/components/schemas/JsonNode"
+          type: array
+          description: "What the runner says about itself — a JSON object, at most\
+            \ 16 KiB"
+    RegisteredRunner:
+      type: object
+      properties:
+        clientId:
+          type: string
+        secret:
+          type: string
+        tokenUrl:
+          type: string
+        audience:
+          type: string
+        socketUrl:
+          type: string
     ResolveReleasedBranchRequest:
       type: object
       required:
@@ -554,6 +675,32 @@ components:
       properties:
         workspace:
           $ref: "#/components/schemas/WorkspaceDto"
+    RunnerOwnedWorkspace:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: The workspace row id
+        repositoryId:
+          type: string
+          description: Its repository
+        branch:
+          type: string
+          description: "Its branch, or null"
+    RunnerRegistrationDto:
+      type: object
+      properties:
+        runner:
+          $ref: "#/components/schemas/WorkspaceRunnerDto"
+        registrationToken:
+          type: string
+          description: The runner's one-use registration token. Returned once
+        installLine:
+          type: string
+          description: "The one line that installs the runner on a docker host: it\
+            \ fetches the generic install script with the registration token and pipes\
+            \ it into sudo sh with this runner's values. Returned once"
     SavePromptDraftRequest:
       type: object
       required:
@@ -817,6 +964,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkspaceEventDto"
+        placement:
+          $ref: "#/components/schemas/WorkspacePlacement"
     WorkspaceHistoryDto:
       type: object
       properties:
@@ -872,6 +1021,65 @@ components:
           type: string
         updatedAt:
           $ref: "#/components/schemas/Instant"
+    WorkspaceRunnerDto:
+      type: object
+      properties:
+        id:
+          $ref: "#/components/schemas/UUID"
+        name:
+          type: string
+        description:
+          type: string
+        slots:
+          type: integer
+          format: int32
+        version:
+          type: string
+        arch:
+          type: string
+        dotClaudeVolume:
+          type: string
+        login:
+          $ref: "#/components/schemas/Login"
+        registered:
+          type: boolean
+        registeredAt:
+          $ref: "#/components/schemas/Instant"
+        quarantined:
+          type: boolean
+        quarantinedAt:
+          $ref: "#/components/schemas/Instant"
+        quarantineReason:
+          type: string
+        eligible:
+          type: boolean
+        lastSeenAt:
+          $ref: "#/components/schemas/Instant"
+        lastHealthCheckAt:
+          $ref: "#/components/schemas/Instant"
+        lastHealthCheckOk:
+          type: boolean
+        createdAt:
+          $ref: "#/components/schemas/Instant"
+        connected:
+          type: boolean
+        connectedSince:
+          $ref: "#/components/schemas/Instant"
+        pinnedVersion:
+          type: string
+        running:
+          type: integer
+          format: int32
+        owned:
+          type: integer
+          format: int32
+        queued:
+          type: integer
+          format: int32
+        loginCommand:
+          type: string
+        kimiLoginCommand:
+          type: string
     WorkspaceRunnerRefDto:
       type: object
       properties:
@@ -957,6 +1165,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "409":
+          description: "RUNNER_DISPATCH_UNSUPPORTED: the workspace already on that\
+            \ branch runs on a workspace runner, which a dispatch cannot wait for\
+            \ yet (qits-626). Nothing was started."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
         "403":
@@ -1023,6 +1239,14 @@ paths:
                 $ref: "#/components/schemas/Delivery"
         "400":
           description: "A blank repository, branch or text."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: "RUNNER_DISPATCH_UNSUPPORTED: the workspace on that branch\
+            \ runs on a workspace runner, which a delivery cannot wait for yet (qits-626).\
+            \ Nothing was said or started."
           content:
             application/json:
               schema:
@@ -1465,6 +1689,350 @@ paths:
         - qits:admin
         - qits:system
         - qits:agent
+  /workspaces/api/runners:
+    get:
+      summary: "Every workspace runner, by name, with its connection, counts and login"
+      responses:
+        "200":
+          description: "Every runner, by name"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WorkspaceRunnerDto"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Workspace Runner Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
+        - qits:agent
+    post:
+      summary: "Declare a workspace runner; answers its install line, once"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRunnerRequest"
+        required: true
+      responses:
+        "201":
+          description: "The runner, its registration token and the install line carrying\
+            \ it"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerRegistrationDto"
+        "400":
+          description: "A malformed name, slots or description"
+        "409":
+          description: The name is taken
+        "502":
+          description: qits-idp refused the registration token
+        "503":
+          description: "This deployment commissions nothing, or RUNNER_PLANE_UNCONFIGURED:\
+            \ it knows no public domain to address a runner by"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Workspace Runner Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
+  /workspaces/api/runners/install.sh:
+    get:
+      summary: The generic workspace runner install script the install line pipes
+        to sh
+      responses:
+        "200":
+          description: "A POSIX sh script, carrying no secret"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "503":
+          description: "RUNNER_PLANE_UNCONFIGURED, or the script cannot be rendered"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Workspace Runner Controller
+      security:
+      - SecurityScheme:
+        - qits:workspaces-runner-registration
+        - qits:admin
+        - qits:system
+        - qits:agent
+  /workspaces/api/runners/{id}:
+    patch:
+      summary: Change a workspace runner's slots or description
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchRunnerRequest"
+        required: true
+      responses:
+        "200":
+          description: The runner as it now is
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceRunnerDto"
+        "400":
+          description: Negative slots or an overlong description
+        "404":
+          description: No such runner
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Workspace Runner Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
+    get:
+      summary: One workspace runner
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: The runner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceRunnerDto"
+        "404":
+          description: No such runner
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Workspace Runner Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
+        - qits:agent
+    delete:
+      summary: Decommission a workspace runner and give its credentials back
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: Gone
+        "404":
+          description: No such runner
+        "409":
+          description: "RUNNER_OWNS_WORKSPACES: an ACTIVE workspace is placed on it;\
+            \ workspaceIds and workspaces name them"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Workspace Runner Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
+  /workspaces/api/runners/{id}/greenlight:
+    post:
+      summary: Lift a workspace runner's quarantine
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: The runner as it now is
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceRunnerDto"
+        "404":
+          description: No such runner
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Workspace Runner Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+  /workspaces/api/runners/{id}/healthcheck:
+    post:
+      summary: Ask a connected workspace runner for a health check
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "202":
+          description: Sent
+        "404":
+          description: No such runner
+        "409":
+          description: "RUNNER_UNAVAILABLE: the runner is not connected"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Workspace Runner Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+  /workspaces/api/runners/{id}/login-check:
+    post:
+      summary: Ask a connected workspace runner to re-check its node's agent login
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "202":
+          description: Sent
+        "404":
+          description: No such runner
+        "409":
+          description: "RUNNER_UNAVAILABLE: the runner is not connected"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Workspace Runner Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+  /workspaces/api/runners/{id}/register:
+    post:
+      summary: Register a workspace runner with its registration token; answers its
+        client
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRunnerRequest"
+        required: true
+      responses:
+        "200":
+          description: The runner's own client and where to use it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisteredRunner"
+        "400":
+          description: Capabilities that are not a JSON object
+        "403":
+          description: The token is not this runner's
+        "404":
+          description: No such runner
+        "409":
+          description: The runner is already registered
+        "502":
+          description: qits-idp refused the runner's client
+        "503":
+          description: "This deployment commissions nothing, or RUNNER_PLANE_UNCONFIGURED"
+        "401":
+          description: Not Authorized
+      tags:
+      - Workspace Runner Controller
+      security:
+      - SecurityScheme:
+        - qits:workspaces-runner-registration
+  /workspaces/api/runners/{id}/registration-token:
+    post:
+      summary: Replace a workspace runner's registration token; answers a new install
+        line
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: "The runner, its new registration token and the install line\
+            \ carrying it"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerRegistrationDto"
+        "404":
+          description: No such runner
+        "409":
+          description: The runner is already registered
+        "502":
+          description: qits-idp refused the registration token
+        "503":
+          description: "This deployment commissions nothing, or RUNNER_PLANE_UNCONFIGURED"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Workspace Runner Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
   /workspaces/api/service-events:
     get:
       parameters:

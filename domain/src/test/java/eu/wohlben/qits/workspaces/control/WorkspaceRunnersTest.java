@@ -196,7 +196,15 @@ public class WorkspaceRunnersTest {
     assertEquals(409, refused.statusCode());
     assertEquals("RUNNER_OWNS_WORKSPACES", refused.code());
     assertEquals(List.of(owned), refused.workspaceIds());
+    Workspace row = QuarkusTransaction.requiringNew().call(() -> workspaceRepository.findById(owned));
+    assertEquals(
+        List.of(
+            new RunnerOwnsWorkspacesException.OwnedWorkspace(owned, row.repositoryId, row.branch)),
+        refused.workspaces(),
+        "each row with what the runners page links it by");
     assertTrue(runnerExists(runner.id));
+    assertEquals(
+        new WorkspaceRunners.Counts(1, 1, 0), runners.counts(runner.id), "running, owned, queued");
 
     // Resolved, the row keeps the runner's id as history and holds nothing up.
     QuarkusTransaction.requiringNew()

@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.api;
 
 import eu.wohlben.qits.workspaces.control.WorkspaceContainerFactory;
+import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerPins;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
@@ -45,6 +46,11 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * qits-platform-orchestrator reads it with a bearer, and an operator asking what the GC will be told
  * is asking the same question. Nothing is registered for reflection — the method returns its record
  * type rather than a bare {@link jakarta.ws.rs.core.Response}, so the native build indexes it.
+ *
+ * <p><b>The workspace runner's image is a pin too</b> (epic qits-624), {@code launches: runner}: this
+ * process does not start it, but every install script it renders and every {@code upgrade} it
+ * sends names it, and a node pulls it cold the next time either is acted on — the same reason the
+ * launch pins need keeping. It is {@link WorkspaceRunnerPins#version}, the protocol jar's version.
  */
 @Path("/pins")
 @Produces(MediaType.APPLICATION_JSON)
@@ -53,12 +59,15 @@ public class PinsController {
 
   @Inject WorkspaceContainerFactory containerFactory;
 
+  @Inject WorkspaceRunnerPins runnerPins;
+
   /**
    * One image a launch would pull.
    *
    * @param image the registry-relative repository, host segment stripped
    * @param version the calver tag this process resolved at boot
-   * @param launches what starting it would be — {@code workspace} or {@code editor}
+   * @param launches what starting it would be — {@code workspace}, {@code editor} or {@code
+   *     runner}
    */
   public record LaunchPin(String image, String version, String launches) {}
 
@@ -77,7 +86,8 @@ public class PinsController {
             containerFactory.imageRepo(),
             containerFactory.imageVersion(),
             containerFactory.editorImageRepo(),
-            containerFactory.editorImageVersion()));
+            containerFactory.editorImageVersion(),
+            runnerPins.version()));
   }
 
   /**
@@ -87,9 +97,20 @@ public class PinsController {
    */
   static List<LaunchPin> pins(
       String imageRepo, String imageVersion, String editorImageRepo, String editorImageVersion) {
+    return pins(imageRepo, imageVersion, editorImageRepo, editorImageVersion, null);
+  }
+
+  /** {@link #pins(String, String, String, String)} with the workspace runner's image beside them. */
+  static List<LaunchPin> pins(
+      String imageRepo,
+      String imageVersion,
+      String editorImageRepo,
+      String editorImageVersion,
+      String runnerVersion) {
     return Stream.of(
             pin(imageRepo, imageVersion, "workspace"),
-            pin(editorImageRepo, editorImageVersion, "editor"))
+            pin(editorImageRepo, editorImageVersion, "editor"),
+            pin(WorkspaceRunnerPins.IMAGE_REPOSITORY, runnerVersion, "runner"))
         .flatMap(Optional::stream)
         .sorted(Comparator.comparing(LaunchPin::image).thenComparing(LaunchPin::launches))
         .toList();

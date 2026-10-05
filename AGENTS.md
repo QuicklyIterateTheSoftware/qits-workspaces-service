@@ -1576,6 +1576,41 @@ RUNNER with no eligible runner is a 409 `NO_RUNNER`. The refusal codes live in `
   whole DIRECT spec, order included; `RunnerWorkspaceSpecs` composes the runner's from the same
   methods and carries no address and no credential until qits-625.
 
+### The runners themselves: the doors, the socket and the pin (qits-848/850/851/859)
+
+`api/WorkspaceRunnerController` (`/workspaces/api/runners`) is qits-ci's `CiRunnerController` door
+for door, and the roles are per method: reads `{admin, system, agent}`; create, PATCH, rotate and
+DELETE `{admin, system}` (the cold bootstrap drives them with its own token); greenlight, healthcheck
+and login-check `qits:admin` alone. `qits:workspaces-runner-registration` opens `register` and
+`install.sh` and nothing else. The register door reads the bearer's `sub` off the validated token,
+so it needs the machine gate on (`qits.auth.machine.required`, true live via
+`QITS_AUTH_MACHINE_REQUIRED`); the tests run under `DaemonControlSocketMachineAuthTest.GateOn` for
+that reason and reuse it rather than adding a profile.
+
+- **The install line and `install.sh` are qits-runner-toolkit's template**, rendered through
+  `InstallScript` with `WorkspaceRunnerInstallScript.IDENTITY` — built from the protocol jar's roots
+  exactly as the runner's own `WorkspacesRunnerIdentity` is. There is no copy of the template here.
+  `quarkus.native.resources.includes` carries the template and the runner pin's version file; both
+  are loaded by a name the native builder cannot see.
+- **The pin is a pom property**, `qits.workspaces-runner-protocol.version`: `WorkspacesRunnerBinary.VERSION`
+  is the version every `hello` is compared with and the image tag an `upgrade` and `install.sh`
+  name. `qits.runner.version` pins both qits-runner-javalib jars with `*:*` exclusions.
+- **Every address is a public one**, from `QITS_DOMAIN` alone (`runnerhost/WorkspaceRunnerAddresses`);
+  an undotted domain is 503 `RUNNER_PLANE_UNCONFIGURED` on create, register and `install.sh`.
+- **`runnerhost/WorkspaceRunnerRegistry` is `CiRunnerRegistry`'s shape**: one session per
+  connection, same version replaces (`ALREADY_CONNECTED`), another version is sent `upgrade` +
+  `ack{0}` and retired when its successor says hello, a 60 s reconnect grace (CI's value, a
+  constant here). A greeted runner gets `ack`, `quarantined` if it is, `estate`, `backlog` and —
+  while it awaits its first one — `healthCheck`; `estate` goes out only from a successful read.
+  `SocketBearerLifetime` is a copy of CI's (qits-545) for this one path.
+- **`runnerhost/RunnerPlacementDriver` is the domain's `RunnerPlacement` port.** Its notifications
+  run after the caller's transaction commits, on the registry's own thread; `stop`/`delete` wait
+  60 s for the reply (`RUNNER_TIMEOUT`, or `RUNNER_UNAVAILABLE` with no socket).
+- **The DTO's live half** — `connected`, `connectedSince`, `pinnedVersion`, the three counts and the
+  two login commands — is laid beside the row by `runnerhost/WorkspaceRunnerViews` through
+  `WorkspaceRunnerMapper.Live`. A login command is null until the runner reported its agent home
+  volume, and a reported name that is not a plain docker volume name is never spliced into it.
+
 ## The contract with qits-projects: golden masters in, a pact out
 
 Epic qits-546. `HttpRepositoryLookup` makes two calls to qits-projects — `getRepository` behind

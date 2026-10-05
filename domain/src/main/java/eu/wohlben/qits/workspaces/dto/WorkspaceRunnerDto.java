@@ -5,8 +5,9 @@ import java.util.UUID;
 
 /**
  * A workspace runner as the runners page reads it. Built by {@code WorkspaceRunnerMapper}, and only
- * there, so a field added later (the connection and slot counts of qits-848, the login command of
- * qits-859) is one component here and one argument there.
+ * there. The row's columns and the runner's last report come from the mapper; what is live — the
+ * connection, the pin, the counts and the login commands (qits-848, qits-859) — is handed to it by
+ * the service, which holds the sockets, as {@code WorkspaceRunnerMapper.Live}.
  *
  * @param id the runner's id: what its install line, register door and socket name
  * @param name unique, {@code [a-z][a-z0-9-]{0,63}}
@@ -27,6 +28,16 @@ import java.util.UUID;
  * @param lastHealthCheckAt when its newest health check settled, or null
  * @param lastHealthCheckOk whether that check passed, or null
  * @param createdAt when the runner was declared
+ * @param connected whether the runner holds a socket to this process right now
+ * @param connectedSince since when it has, without a break; null while it does not
+ * @param pinnedVersion the runner version this process pins and upgrades every runner to; a
+ *     connected runner whose {@code version} differs is being updated
+ * @param running its workspace containers running or being launched (RUNNING + PROVISIONING)
+ * @param owned the ACTIVE workspaces placed on it, whatever their runtime state
+ * @param queued the workspaces sticky to it that wait for one of its slots (QUEUED)
+ * @param loginCommand the one command that logs the node's agent home in to Claude, run on the
+ *     node; null until the runner has reported its agent home volume
+ * @param kimiLoginCommand the same for Kimi; null until the volume is known
  */
 public record WorkspaceRunnerDto(
     UUID id,
@@ -46,7 +57,15 @@ public record WorkspaceRunnerDto(
     Instant lastSeenAt,
     Instant lastHealthCheckAt,
     Boolean lastHealthCheckOk,
-    Instant createdAt) {
+    Instant createdAt,
+    boolean connected,
+    Instant connectedSince,
+    String pinnedVersion,
+    int running,
+    int owned,
+    int queued,
+    String loginCommand,
+    String kimiLoginCommand) {
 
   /**
    * The node's agent login state, last known: kept while the runner is offline.

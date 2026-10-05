@@ -142,4 +142,50 @@ public class NativeImageContractTest {
         missing.isEmpty(),
         "editor records not in EditorController's @RegisterForReflection(targets): " + missing);
   }
+
+  /**
+   * The runner create answers through a bare {@code Response}, so its record and the runner view it
+   * carries are on no signature the native build indexes — the editor door's defect, one door over.
+   */
+  @Test
+  public void everyRunnerRegistrationRecordIsRegisteredForReflection() {
+    Set<Class<?>> registered =
+        Set.of(
+            WorkspaceRunnerController.class.getAnnotation(RegisterForReflection.class).targets());
+    List<String> missing =
+        Stream.of(
+                WorkspaceRunnerController.RunnerRegistrationDto.class,
+                eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto.class,
+                eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto.Login.class)
+            .filter(c -> !registered.contains(c))
+            .map(Class::getSimpleName)
+            .toList();
+    assertTrue(
+        missing.isEmpty(),
+        "runner records not in WorkspaceRunnerController's @RegisterForReflection: " + missing);
+  }
+
+  /**
+   * The two resources the workspace runners load by a computed name are listed for the native image
+   * and are really on the classpath under that name — the install script template, and the runner
+   * pin's version file.
+   */
+  @Test
+  public void theRunnerResourcesAreIncludedInTheNativeImage() {
+    String includes =
+        org.eclipse.microprofile.config.ConfigProvider.getConfig()
+            .getOptionalValue("quarkus.native.resources.includes", String.class)
+            .orElse("");
+    for (String resource :
+        List.of(
+            "eu/wohlben/qits/runner/toolkit/install/runner-install.sh.tmpl",
+            "eu/wohlben/qits/workspacesrunner/protocol/workspaces-runner-binary.properties")) {
+      assertTrue(
+          Arrays.asList(includes.split(",")).contains(resource),
+          resource + " is not in quarkus.native.resources.includes: " + includes);
+      assertTrue(
+          Thread.currentThread().getContextClassLoader().getResource(resource) != null,
+          resource + " is not on the classpath; the pinned jar moved it");
+    }
+  }
 }

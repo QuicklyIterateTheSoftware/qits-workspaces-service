@@ -7,7 +7,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -50,6 +52,16 @@ public class WorkspacesExceptionMapper implements ExceptionMapper<DomainExceptio
     }
     if (exception instanceof RunnerOwnsWorkspacesException owns) {
       body.put("workspaceIds", owns.workspaceIds());
+      List<Map<String, Object>> workspaces = new ArrayList<>();
+      for (RunnerOwnsWorkspacesException.OwnedWorkspace owned : owns.workspaces()) {
+        // A map rather than the record, so a null branch is written as null like every other key.
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("id", owned.id());
+        entry.put("repositoryId", owned.repositoryId());
+        entry.put("branch", owned.branch());
+        workspaces.add(entry);
+      }
+      body.put("workspaces", workspaces);
     }
     if (exception instanceof IntegrateConflictException conflict) {
       body.put("reason", conflict.reason().name());

@@ -7,6 +7,7 @@ import static org.hamcrest.Matchers.notNullValue;
 
 import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceImage;
 import eu.wohlben.qits.workspaceeditor.WorkspaceEditorImage;
+import eu.wohlben.qits.workspacesrunner.protocol.WorkspacesRunnerBinary;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.path.json.JsonPath;
 import java.util.List;
@@ -36,8 +37,10 @@ public class PinsControllerTest {
 
   private static final String editorImageVersion = WorkspaceEditorImage.VERSION;
 
+  private static final String runnerVersion = WorkspacesRunnerBinary.VERSION;
+
   @Test
-  public void theTwoLaunchImagesAnswerRegistryRelativeAndInImageOrder() {
+  public void theLaunchImagesAndTheRunnerAnswerRegistryRelativeAndInImageOrder() {
     JsonPath answer =
         given().when().get("/workspaces/api/pins").then().statusCode(200).extract().jsonPath();
 
@@ -46,10 +49,14 @@ public class PinsControllerTest {
     // and the registry host the launch reference carries is not the registry's own name for it.
     assertThat(
         answer.getList("pins.image", String.class),
-        is(List.of("qits/workspace", "qits/workspace-editor")));
-    assertThat(answer.getList("pins.launches", String.class), is(List.of("workspace", "editor")));
-    assertThat(answer.getString("pins[0].version"), is(workspaceImageVersion));
-    assertThat(answer.getString("pins[1].version"), is(editorImageVersion));
+        is(List.of("qits/qits-workspaces-runner", "qits/workspace", "qits/workspace-editor")));
+    assertThat(
+        answer.getList("pins.launches", String.class),
+        is(List.of("runner", "workspace", "editor")));
+    // The runner's is the protocol jar's version: what an install script and an upgrade name.
+    assertThat(answer.getString("pins[0].version"), is(runnerVersion));
+    assertThat(answer.getString("pins[1].version"), is(workspaceImageVersion));
+    assertThat(answer.getString("pins[2].version"), is(editorImageVersion));
   }
 
   /** A half-composed reference names nothing, so the row is left out rather than half-answered. */

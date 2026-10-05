@@ -17,10 +17,44 @@ import java.time.format.DateTimeParseException;
 @ApplicationScoped
 public class WorkspaceRunnerMapper {
 
+  /**
+   * What only the service knows about a runner: whether it is connected (the sockets live there),
+   * the pinned runner version, the row counts and the login commands composed from its addresses.
+   *
+   * @param connected whether it holds a socket right now
+   * @param connectedSince since when, without a break; null while it does not
+   * @param pinnedVersion the version every runner is upgraded to
+   * @param running RUNNING + PROVISIONING rows on it
+   * @param owned ACTIVE rows on it
+   * @param queued QUEUED rows sticky to it
+   * @param loginCommand the Claude login command, or null while the agent home volume is unknown
+   * @param kimiLoginCommand the Kimi one, likewise
+   */
+  public record Live(
+      boolean connected,
+      Instant connectedSince,
+      String pinnedVersion,
+      int running,
+      int owned,
+      int queued,
+      String loginCommand,
+      String kimiLoginCommand) {
+
+    /** Nothing known beyond the row: not connected, no pin, no counts, no commands. */
+    public static final Live NONE = new Live(false, null, null, 0, 0, 0, null, null);
+  }
+
+  /** The row alone, as {@link Live#NONE} reads it. */
   public WorkspaceRunnerDto toDto(WorkspaceRunner runner) {
+    return toDto(runner, Live.NONE);
+  }
+
+  /** The row together with what the service knows live about it. */
+  public WorkspaceRunnerDto toDto(WorkspaceRunner runner, Live live) {
     if (runner == null) {
       return null;
     }
+    Live known = live == null ? Live.NONE : live;
     JsonNode said = WorkspaceRunnerCapabilities.decode(runner.capabilities);
     return new WorkspaceRunnerDto(
         runner.id,
@@ -40,7 +74,15 @@ public class WorkspaceRunnerMapper {
         runner.lastSeenAt,
         runner.lastHealthCheckAt,
         runner.lastHealthCheckOk,
-        runner.createdAt);
+        runner.createdAt,
+        known.connected(),
+        known.connectedSince(),
+        known.pinnedVersion(),
+        known.running(),
+        known.owned(),
+        known.queued(),
+        known.loginCommand(),
+        known.kimiLoginCommand());
   }
 
   /** {@code login{claude,kimi,checkedAt}}, or null when the runner has not reported one. */
