@@ -15,19 +15,27 @@ import java.util.regex.Pattern;
  *
  * <pre>
  * docker run --rm -it --user 1000 --entrypoint claude \
- *   -v &lt;dotClaudeVolume&gt;:/claude-home -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home \
+ *   -v &lt;dotClaudeVolume&gt;:/claude-home -e HOME=/claude-home \
+ *   -e CLAUDE_CONFIG_DIR=/claude-home/.claude \
  *   &lt;registry.qits.&lt;d&gt;/qits/workspace:&lt;pin&gt;&gt;
  * </pre>
  *
- * (one line). The workspace image's ENTRYPOINT is the Java workspace daemon, not a shell, so the
- * launch overrides it with {@code --entrypoint claude} rather than naming {@code claude} as an
+ * (one line). The agent home is laid out EXACTLY as a workspace container has it (qits-945): every
+ * workspace runs with {@code CLAUDE_CONFIG_DIR=/claude-home/.claude} as a container env, and
+ * qits-coding-agents' sign-in terminal and {@code AgentAuthStatus} add {@code HOME=/claude-home}.
+ * A login with {@code CLAUDE_CONFIG_DIR=/claude-home} — what shipped first — wrote its credentials
+ * one directory above where every workspace reads them, so the runner's probe (which read the same
+ * wrong place) said PRESENT while every launch answered {@code not-signed-in}.
+ *
+ * <p>The workspace image's ENTRYPOINT is the Java workspace daemon, not a shell, so the launch
+ * overrides it with {@code --entrypoint claude} rather than naming {@code claude} as an
  * argument — the mistake that shipped live 2026-10-05, which started the daemon with "claude" on
  * its command line and left the operator staring at Java logs instead of a sign-in prompt.
  * {@code --user 1000} matters for the same reason the image's lack of a {@code USER} does: the
  * image runs as root by default, and a root-owned login would be unreadable by the uid-1000
  * workspace containers that are meant to share it. Kimi's is the same shape with
  * {@code --entrypoint kimi}, {@code KIMI_CODE_HOME} in place of {@code CLAUDE_CONFIG_DIR} (its
- * value one segment deeper, {@code /claude-home/.kimi-code}, the mount point qits-coding-agents'
+ * value {@code /claude-home/.kimi-code}, beside {@code .claude}, the mount point qits-coding-agents'
  * {@code AgentLaunchService} hands every Kimi launch), and a trailing {@code login} argument. The
  * image is {@link WorkspaceRunnerAddresses#workspaceImage}, the one a {@code take} and an
  * {@code estate} name.
@@ -63,6 +71,12 @@ public class RunnerLoginCommand {
    */
   private static final String KIMI_CODE_HOME = HOME + "/.kimi-code";
 
+  /**
+   * Claude Code's config directory beneath {@link #HOME}, as every workspace container sets it
+   * ({@code WorkspaceContainerFactory.homeEnv}): {@code CLAUDE_CONFIG_DIR=<claudeMount>/.claude}.
+   */
+  static final String CLAUDE_CONFIG_DIR = HOME + "/.claude";
+
   @Inject WorkspaceRunnerAddresses addresses;
 
   /**
@@ -75,8 +89,8 @@ public class RunnerLoginCommand {
       Instant connectedSince,
       Instant registeredAt) {
     return compose(
-        dotClaudeVolume, "claude", "CLAUDE_CONFIG_DIR", HOME, null, login, connectedSince,
-        registeredAt);
+        dotClaudeVolume, "claude", "CLAUDE_CONFIG_DIR", CLAUDE_CONFIG_DIR, null, login,
+        connectedSince, registeredAt);
   }
 
   /** The Kimi login command for {@code dotClaudeVolume}, under the same conditions. */

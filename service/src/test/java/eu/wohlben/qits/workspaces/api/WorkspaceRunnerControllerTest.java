@@ -521,7 +521,7 @@ class WorkspaceRunnerControllerTest {
     String expectedLoginCommand =
         "docker run --rm -it --user 1000 --entrypoint claude -v"
             + " qits-workspaces-runner-dot-claude-1234abcd:/claude-home"
-            + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home "
+            + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home/.claude "
             + image;
     String expectedKimiLoginCommand =
         "docker run --rm -it --user 1000 --entrypoint kimi -v"

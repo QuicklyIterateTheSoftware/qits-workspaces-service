@@ -28,9 +28,10 @@ class RunnerLoginCommandTest {
     assertEquals(
         "docker run --rm -it --user 1000 --entrypoint claude -v"
             + " qits-workspaces-runner-dot-claude-3f2b8f0e:/claude-home"
-            + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home "
+            + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home/.claude "
             + IMAGE,
-        RunnerLoginCommand.command(VOLUME, IMAGE, "claude", "CLAUDE_CONFIG_DIR", "/claude-home", null));
+        RunnerLoginCommand.command(
+            VOLUME, IMAGE, "claude", "CLAUDE_CONFIG_DIR", "/claude-home/.claude", null));
     assertEquals(
         "docker run --rm -it --user 1000 --entrypoint kimi -v"
             + " qits-workspaces-runner-dot-claude-3f2b8f0e:/claude-home"
@@ -104,7 +105,7 @@ class RunnerLoginCommandTest {
     WorkspaceRunnerDto.Login login = new WorkspaceRunnerDto.Login("ABSENT", "UNKNOWN", SINCE);
     assertEquals(
         "docker run --rm -it --user 1000 --entrypoint claude -v " + VOLUME + ":/claude-home"
-            + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home " + IMAGE,
+            + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home/.claude " + IMAGE,
         command.claude(VOLUME, login, SINCE, null));
     assertEquals(
         "docker run --rm -it --user 1000 --entrypoint kimi -v " + VOLUME + ":/claude-home"
