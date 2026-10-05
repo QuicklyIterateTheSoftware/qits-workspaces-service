@@ -1332,10 +1332,26 @@ public class WorkspaceService {
       throw new BadRequestException("Invalid workspace id: " + workspaceId);
     }
 
-    // Where the container runs, decided once and here: what the request stated, or DIRECT. Refused
-    // before the branch is pushed, so a placement that cannot be honoured costs nothing.
-    WorkspacePlacement placed = placementOf(placement);
-    refuseUnplaceable(placed, admin);
+    // Where the container runs, decided once and here (qits-837, epic qits-626): RUNNER is the
+    // default for a regular workspace once a runner is eligible, admin and editor stay DIRECT, and a
+    // stated placement is honoured as stated. Refused before the branch is pushed, so a placement
+    // that cannot be honoured costs nothing. The refusal reads the RAW stated value, not the rule's
+    // answer: an admin asking for RUNNER is still a 400 even though WorkspacePlacements would answer
+    // DIRECT for it, and an explicit RUNNER with no eligible runner is still a 409 even though the
+    // "nothing stated" branch would have fallen back to DIRECT.
+    refuseUnplaceable(placement, admin);
+    // The eligibility query is skipped whenever the answer cannot change the outcome: admin/editor
+    // never consult it, and an explicit DIRECT or RUNNER needs no default. Only "nothing stated" on
+    // a regular workspace asks, and asks once.
+    boolean runnerEligible = placement == null && !admin && runnerRepository.existsEligible();
+    WorkspacePlacement placed =
+        WorkspacePlacements.forNewRow(
+            admin, false, Optional.ofNullable(placement), runnerEligible);
+    if (placement == null) {
+      LOG.infof(
+          "Workspace %s/%s placement=%s (default: %s eligible runners)",
+          repoId, workspaceId, placed, runnerEligible ? "has" : "no");
+    }
 
     RepoMirror mirror = mirrors.of(repoId);
 
@@ -1443,19 +1459,15 @@ public class WorkspaceService {
   }
 
   /**
-   * The placement a new row is written with: the one the request stated, or DIRECT. The one place
-   * that decides it — qits-837 replaces it with {@code WorkspacePlacements.forNewRow}, and qits-774
-   * narrows it to RUNNER-only for regular rows. The editor and the main workspace are written by
-   * their own doors and are always DIRECT; so is every dispatch, which states nothing.
-   */
-  private static WorkspacePlacement placementOf(WorkspacePlacement stated) {
-    return stated == null ? WorkspacePlacement.DIRECT : stated;
-  }
-
-  /**
    * Refuses a RUNNER placement that cannot be honoured: 400 for an admin workspace (it holds the
    * host's docker socket and always runs on the platform host, {@code ck_workspace_runner_posture}),
    * and 409 {@code NO_RUNNER} when no runner is eligible at all, so nothing waits forever unseen.
+   *
+   * <p>Reads the raw stated placement (not {@link WorkspacePlacements#forNewRow}'s answer): the two
+   * refusals exist whether or not a <em>default</em> would quietly fall back to DIRECT. A null
+   * placement (nothing stated) is never RUNNER and always returns at once. The editor and the main
+   * workspace are written by their own doors, never through here; so is every dispatch, which states
+   * nothing and leaves the default rule to decide.
    */
   private void refuseUnplaceable(WorkspacePlacement placement, boolean admin) {
     if (placement != WorkspacePlacement.RUNNER) {
@@ -1739,7 +1751,7 @@ public class WorkspaceService {
               }
               refuseSecondActiveForWork(
                   subject == null ? null : subject.normalized().workId());
-              refuseUnplaceable(placementOf(placement), admin);
+              refuseUnplaceable(placement, admin);
             });
     createBranchTree(root, newBranch, parentBranch);
     return QuarkusTransaction.requiringNew()
@@ -2144,6 +2156,9 @@ public class WorkspaceService {
     workspace.status = WorkspaceStatus.ACTIVE;
     workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
     workspace.editor = true;
+    // The editor never consults a runner: stated explicitly rather than left to the entity's own
+    // DIRECT default, so this stays true even if that default ever changes (qits-837).
+    workspace.placement = WorkspacePlacement.DIRECT;
     // The editor pushes nothing today. It has no branch of its own to push, and the repositories it
     // will one day hold side by side are not cloned into it yet — so the honest list is the empty
     // one, which is also what GitRefs.effective would answer for a branchless row. Widening it is
