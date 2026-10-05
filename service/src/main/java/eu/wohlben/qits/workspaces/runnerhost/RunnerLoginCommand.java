@@ -1,10 +1,13 @@
 package eu.wohlben.qits.workspaces.runnerhost;
 
+import eu.wohlben.qits.workspaces.control.WorkspaceContainerFactory;
 import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto;
 import eu.wohlben.qits.workspaces.error.DomainException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -15,17 +18,22 @@ import java.util.regex.Pattern;
  *
  * <pre>
  * docker run --rm -it --user 1000 --entrypoint claude \
- *   -v &lt;dotClaudeVolume&gt;:/claude-home -e HOME=/claude-home \
- *   -e CLAUDE_CONFIG_DIR=/claude-home/.claude \
+ *   -v &lt;dotClaudeVolume&gt;:&lt;claudeMount&gt; -e HOME=&lt;claudeMount&gt; \
+ *   -e CLAUDE_CONFIG_DIR=&lt;claudeMount&gt;/.claude \
  *   &lt;registry.qits.&lt;d&gt;/qits/workspace:&lt;pin&gt;&gt;
  * </pre>
  *
- * (one line). The agent home is laid out EXACTLY as a workspace container has it (qits-945): every
- * workspace runs with {@code CLAUDE_CONFIG_DIR=/claude-home/.claude} as a container env, and
- * qits-coding-agents' sign-in terminal and {@code AgentAuthStatus} add {@code HOME=/claude-home}.
- * A login with {@code CLAUDE_CONFIG_DIR=/claude-home} — what shipped first — wrote its credentials
- * one directory above where every workspace reads them, so the runner's probe (which read the same
- * wrong place) said PRESENT while every launch answered {@code not-signed-in}.
+ * (one line). The agent home is laid out EXACTLY as a workspace container has it (qits-945) —
+ * literally so, rather than by two copies agreeing: {@code claudeMount}, {@code HOME} and
+ * {@code CLAUDE_CONFIG_DIR}/{@code KIMI_CODE_HOME} are all read off the injected {@link
+ * WorkspaceContainerFactory} at the moment the command is composed, {@link
+ * WorkspaceContainerFactory#claudeMount()} and {@link WorkspaceContainerFactory#homeEnv} — the same
+ * two methods {@code RunnerWorkspaceSpecs} composes a RUNNER container's own environment and mount
+ * from. A login with {@code CLAUDE_CONFIG_DIR=/claude-home} while a deployment's mount was
+ * {@code /claude-home} too — what shipped first, as a literal copied beside the real one — wrote
+ * its credentials one directory above where every workspace reads them, so the runner's probe
+ * (which read the same wrong place) said PRESENT while every launch answered {@code
+ * not-signed-in}. Two copies of one value is what let that drift; there is now one.
  *
  * <p>The workspace image's ENTRYPOINT is the Java workspace daemon, not a shell, so the launch
  * overrides it with {@code --entrypoint claude} rather than naming {@code claude} as an
@@ -59,25 +67,12 @@ import java.util.regex.Pattern;
 @ApplicationScoped
 public class RunnerLoginCommand {
 
-  /** Where the node's agent home is mounted, as the runner's login probe mounts it. */
-  static final String HOME = "/claude-home";
-
   /** A docker volume name: what a runner may report and still be spliced into a shell line. */
   private static final Pattern VOLUME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_.-]{0,254}");
 
-  /**
-   * Where Kimi's agent home is mounted beneath {@link #HOME}, as {@code AgentLaunchService}
-   * mounts it.
-   */
-  private static final String KIMI_CODE_HOME = HOME + "/.kimi-code";
-
-  /**
-   * Claude Code's config directory beneath {@link #HOME}, as every workspace container sets it
-   * ({@code WorkspaceContainerFactory.homeEnv}): {@code CLAUDE_CONFIG_DIR=<claudeMount>/.claude}.
-   */
-  static final String CLAUDE_CONFIG_DIR = HOME + "/.claude";
-
   @Inject WorkspaceRunnerAddresses addresses;
+
+  @Inject WorkspaceContainerFactory factory;
 
   /**
    * The Claude login command for {@code dotClaudeVolume}, or null while it is unknown, the login
@@ -89,8 +84,7 @@ public class RunnerLoginCommand {
       Instant connectedSince,
       Instant registeredAt) {
     return compose(
-        dotClaudeVolume, "claude", "CLAUDE_CONFIG_DIR", CLAUDE_CONFIG_DIR, null, login,
-        connectedSince, registeredAt);
+        dotClaudeVolume, "claude", "CLAUDE_CONFIG_DIR", null, login, connectedSince, registeredAt);
   }
 
   /** The Kimi login command for {@code dotClaudeVolume}, under the same conditions. */
@@ -100,8 +94,7 @@ public class RunnerLoginCommand {
       Instant connectedSince,
       Instant registeredAt) {
     return compose(
-        dotClaudeVolume, "kimi", "KIMI_CODE_HOME", KIMI_CODE_HOME, "login", login, connectedSince,
-        registeredAt);
+        dotClaudeVolume, "kimi", "KIMI_CODE_HOME", "login", login, connectedSince, registeredAt);
   }
 
   /**
@@ -118,7 +111,6 @@ public class RunnerLoginCommand {
       String volume,
       String entrypoint,
       String envKey,
-      String envValue,
       String trailingArg,
       WorkspaceRunnerDto.Login login,
       Instant connectedSince,
@@ -132,7 +124,12 @@ public class RunnerLoginCommand {
     } catch (DomainException unconfigured) {
       return null;
     }
-    return command(volume, image, entrypoint, envKey, envValue, trailingArg);
+    // The agent home as this deployment's own workspace containers have it, never a second
+    // literal: the mount point is the factory's, and CLAUDE_CONFIG_DIR/KIMI_CODE_HOME are read off
+    // the same homeEnv a RUNNER container's own spec is composed with (RunnerWorkspaceSpecs).
+    Map<String, String> home = new LinkedHashMap<>();
+    factory.homeEnv(true, false, false, home::put);
+    return command(volume, image, entrypoint, envKey, home.get(envKey), factory.claudeMount(), trailingArg);
   }
 
   /**
@@ -162,13 +159,14 @@ public class RunnerLoginCommand {
   }
 
   /**
-   * The command's one shape, for {@code volume}, {@code image}, the overriding {@code entrypoint}
-   * and the harness's own agent-home env var ({@code envKey}={@code envValue}). {@code trailingArg}
-   * is appended after {@code image} when present (Kimi's {@code login}); null for Claude, whose
-   * entrypoint override needs no argument.
+   * The command's one shape, for {@code volume}, {@code image}, the overriding {@code entrypoint},
+   * the harness's own agent-home env var ({@code envKey}={@code envValue}), and {@code home} — the
+   * mount target and {@code HOME}, both the caller's to supply so this method carries no literal of
+   * its own. {@code trailingArg} is appended after {@code image} when present (Kimi's {@code
+   * login}); null for Claude, whose entrypoint override needs no argument.
    */
   static String command(
-      String volume, String image, String entrypoint, String envKey, String envValue,
+      String volume, String image, String entrypoint, String envKey, String envValue, String home,
       String trailingArg) {
     String base =
         "docker run --rm -it --user 1000 --entrypoint "
@@ -176,9 +174,9 @@ public class RunnerLoginCommand {
             + " -v "
             + volume
             + ":"
-            + HOME
+            + home
             + " -e HOME="
-            + HOME
+            + home
             + " -e "
             + envKey
             + "="

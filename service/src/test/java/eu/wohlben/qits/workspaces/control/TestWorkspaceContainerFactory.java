@@ -66,6 +66,18 @@ public final class TestWorkspaceContainerFactory {
   }
 
   /**
+   * A factory whose {@code qits.workspace.claude-mount} is NOT the shipped default — for a test
+   * that must prove a reader derives the mount from the factory rather than carrying its own copy
+   * of the default value (qits-945, {@code RunnerLoginCommandTest}): a reader that silently fell
+   * back to {@code /claude-home} would pass against {@link #persistent()} just as happily.
+   */
+  public static WorkspaceContainerFactory withClaudeMount(String mount) {
+    WorkspaceContainerFactory f = build(true);
+    f.claudeMount = mount;
+    return f;
+  }
+
+  /**
    * A factory whose workspaces hold a commissioned platform credential — the shape a deployment with
    * an issuer wired has. The shipped posture is the other one, which is why the two builders above
    * leave the lookup empty.

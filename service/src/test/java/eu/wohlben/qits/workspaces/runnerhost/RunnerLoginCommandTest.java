@@ -4,8 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import eu.wohlben.qits.workspaces.control.TestWorkspaceContainerFactory;
+import eu.wohlben.qits.workspaces.control.WorkspaceContainerFactory;
 import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -31,7 +35,8 @@ class RunnerLoginCommandTest {
             + " -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home/.claude "
             + IMAGE,
         RunnerLoginCommand.command(
-            VOLUME, IMAGE, "claude", "CLAUDE_CONFIG_DIR", "/claude-home/.claude", null));
+            VOLUME, IMAGE, "claude", "CLAUDE_CONFIG_DIR", "/claude-home/.claude", "/claude-home",
+            null));
     assertEquals(
         "docker run --rm -it --user 1000 --entrypoint kimi -v"
             + " qits-workspaces-runner-dot-claude-3f2b8f0e:/claude-home"
@@ -39,7 +44,8 @@ class RunnerLoginCommandTest {
             + IMAGE
             + " login",
         RunnerLoginCommand.command(
-            VOLUME, IMAGE, "kimi", "KIMI_CODE_HOME", "/claude-home/.kimi-code", "login"));
+            VOLUME, IMAGE, "kimi", "KIMI_CODE_HOME", "/claude-home/.kimi-code", "/claude-home",
+            "login"));
   }
 
   @Test
@@ -120,6 +126,41 @@ class RunnerLoginCommandTest {
     assertFalse(command.pending(null, null, SINCE, null));
   }
 
+  // --- the home is the factory's, not a second copy of it (qits-945) -----------------------------
+
+  /**
+   * Ties the login command to the workspace factory a RUNNER container's own spec is composed
+   * from: a NON-default {@code claude-mount} ({@code /agent-home}, not the shipped
+   * {@code /claude-home}) proves the command is derived rather than carrying a matching literal by
+   * coincidence. Comparing against {@code factory.homeEnv}/{@code claudeMount()} directly, rather
+   * than a full {@code RunnerWorkspaceSpecs}: that composer's {@code factory} field is
+   * package-private to {@code control}, unreachable from this module's {@code runnerhost} test —
+   * the same reason {@code RunnerLoginCommand} itself cannot be built with {@code new} here and
+   * {@link #withAddresses} wires it by hand.
+   */
+  @Test
+  void theHomeIsDerivedFromTheFactoryNotADefaultLiteral() {
+    WorkspaceContainerFactory factory = TestWorkspaceContainerFactory.withClaudeMount("/agent-home");
+    Map<String, String> expectedEnv = new LinkedHashMap<>();
+    factory.homeEnv(true, false, false, expectedEnv::put);
+
+    RunnerLoginCommand command = withAddresses(IMAGE);
+    command.factory = factory;
+    WorkspaceRunnerDto.Login login = new WorkspaceRunnerDto.Login("ABSENT", "UNKNOWN", SINCE);
+
+    assertEquals(factory.claudeMount(), "/agent-home");
+    assertEquals(
+        "docker run --rm -it --user 1000 --entrypoint claude -v " + VOLUME + ":/agent-home"
+            + " -e HOME=/agent-home -e CLAUDE_CONFIG_DIR=" + expectedEnv.get("CLAUDE_CONFIG_DIR")
+            + " " + IMAGE,
+        command.claude(VOLUME, login, SINCE, null));
+    assertEquals(
+        "docker run --rm -it --user 1000 --entrypoint kimi -v " + VOLUME + ":/agent-home"
+            + " -e HOME=/agent-home -e KIMI_CODE_HOME=" + expectedEnv.get("KIMI_CODE_HOME")
+            + " " + IMAGE + " login",
+        command.kimi(VOLUME, login, SINCE, null));
+  }
+
   private static RunnerLoginCommand withAddresses(String image) {
     RunnerLoginCommand command = new RunnerLoginCommand();
     command.addresses =
@@ -129,6 +170,7 @@ class RunnerLoginCommandTest {
             return image;
           }
         };
+    command.factory = TestWorkspaceContainerFactory.persistent();
     return command;
   }
 }
