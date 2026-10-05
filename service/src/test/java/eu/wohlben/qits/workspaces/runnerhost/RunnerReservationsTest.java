@@ -129,7 +129,7 @@ class RunnerReservationsTest {
   /**
    * A never-placed row is taken: PROVISIONING on this runner, its spec on the wire with the public
    * image, the four logical mounts and the plane's public addresses — and the runner is sent its
-   * new estate. Its {@code launched} makes it RUNNING.
+   * new estate. Its {@code launched}, and then its daemon's report (qits-802), make it RUNNING.
    */
   @Test
   void aQueuedRowIsTakenWithItsSpecAndLaunched() throws Exception {
@@ -162,7 +162,13 @@ class RunnerReservationsTest {
         "every address is the plane's public one (qits-799)");
     assertFalse(
         spec.env().keySet().stream().anyMatch(k -> k.startsWith("QITS_COMMISSIONED_")),
-        "no credential");
+        "no client pair");
+    // The row's workspace token is the credential (qits-802), read off the row at the claim.
+    assertEquals(rows.read(queued).commissionedToken, spec.env().get("QITS_TOKEN"));
+    assertEquals(rows.read(queued).commissionedTokenSubject, spec.env().get("QITS_TOKEN_SUBJECT"));
+    assertEquals(
+        "githost.qits." + WorkspaceRunnerAddressesFixture.DOMAIN,
+        spec.env().get("QITS_GIT_AUTH_HOST"));
     assertFalse(
         spec.labels().keySet().stream().anyMatch(k -> k.startsWith("qits.workspaces.runner.")),
         "never a label in the runner's own namespace");

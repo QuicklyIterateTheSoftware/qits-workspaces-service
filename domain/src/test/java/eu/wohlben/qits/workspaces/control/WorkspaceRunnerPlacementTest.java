@@ -58,6 +58,8 @@ public class WorkspaceRunnerPlacementTest {
   @Inject RunnerClaims claims;
   @Inject WorkspaceIds workspaceIds;
   @Inject TechnicalProcessRegistry processes;
+  @Inject FakeCredentialCommissioner commissioner;
+  @Inject FakeWorkspaceGitStatus gitStatus;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -96,9 +98,11 @@ public class WorkspaceRunnerPlacementTest {
                             .filter(w -> w.status == WorkspaceStatus.ACTIVE)
                             .ifPresent(w -> w.status = WorkspaceStatus.ABANDONED)));
     QuarkusTransaction.requiringNew().run(() -> createdRunners.forEach(runnerRepository::deleteById));
+    rows.forEach(gitStatus::forget);
     rows.clear();
     createdRunners.clear();
     placement.reset();
+    commissioner.reset();
   }
 
   // --- create -------------------------------------------------------------------------------------
@@ -503,6 +507,136 @@ public class WorkspaceRunnerPlacementTest {
         assertThrows(ConflictException.class, () -> workspaceService.deleteContainer(created.id));
     assertEquals(RunnerRefusals.RUNNER_UNAVAILABLE, refused.code());
     assertEquals(runner.id, read(created.id).runnerId);
+  }
+
+  // --- the workspace token (qits-625, qits-802) ---------------------------------------------------
+
+  /**
+   * The token's lifetime is the container's: the create's start mints it (the row holds id, subject
+   * and value, the mint states the row's own context and Git refs) and no client is commissioned; a
+   * stop deletes nothing and the next start reuses it; delete-container deletes it and clears the
+   * row; the start after that mints a fresh one.
+   */
+  @Test
+  public void aRunnerRowsTokenIsMintedAtStartKeptByStopAndDeletedWithTheContainer()
+      throws Exception {
+    WorkspaceRunner runner = eligibleRunner();
+    placement.connect(runner.id);
+    String repoId = repo();
+
+    Workspace created = createRunnerRow(repoId, "tok", false);
+
+    assertEquals(1, commissioner.tokensMinted().size());
+    FakeCredentialCommissioner.MintedToken minted = commissioner.tokensMinted().get(0);
+    assertEquals(created.id.longValue(), minted.rowId());
+    assertEquals(List.of("refs/heads/tok"), minted.gitRefs());
+    Workspace row = read(created.id);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
+    assertEquals(minted.token().tokenId(), row.commissionedTokenId);
+    assertEquals(minted.token().subject(), row.commissionedTokenSubject);
+    assertEquals(minted.token().token(), row.commissionedToken);
+    assertNull(row.commissionedClientId, "a RUNNER row is never commissioned a client");
+    assertEquals(List.of(), commissioner.commissionedFor());
+
+    workspaceService.stopContainer(created.id);
+    workspaceService.beginEnsureContainer(created.id);
+    assertEquals(1, commissioner.tokensMinted().size(), "the start reused the stored token");
+    assertEquals(List.of(), commissioner.tokensDeleted(), "a stop deletes nothing");
+    assertEquals(minted.token().tokenId(), read(created.id).commissionedTokenId);
+
+    running(created.id, runner.id);
+    workspaceService.stopContainer(created.id);
+    assertEquals(List.of(), commissioner.tokensDeleted(), "a routed stop deletes nothing either");
+
+    workspaceService.deleteContainer(created.id);
+    assertEquals(List.of(minted.token().tokenId()), commissioner.tokensDeleted());
+    Workspace deleted = read(created.id);
+    assertNull(deleted.commissionedTokenId);
+    assertNull(deleted.commissionedTokenSubject);
+    assertNull(deleted.commissionedToken);
+
+    workspaceService.beginEnsureContainer(created.id);
+    assertEquals(2, commissioner.tokensMinted().size(), "a fresh token for the next container");
+    assertEquals(
+        commissioner.tokensMinted().get(1).token().tokenId(), read(created.id).commissionedTokenId);
+  }
+
+  /**
+   * No token can be had: the row goes FAILED with {@code WORKSPACE_TOKEN_UNAVAILABLE} and the
+   * reason, nothing is queued and no runner is told — at create and at a later start alike.
+   */
+  @Test
+  public void aStartThatCannotMintFailsTheRowAndQueuesNothing() throws Exception {
+    eligibleRunner();
+    String repoId = repo();
+    commissioner.failTokens("qits-idp is unreachable");
+
+    Workspace created = createRunnerRow(repoId, "notok", false);
+
+    Workspace row = read(created.id);
+    assertEquals(WorkspaceStatus.ACTIVE, row.status, "the create stands");
+    assertEquals(WorkspaceRuntimeStatus.FAILED, row.runtimeStatus);
+    assertEquals("WORKSPACE_TOKEN_UNAVAILABLE: qits-idp is unreachable", row.runtimeError);
+    assertNull(row.queuedAt);
+    assertNull(row.commissionedTokenId);
+    assertFalse(
+        placement.calls().stream().anyMatch(c -> c.startsWith("backlog:")),
+        placement.calls().toString());
+
+    commissioner.reset();
+    commissioner.unwireTokens();
+    workspaceService.beginEnsureContainer(created.id);
+    assertEquals(WorkspaceRuntimeStatus.FAILED, read(created.id).runtimeStatus);
+    assertTrue(
+        read(created.id).runtimeError.startsWith("WORKSPACE_TOKEN_UNAVAILABLE: "),
+        read(created.id).runtimeError);
+
+    commissioner.reset();
+    workspaceService.beginEnsureContainer(created.id);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(created.id).runtimeStatus, "minted now");
+    assertNotNull(read(created.id).commissionedTokenId);
+  }
+
+  /**
+   * RUNNER recreate: the clean-tree gate passes, the container is deleted on its runner (token
+   * deleted, runner cleared), then the start mints a fresh token and queues the row for any runner.
+   */
+  @Test
+  public void recreateDeletesTheContainerAndItsTokenThenStartsWithAFreshOne() throws Exception {
+    WorkspaceRunner runner = eligibleRunner();
+    placement.connect(runner.id);
+    String repoId = repo();
+    Workspace created = stoppedRunnerRow(repoId, "recr");
+    String first = read(created.id).commissionedTokenId;
+    running(created.id, runner.id);
+    gitStatus.report(created.id, true);
+
+    String processId = workspaceService.beginRecreateContainer(created.id);
+
+    assertNotNull(processId);
+    assertTrue(placement.calls().contains("delete:" + created.id), placement.calls().toString());
+    assertEquals(List.of(first), commissioner.tokensDeleted());
+    assertEquals(2, commissioner.tokensMinted().size());
+    Workspace row = read(created.id);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
+    assertNull(row.runnerId, "it may land on another runner");
+    assertEquals(commissioner.tokensMinted().get(1).token().tokenId(), row.commissionedTokenId);
+  }
+
+  /** A resolution deletes the row's token with the rest of the container's teardown. */
+  @Test
+  public void aResolutionDeletesTheToken() throws Exception {
+    WorkspaceRunner runner = eligibleRunner();
+    placement.connect(runner.id);
+    String repoId = repo();
+    Workspace created = stoppedRunnerRow(repoId, "resolvetok");
+    String held = read(created.id).commissionedTokenId;
+    running(created.id, runner.id);
+
+    workspaceService.discardWorkspace(created.id, null, true);
+
+    assertEquals(List.of(held), commissioner.tokensDeleted());
+    assertNull(read(created.id).commissionedTokenId);
   }
 
   @Test

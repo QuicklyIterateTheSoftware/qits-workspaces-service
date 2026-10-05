@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.sun.net.httpserver.HttpServer;
 import eu.wohlben.qits.workspaces.control.CredentialCommissioner;
 import eu.wohlben.qits.workspaces.control.WorkspaceCredential;
+import eu.wohlben.qits.workspaces.control.WorkspaceToken;
 import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
 import io.quarkus.test.junit.QuarkusTest;
 import java.io.OutputStream;
@@ -92,6 +93,8 @@ public class IdpCredentialCommissionerTest {
         QuarkusRestClientBuilder.newBuilder()
             .baseUri(URI.create(baseUrl))
             .build(IdpClients.class);
+    commissioner.tokens =
+        QuarkusRestClientBuilder.newBuilder().baseUri(URI.create(baseUrl)).build(IdpTokens.class);
     return commissioner;
   }
 
@@ -373,5 +376,114 @@ public class IdpCredentialCommissionerTest {
     commissioner.updateGitRefs("ws-7-a", List.of("refs/heads/epic/e"));
 
     assertEquals(List.of(), requests);
+  }
+
+  // --- the workspace token (qits-625, qits-802) -------------------------------------------------
+
+  @Test
+  public void aTokenIsMintedForTheWorkspaceContextWithItsProjectAndGitRefs() throws Exception {
+    String url =
+        serve(
+            List.of(
+                new Answer(
+                    201,
+                    "{\"tokenId\":\"t-1\",\"token\":\"qits_tok_abc\","
+                        + "\"subject\":\"tok-workspace-t-1\",\"contextKind\":\"workspace\"}")));
+
+    Optional<WorkspaceToken> issued =
+        commissionerAgainst(url).commissionToken(7L, A_PROJECT, List.of("refs/heads/task/a"));
+
+    assertEquals(Optional.of(new WorkspaceToken("t-1", "qits_tok_abc", "tok-workspace-t-1")), issued);
+    assertEquals(List.of("POST /api/tokens"), requests);
+    assertEquals(
+        List.of(IdpCredentialCommissioner.basic("dev-qits-workspaces", "service-secret")),
+        authorizations);
+    assertTrue(bodies.get(0).contains("\"contextKind\":\"workspace\""), bodies.get(0));
+    assertTrue(bodies.get(0).contains("\"contextId\":\"7\""), bodies.get(0));
+    assertTrue(
+        bodies.get(0).contains("\"claims\":{\"project\":\"" + A_PROJECT + "\"}"), bodies.get(0));
+    assertTrue(bodies.get(0).contains("\"gitRefs\":[\"refs/heads/task/a\"]"), bodies.get(0));
+    assertFalse(issued.orElseThrow().toString().contains("qits_tok_abc"), "never logged");
+  }
+
+  @Test
+  public void aRefusedGitRefListMintsTheTokenAgainPushingNothing() throws Exception {
+    String url =
+        serve(
+            List.of(
+                new Answer(400, "{\"error\":\"too many refs\"}"),
+                new Answer(
+                    201,
+                    "{\"tokenId\":\"t-1\",\"token\":\"qits_tok_abc\","
+                        + "\"subject\":\"tok-workspace-t-1\"}")));
+
+    assertTrue(
+        commissionerAgainst(url)
+            .commissionToken(7L, A_PROJECT, List.of("refs/heads/task/a"))
+            .isPresent());
+    assertEquals(List.of("POST /api/tokens", "POST /api/tokens"), requests);
+    assertTrue(bodies.get(1).contains("\"gitRefs\":[]"), bodies.get(1));
+  }
+
+  @Test
+  public void anUnwiredDeploymentMintsNoTokenAndCallsNobody() throws Exception {
+    String url = serve(List.of(new Answer(500, null)));
+    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
+    commissioner.enabled = false;
+
+    assertEquals(Optional.empty(), commissioner.commissionToken(7L, A_PROJECT, null));
+    commissioner.deleteToken("t-1");
+    commissioner.updateTokenGitRefs("t-1", List.of());
+    assertEquals(List.of(), commissioner.listTokens());
+    assertEquals(List.of(), requests);
+  }
+
+  @Test
+  public void aTokenIsDeletedByIdAndAnAlreadyGoneOneIsSuccess() throws Exception {
+    String url = serve(List.of(new Answer(204, null), new Answer(404, "{}"), new Answer(500, "{}")));
+    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
+
+    commissioner.deleteToken("t-1");
+    commissioner.deleteToken("t-2");
+    commissioner.deleteToken("t-3"); // a 500 is logged for the reconcile, never thrown
+
+    assertEquals(
+        List.of("DELETE /api/tokens/t-1", "DELETE /api/tokens/t-2", "DELETE /api/tokens/t-3"),
+        requests);
+  }
+
+  @Test
+  public void aTokensGitRefsGoThroughTheTokenDoorAndAFailureThrows() throws Exception {
+    String url =
+        serve(List.of(new Answer(200, "{\"tokenId\":\"t-1\"}"), new Answer(404, "{}")));
+    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
+
+    commissioner.updateTokenGitRefs("t-1", List.of("refs/heads/epic/e"));
+
+    assertEquals(List.of("PUT /api/tokens/t-1/git-refs"), requests);
+    assertEquals("{\"gitRefs\":[\"refs/heads/epic/e\"]}", bodies.get(0));
+    assertThrows(
+        IllegalStateException.class, () -> commissioner.updateTokenGitRefs("t-2", List.of()));
+  }
+
+  @Test
+  public void theTokenListingCarriesKindContextAndCreationAndAFailureIsEmpty() throws Exception {
+    String url =
+        serve(
+            List.of(
+                new Answer(
+                    200,
+                    "[{\"tokenId\":\"t-1\",\"subject\":\"tok-workspace-t-1\","
+                        + "\"contextKind\":\"workspace\",\"contextId\":\"7\","
+                        + "\"createdAt\":\"2026-10-05T10:00:00Z\"}]"),
+                new Answer(500, "{}")));
+    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
+
+    assertEquals(
+        List.of(
+            new CredentialCommissioner.TokenCommission(
+                "t-1", "workspace", "7", java.time.Instant.parse("2026-10-05T10:00:00Z"))),
+        commissioner.listTokens());
+    assertEquals(List.of(), commissioner.listTokens());
   }
 }

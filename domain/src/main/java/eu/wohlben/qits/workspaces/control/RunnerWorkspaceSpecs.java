@@ -24,9 +24,22 @@ import java.util.Map;
  * no internal DNS, so a RUNNER spec has no network and no extra host — the record has no field for
  * either — and none of the DIRECT spec's wire aliases.
  *
- * <p><b>What it still leaves out</b>: the credential (qits-802 adds the per-workspace token where
- * {@link #compose} says so), the host-side placement fields (no docker socket — admin rows are never
- * RUNNER — and no user), and the proxy paths and the daemon API token.
+ * <p><b>The credential is the row's workspace token</b> (qits-625, qits-802): {@code QITS_TOKEN} and
+ * {@code QITS_TOKEN_SUBJECT}, with the image's git credential helper ({@code GIT_CONFIG_GLOBAL})
+ * answering for the plane's githost only ({@code QITS_GIT_AUTH_HOST}). It is read off the row, so a
+ * start re-presents the same spec. None of the DIRECT pair block is written — no {@code
+ * QITS_COMMISSIONED_CLIENT_*}, no token url and no audience — because nothing in a RUNNER container
+ * mints: the edge spends the token on every hop.
+ *
+ * <p><b>The daemon API handshake and its two path bases are the DIRECT spec's</b>, value for value:
+ * {@code QITS_WORKSPACE_DAEMON_API_TOKEN} (without it the daemon's API never binds, and the
+ * terminal and file editor that reach it over the tunnel have nothing to talk to), {@code
+ * QITS_WORKSPACE_DAEMON_API_BASE_PATH} and {@code QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE}. All
+ * three are host-to-daemon values — a constant and two paths of this service's own routes — and
+ * name no address, so the plane has nothing to say about them.
+ *
+ * <p><b>What it still leaves out</b>: the host-side placement fields (no docker socket — admin rows
+ * are never RUNNER — and no user).
  *
  * <p><b>The image is the public reference</b>: {@link WorkspaceContainerFactory#image} — the
  * version a DIRECT launch uses, the pin unless an operator overrode it — with its registry host
@@ -65,6 +78,10 @@ public class RunnerWorkspaceSpecs {
     env.put("QITS_OBSERVABILITY_MCP_URL", plane.observabilityMcpUrl());
     env.put("QITS_PLATFORM_MCP_URL", plane.platformMcpUrl());
     env.put("QITS_WORKSPACE_DAEMON_GIT_BASE_URL", plane.gitBaseUrl());
+    // The two path bases the DIRECT spec writes here, the same values: the daemon is told which
+    // leading part of a proxied path is its own address, and what each dev server's public base is.
+    env.put("QITS_WORKSPACE_DAEMON_API_BASE_PATH", ContainerProxyPath.base(row.id));
+    env.put("QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE", ServiceProxyPath.PREFIX + row.id);
     factory.identityEnv(
         row.repositoryId,
         row.workspaceId,
@@ -75,9 +92,18 @@ public class RunnerWorkspaceSpecs {
         row.editor,
         env::put,
         labels::put);
-    // THE CREDENTIAL BLOCK GOES HERE (qits-802): QITS_TOKEN, QITS_TOKEN_SUBJECT,
-    // GIT_CONFIG_GLOBAL and QITS_GIT_AUTH_HOST = plane.gitAuthHost(), read off the row — where the
-    // DIRECT spec writes its commissioned pair, between the identity and the commit identity.
+    // The host->daemon handshake constant, as the DIRECT spec writes it: the bearer the daemon's
+    // HTTP API requires, which only ever travels the tunnel. Without it the API does not bind.
+    env.put("QITS_WORKSPACE_DAEMON_API_TOKEN", factory.daemonApiToken());
+    // The credential, where the DIRECT spec writes its commissioned pair: the row's workspace token
+    // (qits-802), and the git helper told the one host it may answer for. Both or neither — a row
+    // with no token is never queued, so a spec is only ever composed with one.
+    if (row.commissionedToken != null && !row.commissionedToken.isBlank()) {
+      env.put("QITS_TOKEN", row.commissionedToken);
+      env.put("QITS_TOKEN_SUBJECT", row.commissionedTokenSubject);
+      env.put("GIT_CONFIG_GLOBAL", WorkspaceContainerFactory.GIT_CONFIG_GLOBAL);
+      env.put("QITS_GIT_AUTH_HOST", plane.gitAuthHost());
+    }
     env.putAll(factory.gitIdentityEnv());
     // A runner mounts all four on its node, whatever this deployment's shared volumes are: the
     // agent home and the caches are node volumes there, never the platform host's.

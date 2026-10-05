@@ -531,7 +531,8 @@ public class WorkspaceService {
     if (!commissioner.isResolvable() || rowId == null) {
       return;
     }
-    String clientId =
+    // [clientId, tokenId]: a DIRECT row holds the first, a RUNNER row the second (qits-625).
+    String[] held =
         QuarkusTransaction.requiringNew()
             .call(
                 () ->
@@ -539,13 +540,44 @@ public class WorkspaceService {
                         .findByIdOptional(rowId)
                         .map(
                             wt -> {
-                              String held = wt.commissionedClientId;
+                              String[] was = {wt.commissionedClientId, wt.commissionedTokenId};
                               wt.commissionedClientId = null;
                               wt.commissionedClientSecret = null;
-                              return held;
+                              clearToken(wt);
+                              return was;
                             })
-                        .orElse(null));
-    decommission(clientId);
+                        .orElse(new String[2]));
+    decommission(held[0]);
+    deleteToken(held[1]);
+  }
+
+  /**
+   * Empties a row's three token columns (qits-625), in the caller's transaction, and answers the
+   * token id they held so the caller can delete it once that transaction is out of the way.
+   */
+  private static String clearToken(Workspace wt) {
+    String held = wt.commissionedTokenId;
+    wt.commissionedTokenId = null;
+    wt.commissionedTokenSubject = null;
+    wt.commissionedToken = null;
+    return held;
+  }
+
+  /**
+   * The workspace token's deletion, for callers that already cleared the row. Best-effort, as
+   * {@link #decommission} is; null or blank is a row that held none and is silent.
+   */
+  private void deleteToken(String tokenId) {
+    if (!commissioner.isResolvable() || tokenId == null || tokenId.isBlank()) {
+      return;
+    }
+    try {
+      commissioner.get().deleteToken(tokenId);
+    } catch (RuntimeException e) {
+      LOG.warnf(
+          "Could not delete workspace token %s; the reconcile will reap it: %s",
+          tokenId, e.toString());
+    }
   }
 
   /**
@@ -1360,16 +1392,12 @@ public class WorkspaceService {
     workspace.parent = parentBranch;
     workspace.branch = newBranch;
     workspace.status = WorkspaceStatus.ACTIVE;
-    // A RUNNER row is written QUEUED: creating it IS the request (the qits-ci runner model this
-    // placement copies — the service keeps the list of requested workspaces, a runner takes from
-    // it and owns the state from there). queued_at is what the runners take the oldest by. A DIRECT
-    // row is written STOPPED and started by whoever created it; see createAndStartWorkspace.
-    if (placed == WorkspacePlacement.RUNNER) {
-      workspace.runtimeStatus = WorkspaceRuntimeStatus.QUEUED;
-      workspace.queuedAt = Instant.now();
-    } else {
-      workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
-    }
+    // Every row is written STOPPED. A RUNNER row is still queued by its create — creating it IS the
+    // request a runner takes (the qits-ci runner model) — but by the RUNNER start, once this
+    // transaction committed (queuedOnRunner): that start is the one path to QUEUED, and it builds
+    // the edge plane and mints the workspace token first (qits-625), so no row is ever claimable
+    // without a token. A DIRECT row is started by whoever created it; see createAndStartWorkspace.
+    workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
     workspace.preamble = preamble;
     // The posture, written once and never again: no verb promotes a workspace to admin later, so
     // the socket a container gets is the one the request that created it asked for. See
@@ -1593,8 +1621,10 @@ public class WorkspaceService {
    * {@code admin} is a 400, and one with no eligible runner a 409 {@code NO_RUNNER}, both before any
    * ref is pushed. Every other overload delegates here with null.
    *
-   * <p>A RUNNER row is written QUEUED with {@code queued_at}, and the runners are told once it
-   * committed: creating it is the request a runner takes. A DIRECT row is written STOPPED.
+   * <p>A RUNNER row is queued by its create once the row committed, through the RUNNER start: the
+   * edge plane is built and the workspace token minted first (qits-625), the row goes QUEUED with
+   * {@code queued_at}, and the runners are told. A start that cannot do that leaves the row FAILED
+   * saying why, and the create still stands. A DIRECT row is written STOPPED.
    */
   public Workspace createWorkspace(
       String repoId,
@@ -1608,7 +1638,7 @@ public class WorkspaceService {
       WorkspaceSubject subject,
       List<String> gitRefs,
       WorkspacePlacement placement) {
-    return queued(
+    return queuedOnRunner(
         recordPlaced(
             repoId,
             workspaceId,
@@ -1624,27 +1654,29 @@ public class WorkspaceService {
   }
 
   /**
-   * Tells the runners a RUNNER row was just written QUEUED — after its transaction committed, so a
-   * runner that reserves on the signal finds the row. The signal is a nudge and never the record:
-   * the row is queued whether or not it arrives, and a runner's next reserve takes it all the same,
-   * so a failure to send it is logged rather than allowed to fail a create that already happened.
+   * Queues a RUNNER row its create just committed, through the RUNNER start and nothing beside it
+   * ({@link #beginRunnerStart}, unnarrated: the row's status is its progress), so the create path
+   * gets the same edge-plane check and the same token mint every start gets (qits-625). Answers the
+   * row as the start left it: QUEUED, or FAILED with the reason.
+   *
+   * <p><b>A start refused after the row exists does not undo the create</b>, for the reason {@link
+   * #createAndStartWorkspace} gives; it is logged here, and the row says what happened.
    */
-  private Workspace queued(Workspace created) {
+  private Workspace queuedOnRunner(Workspace created) {
     if (created.placement != WorkspacePlacement.RUNNER) {
       return created;
     }
-    if (runnerPlacement.isResolvable()) {
-      try {
-        runnerPlacement.get().backlogChanged(created);
-      } catch (RuntimeException e) {
-        LOG.warnf(
-            e,
-            "Workspace %s/%s was queued, but the runners could not be told",
-            created.repositoryId,
-            created.workspaceId);
-      }
+    try {
+      beginRunnerStart(created, false);
+    } catch (RuntimeException refused) {
+      LOG.warnf(
+          refused,
+          "Workspace %s/%s was created but could not be queued for a runner",
+          created.repositoryId,
+          created.workspaceId);
     }
-    return created;
+    return QuarkusTransaction.requiringNew()
+        .call(() -> workspaceRepository.findByIdOptional(created.id).orElse(created));
   }
 
   /** {@link #createWorkspace}'s widest form up to the commit: the row as written, not yet signalled. */
@@ -1737,9 +1769,9 @@ public class WorkspaceService {
    * requests a workspace — why is there a second REST call?"). The create door's method.
    *
    * <ul>
-   *   <li>A RUNNER row needs nothing more: {@link #createWorkspace} wrote it QUEUED and told the
-   *       runners, and a runner's reserve takes it from there. No process is answered — the row's
-   *       runtime status is its progress.
+   *   <li>A RUNNER row needs nothing more: {@link #createWorkspace} queued it through the RUNNER
+   *       start (token minted, runners told), and a runner's reserve takes it from there. No
+   *       process is answered — the row's runtime status is its progress.
    *   <li>A DIRECT row is started by {@link #beginEnsureContainer}, the start the {@code
    *       ensure-container} door runs: the three-rung ladder, behind the process it answers.
    * </ul>
@@ -3389,10 +3421,10 @@ public class WorkspaceService {
   //
   // Each container verb above branches ONCE, at its top, on Workspace.placement, and a RUNNER row
   // comes here. Nothing below calls qits-containers: a RUNNER row's container is on a runner's node,
-  // reached through RunnerPlacement, and its persisted runtime status is the runner's word. What a
-  // RUNNER row does not do in this epic: no credential is commissioned, no daemon is waited for and
-  // no bootstrap chain is run (qits-625 adds all three). Its start does build the edge address
-  // plane before queueing (qits-799) and fails the row when there is none.
+  // reached through RunnerPlacement, and its persisted runtime status is the runner's word. Its
+  // start builds the edge address plane (qits-799) and mints the workspace token (qits-802) before
+  // queueing, and fails the row when it can have neither; RunnerClaims waits for its daemon after
+  // the runner launched it. No bootstrap chain is run.
 
   /**
    * Start, for a RUNNER row: <b>start is pull</b>. The row is marked QUEUED and waits for a runner's
@@ -3406,6 +3438,10 @@ public class WorkspaceService {
    *   <li>the durable branch is gone → abandoned and 404, as rung 3 of the DIRECT ladder does;
    *   <li>no edge address plane ({@link EdgePlaneUnconfigured}: no public {@code QITS_DOMAIN}) →
    *       FAILED with {@code EDGE_PLANE_UNCONFIGURED} as its runtime error, and nothing queued;
+   *   <li>no workspace token and none could be minted → FAILED with {@code
+   *       WORKSPACE_TOKEN_UNAVAILABLE} and the reason, and nothing queued ({@link
+   *       #ensureRunnerToken}): a RUNNER container reaches every hop with that token, so a row
+   *       never becomes claimable without one;
    *   <li>STOPPED or FAILED → the compare-and-swap to QUEUED, {@code queuedAt} now, the runner
    *       kept, and the backlog told.
    * </ul>
@@ -3415,6 +3451,15 @@ public class WorkspaceService {
    * and the runner's {@code launched} or {@code launchFailed} settles that.
    */
   private String beginRunnerStart(Workspace row) {
+    return beginRunnerStart(row, true);
+  }
+
+  /**
+   * {@link #beginRunnerStart(Workspace)}, with or without its technical process. A create queues
+   * its row through here unnarrated ({@code narrate} false): no process is opened and none is
+   * answered, and the row's runtime status is the whole of its progress (qits-853).
+   */
+  private String beginRunnerStart(Workspace row, boolean narrate) {
     if (row.runnerId != null && !runnerPresent(row.runnerId)) {
       throw RunnerRefusals.unavailable(row.id, "start");
     }
@@ -3423,9 +3468,10 @@ public class WorkspaceService {
         || row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
       Optional<WorkspaceProcessTracker.Handle> open = runnerClaims.trackedStart(row.id);
       if (open.isPresent()) {
-        return open.get().id();
+        return narrate ? open.get().id() : null;
       }
-      WorkspaceProcessTracker.Handle process = tracker(row.repositoryId, row.workspaceId, row.id);
+      WorkspaceProcessTracker.Handle process =
+          narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null;
       if (process != null) {
         process.completeNoOp(
             RunnerClaims.QUEUED_SEGMENT,
@@ -3442,12 +3488,18 @@ public class WorkspaceService {
     try {
       addressPlanes.plane();
     } catch (EdgePlaneUnconfigured refused) {
-      return failUnplaceable(row, refused);
+      return failUnplaceable(row, refused.getMessage(), narrate);
     }
-    // THE TOKEN IS MINTED HERE (qits-802): after the plane, before the queue and outside the claim
-    // transaction, when the row holds no live token.
+    // The workspace token, after the plane and BEFORE the queue, outside every transaction: the
+    // mint is an HTTP call to qits-idp. A row that already holds one keeps it — a STOPPED row's
+    // container carries it in its spec, and the start re-presents that spec unchanged.
+    String unminted = ensureRunnerToken(row);
+    if (unminted != null) {
+      return failUnplaceable(row, unminted, narrate);
+    }
 
-    WorkspaceProcessTracker.Handle process = tracker(row.repositoryId, row.workspaceId, row.id);
+    WorkspaceProcessTracker.Handle process =
+        narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null;
     if (process != null) {
       process.openSegment(RunnerClaims.QUEUED_SEGMENT);
       process.appendLine(RunnerClaims.QUEUED_SEGMENT, waitingFor(row.runnerId));
@@ -3475,12 +3527,12 @@ public class WorkspaceService {
   }
 
   /**
-   * A RUNNER start refused for want of an edge plane: the row FAILED with the refusal as its runtime
-   * error ({@code EDGE_PLANE_UNCONFIGURED: QITS_DOMAIN '<v>' is not a public domain}), the start's
-   * process failed with one {@code container} segment saying the same, and nothing queued.
+   * A RUNNER start refused before the queue: the row FAILED with the refusal as its runtime error
+   * ({@code EDGE_PLANE_UNCONFIGURED: QITS_DOMAIN '<v>' is not a public domain}, or {@code
+   * WORKSPACE_TOKEN_UNAVAILABLE: …}), the start's process — when it is narrated — failed with one
+   * {@code container} segment saying the same, and nothing queued.
    */
-  private String failUnplaceable(Workspace row, EdgePlaneUnconfigured refused) {
-    String reason = refused.getMessage();
+  private String failUnplaceable(Workspace row, String reason, boolean narrate) {
     LOG.errorf(
         "Workspace %s/%s cannot be placed on a runner: %s",
         row.repositoryId, row.workspaceId, reason);
@@ -3496,7 +3548,8 @@ public class WorkspaceService {
                           w.queuedAt = null;
                         }));
     changePublisher.runtimeChanged(row.repositoryId, row.id);
-    WorkspaceProcessTracker.Handle process = tracker(row.repositoryId, row.workspaceId, row.id);
+    WorkspaceProcessTracker.Handle process =
+        narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null;
     if (process == null) {
       return null;
     }
@@ -3505,6 +3558,119 @@ public class WorkspaceService {
     process.settleSegment(RunnerClaims.CONTAINER_SEGMENT, false);
     process.failProvision(reason);
     return process.id();
+  }
+
+  /** The code a RUNNER row's runtime error starts with when no workspace token could be had. */
+  static final String TOKEN_UNAVAILABLE = "WORKSPACE_TOKEN_UNAVAILABLE";
+
+  /**
+   * Makes sure {@code row} holds its workspace token (qits-625, qits-802), minting one when it holds
+   * none; answers null when it does, else the reason it does not, as a runtime error.
+   *
+   * <p>The RUNNER counterpart of {@link #commissionFor}: the same context ({@code workspace}, the
+   * row id), the same {@code project} claim and the same Git refs, read and stored the same way —
+   * but a {@code qits_tok_} rather than a client pair, and never both. Called outside every
+   * transaction; each row read and write is its own.
+   *
+   * <p><b>Reused, not replaced.</b> A row that holds a token keeps it: the token lives as long as
+   * the container (delete-container, recreate and resolution delete it), and a stop does not
+   * revoke it, because the start re-presents the spec that carries it.
+   *
+   * <p><b>Refused, not degraded.</b> A RUNNER container has no other credential, so no issuer, an
+   * issuer that stayed unreachable through the commissioner's patience, or an empty answer all fail
+   * the start — unlike a DIRECT row, which launches with no credential when no issuer is wired.
+   *
+   * <p>Two starts racing both mint; the second to store finds the first's token and deletes its own.
+   */
+  private String ensureRunnerToken(Workspace row) {
+    Long rowId = row.id;
+    boolean held =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () ->
+                    workspaceRepository
+                        .findActiveById(rowId)
+                        .map(wt -> wt.commissionedTokenId != null)
+                        .orElse(false));
+    if (held) {
+      return null;
+    }
+    if (!commissioner.isResolvable()) {
+      return TOKEN_UNAVAILABLE + ": no issuer is wired to mint the workspace token";
+    }
+    RepositoryLookup.RepositoryView repository = repositoryOf(row.repositoryId);
+    String defaultBranch = repository == null ? null : defaultMainBranch(repository);
+    String statedRefs =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () ->
+                    workspaceRepository
+                        .findActiveById(rowId)
+                        .map(wt -> GitRefs.write(GitRefs.effective(wt, defaultBranch)))
+                        .orElse(null));
+    Optional<WorkspaceToken> issued;
+    try {
+      issued =
+          commissioner
+              .get()
+              .commissionToken(
+                  rowId,
+                  projectOf(repository),
+                  statedRefs == null ? null : GitRefs.read(statedRefs));
+    } catch (RuntimeException failed) {
+      return TOKEN_UNAVAILABLE + ": " + failed.getMessage();
+    }
+    if (issued.isEmpty()) {
+      return TOKEN_UNAVAILABLE + ": no issuer is configured to mint the workspace token";
+    }
+    WorkspaceToken token = issued.get();
+    // [stored, narrowedMeanwhile]
+    boolean[] outcome =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () ->
+                    workspaceRepository
+                        .findActiveById(rowId)
+                        .map(
+                            wt -> {
+                              if (wt.commissionedTokenId != null) {
+                                return new boolean[] {false, false};
+                              }
+                              wt.commissionedTokenId = token.tokenId();
+                              wt.commissionedTokenSubject = token.subject();
+                              wt.commissionedToken = token.token();
+                              // commissionFor's two rules, for the same reasons: a stored list
+                              // never names the default branch, and a narrowing that landed while
+                              // the mint was made is still to be sent.
+                              List<String> allowed = GitRefs.effective(wt, defaultBranch);
+                              if (wt.gitRefs != null
+                                  && !GitRefs.read(wt.gitRefs).equals(allowed)) {
+                                wt.gitRefs = GitRefs.write(allowed);
+                              }
+                              wt.gitRefsPending = !GitRefs.write(allowed).equals(statedRefs);
+                              return new boolean[] {true, wt.gitRefsPending};
+                            })
+                        .orElse(new boolean[] {false, false}));
+    if (!outcome[0]) {
+      // Another start stored a token first, or the row resolved meanwhile: this one is nobody's.
+      deleteToken(token.tokenId());
+      boolean nowHeld =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () ->
+                      workspaceRepository
+                          .findActiveById(rowId)
+                          .map(wt -> wt.commissionedTokenId != null)
+                          .orElse(false));
+      return nowHeld ? null : TOKEN_UNAVAILABLE + ": the workspace is no longer active";
+    }
+    if (outcome[1]) {
+      gitRefScopes.push(rowId);
+    }
+    LOG.debugf(
+        "Minted workspace token %s for workspace %s/%s",
+        token.tokenId(), row.repositoryId, row.workspaceId);
+    return null;
   }
 
   /** The {@code queued} segment's line: which runner the row waits for, or that it waits for any. */
@@ -3590,6 +3756,9 @@ public class WorkspaceService {
    * and {@code -ws-<rowId>} volume), then the row is STOPPED with <b>no runner</b>. Nothing of it is
    * left on that node, so stickiness ends and the next start may be taken by any runner. The row
    * stays ACTIVE. A row on no runner has nothing on any node, and just goes STOPPED.
+   *
+   * <p>The workspace token goes with the container (qits-625): its columns are cleared and it is
+   * deleted at qits-idp, and the next start mints a fresh one for the container it launches.
    */
   private void deleteOnRunner(Workspace row) {
     UUID runnerId = row.runnerId;
@@ -3610,6 +3779,7 @@ public class WorkspaceService {
                           wt.queuedAt = null;
                         }));
     runnerClaims.abandonStart(row.id, "The container was deleted.");
+    decommissionFor(row.id);
     changePublisher.runtimeChanged(row.repositoryId, row.id);
     if (runnerPlacement.isResolvable()) {
       if (row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
@@ -3622,10 +3792,10 @@ public class WorkspaceService {
   }
 
   /**
-   * Recreate, for a RUNNER row: the clean-tree gate first, exactly the DIRECT one — and with no
-   * daemon reporting from a runner in this epic the tree is unknown, so it refuses (400). Once
-   * qits-625 gives a runner-placed workspace its daemon, a recreate that passes is delete-container
-   * then start.
+   * Recreate, for a RUNNER row: the clean-tree gate first, exactly the DIRECT one (an unknown tree —
+   * no daemon reporting — refuses with 400), then {@link #deleteOnRunner} (container and volume
+   * gone, the workspace token deleted, the runner cleared), then the start, which mints a fresh
+   * token and queues the row for any runner (qits-625).
    */
   private String beginRunnerRecreate(Workspace row) {
     requireCleanForRecreate(row.workspaceId, row.id);
@@ -3684,6 +3854,9 @@ public class WorkspaceService {
       String commissioned = workspace.commissionedClientId;
       workspace.commissionedClientId = null;
       decommission(commissioned);
+      // The workspace token goes with the container it was minted for (qits-625), beside the
+      // release and for doDiscard's reason not on the resolved event.
+      deleteToken(clearToken(workspace));
 
       if (deleteBranch && branch != null && !branch.isBlank()) {
         try {

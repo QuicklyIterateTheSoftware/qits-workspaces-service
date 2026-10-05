@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.control;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,6 +58,127 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     gitRefs.clear();
     gitRefUpdates.clear();
     failGitRefUpdates = false;
+    tokensWired = true;
+    tokenFailure = null;
+    tokensMinted.clear();
+    tokensDeleted.clear();
+    tokenGitRefUpdates.clear();
+    synchronized (liveTokens) {
+      liveTokens.clear();
+    }
+  }
+
+  // --- the workspace token (qits-625) ------------------------------------------------------------
+  //
+  // WIRED BY DEFAULT, unlike the pair above, and for the opposite reason: only a RUNNER row is ever
+  // minted a token, and a RUNNER start refuses to queue a row without one. A double that minted
+  // nothing by default would fail every RUNNER start in the suite, while minting changes nothing
+  // about any DIRECT container. unwireTokens() is the shipped posture with no issuer.
+
+  private volatile boolean tokensWired = true;
+  private volatile RuntimeException tokenFailure;
+  private final AtomicInteger tokenSerial = new AtomicInteger();
+
+  /** One token this fake minted: the row it was for and what the mint stated. */
+  public record MintedToken(long rowId, WorkspaceToken token, String projectId, List<String> gitRefs) {}
+
+  private final List<MintedToken> tokensMinted = new CopyOnWriteArrayList<>();
+  private final List<String> tokensDeleted = new CopyOnWriteArrayList<>();
+  private final List<GitRefUpdate> tokenGitRefUpdates = new CopyOnWriteArrayList<>();
+
+  /** Live tokens by id: kind, context and creation instant, as a listing would read them. */
+  private final Map<String, TokenCommission> liveTokens = new LinkedHashMap<>();
+
+  /** Behave as a deployment with no issuer: every token mint answers empty. */
+  public void unwireTokens() {
+    tokensWired = false;
+  }
+
+  /** Make every following token mint fail the way an unreachable issuer does. */
+  public void failTokens(String why) {
+    tokenFailure = new IllegalStateException(why);
+  }
+
+  /** Every token minted, in order. */
+  public List<MintedToken> tokensMinted() {
+    return List.copyOf(tokensMinted);
+  }
+
+  /** Every token id deleted, in order. */
+  public List<String> tokensDeleted() {
+    return List.copyOf(tokensDeleted);
+  }
+
+  /** Every token Git ref update, in order — the failed ones included. */
+  public List<GitRefUpdate> tokenGitRefUpdates() {
+    return List.copyOf(tokenGitRefUpdates);
+  }
+
+  /** Put a token in place this service never stored on a row — an orphan, for the reconcile. */
+  public void plantToken(String tokenId, String contextKind, String contextId, Instant createdAt) {
+    synchronized (liveTokens) {
+      liveTokens.put(tokenId, new TokenCommission(tokenId, contextKind, contextId, createdAt));
+    }
+  }
+
+  /** The token ids this fake still holds. */
+  public List<String> liveTokenIds() {
+    synchronized (liveTokens) {
+      return new ArrayList<>(liveTokens.keySet());
+    }
+  }
+
+  @Override
+  public Optional<WorkspaceToken> commissionToken(
+      long rowId, String projectId, List<String> statedGitRefs) {
+    if (!tokensWired) {
+      return Optional.empty();
+    }
+    if (tokenFailure != null) {
+      throw tokenFailure;
+    }
+    int serial = tokenSerial.incrementAndGet();
+    WorkspaceToken token =
+        new WorkspaceToken(
+            "tok-id-" + rowId + "-" + serial,
+            "qits_tok_fake" + rowId + "x" + serial,
+            "tok-workspace-" + rowId + "-" + serial);
+    tokensMinted.add(
+        new MintedToken(
+            rowId, token, projectId, statedGitRefs == null ? null : List.copyOf(statedGitRefs)));
+    synchronized (liveTokens) {
+      liveTokens.put(
+          token.tokenId(),
+          new TokenCommission(token.tokenId(), CONTEXT_KIND, Long.toString(rowId), Instant.now()));
+    }
+    return Optional.of(token);
+  }
+
+  @Override
+  public void deleteToken(String tokenId) {
+    tokensDeleted.add(tokenId);
+    synchronized (liveTokens) {
+      liveTokens.remove(tokenId);
+    }
+  }
+
+  @Override
+  public void updateTokenGitRefs(String tokenId, List<String> refs) {
+    boolean fail = failGitRefUpdates;
+    tokenGitRefUpdates.add(new GitRefUpdate(tokenId, List.copyOf(refs)));
+    if (fail) {
+      throw new IllegalStateException("qits-idp is unreachable (fake)");
+    }
+  }
+
+  @Override
+  public List<TokenCommission> listTokens() {
+    if (!tokensWired) {
+      return List.of();
+    }
+    synchronized (liveTokens) {
+      return new ArrayList<>(liveTokens.values());
+    }
   }
 
   /** Make the next and every following commission fail the way an unreachable issuer does. */

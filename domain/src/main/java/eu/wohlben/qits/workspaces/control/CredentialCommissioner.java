@@ -51,6 +51,13 @@ public interface CredentialCommissioner {
   record Commission(String clientId, String contextKind, String contextId) {}
 
   /**
+   * One live token as the owner's reconcile reads it back (qits-625). Never carries a value. {@code
+   * createdAt} is null when qits-idp did not say.
+   */
+  record TokenCommission(
+      String tokenId, String contextKind, String contextId, java.time.Instant createdAt) {}
+
+  /**
    * Commission a credential for the workspace row {@code rowId}, or empty when this deployment has
    * no issuer to ask (see the class javadoc — that is a configuration, not a failure).
    *
@@ -119,4 +126,36 @@ public interface CredentialCommissioner {
    * decommission nothing rather than everything.
    */
   List<Commission> list();
+
+  // --- the workspace token: a RUNNER row's credential (qits-625, qits-802) ----------------------
+
+  /**
+   * Mint the {@code qits_tok_} of kind {@link #CONTEXT_KIND} for the RUNNER row {@code rowId}, or
+   * empty when this deployment has no issuer to ask. The {@link #commission} of a RUNNER row: the
+   * same context, the same {@code project} claim (null is unscoped) and the same Git refs (null
+   * states nothing), and the same fail-closed answer to a refused list. The value is answered once.
+   *
+   * @throws RuntimeException when an issuer is configured and the call did not succeed
+   */
+  Optional<WorkspaceToken> commissionToken(long rowId, String projectId, List<String> gitRefs);
+
+  /**
+   * Delete a workspace token: the container it belonged to is gone. Best-effort by contract, as
+   * {@link #decommission} is, for the same reason; what a failure leaves is the reconcile's.
+   */
+  void deleteToken(String tokenId);
+
+  /**
+   * Replace the Git refs a live token states ({@code PUT /idp/api/tokens/{tokenId}/git-refs}), the
+   * token twin of {@link #updateGitRefs}. Throws on failure, as that does.
+   *
+   * @throws RuntimeException when an issuer is configured and the update did not land
+   */
+  void updateTokenGitRefs(String tokenId, List<String> gitRefs);
+
+  /**
+   * Every token this service currently owns, of every kind, for the reconcile. Empty when nothing
+   * could be asked, for {@link #list}'s reason.
+   */
+  List<TokenCommission> listTokens();
 }

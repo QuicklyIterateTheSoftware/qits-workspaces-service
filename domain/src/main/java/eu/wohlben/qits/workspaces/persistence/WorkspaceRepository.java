@@ -143,6 +143,17 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
   }
 
   /**
+   * Every workspace token id an ACTIVE RUNNER row currently holds (qits-625) — {@link
+   * #liveCommissionedClientIds} for the token arm of the reconcile. A token no ACTIVE row names is
+   * an orphan, and so is one a recreate replaced.
+   */
+  public List<String> liveCommissionedTokenIds() {
+    return list("status = ?1 and commissionedTokenId is not null", WorkspaceStatus.ACTIVE).stream()
+        .map(w -> w.commissionedTokenId)
+        .toList();
+  }
+
+  /**
    * Every ACTIVE workspace that stores a Git ref list — the candidates a new workspace may narrow.
    * Rows that predate the column store none; their list is only their own branch, which is never
    * narrowed away, so they are never candidates.
@@ -153,11 +164,13 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
 
   /**
    * The ACTIVE workspaces whose narrowed Git ref list has not reached qits-idp yet, and whose
-   * container still holds the commission it has to reach. What the reconcile sends again.
+   * container still holds the commission it has to reach — a client pair, or a RUNNER row's token
+   * (qits-625). What the reconcile sends again.
    */
   public List<Long> pendingGitRefIds() {
     return list(
-            "status = ?1 and gitRefsPending = true and commissionedClientId is not null",
+            "status = ?1 and gitRefsPending = true"
+                + " and (commissionedClientId is not null or commissionedTokenId is not null)",
             WorkspaceStatus.ACTIVE)
         .stream()
         .map(w -> w.id)
@@ -345,11 +358,15 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
    * Start for a RUNNER row: STOPPED or FAILED becomes QUEUED, stamped {@code queuedAt}, keeping its
    * runner. A compare-and-swap, so two starts and a start racing anything else change the row once:
    * answers how many rows changed, 0 or 1.
+   *
+   * <p><b>Only a row that holds its workspace token is queued</b> (qits-625): a RUNNER container's
+   * every hop is the token, so a row without one must never become claimable. The start mints it
+   * first; this clause is the rule as the swap keeps it.
    */
   public int queueForRunner(Long id, Instant queuedAt) {
     return update(
         "runtimeStatus = ?1, queuedAt = ?2, runtimeError = null where id = ?3 and status = ?4"
-            + " and placement = ?5 and runtimeStatus in ?6",
+            + " and placement = ?5 and runtimeStatus in ?6 and commissionedTokenId is not null",
         WorkspaceRuntimeStatus.QUEUED,
         queuedAt,
         id,
@@ -377,12 +394,14 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
    * <b>Reserve is the claim</b> (qits-849): a QUEUED RUNNER row that is unplaced or already this
    * runner's becomes PROVISIONING on it. The WHERE clause is the whole race: of two runners updating
    * one never-placed row, the second re-reads it PROVISIONING after the first commits and changes
-   * nothing. Answers the changed-row count, 0 or 1.
+   * nothing. Answers the changed-row count, 0 or 1. A row holding no workspace token is never
+   * claimed (qits-625), whatever wrote it QUEUED.
    */
   public int claimForRunner(Long id, UUID runnerId) {
     return update(
         "runnerId = ?1, runtimeStatus = ?2, runtimeError = null where id = ?3 and status = ?4"
-            + " and placement = ?5 and runtimeStatus = ?6 and (runnerId is null or runnerId = ?1)",
+            + " and placement = ?5 and runtimeStatus = ?6 and (runnerId is null or runnerId = ?1)"
+            + " and commissionedTokenId is not null",
         runnerId,
         WorkspaceRuntimeStatus.PROVISIONING,
         id,

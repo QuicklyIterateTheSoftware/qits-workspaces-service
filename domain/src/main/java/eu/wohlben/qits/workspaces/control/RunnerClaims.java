@@ -8,19 +8,26 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.persistence.LockModeType;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 /**
@@ -43,6 +50,13 @@ import org.jboss.logging.Logger;
  * and opens {@code container}, and the launch result settles that. It is in-memory, like every
  * technical process; a restart loses the narration and never the row.
  *
+ * <p><b>{@code launched} is not RUNNING</b> (qits-625, qits-802). The runner's word is that the
+ * container runs; the row stays PROVISIONING until the container's workspace-daemon has dialled home
+ * and reported its self-clone, as rung 3 of the DIRECT ladder waits for it — through the same {@link
+ * WorkspaceDaemonProvisioner}, bounded by the same {@code qits.workspace.provision.connect-timeout-ms}
+ * and {@code timeout-ms}. A daemon that never dials home, or a clone that fails, leaves the row
+ * FAILED with the reason. The wait runs on a thread of this bean's own, never the runner socket's.
+ *
  * <p>Each write is its own {@code requiringNew} transaction, and every hint and notification fires
  * after it commits.
  */
@@ -56,6 +70,9 @@ public class RunnerClaims {
 
   static final String CONTAINER_SEGMENT = "container";
 
+  /** The segment the daemon's self-clone streams into, as on the DIRECT ladder. */
+  static final String CLONE_SEGMENT = "clone";
+
   @Inject WorkspaceRepository workspaces;
 
   @Inject WorkspaceRunnerRepository runners;
@@ -65,7 +82,42 @@ public class RunnerClaims {
   /** Optional, see {@link RunnerPlacement}: absent, the backlog notifications go nowhere. */
   @Inject Instance<RunnerPlacement> placement;
 
+  /**
+   * The daemon's self-provision, awaited after {@code launched} exactly as the DIRECT ladder awaits
+   * it. Absent is a failed provision there, and it is here.
+   */
+  @Inject Instance<WorkspaceDaemonProvisioner> daemonProvisioner;
+
+  /** How long a launched container's daemon has to dial home: rung 3's window. */
+  @ConfigProperty(name = "qits.workspace.provision.connect-timeout-ms", defaultValue = "30000")
+  long provisionConnectTimeoutMs;
+
+  /** How long, once it dialled home, it has to report its clone. */
+  @ConfigProperty(name = "qits.workspace.provision.timeout-ms", defaultValue = "600000")
+  long provisionTimeoutMs;
+
   private final Map<Long, WorkspaceProcessTracker.Handle> starts = new ConcurrentHashMap<>();
+
+  /**
+   * The rows whose daemon is being waited for after {@code launched}. The inventory reconcile reads
+   * it: a container the runner holds running is not yet a RUNNING row while its daemon has not
+   * reported, and a restart that lost the wait lets the inventory say RUNNING as before.
+   */
+  private final Set<Long> awaitingDaemon = ConcurrentHashMap.newKeySet();
+
+  /** The waits themselves: each blocks for up to the two windows, so each gets its own thread. */
+  private final ExecutorService daemonWaits =
+      Executors.newCachedThreadPool(
+          runnable -> {
+            Thread thread = new Thread(runnable, "runner-workspace-daemon-wait");
+            thread.setDaemon(true);
+            return thread;
+          });
+
+  @PreDestroy
+  void shutdownWaits() {
+    daemonWaits.shutdownNow();
+  }
 
   /** One container a runner reported holding: the row it was launched for, and whether it runs. */
   public record HeldContainer(Long rowId, boolean running) {}
@@ -151,27 +203,124 @@ public class RunnerClaims {
 
   // --- launch results -----------------------------------------------------------------------------
 
-  /** {@code launched}: the runner's container for {@code rowId} runs. RUNNING. */
+  /**
+   * {@code launched}: the runner's container for {@code rowId} runs. The row stays PROVISIONING and
+   * its daemon is waited for ({@link #awaitDaemon}); the {@code container} segment settles and
+   * {@code clone} opens.
+   */
   public boolean launched(UUID runnerId, Long rowId) {
+    // Marked BEFORE the write commits, so an inventory that lands in between does not call the row
+    // RUNNING ahead of its daemon.
+    boolean fresh = rowId != null && awaitingDaemon.add(rowId);
     Optional<Workspace> written =
         write(
             runnerId,
             rowId,
             row -> {
-              row.runtimeStatus = WorkspaceRuntimeStatus.RUNNING;
+              row.runtimeStatus = WorkspaceRuntimeStatus.PROVISIONING;
               row.runtimeError = null;
               row.queuedAt = null;
             });
-    written.ifPresent(
-        row -> {
-          WorkspaceProcessTracker.Handle process = starts.remove(rowId);
-          if (process != null) {
-            process.appendLine(CONTAINER_SEGMENT, "The runner reports the container running.");
-            process.settleSegment(CONTAINER_SEGMENT, true);
-            process.finishProvision(true);
+    if (written.isEmpty()) {
+      if (fresh) {
+        awaitingDaemon.remove(rowId);
+      }
+      return false;
+    }
+    WorkspaceProcessTracker.Handle process = starts.get(rowId);
+    if (process != null) {
+      process.appendLine(CONTAINER_SEGMENT, "The runner reports the container running.");
+      process.settleSegment(CONTAINER_SEGMENT, true);
+      process.openSegment(CLONE_SEGMENT);
+    }
+    if (!fresh) {
+      // A wait for this row is already running, and it settles the row.
+      return true;
+    }
+    try {
+      daemonWaits.submit(() -> awaitDaemon(runnerId, rowId));
+    } catch (RejectedExecutionException shuttingDown) {
+      awaitingDaemon.remove(rowId);
+    }
+    return true;
+  }
+
+  /**
+   * Rung 3 for a launched RUNNER row: the daemon's self-provision, awaited. Reported → RUNNING;
+   * no daemon in the connect window, or a failed or overdue clone → FAILED with the reason. Either
+   * write only lands on a row still PROVISIONING on this runner, so a stop or a delete that came
+   * first stands.
+   */
+  void awaitDaemon(UUID runnerId, Long rowId) {
+    try {
+      WorkspaceProcessTracker.Handle process = starts.get(rowId);
+      Consumer<String> onLine =
+          process == null ? null : line -> process.appendLine(CLONE_SEGMENT, line);
+      // The DIRECT ladder's two failure wordings: no daemon at all, and a daemon that said no.
+      String error;
+      if (!daemonProvisioner.isResolvable()) {
+        error = "no workspace-daemon provisioner is available";
+      } else {
+        Optional<ProvisionResult> outcome =
+            daemonProvisioner
+                .get()
+                .awaitProvision(
+                    rowId,
+                    Duration.ofMillis(provisionConnectTimeoutMs),
+                    Duration.ofMillis(provisionTimeoutMs),
+                    onLine);
+        if (outcome.isEmpty()) {
+          error = "no workspace-daemon dialed home within " + provisionConnectTimeoutMs + "ms";
+        } else if (!outcome.get().ok()) {
+          error = "workspace-daemon self-provision failed: " + outcome.get().message();
+        } else {
+          error = null;
+        }
+      }
+      if (error == null) {
+        Optional<Workspace> written =
+            write(
+                runnerId,
+                rowId,
+                row -> {
+                  if (row.runtimeStatus == WorkspaceRuntimeStatus.PROVISIONING) {
+                    row.runtimeStatus = WorkspaceRuntimeStatus.RUNNING;
+                    row.runtimeError = null;
+                  }
+                });
+        if (written.filter(row -> row.runtimeStatus == WorkspaceRuntimeStatus.RUNNING).isPresent()) {
+          WorkspaceProcessTracker.Handle done = starts.remove(rowId);
+          if (done != null) {
+            done.settleSegment(CLONE_SEGMENT, true);
+            done.finishProvision(true);
           }
-        });
-    return written.isPresent();
+        }
+        return;
+      }
+      LOG.warnf("Runner workspace %s did not come up: %s", rowId, error);
+      Optional<Workspace> written =
+          write(
+              runnerId,
+              rowId,
+              row -> {
+                if (row.runtimeStatus == WorkspaceRuntimeStatus.PROVISIONING) {
+                  row.runtimeStatus = WorkspaceRuntimeStatus.FAILED;
+                  row.runtimeError = truncate(error);
+                }
+              });
+      if (written.filter(row -> row.runtimeStatus == WorkspaceRuntimeStatus.FAILED).isPresent()) {
+        abandonStart(rowId, error);
+      }
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "Waiting for the daemon of runner workspace %s failed", rowId);
+    } finally {
+      awaitingDaemon.remove(rowId);
+    }
+  }
+
+  /** Whether {@code rowId}'s daemon is being waited for after its launch. */
+  public boolean awaitingDaemon(Long rowId) {
+    return rowId != null && awaitingDaemon.contains(rowId);
   }
 
   /**
@@ -283,7 +432,8 @@ public class RunnerClaims {
    * transaction. The server's list is the desired state, and nothing is ever reassigned:
    *
    * <ul>
-   *   <li>an owned row held running → RUNNING;
+   *   <li>an owned row held running → RUNNING, unless it is PROVISIONING with its daemon still
+   *       being waited for after {@code launched}: that wait settles it;
    *   <li>an owned row held stopped → STOPPED, unless it is QUEUED: a start is waiting for a slot,
    *       and a stopped container is exactly what it is waiting to have started;
    *   <li>an owned PROVISIONING row not held → QUEUED again, still this runner's, keeping its place
@@ -313,7 +463,12 @@ public class RunnerClaims {
                   for (Workspace row : workspaces.lockActiveOnRunner(runnerId)) {
                     WorkspaceRuntimeStatus was = row.runtimeStatus;
                     Boolean running = holding.get(row.id);
-                    if (Boolean.TRUE.equals(running)) {
+                    if (Boolean.TRUE.equals(running)
+                        && was == WorkspaceRuntimeStatus.PROVISIONING
+                        && awaitingDaemon.contains(row.id)) {
+                      // Launched, and its daemon is still being waited for: that wait settles it.
+                      continue;
+                    } else if (Boolean.TRUE.equals(running)) {
                       row.runtimeStatus = WorkspaceRuntimeStatus.RUNNING;
                       row.runtimeError = null;
                       row.queuedAt = null;

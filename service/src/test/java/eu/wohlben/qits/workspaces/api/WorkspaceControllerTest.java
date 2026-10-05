@@ -204,10 +204,15 @@ public class WorkspaceControllerTest {
 
   /**
    * A RUNNER workspace's create is the request: the row comes back QUEUED, and no process is
-   * answered because there is none — the row's status is its progress.
+   * answered because there is none — the row's status is its progress. Queued through the RUNNER
+   * start, so it needs the edge plane (a public domain) and holds its workspace token (qits-625).
    */
   @Test
   public void testCreateQueuesARunnerWorkspace() {
+    io.quarkus.test.junit.QuarkusMock.installMockForType(
+        eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerAddressesFixture.planesWithDomain(
+            "wohlben.eu"),
+        eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes.class);
     String repoId = createProjectAndRepository();
     java.util.UUID runnerId = java.util.UUID.randomUUID();
     runners.create(runnerId, "r-" + runnerId.toString().substring(0, 8), null, 1, "token-" + runnerId, "sub-" + runnerId);
@@ -233,6 +238,11 @@ public class WorkspaceControllerTest {
           .body("workspace.queuedAt", matchesPattern(ISO_INSTANT))
           .body("technicalProcessId", nullValue())
           .body("startError", nullValue());
+      Long queuedRow = workspaceIds.of(repoId, "queued-01");
+      org.junit.jupiter.api.Assertions.assertNotNull(
+          io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
+              .call(() -> workspaceRepository.findById(queuedRow).commissionedTokenId),
+          "queued only once it holds its workspace token");
     } finally {
       // Abandoned outright, as the domain's placement test cleans up: a QUEUED row left behind
       // would be a reservation for the next suite's fake runner to take.

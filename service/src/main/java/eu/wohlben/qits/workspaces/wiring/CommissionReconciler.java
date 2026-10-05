@@ -51,6 +51,13 @@ import org.jboss.logging.Logger;
  * and a rotation commission it before the row names it. Both arms keep the stance above: a listing,
  * or a runner table, that could not be read reaps nothing.
  *
+ * <p><b>And a third, for the workspace tokens a RUNNER row holds</b> (qits-625, qits-802). A {@code
+ * workspace} token in the token listing is kept when an ACTIVE row names that exact {@code tokenId}
+ * as its {@code commissioned_token_id}, and deleted otherwise: its row resolved, its container was
+ * deleted or recreated (a newer token replaced it), or a crash lost it between the mint and the
+ * write. A token younger than {@link #TOKEN_GRACE} is spared for that last window, the one a start
+ * holds open between the mint and the row write.
+ *
  * <p>At boot and hourly. Boot catches the crash that lost a decommission; the interval bounds how
  * long anything else lives. Both are best-effort in full: this must never fail a startup and never
  * throw out of a scheduled method.
@@ -106,7 +113,40 @@ public class CommissionReconciler {
       return 0;
     }
     gitRefScopes.pushPending();
-    return reapClients() + reapRegistrationTokens(Instant.now());
+    Instant now = Instant.now();
+    return reapClients() + reapRegistrationTokens(now) + reapWorkspaceTokens(now);
+  }
+
+  /** The {@code workspace} arm of the token listing; see the class javadoc. */
+  int reapWorkspaceTokens(Instant now) {
+    try {
+      List<CredentialCommissioner.TokenCommission> held =
+          commissioner.get().listTokens().stream()
+              .filter(t -> CredentialCommissioner.CONTEXT_KIND.equals(t.contextKind()))
+              .toList();
+      if (held.isEmpty()) {
+        return 0;
+      }
+      Set<String> claimed = Set.copyOf(claimedTokenIds());
+      int reaped = 0;
+      for (CredentialCommissioner.TokenCommission token : held) {
+        if (token.tokenId() == null || claimed.contains(token.tokenId())) {
+          continue;
+        }
+        if (token.createdAt() != null && token.createdAt().isAfter(now.minus(TOKEN_GRACE))) {
+          continue;
+        }
+        LOG.infof(
+            "Deleting workspace token %s: no live workspace container holds it (context %s)",
+            token.tokenId(), token.contextId());
+        commissioner.get().deleteToken(token.tokenId());
+        reaped++;
+      }
+      return reaped;
+    } catch (RuntimeException e) {
+      LOG.warnf("Workspace token reconcile did not complete: %s", e.toString());
+      return 0;
+    }
   }
 
   /** The client listing: the {@code workspace} arm and the {@code workspaces-runner} arm. */
@@ -241,5 +281,10 @@ public class CommissionReconciler {
    */
   List<String> claimedClientIds() {
     return QuarkusTransaction.requiringNew().call(workspaces::liveCommissionedClientIds);
+  }
+
+  /** The workspace token ids ACTIVE rows hold, in a transaction of its own, as above. */
+  List<String> claimedTokenIds() {
+    return QuarkusTransaction.requiringNew().call(workspaces::liveCommissionedTokenIds);
   }
 }

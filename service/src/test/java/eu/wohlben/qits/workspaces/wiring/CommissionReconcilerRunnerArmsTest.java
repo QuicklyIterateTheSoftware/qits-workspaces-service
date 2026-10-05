@@ -148,16 +148,21 @@ public class CommissionReconcilerRunnerArmsTest {
                         "workspaces-runner-registration",
                         UUID.randomUUID(),
                         Instant.now().toString()),
-                    // Another kind is not this arm's (the per-workspace token, qits-625).
+                    // Another kind is not this arm's: the per-workspace token (qits-625) is judged
+                    // by the workspace arm, which deletes it — no ACTIVE row holds it.
                     token("t-workspace", "workspace", "7", LONG_AGO))
                 + "]"));
     idp.on("DELETE /api/tokens/t-rotated", new Answer(204, null));
     idp.on("DELETE /api/tokens/t-spent", new Answer(204, null));
+    idp.on("DELETE /api/tokens/t-workspace", new Answer(204, null));
 
-    assertEquals(2, reconciler().reconcile());
+    assertEquals(3, reconciler().reconcile());
 
     assertEquals(
-        List.of("DELETE /api/tokens/t-rotated", "DELETE /api/tokens/t-spent"),
+        List.of(
+            "DELETE /api/tokens/t-rotated",
+            "DELETE /api/tokens/t-spent",
+            "DELETE /api/tokens/t-workspace"),
         idp.lines("DELETE"));
   }
 
@@ -169,7 +174,8 @@ public class CommissionReconcilerRunnerArmsTest {
 
     assertEquals(0, reconciler().reconcile());
 
-    assertEquals(List.of("GET /api/clients", "GET /api/tokens"), idp.lines());
+    // The token listing is read once per token arm: the registration arm and the workspace arm.
+    assertEquals(List.of("GET /api/clients", "GET /api/tokens", "GET /api/tokens"), idp.lines());
   }
 
   @Test

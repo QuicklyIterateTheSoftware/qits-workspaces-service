@@ -2,6 +2,7 @@ package eu.wohlben.qits.workspaces.wiring;
 
 import eu.wohlben.qits.workspaces.control.CredentialCommissioner;
 import eu.wohlben.qits.workspaces.control.WorkspaceCredential;
+import eu.wohlben.qits.workspaces.control.WorkspaceToken;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -10,6 +11,7 @@ import jakarta.ws.rs.core.HttpHeaders;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -86,6 +88,9 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
   Duration patience;
 
   @Inject @RestClient IdpClients clients;
+
+  /** The token half (qits-625): a RUNNER row's workspace token, minted, scoped, listed, deleted. */
+  @Inject @RestClient IdpTokens tokens;
 
   /** The most of the idp's answer an ERROR line carries. */
   private static final int MAX_REASON = 500;
@@ -280,6 +285,142 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
       // answers and nothing else, so an unreadable listing reaps nothing rather than everything.
       LOG.warnf("Could not list this service's commissions at qits-idp: %s", e.toString());
       return List.of();
+    }
+  }
+
+  // --- the workspace token (qits-625, qits-802) -------------------------------------------------
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>{@code POST /idp/api/tokens} through {@link #patiently}, exactly as {@link #commission}: the
+   * same window, the same claims rule, and the same fail-closed retry with {@code gitRefs: []} when
+   * qits-idp refuses a stated list.
+   */
+  @Override
+  public Optional<WorkspaceToken> commissionToken(
+      long rowId, String projectId, List<String> gitRefs) {
+    String authorization = authorization();
+    if (authorization == null) {
+      return Optional.empty();
+    }
+    IdpTokens.TokenRequest[] request = {
+      new IdpTokens.TokenRequest(
+          CONTEXT_KIND,
+          Long.toString(rowId),
+          claims(projectId),
+          gitRefs == null ? null : List.copyOf(gitRefs))
+    };
+    return Optional.of(
+        patiently(
+            patience,
+            "a token for workspace " + rowId,
+            () -> {
+              IdpTokens.TokenResponse issued = tokens.commission(authorization, request[0]);
+              if (issued == null
+                  || blank(issued.tokenId())
+                  || blank(issued.token())
+                  || blank(issued.subject())) {
+                throw new IllegalStateException(
+                    "qits-idp answered a token commission for workspace "
+                        + rowId
+                        + " with no usable token in it");
+              }
+              return new WorkspaceToken(issued.tokenId(), issued.token(), issued.subject());
+            },
+            failure -> {
+              if (request[0].gitRefs() == null
+                  || request[0].gitRefs().isEmpty()
+                  || status(failure) != 400) {
+                return false;
+              }
+              LOG.error(
+                  "qits-idp refused the Git refs of workspace "
+                      + rowId
+                      + " ("
+                      + reasonOf(failure)
+                      + "). Minting its token with gitRefs [] instead: its container may push"
+                      + " nothing until the list is one qits-idp accepts.");
+              request[0] = request[0].pushingNothing();
+              return true;
+            }));
+  }
+
+  /** One attempt; 404 is success; a failure is logged and left for the reconcile. */
+  @Override
+  public void deleteToken(String tokenId) {
+    String authorization = authorization();
+    if (authorization == null || blank(tokenId)) {
+      return;
+    }
+    try {
+      tokens.delete(authorization, tokenId);
+    } catch (WebApplicationException http) {
+      if (http.getResponse().getStatus() == 404) {
+        return;
+      }
+      LOG.warnf(
+          "qits-idp answered %d while deleting workspace token %s; the reconcile will reap it",
+          http.getResponse().getStatus(), tokenId);
+    } catch (RuntimeException transportFailure) {
+      LOG.warnf(
+          "Could not reach qits-idp to delete workspace token %s; the reconcile will reap it: %s",
+          tokenId, transportFailure.toString());
+    }
+  }
+
+  /** {@link #updateGitRefs}' twin on the token door: one attempt, and a failure throws. */
+  @Override
+  public void updateTokenGitRefs(String tokenId, List<String> gitRefs) {
+    String authorization = authorization();
+    if (authorization == null || blank(tokenId)) {
+      return;
+    }
+    try {
+      tokens.updateGitRefs(
+          authorization, tokenId, new IdpClients.GitRefsRequest(List.copyOf(gitRefs)));
+    } catch (WebApplicationException http) {
+      throw new IllegalStateException(
+          "qits-idp answered "
+              + http.getResponse().getStatus()
+              + " to the Git ref update of token "
+              + tokenId,
+          http);
+    }
+  }
+
+  @Override
+  public List<TokenCommission> listTokens() {
+    String authorization = authorization();
+    if (authorization == null) {
+      return List.of();
+    }
+    try {
+      List<IdpTokens.TokenView> answer = tokens.list(authorization);
+      return answer == null
+          ? List.of()
+          : answer.stream()
+              .filter(t -> !blank(t.tokenId()))
+              .map(
+                  t ->
+                      new TokenCommission(
+                          t.tokenId(), t.contextKind(), t.contextId(), instant(t.createdAt())))
+              .toList();
+    } catch (RuntimeException e) {
+      // Empty, for list()'s reason: an unreadable listing reaps nothing.
+      LOG.warnf("Could not list this service's tokens at qits-idp: %s", e.toString());
+      return List.of();
+    }
+  }
+
+  private static Instant instant(String text) {
+    if (text == null || text.isBlank()) {
+      return null;
+    }
+    try {
+      return Instant.parse(text);
+    } catch (DateTimeParseException unparseable) {
+      return null;
     }
   }
 

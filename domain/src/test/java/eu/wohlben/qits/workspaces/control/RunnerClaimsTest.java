@@ -44,6 +44,7 @@ public class RunnerClaimsTest {
   @Inject WorkspaceRunnerRepository runnerRepository;
   @Inject WorkspaceRepository workspaceRepository;
   @Inject FakeRunnerPlacement placement;
+  @Inject FakeWorkspaceDaemonProvisioner daemons;
 
   private final List<UUID> createdRunners = new ArrayList<>();
   private final List<Long> rows = new ArrayList<>();
@@ -62,6 +63,7 @@ public class RunnerClaimsTest {
     rows.clear();
     createdRunners.clear();
     placement.reset();
+    daemons.reset();
   }
 
   // --- reserve ------------------------------------------------------------------------------------
@@ -190,7 +192,7 @@ public class RunnerClaimsTest {
   // --- results ------------------------------------------------------------------------------------
 
   @Test
-  public void resultsMoveOnlyARowTheRunnerOwns() {
+  public void resultsMoveOnlyARowTheRunnerOwns() throws Exception {
     WorkspaceRunner a = eligibleRunner(1);
     WorkspaceRunner b = eligibleRunner(1);
     Long row = queued(null, Instant.now());
@@ -200,7 +202,7 @@ public class RunnerClaimsTest {
     assertEquals(WorkspaceRuntimeStatus.PROVISIONING, read(row).runtimeStatus);
 
     assertTrue(claims.launched(a.id, row));
-    assertEquals(WorkspaceRuntimeStatus.RUNNING, read(row).runtimeStatus);
+    awaitStatus(row, WorkspaceRuntimeStatus.RUNNING);
 
     assertTrue(claims.exited(a.id, row));
     assertEquals(WorkspaceRuntimeStatus.STOPPED, read(row).runtimeStatus);
@@ -211,6 +213,91 @@ public class RunnerClaimsTest {
     assertEquals(WorkspaceRuntimeStatus.STOPPED, deleted.runtimeStatus);
     assertNull(deleted.runnerId, "deleted clears the runner");
     assertEquals(WorkspaceStatus.ACTIVE, deleted.status);
+  }
+
+  /**
+   * qits-802, the RUNNER ladder after {@code launched}: the row stays PROVISIONING until its daemon
+   * dialled home and reported its clone, then RUNNING; an inventory that holds the container running
+   * meanwhile does not call it RUNNING early.
+   */
+  @Test
+  public void launchedStaysProvisioningUntilTheDaemonReportsThenRunning() throws Exception {
+    WorkspaceRunner a = eligibleRunner(1);
+    Long row = queued(null, Instant.now());
+    claims.reserveFor(a).orElseThrow();
+    CountDownLatch hello = new CountDownLatch(1);
+    daemons.answerRunnerRows(
+        id -> {
+          try {
+            hello.await();
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+          return Optional.of(ProvisionResult.ok("abc"));
+        });
+
+    assertTrue(claims.launched(a.id, row));
+    assertEquals(WorkspaceRuntimeStatus.PROVISIONING, read(row).runtimeStatus);
+    assertTrue(claims.awaitingDaemon(row));
+    claims.reconcile(a.id, List.of(new RunnerClaims.HeldContainer(row, true)));
+    assertEquals(
+        WorkspaceRuntimeStatus.PROVISIONING,
+        read(row).runtimeStatus,
+        "the inventory does not run ahead of the daemon");
+
+    hello.countDown();
+    awaitStatus(row, WorkspaceRuntimeStatus.RUNNING);
+    assertNull(read(row).runtimeError);
+  }
+
+  /** No daemon dials home within the connect window: FAILED, saying so. */
+  @Test
+  public void launchedWithNoHelloTimesOutFailed() throws Exception {
+    WorkspaceRunner a = eligibleRunner(1);
+    Long row = queued(null, Instant.now());
+    claims.reserveFor(a).orElseThrow();
+    daemons.answerRunnerRows(id -> Optional.empty());
+
+    assertTrue(claims.launched(a.id, row));
+
+    awaitStatus(row, WorkspaceRuntimeStatus.FAILED);
+    assertTrue(
+        read(row).runtimeError.startsWith("no workspace-daemon dialed home within"),
+        read(row).runtimeError);
+    assertEquals(a.id, read(row).runnerId, "it keeps its runner");
+  }
+
+  /** A daemon that dialled home and failed its clone: FAILED with the daemon's reason. */
+  @Test
+  public void launchedWithAFailedCloneIsFailed() throws Exception {
+    WorkspaceRunner a = eligibleRunner(1);
+    Long row = queued(null, Instant.now());
+    claims.reserveFor(a).orElseThrow();
+    daemons.answerRunnerRows(id -> Optional.of(ProvisionResult.failed("clone refused")));
+
+    assertTrue(claims.launched(a.id, row));
+
+    awaitStatus(row, WorkspaceRuntimeStatus.FAILED);
+    assertEquals("workspace-daemon self-provision failed: clone refused", read(row).runtimeError);
+  }
+
+  /** qits-625: a QUEUED row holding no workspace token is never claimed, whatever wrote it. */
+  @Test
+  public void aQueuedRowWithNoTokenIsNeverClaimed() {
+    WorkspaceRunner a = eligibleRunner(1);
+    Long row =
+        insert(
+            w -> {
+              w.runtimeStatus = WorkspaceRuntimeStatus.QUEUED;
+              w.queuedAt = Instant.now();
+              w.commissionedTokenId = null;
+              w.commissionedTokenSubject = null;
+              w.commissionedToken = null;
+            });
+
+    assertEquals(0, cas(row, a.id));
+    assertTrue(claims.reserveFor(a).isEmpty());
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(row).runtimeStatus);
   }
 
   @Test
@@ -322,6 +409,11 @@ public class RunnerClaimsTest {
                   workspace.status = WorkspaceStatus.ACTIVE;
                   workspace.placement = WorkspacePlacement.RUNNER;
                   workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                  // What a RUNNER start writes before it queues (qits-625): no row is claimable
+                  // without its workspace token.
+                  workspace.commissionedTokenId = "tok-id-" + label;
+                  workspace.commissionedTokenSubject = "tok-workspace-" + label;
+                  workspace.commissionedToken = "qits_tok_" + label;
                   shape.accept(workspace);
                   workspaceRepository.persist(workspace);
                   workspaceRepository.flush();
@@ -334,6 +426,15 @@ public class RunnerClaimsTest {
   private int cas(Long row, UUID runnerId) {
     return QuarkusTransaction.requiringNew()
         .call(() -> workspaceRepository.claimForRunner(row, runnerId));
+  }
+
+  /** Waits for the asynchronous daemon wait after {@code launched} to settle {@code rowId}. */
+  private void awaitStatus(Long rowId, WorkspaceRuntimeStatus expected) throws InterruptedException {
+    long deadline = System.currentTimeMillis() + 15_000;
+    while (read(rowId).runtimeStatus != expected && System.currentTimeMillis() < deadline) {
+      Thread.sleep(20);
+    }
+    assertEquals(expected, read(rowId).runtimeStatus);
   }
 
   private Workspace read(Long rowId) {

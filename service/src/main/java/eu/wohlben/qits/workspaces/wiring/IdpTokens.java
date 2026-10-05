@@ -7,6 +7,7 @@ import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -24,10 +25,10 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
  * service's own static client. Only a static {@code qits:system} client may commission a token
  * (qits-idp {@code IdpTokensController.commission}), and this service's is one.
  *
- * <p><b>Written for more than one kind.</b> Today it mints a workspace runner's registration token
- * ({@code IdpRunnerCommissioner}); the per-workspace token of kind {@code workspace} (qits-625) is
- * the next caller, which is why the request carries {@code claims} and {@code gitRefs} although the
- * runner states neither.
+ * <p><b>Written for more than one kind.</b> It mints a workspace runner's registration token
+ * ({@code IdpRunnerCommissioner}) and the per-workspace token of kind {@code workspace} a RUNNER row
+ * holds (qits-625, {@code IdpCredentialCommissioner}), which is why the request carries {@code
+ * claims} and {@code gitRefs} although the runner states neither.
  *
  * <p><b>The value is answered once.</b> qits-idp stores a hash; the listing never carries a value,
  * and a caller that loses one deletes the token and commissions again.
@@ -56,6 +57,20 @@ public interface IdpTokens {
       @PathParam("tokenId") String tokenId);
 
   /**
+   * Replace the Git refs a token states (qits-625): the twin of {@link IdpClients#updateGitRefs},
+   * owner-only, and the body must carry a list — {@code []} is "may push nothing". 200 with the
+   * token's view, which nothing here reads; 404 for a foreign or unknown token. The edge picks the
+   * new list up within its introspection cache.
+   */
+  @PUT
+  @Path("/{tokenId}/git-refs")
+  @Consumes(MediaType.APPLICATION_JSON)
+  void updateGitRefs(
+      @HeaderParam(HttpHeaders.AUTHORIZATION) String authorization,
+      @PathParam("tokenId") String tokenId,
+      IdpClients.GitRefsRequest request);
+
+  /**
    * What a caller asks for: the context the token is for, and optionally what that context is about
    * ({@code claims}) and may push ({@code gitRefs}). Absent members state nothing, which is what a
    * runner's registration token asks for.
@@ -69,6 +84,11 @@ public interface IdpTokens {
     /** A token that states no claims and no Git refs. */
     TokenRequest(String contextKind, String contextId) {
       this(contextKind, contextId, null, null);
+    }
+
+    /** The same request stating an empty Git ref list: the fail-closed retry. */
+    TokenRequest pushingNothing() {
+      return new TokenRequest(contextKind, contextId, claims, List.of());
     }
   }
 

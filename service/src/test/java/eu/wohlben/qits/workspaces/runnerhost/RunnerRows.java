@@ -125,6 +125,11 @@ public final class RunnerRows {
                   workspace.status = WorkspaceStatus.ACTIVE;
                   workspace.placement = WorkspacePlacement.RUNNER;
                   workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                  // What a RUNNER start writes before it queues (qits-625): no row is claimable
+                  // without its workspace token.
+                  workspace.commissionedTokenId = "tok-id-" + label;
+                  workspace.commissionedTokenSubject = "tok-workspace-" + label;
+                  workspace.commissionedToken = "qits_tok_" + label;
                   shape.accept(workspace);
                   workspaces.persist(workspace);
                   workspaces.flush();

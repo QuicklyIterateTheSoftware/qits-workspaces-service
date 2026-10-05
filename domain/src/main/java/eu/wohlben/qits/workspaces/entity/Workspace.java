@@ -154,6 +154,24 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public String commissionedClientSecret;
 
   /**
+   * The workspace token minted for a RUNNER row's <em>current container</em> (qits-625, {@code
+   * V13}): qits-idp's id for it, the {@code sub} the edge stamps on its JWT, and the value. All
+   * three null on every DIRECT row, and on a RUNNER row with no container holding a token.
+   *
+   * <p>The value is stored for {@link #commissionedClientSecret}'s reason: the spec has to be
+   * reproducible at every start, and qits-idp answers a value once. <b>Cleared with the deletion,
+   * never after it</b>, like the pair above.
+   */
+  @Column(name = "commissioned_token_id", length = 64)
+  public String commissionedTokenId;
+
+  @Column(name = "commissioned_token_subject", length = 255)
+  public String commissionedTokenSubject;
+
+  @Column(name = "commissioned_token", columnDefinition = "text")
+  public String commissionedToken;
+
+  /**
    * Whether this workspace runs in <b>admin mode</b>: its container is started with the host's
    * docker socket bound into it, so platform administration can be done from inside a workspace.
    *

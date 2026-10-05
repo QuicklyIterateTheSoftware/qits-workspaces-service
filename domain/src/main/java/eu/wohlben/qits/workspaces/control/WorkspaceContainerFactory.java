@@ -562,6 +562,17 @@ public class WorkspaceContainerFactory {
   @ConfigProperty(name = "qits.workspace.daemon-api-token", defaultValue = "qits-workspace-daemon")
   String daemonApiToken;
 
+  /** {@link #daemonApiToken}, for the RUNNER spec, which writes the same value (qits-625). */
+  String daemonApiToken() {
+    return daemonApiToken;
+  }
+
+  /**
+   * The image's git config naming its credential helper: {@code GIT_CONFIG_GLOBAL} on a container
+   * that holds a credential, DIRECT pair or RUNNER token alike.
+   */
+  static final String GIT_CONFIG_GLOBAL = "/etc/qits-gitconfig";
+
   static final String MAVEN_MOUNT = "/caches/m2";
   static final String PNPM_MOUNT = "/caches/pnpm";
 
@@ -859,7 +870,7 @@ public class WorkspaceContainerFactory {
               // It compares Git's requested authority with this value before it ever exchanges the
               // client secret, so an absolute submodule or an ad-hoc external remote cannot obtain
               // a platform token.
-              container.env("GIT_CONFIG_GLOBAL", "/etc/qits-gitconfig");
+              container.env("GIT_CONFIG_GLOBAL", GIT_CONFIG_GLOBAL);
               container.env("QITS_GIT_AUTH_HOST", gitAuthority(containerGitUrl));
               container.env("QITS_GIT_AUTH_TOKEN_URL", tokenUrl(idpUrl));
               container.env("QITS_GIT_AUTH_AUDIENCE", CONTAINER_TOKEN_AUDIENCE);

@@ -12,11 +12,18 @@ import eu.wohlben.qits.workspaces.control.WorkspaceCredentials;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.control.WorkspaceSubject;
+import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
+import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
+import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -163,6 +170,63 @@ public class CommissionReconcilerTest {
         commissioner.gitRefUpdates().get(1),
         "the reconcile sent the narrowed list again");
     assertFalse(pending(epic));
+  }
+
+  /**
+   * The workspace token arm (qits-625, qits-802): an orphaned token (no ACTIVE row names it) and a
+   * superseded one (its row holds a newer token) are deleted; the token a live row holds, a token of
+   * another kind and a token younger than the grace are kept.
+   */
+  @Test
+  public void anOrphanedAndASupersededTokenAreReapedAndALiveOneIsKept() {
+    Long row = runnerRowHolding("tok-live");
+    Instant old = Instant.now().minus(Duration.ofHours(1));
+    commissioner.plantToken("tok-live", CredentialCommissioner.CONTEXT_KIND, row.toString(), old);
+    commissioner.plantToken(
+        "tok-superseded", CredentialCommissioner.CONTEXT_KIND, row.toString(), old);
+    commissioner.plantToken("tok-orphan", CredentialCommissioner.CONTEXT_KIND, "999999", old);
+    commissioner.plantToken(
+        "tok-young", CredentialCommissioner.CONTEXT_KIND, "999998", Instant.now());
+    commissioner.plantToken("tok-registration", "workspaces-runner-registration", "r", old);
+    try {
+      assertEquals(2, reconciler.reapWorkspaceTokens(Instant.now()));
+
+      assertEquals(
+          java.util.Set.of("tok-superseded", "tok-orphan"),
+          java.util.Set.copyOf(commissioner.tokensDeleted()));
+      assertEquals(
+          java.util.Set.of("tok-live", "tok-young", "tok-registration"),
+          java.util.Set.copyOf(commissioner.liveTokenIds()));
+    } finally {
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  workspaceRepository
+                      .findByIdOptional(row)
+                      .ifPresent(w -> w.status = WorkspaceStatus.ABANDONED));
+    }
+  }
+
+  /** An ACTIVE RUNNER row holding the workspace token {@code tokenId}, written directly. */
+  private Long runnerRowHolding(String tokenId) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              Workspace w = new Workspace();
+              String label = "w" + UUID.randomUUID().toString().substring(0, 8);
+              w.workspaceId = label;
+              w.repositoryId = "repo-" + label;
+              w.branch = label;
+              w.status = WorkspaceStatus.ACTIVE;
+              w.placement = WorkspacePlacement.RUNNER;
+              w.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+              w.commissionedTokenId = tokenId;
+              w.commissionedTokenSubject = "tok-workspace-" + label;
+              w.commissionedToken = "qits_tok_" + label;
+              workspaceRepository.persist(w);
+              workspaceRepository.flush();
+              return w.id;
+            });
   }
 
   private boolean pending(Long rowId) {

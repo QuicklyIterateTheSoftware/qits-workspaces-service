@@ -53,6 +53,10 @@ import org.jboss.logging.Logger;
  * {@code PUT} that fails leaves the flag set, and the commission reconcile sends it again ({@link
  * #pushPending}). A row with no commission needs no {@code PUT}: its next commission states the
  * stored list.
+ *
+ * <p>A RUNNER row's commission is its workspace token (qits-625), and its list goes through the
+ * token door ({@code PUT /idp/api/tokens/{tokenId}/git-refs}) instead of the clients one; the edge
+ * picks it up within its introspection cache.
  */
 @ApplicationScoped
 public class GitRefScopes {
@@ -115,7 +119,7 @@ public class GitRefScopes {
         continue;
       }
       other.gitRefs = GitRefs.write(GitRefs.without(refs, ref));
-      if (other.commissionedClientId != null) {
+      if (other.commissionedClientId != null || other.commissionedTokenId != null) {
         other.gitRefsPending = true;
         toUpdate.add(other.id);
       }
@@ -164,8 +168,11 @@ public class GitRefScopes {
     return landed;
   }
 
-  /** What one update sends: the client, and the stored list as it was read. */
-  private record Update(String clientId, String storedRefs) {}
+  /**
+   * What one update sends: the commission — a client, or a RUNNER row's token (qits-625), never
+   * both — and the stored list as it was read.
+   */
+  private record Update(String clientId, String tokenId, String storedRefs) {}
 
   /**
    * Send one workspace's stored list to its commission, and clear the flag when it landed — only if
@@ -184,8 +191,15 @@ public class GitRefScopes {
                   () ->
                       workspaces
                           .findActiveById(rowId)
-                          .filter(w -> w.gitRefsPending && w.commissionedClientId != null)
-                          .map(w -> new Update(w.commissionedClientId, w.gitRefs)));
+                          .filter(
+                              w ->
+                                  w.gitRefsPending
+                                      && (w.commissionedClientId != null
+                                          || w.commissionedTokenId != null))
+                          .map(
+                              w ->
+                                  new Update(
+                                      w.commissionedClientId, w.commissionedTokenId, w.gitRefs)));
     } catch (RuntimeException e) {
       LOG.warnf("Could not read workspace %s to send its Git refs: %s", rowId, e.toString());
       return false;
@@ -194,9 +208,15 @@ public class GitRefScopes {
       return false;
     }
     String clientId = update.get().clientId();
+    String tokenId = update.get().tokenId();
     String stored = update.get().storedRefs();
     try {
-      commissioner.get().updateGitRefs(clientId, GitRefs.read(stored));
+      // A client row through the clients door; a RUNNER row's token through the token door.
+      if (clientId != null) {
+        commissioner.get().updateGitRefs(clientId, GitRefs.read(stored));
+      } else {
+        commissioner.get().updateTokenGitRefs(tokenId, GitRefs.read(stored));
+      }
     } catch (RuntimeException e) {
       LOG.warnf(
           "Could not send the narrowed Git refs of workspace %s to qits-idp; the reconcile will"
@@ -212,7 +232,8 @@ public class GitRefScopes {
                       .findActiveById(rowId)
                       .filter(
                           w ->
-                              clientId.equals(w.commissionedClientId)
+                              Objects.equals(clientId, w.commissionedClientId)
+                                  && Objects.equals(tokenId, w.commissionedTokenId)
                                   && Objects.equals(stored, w.gitRefs))
                       .ifPresent(w -> w.gitRefsPending = false));
     } catch (RuntimeException e) {

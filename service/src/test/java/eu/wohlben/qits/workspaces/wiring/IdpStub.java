@@ -103,6 +103,7 @@ public final class IdpStub implements AutoCloseable {
     commissioner.clientSecret = Optional.of("service-secret");
     commissioner.patience = Duration.ofSeconds(1);
     commissioner.clients = client(IdpClients.class);
+    commissioner.tokens = client(IdpTokens.class);
     return commissioner;
   }
 

@@ -113,6 +113,36 @@ public class GitRefNarrowingTest {
     fail("timed out waiting for: " + what);
   }
 
+  /**
+   * qits-625: a RUNNER row's commission is its workspace token, so its narrowing goes through the
+   * token door ({@code updateTokenGitRefs}) and never the clients one.
+   */
+  @Test
+  public void aRunnerRowsNarrowingGoesThroughItsToken() throws Exception {
+    String repoId = repository();
+    Long epic = epicWorkspace(repoId);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              var row = workspaceRepository.findActiveById(epic).orElseThrow();
+              row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
+              row.commissionedTokenId = "tok-id-epic";
+              row.commissionedTokenSubject = "tok-workspace-epic";
+              row.commissionedToken = "qits_tok_epic";
+            });
+
+    workspaceService.createWorkspace(repoId, "task-e-a", "epic/e", "task/e/a");
+
+    await(() -> !commissioner.tokenGitRefUpdates().isEmpty(), "the token's Git ref update");
+    assertEquals(
+        List.of(
+            new FakeCredentialCommissioner.GitRefUpdate(
+                "tok-id-epic", List.of(EPIC, TASK_B, FEATURES))),
+        commissioner.tokenGitRefUpdates());
+    assertEquals(List.of(), commissioner.gitRefUpdates(), "never the clients door");
+    await(() -> !pendingOf(epic), "the pending flag cleared");
+  }
+
   @Test
   public void aWorkspaceCreatedWithoutGitRefsMayPushItsOwnBranch() throws Exception {
     String repoId = repository();

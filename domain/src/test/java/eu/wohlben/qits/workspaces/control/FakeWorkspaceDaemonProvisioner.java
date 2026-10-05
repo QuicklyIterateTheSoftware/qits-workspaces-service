@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.control;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.Mock;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Test double for {@link WorkspaceDaemonProvisioner}: stands in for the in-container
@@ -41,6 +43,26 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
   @Inject ContainerRuntime containers;
   @Inject RepositoryAddressResolver nameResolver;
 
+  /**
+   * What a RUNNER row's daemon answers (qits-625): its container is on a runner's node, which no
+   * fake runtime here holds, so the double does not clone — it answers this, by row id. Reported at
+   * once by default: a daemon that dialled home and found its clone done.
+   */
+  private volatile Function<Long, Optional<ProvisionResult>> runnerAnswer = DAEMON_REPORTS;
+
+  private static final Function<Long, Optional<ProvisionResult>> DAEMON_REPORTS =
+      id -> Optional.of(ProvisionResult.ok(""));
+
+  /** Answer every following RUNNER row with {@code answer}; empty is "no daemon dialled home". */
+  public void answerRunnerRows(Function<Long, Optional<ProvisionResult>> answer) {
+    runnerAnswer = answer;
+  }
+
+  /** Back to answering RUNNER rows at once. */
+  public void reset() {
+    runnerAnswer = DAEMON_REPORTS;
+  }
+
   @Override
   public Optional<ProvisionResult> awaitProvision(
       Long workspaceId,
@@ -59,6 +81,9 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
                           .orElseThrow(
                               () ->
                                   new IllegalStateException("no such workspace " + workspaceId));
+                  if (ws.placement == WorkspacePlacement.RUNNER) {
+                    return RUNNER;
+                  }
                   if (ws.editor) {
                     // THE EDITOR CLONES NOTHING, and the double has to say so or it would be
                     // testing a container the service never asks for. The editor's row belongs to
@@ -78,6 +103,9 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
                   return new Target(ws.repositoryId, ws.workspaceId, ws.branch, url);
                 });
 
+    if (target == RUNNER) {
+      return runnerAnswer.apply(workspaceId);
+    }
     if (target == null) {
       return Optional.of(ProvisionResult.ok("")); // the editor: nothing to clone, nothing to report
     }
@@ -203,4 +231,7 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
   }
 
   private record Target(String repoId, String label, String branch, String url) {}
+
+  /** The marker a RUNNER row reads as: answered by {@link #runnerAnswer}, never cloned. */
+  private static final Target RUNNER = new Target(null, null, null, null);
 }
