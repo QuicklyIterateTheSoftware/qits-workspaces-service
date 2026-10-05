@@ -654,14 +654,6 @@ public class WorkspaceContainerFactory {
     return persistWorkspace;
   }
 
-  /**
-   * The platform's public domain ({@code QITS_DOMAIN}), trimmed, or empty when none is set. The
-   * runner spec composes the public image reference from it ({@link RunnerWorkspaceSpecs}).
-   */
-  public Optional<String> publicDomain() {
-    return set(domain);
-  }
-
   /** Where the agent home volume is mounted, on every placement. */
   public String claudeMount() {
     return claudeMount;

@@ -12,6 +12,7 @@ import eu.wohlben.qits.runner.protocol.Backlog;
 import eu.wohlben.qits.runner.protocol.Nothing;
 import eu.wohlben.qits.runner.protocol.Reserve;
 import eu.wohlben.qits.runner.protocol.RunnerMessage;
+import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.daemonhost.DaemonControlSocketMachineAuthTest;
 import eu.wohlben.qits.workspaces.daemonhost.DaemonMachineTokens;
@@ -83,6 +84,9 @@ class RunnerReservationsTest {
     QuarkusMock.installMockForType(
         WorkspaceRunnerAddressesFixture.withDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
         WorkspaceRunnerAddresses.class);
+    QuarkusMock.installMockForType(
+        WorkspaceRunnerAddressesFixture.planesWithDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
+        WorkspaceAddressPlanes.class);
     rows = new RunnerRows();
   }
 
@@ -124,8 +128,8 @@ class RunnerReservationsTest {
 
   /**
    * A never-placed row is taken: PROVISIONING on this runner, its spec on the wire with the public
-   * image, the four logical mounts and no address — and the runner is sent its new estate. Its
-   * {@code launched} makes it RUNNING.
+   * image, the four logical mounts and the plane's public addresses — and the runner is sent its
+   * new estate. Its {@code launched} makes it RUNNING.
    */
   @Test
   void aQueuedRowIsTakenWithItsSpecAndLaunched() throws Exception {
@@ -149,7 +153,13 @@ class RunnerReservationsTest {
             Mount.Volume.WORKSPACE, Mount.Volume.DOT_CLAUDE, Mount.Volume.M2, Mount.Volume.PNPM),
         spec.mounts().stream().map(Mount::volume).toList());
     assertEquals("/workspace", spec.mounts().get(0).target());
-    assertFalse(spec.env().containsKey("QITS_WORKSPACE_DAEMON_URL"), "no address: qits-625's");
+    assertEquals(
+        "wss://workspaces.qits."
+            + WorkspaceRunnerAddressesFixture.DOMAIN
+            + "/workspaces/daemon/"
+            + queued,
+        spec.env().get("QITS_WORKSPACE_DAEMON_URL"),
+        "every address is the plane's public one (qits-799)");
     assertFalse(
         spec.env().keySet().stream().anyMatch(k -> k.startsWith("QITS_COMMISSIONED_")),
         "no credential");

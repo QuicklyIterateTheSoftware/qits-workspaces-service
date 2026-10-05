@@ -4,6 +4,7 @@ import eu.wohlben.qits.runner.protocol.Nothing;
 import eu.wohlben.qits.workspaces.control.RunnerClaims;
 import eu.wohlben.qits.workspaces.control.RunnerLaunchSpec;
 import eu.wohlben.qits.workspaces.control.RunnerWorkspaceSpecs;
+import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspacesrunner.protocol.Mount;
 import eu.wohlben.qits.workspacesrunner.protocol.Take;
@@ -25,8 +26,9 @@ import org.jboss.logging.Logger;
  * and the registry takes it.
  *
  * <p><b>The spec is the domain's</b> ({@link RunnerWorkspaceSpecs#compose}), mapped field for field
- * onto the protocol's {@link WorkspaceSpec}, with the public workspace image these addresses name.
- * A row whose spec cannot be composed after it was claimed is failed on the spot ({@link
+ * onto the protocol's {@link WorkspaceSpec}, every address and the image from the configured
+ * {@link WorkspaceAddressPlanes#plane}. A row whose spec cannot be composed after it was claimed —
+ * an {@code EdgePlaneUnconfigured} domain among the reasons — is failed on the spot ({@link
  * RunnerClaims#launchFailed}), so it frees its slot and says why, rather than sitting PROVISIONING.
  *
  * <p>A draining connection — told to upgrade — takes nothing whatever it asks, and neither does a
@@ -43,6 +45,8 @@ public class RunnerReservations {
   @Inject RunnerWorkspaceSpecs specs;
 
   @Inject WorkspaceRunnerAddresses addresses;
+
+  @Inject WorkspaceAddressPlanes planes;
 
   @Inject WorkspaceRunnerRegistry registry;
 
@@ -76,7 +80,7 @@ public class RunnerReservations {
     Workspace row = claimed.orElseThrow();
     WorkspaceSpec spec;
     try {
-      spec = wire(specs.compose(row, addresses.workspaceImage()));
+      spec = wire(specs.compose(row, planes.plane()));
     } catch (RuntimeException uncomposable) {
       LOG.errorf(
           "Runner %s took workspace %d and its launch spec could not be composed: %s",

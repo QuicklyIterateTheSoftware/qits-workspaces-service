@@ -1,7 +1,10 @@
 package eu.wohlben.qits.workspaces.runnerhost;
 
+import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlane;
+import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes;
 import eu.wohlben.qits.workspaces.control.WorkspaceContainerFactory;
 import io.quarkus.arc.Arc;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -24,5 +27,18 @@ public final class WorkspaceRunnerAddressesFixture {
     addresses.domain = Optional.ofNullable(domain);
     addresses.containerFactory = Arc.container().instance(WorkspaceContainerFactory.class).get();
     return addresses;
+  }
+
+  /**
+   * The RUNNER address plane (qits-799) under {@code domain}, for the same {@code installMockForType}
+   * — the plane a take's spec is composed from, recognising the shipped registry spelling.
+   */
+  public static WorkspaceAddressPlanes planesWithDomain(String publicDomain) {
+    return new WorkspaceAddressPlanes() {
+      @Override
+      public WorkspaceAddressPlane plane() {
+        return WorkspaceAddressPlane.of(publicDomain, List.of("registry.dev.localhost:8080"));
+      }
+    };
   }
 }

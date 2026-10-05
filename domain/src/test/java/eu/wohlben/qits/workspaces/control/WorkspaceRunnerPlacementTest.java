@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import eu.wohlben.qits.workspaces.dto.TechnicalProcessFrame;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
@@ -21,6 +22,7 @@ import eu.wohlben.qits.workspaces.error.RunnerRefusals;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import java.nio.file.Path;
@@ -31,6 +33,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -61,6 +64,25 @@ public class WorkspaceRunnerPlacementTest {
 
   private final List<UUID> createdRunners = new ArrayList<>();
   private final List<Long> rows = new ArrayList<>();
+
+  /**
+   * A public domain for every start here: the suites ship {@code qits.workspace.domain} empty, and a
+   * RUNNER start refuses to queue without an edge plane (qits-799). Installed per test, so the
+   * refusal case below can install its own.
+   */
+  @BeforeEach
+  void aPublicDomain() {
+    QuarkusMock.installMockForType(planesAt("wohlben.eu"), WorkspaceAddressPlanes.class);
+  }
+
+  private static WorkspaceAddressPlanes planesAt(String publicDomain) {
+    return new WorkspaceAddressPlanes() {
+      @Override
+      public WorkspaceAddressPlane plane() {
+        return WorkspaceAddressPlane.of(publicDomain, List.of("registry.dev.localhost:8080"));
+      }
+    };
+  }
 
   @AfterEach
   void cleanUp() {
@@ -266,6 +288,72 @@ public class WorkspaceRunnerPlacementTest {
     assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
     assertEquals(runner.id, row.runnerId, "sticky: the row keeps its runner");
     assertNull(row.runtimeError);
+  }
+
+  /**
+   * No edge plane (qits-799): a deployment whose {@code QITS_DOMAIN} is a local name fails the start
+   * on the spot — FAILED with {@code EDGE_PLANE_UNCONFIGURED} as its runtime error, a {@code
+   * container} segment saying so in the start's process — and queues nothing, so no runner is told.
+   */
+  @Test
+  public void startWithNoEdgePlaneFailsTheRowAndQueuesNothing() throws Exception {
+    eligibleRunner();
+    String repoId = repo();
+    Workspace created = stoppedRunnerRow(repoId, "noplane");
+    QuarkusMock.installMockForType(planesAt("dev.localhost"), WorkspaceAddressPlanes.class);
+
+    String processId = workspaceService.beginEnsureContainer(created.id);
+
+    Workspace row = read(created.id);
+    assertEquals(WorkspaceRuntimeStatus.FAILED, row.runtimeStatus);
+    assertEquals(
+        "EDGE_PLANE_UNCONFIGURED: QITS_DOMAIN 'dev.localhost' is not a public domain",
+        row.runtimeError);
+    assertNull(row.queuedAt);
+    assertNull(row.runnerId);
+    assertFalse(
+        placement.calls().stream().anyMatch(c -> c.startsWith("backlog:")),
+        placement.calls().toString());
+    assertTrue(claims.trackedStart(created.id).isEmpty(), "nothing waits for a runner");
+
+    assertNotNull(processId);
+    TechnicalProcess process = processes.find(processId).orElseThrow();
+    assertTrue(process.isTerminal(), "the start's process ended");
+    List<TechnicalProcessFrame> frames = new ArrayList<>();
+    process.attach(
+        new TechnicalProcess.Listener() {
+          @Override
+          public void onFrame(TechnicalProcessFrame frame) {
+            frames.add(frame);
+          }
+
+          @Override
+          public void onDone() {}
+
+          @Override
+          public boolean isOpen() {
+            return true;
+          }
+        });
+    assertTrue(
+        frames.stream()
+            .anyMatch(
+                f ->
+                    "container".equals(f.segment())
+                        && TechnicalProcessFrame.KIND_LINE.equals(f.kind())
+                        && f.line().startsWith("EDGE_PLANE_UNCONFIGURED")),
+        frames.toString());
+    assertTrue(
+        frames.stream()
+            .anyMatch(
+                f ->
+                    "container".equals(f.segment())
+                        && TechnicalProcessFrame.KIND_SEGMENT_SETTLED.equals(f.kind())
+                        && TechnicalProcessFrame.STATUS_FAILED.equals(f.status())),
+        frames.toString());
+    assertFalse(
+        frames.stream().anyMatch(f -> RunnerClaims.QUEUED_SEGMENT.equals(f.segment())),
+        "never queued");
   }
 
   @Test

@@ -1582,8 +1582,12 @@ RUNNER with no eligible runner is a 409 `NO_RUNNER`. The refusal codes live in `
   `UNAVAILABLE` laid over it on read when the row's runner is not present. It is never stored.
 - **The runner spec shares the DIRECT spec's environment code**: `WorkspaceContainerFactory.identityEnv`
   and `homeEnv`, written in place in `forWorkspace`. `WorkspaceContainerFactoryGoldenSpecTest` pins the
-  whole DIRECT spec, order included; `RunnerWorkspaceSpecs` composes the runner's from the same
-  methods and carries no address and no credential until qits-625.
+  whole DIRECT spec (ordinary, editor and admin rows), order included; `RunnerWorkspaceSpecs`
+  composes the runner's from the same methods, and every address in it from a
+  `WorkspaceAddressPlane` — public `<app>.qits.<domain>` names off `QITS_DOMAIN` alone, the image
+  moved to `registry.qits.<domain>`, no network, no extra host (qits-799). A RUNNER start builds the
+  plane before it queues: a blank, undotted or `*.localhost` domain fails the row with
+  `EDGE_PLANE_UNCONFIGURED` and queues nothing. It carries no credential until qits-802.
 
 ### The runners themselves: the doors, the socket and the pin (qits-848/850/851/859)
 

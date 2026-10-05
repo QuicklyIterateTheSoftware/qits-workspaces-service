@@ -102,6 +102,12 @@ public class WorkspaceService {
   /** The runner session's writes, and the start processes a runner's launch settles. */
   @Inject RunnerClaims runnerClaims;
 
+  /**
+   * The edge address plane a RUNNER row is composed from (qits-625): built by the RUNNER start
+   * before it queues, so a deployment with no public domain fails the row rather than queueing it.
+   */
+  @Inject WorkspaceAddressPlanes addressPlanes;
+
   @Inject WorkspaceChangePublisher changePublisher;
 
   /**
@@ -3388,7 +3394,8 @@ public class WorkspaceService {
   // comes here. Nothing below calls qits-containers: a RUNNER row's container is on a runner's node,
   // reached through RunnerPlacement, and its persisted runtime status is the runner's word. What a
   // RUNNER row does not do in this epic: no credential is commissioned, no daemon is waited for and
-  // no bootstrap chain is run (qits-625 adds all three).
+  // no bootstrap chain is run (qits-625 adds all three). Its start does build the edge address
+  // plane before queueing (qits-799) and fails the row when there is none.
 
   /**
    * Start, for a RUNNER row: <b>start is pull</b>. The row is marked QUEUED and waits for a runner's
@@ -3400,6 +3407,8 @@ public class WorkspaceService {
    *   <li>already RUNNING, PROVISIONING or QUEUED → nothing to do. The start process still open
    *       for it is answered, so a second press joins the first;
    *   <li>the durable branch is gone → abandoned and 404, as rung 3 of the DIRECT ladder does;
+   *   <li>no edge address plane ({@link EdgePlaneUnconfigured}: no public {@code QITS_DOMAIN}) →
+   *       FAILED with {@code EDGE_PLANE_UNCONFIGURED} as its runtime error, and nothing queued;
    *   <li>STOPPED or FAILED → the compare-and-swap to QUEUED, {@code queuedAt} now, the runner
    *       kept, and the backlog told.
    * </ul>
@@ -3430,6 +3439,16 @@ public class WorkspaceService {
     if (row.branch == null || row.branch.isBlank() || !branchExists(row.repositoryId, row.branch)) {
       abandonRunnerRow(row);
     }
+    // The edge plane, BEFORE the row is queued: a deployment with no public domain has no address a
+    // runner's container could reach home by, so the row goes FAILED saying so and no runner is
+    // ever sent it. Nothing else is read off the plane here; the claim composes the spec from it.
+    try {
+      addressPlanes.plane();
+    } catch (EdgePlaneUnconfigured refused) {
+      return failUnplaceable(row, refused);
+    }
+    // THE TOKEN IS MINTED HERE (qits-802): after the plane, before the queue and outside the claim
+    // transaction, when the row holds no live token.
 
     WorkspaceProcessTracker.Handle process = tracker(row.repositoryId, row.workspaceId, row.id);
     if (process != null) {
@@ -3456,6 +3475,39 @@ public class WorkspaceService {
       runnerPlacement.get().backlogChanged(row);
     }
     return process == null ? null : process.id();
+  }
+
+  /**
+   * A RUNNER start refused for want of an edge plane: the row FAILED with the refusal as its runtime
+   * error ({@code EDGE_PLANE_UNCONFIGURED: QITS_DOMAIN '<v>' is not a public domain}), the start's
+   * process failed with one {@code container} segment saying the same, and nothing queued.
+   */
+  private String failUnplaceable(Workspace row, EdgePlaneUnconfigured refused) {
+    String reason = refused.getMessage();
+    LOG.errorf(
+        "Workspace %s/%s cannot be placed on a runner: %s",
+        row.repositoryId, row.workspaceId, reason);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaceRepository
+                    .findByIdOptional(row.id)
+                    .ifPresent(
+                        w -> {
+                          w.runtimeStatus = WorkspaceRuntimeStatus.FAILED;
+                          w.runtimeError = truncate(reason);
+                          w.queuedAt = null;
+                        }));
+    changePublisher.runtimeChanged(row.repositoryId, row.id);
+    WorkspaceProcessTracker.Handle process = tracker(row.repositoryId, row.workspaceId, row.id);
+    if (process == null) {
+      return null;
+    }
+    process.openSegment(RunnerClaims.CONTAINER_SEGMENT);
+    process.appendLine(RunnerClaims.CONTAINER_SEGMENT, reason);
+    process.settleSegment(RunnerClaims.CONTAINER_SEGMENT, false);
+    process.failProvision(reason);
+    return process.id();
   }
 
   /** The {@code queued} segment's line: which runner the row waits for, or that it waits for any. */

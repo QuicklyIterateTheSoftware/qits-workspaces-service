@@ -27,10 +27,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * method then refuses with 503 {@link #RUNNER_PLANE_UNCONFIGURED}, which is what the create door,
  * the register door and {@code install.sh} answer before anything is minted.
  *
- * <p>The domain is {@code qits.workspace.domain} ({@code QITS_DOMAIN}), the key {@link
- * WorkspaceContainerFactory#publicDomain} reads for the runner launch spec's image; the workspace
- * image's version is the factory's too, so the image a runner is told in its {@code estate}, in a
- * {@code take} and in the login command is the one a DIRECT launch would pull.
+ * <p>The domain is {@code qits.workspace.domain} ({@code QITS_DOMAIN}), the key {@code
+ * WorkspaceAddressPlanes} composes a runner-placed workspace's own addresses and image from; the
+ * workspace image's version is the factory's too, so the image a runner is told in its {@code
+ * estate}, in a {@code take} and in the login command is the one a DIRECT launch would pull.
  */
 @ApplicationScoped
 public class WorkspaceRunnerAddresses {

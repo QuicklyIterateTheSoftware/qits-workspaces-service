@@ -9,14 +9,14 @@ import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
- * The runner launch spec (qits-851): the DIRECT spec's identity, behaviour and home environment,
- * the public image, four logical mounts, the factory labels and the limits — and none of the
- * addresses or credentials a DIRECT container carries. Plain JUnit over the golden test's fixture,
- * so the DIRECT spec it is compared with is the pinned one.
+ * The runner launch spec (qits-851, qits-799): the DIRECT spec's identity, behaviour and home
+ * environment, every address off the {@link WorkspaceAddressPlane}, the public image, four logical
+ * mounts, the factory labels and the limits — and none of the wire aliases or credentials a DIRECT
+ * container carries. Plain JUnit over the golden test's fixture, so the DIRECT spec it is compared
+ * with is the pinned one.
  */
 class RunnerWorkspaceSpecsTest {
 
@@ -32,6 +32,14 @@ class RunnerWorkspaceSpecsTest {
     return row;
   }
 
+  /** The plane every case composes from: a public domain other than the fixture factory's own. */
+  private static final WorkspaceAddressPlane PLANE =
+      WorkspaceAddressPlane.of("wohlben.eu", List.of("registry.dev.localhost:8080"));
+
+  private static RunnerLaunchSpec spec() {
+    return specs(WorkspaceContainerFactoryGoldenSpecTest.factory()).compose(row(), PLANE);
+  }
+
   private static RunnerWorkspaceSpecs specs(WorkspaceContainerFactory factory) {
     RunnerWorkspaceSpecs specs = new RunnerWorkspaceSpecs();
     specs.factory = factory;
@@ -40,9 +48,9 @@ class RunnerWorkspaceSpecsTest {
 
   @Test
   void composesThePublicImageTheFourMountsTheLabelsAndTheLimits() {
-    RunnerLaunchSpec spec = specs(WorkspaceContainerFactoryGoldenSpecTest.factory()).compose(row());
+    RunnerLaunchSpec spec = spec();
 
-    assertEquals("registry.qits.example.eu/qits/workspace:2026.1001.120000", spec.image());
+    assertEquals("registry.qits.wohlben.eu/qits/workspace:2026.1001.120000", spec.image());
     assertEquals(
         List.of(
             new RunnerLaunchSpec.Mount(RunnerLaunchSpec.Volume.WORKSPACE, "/workspace"),
@@ -63,10 +71,17 @@ class RunnerWorkspaceSpecsTest {
   @Test
   void carriesExactlyTheDirectSpecsIdentityBehaviourAndHomeEnvironment() {
     WorkspaceContainerFactory factory = WorkspaceContainerFactoryGoldenSpecTest.factory();
-    RunnerLaunchSpec spec = specs(factory).compose(row());
+    RunnerLaunchSpec spec = specs(factory).compose(row(), PLANE);
     Map<String, String> direct =
         factory.forWorkspace("repo12345678abc", "work", 7L, "task/a", "epic/b", "qits-614").env();
 
+    List<String> addresses =
+        List.of(
+            "QITS_WORKSPACE_DAEMON_URL",
+            "QITS_REPOSITORY_MCP_URL",
+            "QITS_OBSERVABILITY_MCP_URL",
+            "QITS_PLATFORM_MCP_URL",
+            "QITS_WORKSPACE_DAEMON_GIT_BASE_URL");
     List<String> shared =
         List.of(
             "TZ",
@@ -94,23 +109,72 @@ class RunnerWorkspaceSpecsTest {
             "CLAUDE_CONFIG_DIR",
             "KIMI_CODE_HOME",
             "MAVEN_OPTS",
-            "npm_config_store_dir",
-            "QITS_DOMAIN");
-    assertEquals(shared, List.copyOf(spec.env().keySet()), "the runner env is these, in order");
+            "npm_config_store_dir");
+    List<String> expected = new java.util.ArrayList<>();
+    expected.add("TZ");
+    expected.addAll(addresses);
+    expected.addAll(shared.subList(1, shared.size()));
+    expected.add("QITS_DOMAIN");
+    assertEquals(expected, List.copyOf(spec.env().keySet()), "the runner env is these, in order");
     for (String key : shared) {
       assertEquals(direct.get(key), spec.env().get(key), key);
     }
+    // The addresses are the DIRECT spec's keys with the plane's values, and the domain is the
+    // plane's — the fixture factory's own (example.eu) is the DIRECT spec's.
+    Map<String, String> env = spec.env();
+    assertEquals("wss://workspaces.qits.wohlben.eu/workspaces/daemon/7", env.get(addresses.get(0)));
+    assertEquals("https://projects.qits.wohlben.eu/projects/mcp", env.get(addresses.get(1)));
+    assertEquals(
+        "https://observability.qits.wohlben.eu/observability/mcp", env.get(addresses.get(2)));
+    assertEquals("https://mcp.qits.wohlben.eu/mcp", spec.env().get(addresses.get(3)));
+    assertEquals("https://githost.qits.wohlben.eu/git", spec.env().get(addresses.get(4)));
+    assertEquals("wohlben.eu", spec.env().get("QITS_DOMAIN"));
+    for (String key : addresses) {
+      assertTrue(direct.containsKey(key), key);
+    }
+  }
+
+  /**
+   * qits-799's acceptance: no network and no extra host (the record has no field for either), no
+   * wire alias, internal name or local spelling in any value, and the image on the public registry.
+   */
+  @Test
+  void aRunnerSpecNamesOnlyPublicEdgeHosts() {
+    RunnerLaunchSpec spec = spec();
+
+    for (Map.Entry<String, String> e : spec.env().entrySet()) {
+      assertFalse(e.getValue().contains("-qits-"), e.toString());
+      assertFalse(e.getValue().contains(".internal"), e.toString());
+      assertFalse(e.getValue().contains(".localhost"), e.toString());
+      assertFalse(
+          e.getValue().startsWith("http://") || e.getValue().startsWith("ws://"), e.toString());
+    }
+    assertTrue(spec.image().startsWith("registry.qits.wohlben.eu/"), spec.image());
+    assertFalse(
+        java.util.Arrays.stream(RunnerLaunchSpec.class.getRecordComponents())
+            .map(java.lang.reflect.RecordComponent::getName)
+            .anyMatch(n -> n.equals("network") || n.equals("addHosts")));
+  }
+
+  /** The DIRECT spec of the same row still carries its network and its extra host: untouched. */
+  @Test
+  void theDirectSpecOfTheSameRowKeepsItsNetworkAndExtraHost() {
+    WorkspaceContainer direct =
+        WorkspaceContainerFactoryGoldenSpecTest.factory()
+            .forWorkspace("repo12345678abc", "work", 7L, "task/a", "epic/b", "qits-614");
+
+    assertEquals("qits-net", direct.network());
+    assertEquals(List.of("host.docker.internal:host-gateway"), List.copyOf(direct.addHosts()));
+    assertEquals(
+        "ws://qits:8080/workspaces/daemon/7", direct.env().get("QITS_WORKSPACE_DAEMON_URL"));
   }
 
   @Test
-  void carriesNoAddressAndNoCredential() {
-    RunnerLaunchSpec spec = specs(WorkspaceContainerFactoryGoldenSpecTest.factory()).compose(row());
+  void carriesNoCredentialYet() {
+    RunnerLaunchSpec spec = spec();
 
     for (String key : spec.env().keySet()) {
-      assertFalse(key.equals("QITS_WORKSPACE_DAEMON_URL"), key);
-      assertFalse(key.equals("QITS_WORKSPACE_DAEMON_GIT_BASE_URL"), key);
       assertFalse(key.startsWith("QITS_GIT_AUTH_"), key);
-      assertFalse(key.endsWith("_MCP_URL"), key);
       assertFalse(key.startsWith("QITS_COMMISSIONED_"), key);
       assertFalse(key.startsWith("QITS_WORKSPACE_DAEMON_AUTH_"), key);
       assertFalse(key.equals("GIT_CONFIG_GLOBAL"), key);
@@ -126,10 +190,9 @@ class RunnerWorkspaceSpecsTest {
   }
 
   @Test
-  void refusesToComposeWithoutAPublicDomain() {
-    WorkspaceContainerFactory factory = WorkspaceContainerFactoryGoldenSpecTest.factory();
-    factory.domain = Optional.empty();
-
-    assertThrows(IllegalStateException.class, () -> specs(factory).compose(row()));
+  void refusesToComposeWithoutAPlane() {
+    assertThrows(
+        IllegalStateException.class,
+        () -> specs(WorkspaceContainerFactoryGoldenSpecTest.factory()).compose(row(), null));
   }
 }
