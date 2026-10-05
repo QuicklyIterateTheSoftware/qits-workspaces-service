@@ -16,7 +16,8 @@ import org.junit.jupiter.api.Test;
  * container on its next start, so the move has to be provably a move: this test was committed
  * before it, against the code as it stood, and asserts every field and the ORDER of every map —
  * environment and labels are insertion-ordered, and an order the orchestrator hashes is part of the
- * spec. Two rows, because the editor takes the other arm of every branch in the shared block.
+ * spec. Three rows: the editor takes the other arm of every branch in the shared block, and the
+ * admin row holds the host's docker socket; both stay DIRECT for good, so both are pinned.
  *
  * <p>The one field left out is {@code user}: it is this machine's uid, so it is asserted as a uid
  * and not as a value.
@@ -236,6 +237,99 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         volume qits_shared_m2:/caches/m2
         volume qits_shared_pnpm:/caches/pnpm
         volume qits_workspace_editor:/workspace
+        """,
+        render(c));
+  }
+
+  /**
+   * An admin row: the ordinary spec plus the host's docker socket, and nothing else different. Pinned
+   * because the runner work (qits-625) must leave every admin spec exactly as it is: an admin
+   * workspace is DIRECT for good.
+   */
+  @Test
+  void anAdminWorkspacesSpecIsExactlyThis() {
+    WorkspaceContainerFactory f = factory();
+    f.postures =
+        StubInstance.of(
+            new WorkspacePostures() {
+              @Override
+              public boolean isAdmin(Long rowId) {
+                return true;
+              }
+
+              @Override
+              public boolean isEditor(Long rowId) {
+                return false;
+              }
+            });
+    WorkspaceContainer c =
+        f.forWorkspace("repo12345678abc", "admin", 8L, "admin/recovery", "main", null);
+
+    assertTrue(c.user().matches("\\d+"), c.user());
+    assertEquals(
+        """
+        name=qits-ws-admin-repo1234
+        image=registry.dev.localhost:8080/qits/workspace:2026.1001.120000
+        editor=false
+        hostDockerSocket=true
+        network=qits-net
+        memory=4g
+        memorySwap=8g
+        pidsLimit=4096
+        cpus=2
+        oomScoreAdj=600
+        addHost=host.docker.internal:host-gateway
+        label qits.repository=repo12345678abc
+        label qits.workspace=admin
+        label qits.branch=admin/recovery
+        label qits.parent=main
+        label qits.project=proj-1
+        env TZ=Europe/Berlin
+        env QITS_WORKSPACE_DAEMON_URL=ws://qits:8080/workspaces/daemon/8
+        env QITS_REPOSITORY_MCP_URL=http://qits-projects:8080/projects/mcp
+        env QITS_OBSERVABILITY_MCP_URL=http://dev-qits-observability:8080/observability/mcp
+        env QITS_PLATFORM_MCP_URL=http://dev-qits-platform-access-mcp-service:8080/mcp
+        env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=http://qits-platform-edge:8080/git
+        env QITS_WORKSPACE_DAEMON_API_BASE_PATH=/workspaces/container/8/
+        env QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE=/workspaces/service/8
+        env QITS_WORKSPACE_DAEMON_WORKSPACE_ID=admin
+        env QITS_WORKSPACE_DAEMON_REPOSITORY_ID=repo12345678abc
+        env QITS_WORKSPACE_DAEMON_BRANCH=admin/recovery
+        env QITS_WORKSPACE_DAEMON_PARENT=main
+        env QITS_WORKSPACE_DAEMON_ENTITY_TITLE=Fix the login
+        env QITS_WORKSPACE_DAEMON_ENTITY_STATUS=IMPLEMENTING
+        env QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED=true
+        env QITS_WORKSPACE_DAEMON_PROJECT_ID=proj-1
+        env QITS_WORKSPACE_DAEMON_REPO_NAME=my-repo
+        env QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN=true
+        env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
+        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=true
+        env QITS_WORKSPACE_DAEMON_SERVICE_READY_GRACE_MS=10000
+        env QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_INITIAL_MS=1000
+        env QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_MAX_MS=30000
+        env QITS_WORKSPACE_DAEMON_SERVICE_STOP_GRACE_MS=5000
+        env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
+        env QITS_COMMISSIONED_CLIENT_ID=ws-7-a
+        env QITS_COMMISSIONED_CLIENT_SECRET=s3cr3t
+        env GIT_CONFIG_GLOBAL=/etc/qits-gitconfig
+        env QITS_GIT_AUTH_HOST=qits-platform-edge:8080
+        env QITS_GIT_AUTH_TOKEN_URL=http://qits-idp:8080/idp/token
+        env QITS_GIT_AUTH_AUDIENCE=qits-platform
+        env QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL=http://qits-idp:8080/idp/token
+        env QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE=qits-platform
+        env GIT_AUTHOR_NAME=qits
+        env GIT_AUTHOR_EMAIL=qits@local
+        env GIT_COMMITTER_NAME=qits
+        env GIT_COMMITTER_EMAIL=qits@local
+        env CLAUDE_CONFIG_DIR=/claude-home/.claude
+        env KIMI_CODE_HOME=/claude-home/.kimi-code
+        env MAVEN_OPTS=-Dmaven.repo.local=/caches/m2
+        env npm_config_store_dir=/caches/pnpm/store
+        env QITS_DOMAIN=example.eu
+        volume qits_shared_dot_claude:/claude-home
+        volume qits_shared_m2:/caches/m2
+        volume qits_shared_pnpm:/caches/pnpm
+        volume qits_workspace_admin:/workspace
         """,
         render(c));
   }
