@@ -154,6 +154,26 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SweepError"
+    Check:
+      type: object
+      properties:
+        name:
+          type: string
+        ok:
+          type: boolean
+        detail:
+          type: string
+    CheckReport:
+      type: object
+      properties:
+        name:
+          type: string
+        ok:
+          type: boolean
+        detail:
+          type: string
+        data:
+          $ref: "#/components/schemas/JsonNode"
     CleanupBranchRequest:
       type: object
       required:
@@ -305,6 +325,24 @@ components:
       properties:
         workspace:
           $ref: "#/components/schemas/WorkspaceHistoryDto"
+    Health:
+      type: object
+      properties:
+        at:
+          $ref: "#/components/schemas/Instant"
+        ok:
+          type: boolean
+        detail:
+          type: string
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Check"
+    HealthCheckRequested:
+      type: object
+      properties:
+        requestId:
+          type: string
     Instant:
       type: string
       format: date-time
@@ -1086,6 +1124,25 @@ components:
           type: string
         loginCommandPending:
           type: boolean
+        health:
+          $ref: "#/components/schemas/Health"
+    WorkspaceRunnerHealthDto:
+      type: object
+      properties:
+        at:
+          $ref: "#/components/schemas/Instant"
+        ok:
+          type: boolean
+        detail:
+          type: string
+        requestId:
+          type: string
+        dataOmitted:
+          type: boolean
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckReport"
     WorkspaceRunnerRefDto:
       type: object
       properties:
@@ -1903,6 +1960,37 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+  /workspaces/api/runners/{id}/health:
+    get:
+      summary: "A workspace runner's newest health check, every check's data included"
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: The newest health check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceRunnerHealthDto"
+        "204":
+          description: No health check has settled yet
+        "404":
+          description: No such runner
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Workspace Runner Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
+        - qits:agent
   /workspaces/api/runners/{id}/healthcheck:
     post:
       summary: Ask a connected workspace runner for a health check
@@ -1914,7 +2002,11 @@ paths:
           type: string
       responses:
         "202":
-          description: Sent
+          description: "Sent, or one is pending already; its requestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthCheckRequested"
         "404":
           description: No such runner
         "409":
@@ -1932,6 +2024,8 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:system
+        - qits:agent
   /workspaces/api/runners/{id}/login-check:
     post:
       summary: Ask a connected workspace runner to re-check its node's agent login
@@ -2850,4 +2944,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.1005.74656
+  version: 2026.1005.112909

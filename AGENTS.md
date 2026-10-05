@@ -828,7 +828,8 @@ There is no auth variant to select in this service. The shared `qits-auth-core` 
 retain their narrower `MachineAuth` audience/scope checks.
 
 **Every read also takes `qits:agent`; no write does** (phase 4 of the superproject's
-`principal-bound-git-refs-plan.md`: agents keep every read and lose only writes). It is stated on
+`principal-bound-git-refs-plan.md`: agents keep every read and lose only writes) — with one stated
+exception, a workspace runner's health check (qits-850, below). It is stated on
 each read METHOD — every `GET`, the three event streams — and never on a class, so a write added to
 a class later does not inherit the agent role. A method-level list replaces the class's, so each one
 repeats the class's roles beside `qits:agent`. `AgentReadAccessTest` has one test per class. The
@@ -1587,9 +1588,11 @@ RUNNER with no eligible runner is a 409 `NO_RUNNER`. The refusal codes live in `
 ### The runners themselves: the doors, the socket and the pin (qits-848/850/851/859)
 
 `api/WorkspaceRunnerController` (`/workspaces/api/runners`) is qits-ci's `CiRunnerController` door
-for door, and the roles are per method: reads `{admin, system, agent}`; create, PATCH, rotate and
-DELETE `{admin, system}` (the cold bootstrap drives them with its own token); greenlight, healthcheck
-and login-check `qits:admin` alone. `qits:workspaces-runner-registration` opens `register` and
+for door, and the roles are per method: reads `{admin, system, agent}` (`GET …/{id}/health`, the
+newest check in full, among them); create, PATCH, rotate and DELETE `{admin, system}` (the cold
+bootstrap drives them with its own token); greenlight and login-check `qits:admin` alone. The
+health check (`POST …/{id}/healthcheck`, 202 `{requestId}`) is `{admin, system, agent}` — the one
+write an agent may press here, by the owner's decision (qits-850): it reads and self-tests only. `qits:workspaces-runner-registration` opens `register` and
 `install.sh` and nothing else. The register door reads the bearer's `sub` off the validated token,
 so it needs the machine gate on (`qits.auth.machine.required`, true live via
 `QITS_AUTH_MACHINE_REQUIRED`); the tests run under `DaemonControlSocketMachineAuthTest.GateOn` for
@@ -1611,6 +1614,17 @@ that reason and reuse it rather than adding a profile.
   constant here). A greeted runner gets `ack`, `quarantined` if it is, `estate`, `backlog` and —
   while it awaits its first one — `healthCheck`; `estate` goes out only from a successful read.
   `SocketBearerLifetime` is a copy of CI's (qits-545) for this one path.
+- **`runnerhost/WorkspaceRunnerHealth` gates a runner exactly as qits-ci's `CiRunnerHealth` does**
+  (qits-850), without CI's build-failure streak. Quarantined at registration, when it comes back
+  (its first socket after more than the reconnect grace — a reconnect inside it, the rollover
+  successor included, is not one; nor is a reconnect to a freshly started service, whose memory of
+  the drop is gone), and when a check fails or is not answered within
+  `qits.workspaces.runner.healthcheck.timeout` (`no answer`). A check is sent at the greeting of a
+  runner awaiting its first one or coming back, on demand, and by the sweep on CI's back-off
+  `qits.workspaces.runner.healthcheck.schedule` counted from `quarantined_at`, which a failed check
+  of a runner already out keeps. The whole report sits in `capabilities.health`, bounded on its own;
+  a pass reinstates (`reinstated{by: "health check"}`, `ack{slots}`). A quarantine never touches
+  running workspaces: stop and delete are still routed to the runner.
 - **`runnerhost/RunnerPlacementDriver` is the domain's `RunnerPlacement` port.** Its notifications
   run after the caller's transaction commits, on the registry's own thread; `stop`/`delete` wait
   60 s for the reply (`RUNNER_TIMEOUT`, or `RUNNER_UNAVAILABLE` with no socket).

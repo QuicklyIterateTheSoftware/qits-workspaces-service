@@ -5,6 +5,7 @@ import eu.wohlben.qits.auth.MachineAuth;
 import eu.wohlben.qits.auth.MachineIdentity;
 import eu.wohlben.qits.workspaces.control.WorkspaceRunners;
 import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerDto;
+import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerHealthDto;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunnerCapabilities;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
@@ -13,11 +14,11 @@ import eu.wohlben.qits.workspaces.error.DomainException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.error.RunnerRefusals;
 import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerAddresses;
+import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerHealth;
 import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerInstallScript;
 import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerRegistry;
 import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerViews;
 import eu.wohlben.qits.workspaces.wiring.IdpRunnerCommissioner;
-import eu.wohlben.qits.workspacesrunner.protocol.HealthCheck;
 import eu.wohlben.qits.workspacesrunner.protocol.ProbeLogin;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -50,8 +51,9 @@ import org.jboss.logging.Logger;
  * <p><b>Roles, per method and never on the class.</b> The reads take {@code qits:admin}, {@code
  * qits:system} and {@code qits:agent} (agents keep every read). Create, patch, a registration token
  * rotation and delete take {@code {qits:admin, qits:system}}, because the cold bootstrap's own
- * service client creates and rotates a runner with nobody at a keyboard; greenlight, health check
- * and login check are {@code qits:admin} alone. {@code qits:workspaces-runner-registration} — what
+ * service client creates and rotates a runner with nobody at a keyboard; greenlight and login check
+ * are {@code qits:admin} alone. The health check is open to all three (qits-850): it reads and
+ * self-tests, and moves a runner's standing only as its own result does. {@code qits:workspaces-runner-registration} — what
  * a registration token carries through the edge — opens exactly two routes: the register door, for
  * the runner the token was minted for only, and {@code GET /runners/install.sh}, which carries no
  * secret and names no runner.
@@ -79,7 +81,13 @@ import org.jboss.logging.Logger;
     targets = {
       WorkspaceRunnerController.RunnerRegistrationDto.class,
       WorkspaceRunnerDto.class,
-      WorkspaceRunnerDto.Login.class
+      WorkspaceRunnerDto.Login.class,
+      WorkspaceRunnerDto.Health.class,
+      WorkspaceRunnerDto.Check.class,
+      // healthcheck (202) and health (200 or 204) answer through a bare Response as well.
+      WorkspaceRunnerController.HealthCheckRequested.class,
+      WorkspaceRunnerHealthDto.class,
+      WorkspaceRunnerHealthDto.CheckReport.class
     })
 public class WorkspaceRunnerController {
 
@@ -100,6 +108,8 @@ public class WorkspaceRunnerController {
   @Inject WorkspaceRunnerViews views;
 
   @Inject WorkspaceRunnerRegistry registry;
+
+  @Inject WorkspaceRunnerHealth health;
 
   @Inject IdpRunnerCommissioner idp;
 
@@ -145,6 +155,9 @@ public class WorkspaceRunnerController {
   public record RegisterRunnerRequest(
       @Schema(description = "What the runner says about itself — a JSON object, at most 16 KiB")
           JsonNode capabilities) {}
+
+  /** What a health check request answers: the {@code requestId} its {@code healthChecked} echoes. */
+  public record HealthCheckRequested(String requestId) {}
 
   /** What the register door answers, once: the runner's own client and where to use it. */
   public record RegisteredRunner(
@@ -358,23 +371,51 @@ public class WorkspaceRunnerController {
   }
 
   /**
-   * Ask a connected runner to run its health check now: pull the pinned workspace image, start it,
-   * see it running, remove it. Its {@code healthChecked} records the result, and a pass lifts a
-   * quarantine.
+   * Ask a connected runner to run its health check now — every named check it has, the selfTest
+   * among them: pull the pinned workspace image, start it, see it running, remove it. Its {@code
+   * healthChecked} is recorded on the row; a pass lifts a quarantine and a failure begins one. A
+   * runner with a check pending is answered that one's {@code requestId} and asked nothing more.
+   *
+   * <p>Open to {@code qits:system} and {@code qits:agent} beside the admin (qits-850, the owner's
+   * decision): a check reads and self-tests and changes nothing a person set, and its only effect on
+   * the runner's standing is the one its own result has.
    */
   @POST
   @Path("/{id}/healthcheck")
-  @RolesAllowed(ADMIN_ROLE)
+  @RolesAllowed({ADMIN_ROLE, SYSTEM_ROLE, AGENT_ROLE})
   @Operation(summary = "Ask a connected workspace runner for a health check")
-  @APIResponse(responseCode = "202", description = "Sent")
+  @APIResponse(
+      responseCode = "202",
+      description = "Sent, or one is pending already; its requestId",
+      content = @Content(schema = @Schema(implementation = HealthCheckRequested.class)))
   @APIResponse(responseCode = "404", description = "No such runner")
   @APIResponse(
       responseCode = "409",
       description = "RUNNER_UNAVAILABLE: the runner is not connected",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   public Response healthcheck(@PathParam("id") String id) {
-    sendToConnected(runnerId(id), new HealthCheck(), "run a health check");
-    return Response.accepted().build();
+    String requestId = health.request(runnerId(id));
+    return Response.accepted(new HealthCheckRequested(requestId)).build();
+  }
+
+  /**
+   * The runner's newest health check in full: the verdict, the request it answered and every named
+   * check with its data. 204 with no body while no check has settled yet — the runner exists, so it
+   * is not a 404.
+   */
+  @GET
+  @Path("/{id}/health")
+  @RolesAllowed({ADMIN_ROLE, SYSTEM_ROLE, AGENT_ROLE})
+  @Operation(summary = "A workspace runner's newest health check, every check's data included")
+  @APIResponse(
+      responseCode = "200",
+      description = "The newest health check",
+      content = @Content(schema = @Schema(implementation = WorkspaceRunnerHealthDto.class)))
+  @APIResponse(responseCode = "204", description = "No health check has settled yet")
+  @APIResponse(responseCode = "404", description = "No such runner")
+  public Response health(@PathParam("id") String id) {
+    WorkspaceRunnerHealthDto report = runners.health(runnerId(id));
+    return report == null ? Response.noContent().build() : Response.ok(report).build();
   }
 
   /** Ask a connected runner to probe its node's agent login now; {@code loginState} records it. */

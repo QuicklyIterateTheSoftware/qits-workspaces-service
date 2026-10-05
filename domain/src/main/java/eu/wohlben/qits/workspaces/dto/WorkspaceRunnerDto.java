@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.dto;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -43,6 +44,8 @@ import java.util.UUID;
  * @param loginCommandPending true when {@code dotClaudeVolume} is known but the commands above are
  *     withheld because the proof above is not there yet: the SPA's cue that the runner is still
  *     fetching the workspace image, not that nothing was reported
+ * @param health the newest health check's verdict and each named check's, without their data
+ *     ({@code GET /runners/{id}/health} answers that); null until a check has settled (qits-850)
  */
 public record WorkspaceRunnerDto(
     UUID id,
@@ -71,7 +74,8 @@ public record WorkspaceRunnerDto(
     int queued,
     String loginCommand,
     String kimiLoginCommand,
-    boolean loginCommandPending) {
+    boolean loginCommandPending,
+    Health health) {
 
   /**
    * The node's agent login state, last known: kept while the runner is offline.
@@ -81,4 +85,24 @@ public record WorkspaceRunnerDto(
    * @param checkedAt when the runner probed, as it said; null when it did not say
    */
   public record Login(String claude, String kimi, Instant checkedAt) {}
+
+  /**
+   * The newest health check, as the listing reads it (qits-850).
+   *
+   * @param at when it settled
+   * @param ok whether every check passed
+   * @param detail the runner's line for a person, or why the check settled without an answer
+   * @param checks each named check's outcome, in the runner's order; empty from a runner that
+   *     reports none, or a check that was never answered
+   */
+  public record Health(Instant at, boolean ok, String detail, List<Check> checks) {}
+
+  /**
+   * One named check's outcome, without its data.
+   *
+   * @param name the check's stable name ({@code docker}, {@code selfTest}, {@code nodeInventory}, …)
+   * @param ok whether it found what it looks for
+   * @param detail its line for a person
+   */
+  public record Check(String name, boolean ok, String detail) {}
 }

@@ -176,6 +176,64 @@ public class WorkspaceRunnersTest {
         BadRequestException.class, () -> runners.recordCapabilities(runner.id, JSON.readTree("[]")));
   }
 
+  /**
+   * qits-850: a failed check of a runner already out keeps its {@code quarantined_at} — the
+   * back-off schedule counts from it — and takes the newer reason; one in service is taken out now.
+   */
+  @Test
+  public void quarantineForKeepsTheQuarantineInstantAndTakesTheNewerReason() {
+    WorkspaceRunner runner = create(uniqueName());
+    runners.markRegistered(runner.id, "client-" + runner.id, null);
+    WorkspaceRunner before = runners.get(runner.id);
+
+    WorkspaceRunners.Quarantine kept = runners.quarantineFor(runner.id, "health check failed: x");
+
+    assertFalse(kept.began());
+    assertTrue(kept.reasonChanged());
+    assertEquals(before.quarantinedAt, runners.get(runner.id).quarantinedAt);
+    assertEquals("health check failed: x", runners.get(runner.id).quarantineReason);
+    assertFalse(runners.quarantineFor(runner.id, "health check failed: x").reasonChanged());
+
+    runners.greenlight(runner.id);
+    WorkspaceRunners.Quarantine began = runners.quarantineFor(runner.id, "health check failed: y");
+    assertTrue(began.began());
+    assertTrue(runners.get(runner.id).quarantined());
+  }
+
+  /**
+   * qits-850: the report lands as the capabilities' {@code health} key beside the columns, and
+   * every other key is kept; a {@code health} key in a runner's own report is not the runner's to
+   * write.
+   */
+  @Test
+  public void aHealthReportIsKeptBesideWhatTheRunnerSaid() throws Exception {
+    WorkspaceRunner runner = create(uniqueName());
+    runners.markRegistered(
+        runner.id, "client-" + runner.id, JSON.readTree("{\"version\":\"1.0\"}"));
+    var report =
+        (com.fasterxml.jackson.databind.node.ObjectNode)
+            JSON.readTree(
+                "{\"at\":\"2026-10-05T10:00:00Z\",\"ok\":false,\"detail\":\"selfTest failed\","
+                    + "\"requestId\":\"r-1\",\"checks\":[{\"name\":\"nodeInventory\",\"ok\":true,"
+                    + "\"detail\":\"1 container\",\"data\":{\"containers\":[{\"name\":\"c\"}]}}]}");
+
+    WorkspaceRunner after =
+        runners.recordHealthCheck(runner.id, false, java.time.Instant.now(), report);
+    runners.recordCapabilities(runner.id, JSON.readTree("{\"health\":{\"ok\":true}}"));
+
+    assertEquals(Boolean.FALSE, after.lastHealthCheckOk);
+    WorkspaceRunnerDto view = runners.view(runners.get(runner.id));
+    assertEquals("1.0", view.version());
+    assertFalse(view.health().ok(), "the runner's own health key was ignored");
+    assertEquals(
+        List.of(new WorkspaceRunnerDto.Check("nodeInventory", true, "1 container")),
+        view.health().checks());
+    assertEquals(
+        "c",
+        runners.health(runner.id).checks().get(0).data().path("containers").get(0).path("name").asText());
+    assertEquals("r-1", runners.health(runner.id).requestId());
+  }
+
   // --- the delete refusal -------------------------------------------------------------------------
 
   @Test
