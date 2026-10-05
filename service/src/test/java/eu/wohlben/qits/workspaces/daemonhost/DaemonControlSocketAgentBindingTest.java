@@ -28,9 +28,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * A {@code qits:agent} caller may open only the control socket of the workspace it was commissioned
- * for; a {@code qits:system} caller keeps today's behaviour. Real RS256 bearers against the gate-on
- * profile of {@link DaemonControlSocketMachineAuthTest}, so the roles and the {@code sub} come out of
- * a validated token rather than a test identity.
+ * for; a {@code qits:system} caller keeps today's behaviour. On a RUNNER row the bound identity is
+ * its workspace token's subject (qits-812), and a client id never matches. Real RS256 bearers against
+ * the gate-on profile of {@link DaemonControlSocketMachineAuthTest}, so the roles and the {@code sub}
+ * come out of a validated token rather than a test identity.
  */
 @QuarkusTest
 @TestProfile(DaemonControlSocketMachineAuthTest.GateOn.class)
@@ -122,6 +123,48 @@ class DaemonControlSocketAgentBindingTest {
 
     assertEquals(101, connect("/api/workspace-daemon/" + labelA, token));
     assertEquals(403, connect("/api/workspace-daemon/" + labelB, token));
+  }
+
+  // --- a RUNNER row binds its token subject (qits-625, qits-812) ---------------------------------
+
+  /** Row A turned RUNNER, holding a workspace token with {@code subject} (and its stale client). */
+  private void runnerWithToken(Long rowId, String subject) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              var row = workspaceRepository.findActiveById(rowId).orElseThrow();
+              row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
+              row.commissionedTokenId = "tok-id-" + rowId;
+              row.commissionedTokenSubject = subject;
+              row.commissionedToken = "qits_tok_" + rowId;
+            });
+  }
+
+  @Test
+  void aRunnerRowAdmitsItsTokenSubject() throws Exception {
+    String subject = "tok-workspace-" + rowA;
+    runnerWithToken(rowA, subject);
+    String token = DaemonMachineTokens.tokenWithRoles(subject, AGENT, PLATFORM_AUDIENCE);
+
+    assertEquals(101, connect("/workspaces/daemon/" + rowA, token));
+  }
+
+  @Test
+  void aRunnerRowRefusesAClientIdEvenTheOneItsColumnStillNames() throws Exception {
+    runnerWithToken(rowA, "tok-workspace-" + rowA);
+    String token = DaemonMachineTokens.tokenWithRoles(clientA, AGENT, PLATFORM_AUDIENCE);
+
+    assertEquals(403, connect("/workspaces/daemon/" + rowA, token));
+  }
+
+  @Test
+  void aRunnerRowRefusesAnotherWorkspacesTokenSubject() throws Exception {
+    runnerWithToken(rowA, "tok-workspace-" + rowA);
+    runnerWithToken(rowB, "tok-workspace-" + rowB);
+    String token =
+        DaemonMachineTokens.tokenWithRoles("tok-workspace-" + rowB, AGENT, PLATFORM_AUDIENCE);
+
+    assertEquals(403, connect("/workspaces/daemon/" + rowA, token));
   }
 
   /** 101 when the socket opened, else the status the upgrade was refused with. */

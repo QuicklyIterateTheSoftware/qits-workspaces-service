@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.daemonhost;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -21,9 +22,12 @@ import org.jboss.logging.Logger;
  * <p>Both control sockets ({@link DaemonControlSocket}, {@link LegacyDaemonControlSocket}) take the
  * workspace from the path. {@code qits:system} callers are trusted to name any workspace, as today.
  * A {@code qits:agent} caller is not (phase 4 of principal-bound-git-refs-plan.md): the token's
- * {@code sub} must be the idp client commissioned for that workspace's container — the pair the
- * workspace row holds in {@code commissioned_client_id}. Anything else is refused with 403 before
- * the socket opens.
+ * {@code sub} must be the identity bound to that workspace's container: for a DIRECT row the idp
+ * client commissioned for it ({@code commissioned_client_id}), and for a RUNNER row the subject of
+ * its workspace token ({@code commissioned_token_subject}, qits-625 — the {@code sub} the edge puts
+ * on the JWT it mints for the token). Anything else is refused with 403 before the socket opens: a
+ * RUNNER row's client id never matches, because it holds none, and another row's token never does.
+ * The legacy label path binds the client only, because a RUNNER row's daemon never dials it.
  *
  * <p>A caller that holds both roles is treated as {@code qits:system}: agents switch to their own
  * role later, and until then a workspace container still presents the owner's roles.
@@ -64,7 +68,7 @@ public class DaemonAgentBindingCheck implements HttpUpgradeCheck {
               String segment = context.pathParam(legacy ? "workspaceId" : "id");
               String caller = subjectOf(identity);
               return Uni.createFrom()
-                  .item(() -> commissionedClientOf(legacy, segment))
+                  .item(() -> boundSubjectOf(legacy, segment))
                   .runSubscriptionOn(Infrastructure.getDefaultWorkerPool())
                   .map(
                       held -> {
@@ -72,7 +76,7 @@ public class DaemonAgentBindingCheck implements HttpUpgradeCheck {
                           return CheckResult.permitUpgradeSync();
                         }
                         LOG.warnf(
-                            "Refused an agent control socket: %s is not the client commissioned for"
+                            "Refused an agent control socket: %s is not the identity bound to"
                                 + " workspace '%s'",
                             caller, segment);
                         return CheckResult.rejectUpgradeSync(403);
@@ -85,7 +89,7 @@ public class DaemonAgentBindingCheck implements HttpUpgradeCheck {
   }
 
   /** The token's {@code sub}; the principal's name when the identity is not a JWT. */
-  private static String subjectOf(SecurityIdentity identity) {
+  static String subjectOf(SecurityIdentity identity) {
     Principal principal = identity.getPrincipal();
     if (principal instanceof JsonWebToken jwt && jwt.getSubject() != null) {
       return jwt.getSubject();
@@ -94,11 +98,12 @@ public class DaemonAgentBindingCheck implements HttpUpgradeCheck {
   }
 
   /**
-   * The client commissioned for the workspace the path names, or null — no such ACTIVE workspace,
-   * no commission, a segment that is not an id, or a legacy label more than one workspace carries.
-   * Null never matches a caller.
+   * The subject an agent must present for the workspace the path names: its token subject on a
+   * RUNNER row, its commissioned client on a DIRECT one (and on the legacy label path, which a RUNNER
+   * daemon never dials). Null — no such ACTIVE workspace, no credential, a segment that is not an id,
+   * or a legacy label more than one workspace carries — never matches a caller.
    */
-  String commissionedClientOf(boolean legacy, String segment) {
+  String boundSubjectOf(boolean legacy, String segment) {
     if (segment == null || segment.isBlank()) {
       return null;
     }
@@ -117,7 +122,14 @@ public class DaemonAgentBindingCheck implements HttpUpgradeCheck {
               } catch (NumberFormatException notAnId) {
                 return null;
               }
-              return workspaces.findActiveById(id).map(w -> w.commissionedClientId).orElse(null);
+              return workspaces
+                  .findActiveById(id)
+                  .map(
+                      w ->
+                          w.placement == WorkspacePlacement.RUNNER
+                              ? w.commissionedTokenSubject
+                              : w.commissionedClientId)
+                  .orElse(null);
             });
   }
 }

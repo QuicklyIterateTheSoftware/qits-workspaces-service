@@ -1,8 +1,11 @@
 package eu.wohlben.qits.workspaces.daemonhost;
 
 import eu.wohlben.qits.workspaces.control.WorkspaceDaemonInfo;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspacedaemon.protocol.DaemonProtocol;
 import eu.wohlben.qits.workspacedaemon.protocol.StreamTarget;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClient;
@@ -91,6 +94,9 @@ public class WorkspaceTunnels {
 
   @Inject WorkspaceDaemonRegistry registry;
 
+  /** The row's placement and bound token subject, read once per tunnel (qits-812). */
+  @Inject WorkspaceRepository workspaces;
+
   /**
    * The kill switch. A tunnel that misbehaves can be turned off without rolling back an image —
    * with the caveat that a daemon at the tunnel capability has already stopped listening on {@code
@@ -150,13 +156,22 @@ public class WorkspaceTunnels {
      */
     private final Instant connectedAt;
 
+    /**
+     * Who may dial back for this tunnel's streams, read when it was opened. A tunnel lives as long as
+     * one daemon connection, and a RUNNER row's token only changes with its container — which
+     * replaces the connection, and with it the tunnel.
+     */
+    private final DialBack dialBack;
+
     private final Set<NetSocket> accepted = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
-    Tunnel(TunnelKey key, NetServer server, HttpClient client, Instant connectedAt) {
+    Tunnel(
+        TunnelKey key, NetServer server, HttpClient client, Instant connectedAt, DialBack dialBack) {
       this.key = key;
       this.server = server;
       this.client = client;
       this.connectedAt = connectedAt;
+      this.dialBack = dialBack;
     }
 
     void close() {
@@ -180,7 +195,21 @@ public class WorkspaceTunnels {
    * Pausing the socket is not enough on its own to make that safe, so an interim handler collects
    * whatever arrives and {@link #pipe} replays it before wiring the two ends together.
    */
-  record Parked(Long workspaceId, NetSocket socket, long timerId, Buffer early) {}
+  record Parked(Long workspaceId, NetSocket socket, long timerId, Buffer early, DialBack dialBack) {}
+
+  /**
+   * What a dial-back for one workspace's stream must present beside its nonce (qits-625, qits-812).
+   *
+   * <p>A DIRECT row's dial-back comes over {@code qits-net} and the nonce is its whole
+   * authentication, as it always was. A RUNNER row's comes through the edge with the workspace
+   * token, so it must also carry a bearer this service validated whose {@code sub} is the row's
+   * token subject ({@code boundSubject}); a RUNNER row with no subject admits nothing.
+   */
+  record DialBack(boolean runner, String boundSubject) {
+
+    /** The DIRECT row's: the nonce alone. */
+    static final DialBack NONCE_ONLY = new DialBack(false, null);
+  }
 
   /**
    * Where to reach {@code workspaceRowId}'s daemon through the tunnel, or empty when that daemon
@@ -264,7 +293,7 @@ public class WorkspaceTunnels {
     server.connectHandler(socket -> onAccepted(key, socket));
     NetServer bound = await(server.listen(0, "127.0.0.1"));
     HttpClient client = vertx.createHttpClient(new HttpClientOptions().setKeepAlive(true));
-    Tunnel tunnel = new Tunnel(key, bound, client, connectedAt);
+    Tunnel tunnel = new Tunnel(key, bound, client, connectedAt, dialBackFor(key.workspaceId()));
     tunnels.put(key, tunnel);
     LOG.debugf(
         "daemon %s tunnel for workspace %s listening on 127.0.0.1:%s",
@@ -272,6 +301,23 @@ public class WorkspaceTunnels {
         key.workspaceId(),
         Integer.valueOf(bound.actualPort()));
     return tunnel;
+  }
+
+  /**
+   * Who may dial back for {@code workspaceRowId}'s streams: the row's placement and, on a RUNNER
+   * row, its token subject. Read off the row on the blocking path that opens a tunnel, never on the
+   * event loop that mints a nonce. A row that cannot be read is treated as DIRECT, which is what
+   * every row was before placement — no RUNNER row reaches here without a row to read.
+   */
+  private DialBack dialBackFor(Long workspaceRowId) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                workspaces
+                    .findActiveById(workspaceRowId)
+                    .filter(w -> w.placement == WorkspacePlacement.RUNNER)
+                    .map(w -> new DialBack(true, w.commissionedTokenSubject))
+                    .orElse(DialBack.NONCE_ONLY));
   }
 
   /**
@@ -330,7 +376,8 @@ public class WorkspaceTunnels {
                 expired.socket().close();
               }
             });
-    pending.put(nonce, new Parked(workspaceId, socket, timerId, early));
+    // The tunnel's dial-back rule rides the nonce, so the route checks it without a row read.
+    pending.put(nonce, new Parked(workspaceId, socket, timerId, early, tunnel.dialBack));
     registry.requestStream(workspaceId, nonce, STREAM_PATH_PREFIX + nonce, key.target());
   }
 

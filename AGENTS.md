@@ -169,6 +169,11 @@ hold the rules: only a RUNNER row names a runner, and an admin or editor row is 
 inline `runtime_status` check is replaced by `ck_workspace_runtime_status`, which admits `QUEUED`;
 `UNAVAILABLE` is computed on read and the column refuses it.
 
+**`V13__workspace_token.sql` adds `commissioned_token_id`, `_subject` and `commissioned_token`**
+(qits-625, qits-802): a RUNNER row's workspace `qits_tok_`, the RUNNER counterpart of `V3`'s pair
+and never set beside it. Columns on a `CausedRow` again; see "The credential a workspace container
+holds".
+
 **The target is PostgreSQL 18.4** — the tag `components/qits-database/qits-database-oci` is built
 from, and the version the suites' embedded binaries are, so a migration is proved against the engine it ships on.
 Two H2 habits are gone with it: a rule that applies to some rows is a **partial unique index** now
@@ -345,7 +350,11 @@ the sixth raw route and carries no path at all — see below):
   presents it on every upgrade; the endpoint requires `qits:system` or `qits:agent`. A caller with
   `qits:agent` and not `qits:system` may open only its own workspace's socket: `DaemonAgentBindingCheck`
   (an `HttpUpgradeCheck`, so the refusal is a real 403 before the upgrade) compares the token's `sub`
-  with the row's `commissioned_client_id`, on this path and on the legacy label path alike.
+  with the row's `commissioned_client_id`, on this path and on the legacy label path alike — and,
+  on a RUNNER row, with its `commissioned_token_subject` instead (qits-812; a client id never
+  matches there). `DaemonSocketBearerLifetime` drops the bearer's expiry on this path for a `tok-`
+  subject only, so a RUNNER daemon's socket outlives the edge's 300 s JWT and a DIRECT one keeps its
+  lifetime.
   `qits:system` is not bound until agents switch to their own role (phase 4 of the superproject's
   `principal-bound-git-refs-plan.md`). The local/no-IdP topology
   stays anonymous only while the machine-auth rollout gate is off. Do not make this path public to
@@ -380,7 +389,10 @@ the sixth raw route and carries no path at all — see below):
   collide (`{id}` matches one segment, so no daemon can be named `stream`), and it is a **raw** route
   rather than websockets-next for a hard reason: `io.quarkus.websockets.next.Connection` exposes
   `sendBinary` and no `writeQueueFull`/`drainHandler`, and a byte tunnel with no backpressure signal
-  is an unbounded heap buffer. `request.toWebSocket()` gives a real `WriteStream`.
+  is an unbounded heap buffer. `request.toWebSocket()` gives a real `WriteStream`. A RUNNER row's
+  dial-back comes through the edge and must also carry a validated bearer whose `sub` is the row's
+  token subject (`WorkspaceTunnels.DialBack`, captured when the tunnel opens); otherwise the same
+  bare 404 an unknown nonce gets. A DIRECT dial-back is the nonce alone, as before.
 - `CaptureCorsRoute` — derives its path from the REST prefix instead of repeating it, because a
   preflight on a different path from the POST it clears is worth nothing, and the client reads a 404
   there as "hide the button" rather than as an error. It reads **`qits.rest.path`**, not
@@ -1456,6 +1468,17 @@ crashed teardown's leftover are both orphans the moment they stop being claimed.
 what that listing just returned, and an unreadable listing comes back empty, so a blip reaps nothing
 rather than everything.
 
+**A RUNNER row holds a workspace token instead of the pair** (qits-625, qits-802): one opaque
+`qits_tok_` of the `workspace` kind (`CredentialCommissioner.commissionToken`, `POST
+/idp/api/tokens` on the existing `IdpTokens` client), minted by the RUNNER start before the row is
+queued and outside every transaction, stored on the row (`V13`) and composed into the spec as
+`QITS_TOKEN`/`QITS_TOKEN_SUBJECT`. Its lifetime is the container's: a stop keeps it and the next start
+reuses it; delete-container, recreate, discard/integrate and abandon delete it; the reconcile reaps
+every `workspace` token no ACTIVE row names (sparing one younger than `TOKEN_GRACE`). **Absent is not
+supported here**: a RUNNER container has no other credential, so a start that cannot mint fails the
+row with `WORKSPACE_TOKEN_UNAVAILABLE` and queues nothing. The test double mints tokens by default for
+that reason (`unwireTokens()` is the no-issuer case); its pair half still starts unwired.
+
 **Absent is a supported configuration in two spellings and they behave identically**: no
 implementation of `CredentialCommissioner`, or one wired against no issuer. The switch is
 `quarkus.oidc-client.qits.client-enabled` — the extension's own, read a third time here for the
@@ -1566,11 +1589,15 @@ RUNNER with no eligible runner is a 409 `NO_RUNNER`. The refusal codes live in `
 - **`stopContainer`/`deleteContainer` are no longer `@Transactional`**, so the RUNNER arm can wait up
   to 60 s for its runner's reply outside a transaction (Narayana's default timeout is also 60 s). The
   DIRECT body runs unchanged inside `QuarkusTransaction.joiningExisting()`.
-- **Start is pull, and creating a RUNNER row is its first start.** `recordWorkspace` writes a RUNNER
-  row QUEUED with `queued_at`, and the backlog is told once it committed — the qits-ci runner model:
-  the service keeps the list of requested workspaces, a runner takes from it. A later start (a row
-  stopped since) only marks the row QUEUED again (a compare-and-swap); a runner's `reserve` takes it
-  (`RunnerClaims.reserveFor`, the CAS in `WorkspaceRepository.claimForRunner`).
+- **Start is pull, and creating a RUNNER row is its first start.** `recordWorkspace` writes every
+  row STOPPED; once a RUNNER row committed, the create queues it through the RUNNER start itself
+  (`beginRunnerStart`, unnarrated) — the qits-ci runner model: the service keeps the list of
+  requested workspaces, a runner takes from it. The start is the one path to QUEUED: it builds the
+  edge plane, mints the workspace token when the row holds none (qits-802), then marks the row QUEUED
+  (a compare-and-swap that also requires the token); a runner's `reserve` takes it
+  (`RunnerClaims.reserveFor`, the CAS in `WorkspaceRepository.claimForRunner`, which refuses a row
+  with no token too). `launched` keeps the row PROVISIONING until its daemon reported the self-clone
+  (rung 3's provisioner and windows), then RUNNING; no daemon, or a failed clone, is FAILED.
 - **The create door starts what it creates** (qits-853, `createAndStartWorkspace`): a DIRECT row's
   container is started in the same request and the answer carries its `technicalProcessId`, so no
   client makes a second call. Dispatch, the editor and capture create through `createWorkspace` and
@@ -1587,7 +1614,12 @@ RUNNER with no eligible runner is a 409 `NO_RUNNER`. The refusal codes live in `
   `WorkspaceAddressPlane` — public `<app>.qits.<domain>` names off `QITS_DOMAIN` alone, the image
   moved to `registry.qits.<domain>`, no network, no extra host (qits-799). A RUNNER start builds the
   plane before it queues: a blank, undotted or `*.localhost` domain fails the row with
-  `EDGE_PLANE_UNCONFIGURED` and queues nothing. It carries no credential until qits-802.
+  `EDGE_PLANE_UNCONFIGURED` and queues nothing. Its credential is the row's workspace token
+  (`QITS_TOKEN`, `QITS_TOKEN_SUBJECT`, the git helper on the plane's githost), and it carries the
+  DIRECT spec's daemon API token and two path bases; none of the DIRECT pair block.
+- **No direct path for a RUNNER row** (qits-812): `DaemonProxyTargets` answers `NOT_CONNECTED`
+  without asking the runtime, and `ContainerProxyRoute` answers 503 "workspace daemon not connected"
+  when the tunnel is not there.
 
 ### The runners themselves: the doors, the socket and the pin (qits-848/850/851/859)
 

@@ -1,5 +1,7 @@
 package eu.wohlben.qits.workspaces.daemonhost;
 
+import io.quarkus.security.identity.SecurityIdentity;
+import io.quarkus.vertx.http.runtime.security.QuarkusHttpUser;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.net.NetSocket;
 import io.vertx.ext.web.Router;
@@ -7,6 +9,7 @@ import io.vertx.ext.web.RoutingContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.logging.Logger;
 
 /**
@@ -35,6 +38,16 @@ import org.jboss.logging.Logger;
  * names nothing: it is host-minted, single-use (the claim is an atomic map removal), short-lived,
  * and bound to the workspace it was sent to. An unknown or already-claimed nonce gets a bare 404
  * that says nothing about which of the two it was.
+ *
+ * <h2>A RUNNER row's dial-back also carries its token (qits-625, qits-812)</h2>
+ *
+ * <p>A runner-placed daemon dials back through the edge, which refuses an anonymous upgrade, so it
+ * sends {@code Authorization: Bearer $QITS_TOKEN} and the edge forwards a JWT. For a nonce parked
+ * for a RUNNER row ({@link WorkspaceTunnels.DialBack}) the nonce is then the second factor: the
+ * request must carry a bearer this service's OIDC tenant validated, and its {@code sub} must be the
+ * row's token subject. Anything else — no bearer, another subject, an identity that is not a
+ * validated token — gets the same bare 404 an unknown nonce gets, and the parked socket is dropped.
+ * A DIRECT row's dial-back is unchanged: the nonce alone.
  */
 @ApplicationScoped
 public class DaemonStreamRoute {
@@ -71,6 +84,14 @@ public class DaemonStreamRoute {
       rc.response().setStatusCode(404).end();
       return;
     }
+    if (!admits(parked.dialBack(), identityOf(rc))) {
+      LOG.debugf(
+          "refused a dial-back for runner workspace %s: not its token's bearer",
+          parked.workspaceId());
+      parked.socket().close();
+      rc.response().setStatusCode(404).end();
+      return;
+    }
     rc.request()
         .toWebSocket()
         .onFailure(
@@ -79,6 +100,29 @@ public class DaemonStreamRoute {
               parked.socket().close();
             })
         .onSuccess(socket -> pipe(socket, parked));
+  }
+
+  /**
+   * Whether a dial-back presenting {@code identity} may take a stream parked under {@code dialBack}:
+   * always for a DIRECT row's (the nonce is the whole authentication), and for a RUNNER row's only
+   * when {@code identity} is a validated token whose {@code sub} is the row's bound subject.
+   */
+  static boolean admits(WorkspaceTunnels.DialBack dialBack, SecurityIdentity identity) {
+    if (dialBack == null || !dialBack.runner()) {
+      return true;
+    }
+    if (dialBack.boundSubject() == null
+        || identity == null
+        || identity.isAnonymous()
+        || !(identity.getPrincipal() instanceof JsonWebToken)) {
+      return false;
+    }
+    return dialBack.boundSubject().equals(DaemonAgentBindingCheck.subjectOf(identity));
+  }
+
+  /** The identity the request authenticated as, or null when none was established. */
+  private static SecurityIdentity identityOf(RoutingContext rc) {
+    return rc.user() instanceof QuarkusHttpUser user ? user.getSecurityIdentity() : null;
   }
 
   /**

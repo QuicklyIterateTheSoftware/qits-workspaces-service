@@ -63,6 +63,8 @@ public class ContainerProxyRouteTest {
 
   @Inject WorkspaceIds workspaceIds;
 
+  @Inject eu.wohlben.qits.workspaces.persistence.WorkspaceRepository workspaceRepository;
+
   @Inject WorkspaceService workspaceService;
 
   @ConfigProperty(name = "qits.test.origins-dir")
@@ -418,5 +420,28 @@ public class ContainerProxyRouteTest {
         // then every daemon problem looks like the same problem.
         .body(containsString("not running"));
     assertEquals(hitsBefore, daemonHits.get(), "a stopped container must not be forwarded to");
+  }
+
+  /**
+   * qits-812: a RUNNER row with no live tunnel has no direct path. It answers 503 "workspace daemon
+   * not connected" and never dials the container's {@code qits-net} address — even here, where a
+   * DIRECT container of the same name is running and would answer.
+   */
+  @Test
+  public void aRunnerRowWithNoTunnelIs503AndNeverDialsTheContainer() throws Exception {
+    Long id = workspaceWithContainer();
+    io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaceRepository.findActiveById(id).orElseThrow().placement =
+                    eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER);
+
+    int hitsBefore = daemonHits.get();
+    given()
+        .get("/workspaces/container/" + id + "/files")
+        .then()
+        .statusCode(503)
+        .body(containsString("workspace daemon not connected"));
+    assertEquals(hitsBefore, daemonHits.get(), "a RUNNER row is never forwarded to qits-net");
   }
 }

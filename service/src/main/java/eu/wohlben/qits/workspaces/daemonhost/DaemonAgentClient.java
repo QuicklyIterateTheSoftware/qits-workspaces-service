@@ -383,6 +383,12 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
       LOG.debugf(e, "could not resolve workspace %s's daemon", workspaceRowId);
       return null;
     }
+    if (target.reachability() == DaemonProxyTargets.Reachability.NOT_CONNECTED) {
+      // A RUNNER row with no tunnel (qits-812): there is no direct path, so nothing is dialled. The
+      // callers read it as unreachable and ask again, as for every other absence.
+      LOG.debugf("workspace %s's daemon is not connected", workspaceRowId);
+      return null;
+    }
     if (target.reachability() != DaemonProxyTargets.Reachability.READY) {
       return null;
     }

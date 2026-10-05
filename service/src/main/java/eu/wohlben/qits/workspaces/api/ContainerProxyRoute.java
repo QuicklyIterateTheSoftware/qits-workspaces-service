@@ -222,6 +222,9 @@ public class ContainerProxyRoute {
     DaemonProxyTargets.DaemonTarget target = resolved.direct();
     switch (target.reachability()) {
       case NO_WORKSPACE -> respond(rc, 404, "No workspace here.");
+      // A RUNNER row whose daemon holds no tunnel: there is no direct origin to fall back on, and
+      // dialling qits-net for a container on a runner's node would reach nothing or somebody else's.
+      case NOT_CONNECTED -> respond(rc, 503, "workspace daemon not connected");
       case NO_CONTAINER ->
           respond(
               rc,

@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.control;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -30,6 +31,14 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * product does not have — and this service authenticates nothing anyway (see {@code
  * ForwardAuthMechanism}); a check of the form "is the caller anonymous" would look like a security
  * control and be worth nothing.
+ *
+ * <h2>A RUNNER row has no direct origin (qits-625, qits-812)</h2>
+ *
+ * <p>Its container is on a runner's node, which has no {@code qits-net}: the daemon is reachable
+ * through its reverse tunnel or not at all. So a RUNNER row resolves to {@link
+ * Reachability#NOT_CONNECTED} — the answer the callers reach only once the tunnel was not there —
+ * without asking the {@link ContainerRuntime} anything, and never to a {@code container:13338}
+ * origin, which on this host would name nothing or, worse, somebody else's container.
  */
 @ApplicationScoped
 public class DaemonProxyTargets {
@@ -57,6 +66,11 @@ public class DaemonProxyTargets {
   public enum Reachability {
     /** No ACTIVE workspace with that id. Indistinguishable from a soft-deleted one, deliberately. */
     NO_WORKSPACE,
+    /**
+     * A RUNNER row whose daemon holds no tunnel: there is no direct path to try (qits-812). The
+     * callers answer 503 "workspace daemon not connected".
+     */
+    NOT_CONNECTED,
     /** The workspace exists but its container is not running. */
     NO_CONTAINER,
     /** The container is there and the runtime cannot say where to reach it. */
@@ -85,6 +99,9 @@ public class DaemonProxyTargets {
       return new DaemonTarget(Reachability.NO_WORKSPACE, null);
     }
     Workspace workspace = found.get();
+    if (workspace.placement == WorkspacePlacement.RUNNER) {
+      return new DaemonTarget(Reachability.NOT_CONNECTED, null);
+    }
     String container = containers.containerName(workspace.workspaceId, workspace.repositoryId);
     if (!containers.isRunning(container)) {
       // Present-but-Exited counts as not running: a stopped container answers nothing, and saying
