@@ -514,6 +514,16 @@ Two properties worth not simplifying away:
 `ENDED` is lowest precedence deliberately: a workspace with one finished session and one still idling
 has a live conversation in it.
 
+**A killed agent is an `ENDED` plus a `runtimeError`** (qits-951). The OOM killer takes the agent and
+leaves the container — PID 1 survives, docker still says `running` — and a SIGKILLed agent fires no
+hook, so the rollup used to keep the `IDLE` it last heard and the workspace read exactly like a turn
+that finished. A daemon at capability 7 sends `ENDED` itself with `hookEvent` `OomKilled`/`Killed`;
+`WorkspaceDaemonRegistry.onAgentKill` writes `AGENT_OOM_KILLED: …`/`AGENT_KILLED: …` onto the row
+through `AgentKills` and takes it back off on the next `BUSY`. Every re-provision clears it as it
+clears any `runtimeError`; a runner inventory deliberately does **not** (the container is running,
+which is no news to an agent kill). Until the protocol pin carries `AgentActivity.message()` the
+sentence is the host's own and names no memory cap.
+
 ## The protocol is a dependency, and its version is the workspace image
 
 `workspace-daemon-protocol/` used to be a module here — a byte-identical copy of the daemon repo's,

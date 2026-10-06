@@ -1185,6 +1185,13 @@ public class DispatchService {
    * AgentActivityState#ENDED} is not a wait at all: the session is over, so there is nobody to
    * interrupt and nobody to hear it either, and the caller launches instead.
    *
+   * <p><b>A killed agent reads ENDED too, and that is what keeps it out of DELIVER_NOW</b>
+   * (qits-951). An agent the OOM killer took fires no hook, so the rollup used to keep the {@code
+   * IDLE} it last heard and this wait delivered a turn into a session that no longer existed. The
+   * daemon now reports the kill as {@code ENDED}, which lands on the launch arm with no change here;
+   * what tells the kill apart from a clean end is the row's {@code runtimeError} ({@link
+   * AgentKills}), which this wait has no reason to read — either way the text needs a new session.
+   *
    * <p><b>No signal is DELIVER_NOW, and that is a decision rather than a fallthrough.</b> The rollup
    * is empty when the port has no backend in this app (cli, some tests), when the daemon's socket
    * has not reported yet after a reconnect, and when the session was launched with {@code

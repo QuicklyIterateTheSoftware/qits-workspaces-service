@@ -501,7 +501,12 @@ public class RunnerClaims {
                         runningFromQueue.add(row.id);
                       }
                       row.runtimeStatus = WorkspaceRuntimeStatus.RUNNING;
-                      row.runtimeError = null;
+                      // A running container is news to a start's error, not to an agent's: the
+                      // OOM killer leaves the container running, so every inventory would
+                      // otherwise erase the kill within one report (qits-951).
+                      if (!AgentKills.isAgentKill(row.runtimeError)) {
+                        row.runtimeError = null;
+                      }
                       row.queuedAt = null;
                     } else if (Boolean.FALSE.equals(running)) {
                       if (was != WorkspaceRuntimeStatus.QUEUED) {

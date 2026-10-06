@@ -114,7 +114,10 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   @Column(name = "runtime_status", nullable = false)
   public WorkspaceRuntimeStatus runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
 
-  /** The reason the last re-provision failed (when {@link #runtimeStatus} is FAILED); else null. */
+  /**
+   * The reason the last re-provision failed (when {@link #runtimeStatus} is FAILED), or — on a
+   * RUNNING row — that its coding agent was killed mid-turn ({@code AgentKills}); else null.
+   */
   @Column(name = "runtime_error", length = 2000)
   public String runtimeError;
 

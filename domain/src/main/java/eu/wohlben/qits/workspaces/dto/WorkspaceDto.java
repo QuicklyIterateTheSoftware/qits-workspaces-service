@@ -29,7 +29,13 @@ import java.time.Instant;
  * @param runtimeStatus the container's runtime state (RUNNING/STOPPED/PROVISIONING/FAILED),
  *     independent of {@code status}: the branch is the source of truth, the container is a
  *     recreatable cache of it
- * @param runtimeError when {@code runtimeStatus} is FAILED, why the last re-provision failed
+ * @param runtimeError when {@code runtimeStatus} is FAILED, why the last re-provision failed. Also
+ *     set on a RUNNING workspace whose coding agent was killed rather than finished — {@code
+ *     AGENT_OOM_KILLED: …} or {@code AGENT_KILLED: …}, with the exit code and, where the daemon
+ *     could read it, the memory cap (see {@code AgentKills}). That is the one thing telling such a
+ *     turn apart from one that completed: the container still runs and {@code agentActivity} can
+ *     only say ENDED. Cleared when the container is re-provisioned or an agent there starts a turn
+ *     again
  * @param clean whether the workspace's in-container working tree is clean ({@code true}) or has
  *     uncommitted changes ({@code false}), as last reported by {@code workspace-daemon} over its
  *     socket; {@code null} when unknown — the daemon only reports while the container is RUNNING,
