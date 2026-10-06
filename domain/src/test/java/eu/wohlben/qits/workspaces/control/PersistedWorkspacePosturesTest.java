@@ -68,15 +68,18 @@ public class PersistedWorkspacePosturesTest {
 
   @Test
   void anOrdinaryWorkspaceIsNot() throws Exception {
-    // Every workspace anybody works in, including the one on a repository's main branch — which is
-    // exactly what the editor USED to be, and is now just a workspace.
+    // Every workspace anybody works in — the admin kind included, which is the other posture that
+    // runs on the direct path.
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId, "master");
-    Workspace main = workspaceService.createMainWorkspace(repoId, "master");
+    Workspace admin =
+        workspaceService.createWorkspace(
+            repoId, "admin-check", "master", "task/admin-check", null, false, false, true);
     Workspace branched =
-        workspaceService.createWorkspace(repoId, "editor-check", "master", "task/editor-check", null);
+        workspaceService.createWorkspace(
+            repoId, "editor-check", "master", "task/editor-check", null);
 
-    assertFalse(postures.isEditor(main.id));
+    assertFalse(postures.isEditor(admin.id));
     assertFalse(postures.isEditor(branched.id));
   }
 

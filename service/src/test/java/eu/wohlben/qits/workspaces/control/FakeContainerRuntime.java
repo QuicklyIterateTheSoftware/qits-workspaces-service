@@ -340,33 +340,6 @@ public class FakeContainerRuntime implements ContainerRuntime {
     volumes.put(workspaceId, new Volume(repoId, workspaceId, branch, parent, dir));
   }
 
-  /**
-   * What {@link #workspaceVolumeExists} answers per workspace when a test said so (qits-776); a
-   * workspace not named here answers whether this fake holds its volume.
-   */
-  private final Map<String, Boolean> volumePresence = new ConcurrentHashMap<>();
-
-  /** Test hook: {@link #workspaceVolumeExists} answers {@code present} for this workspace. */
-  public void setVolumeExists(String workspaceId, boolean present) {
-    volumePresence.put(workspaceId, present);
-  }
-
-  /** Test hook: back to answering from the volumes this fake holds. */
-  public void clearVolumeExists(String workspaceId) {
-    volumePresence.remove(workspaceId);
-  }
-
-  @Override
-  public boolean workspaceVolumeExists(String workspaceId) {
-    Boolean said = volumePresence.get(workspaceId);
-    return said != null ? said : volumes.containsKey(workspaceId);
-  }
-
-  @Override
-  public java.util.Set<String> workspaceContainerNames() {
-    return java.util.Set.copyOf(byName.keySet());
-  }
-
   @Override
   public void removeWorkspaceVolume(String workspaceId) {
     // The one destructive path: drop the volume AND its dir, even after the container is gone (the

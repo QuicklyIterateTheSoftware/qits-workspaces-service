@@ -57,9 +57,7 @@ public class ServiceLifecycleCouplerSettleTest {
   private String repoWithWorkspace() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "work", "master", "work"));
+    workspaceService.createWorkspace(repoId, "work", "master", "work", null, false, false, true);
     return repoId;
   }
 

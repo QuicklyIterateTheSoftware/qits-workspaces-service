@@ -40,7 +40,6 @@ public class WorkspaceBootstrapKillSwitchTest {
   public void killSwitchPassesFreshProvisionStraightThrough() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     // A declared chain exists (committed before the workspace fork, so the checkout carries it) —
     // the kill switch, not its absence, is what suppresses the run.
     Path origin = Path.of(dataDir, repoId, "origin");
@@ -54,7 +53,8 @@ public class WorkspaceBootstrapKillSwitchTest {
     TestGit.exec(worktree.toFile(), "git", "add", ".qits-config.yml");
     TestGit.exec(worktree.toFile(), "git", "commit", "-m", "stage qits config");
     TestGit.exec(worktree.toFile(), "git", "push", "origin", "HEAD:master");
-    workspaceService.createWorkspace(repoId, "work", "master", "work");
+    // An admin workspace: this provision is a DIRECT one, admin and editor only (qits-780).
+    workspaceService.createWorkspace(repoId, "work", "master", "work", null, false, false, true);
     readyRecorder.clear();
 
     workspaceService.ensureContainer(workspaceIds.of(repoId, "work"));

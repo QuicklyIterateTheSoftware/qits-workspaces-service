@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
-import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
+import eu.wohlben.qits.workspaces.daemonhost.StubDaemonTunnels;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
@@ -67,6 +67,12 @@ public class AgentTurnDeliveryTest {
   String dataDir;
 
   private Vertx daemonVertx;
+
+  private StubDaemonTunnels tunnels;
+
+  @Inject eu.wohlben.qits.workspaces.control.FakeContainerRuntime containerRuntime;
+
+  @Inject eu.wohlben.qits.workspaces.persistence.WorkspaceRepository workspaceRows;
 
   private final AtomicReference<String> runningCommands = new AtomicReference<>(NOTHING_IS_RUNNING);
 
@@ -127,10 +133,21 @@ public class AgentTurnDeliveryTest {
         .toCompletionStage()
         .toCompletableFuture()
         .get(10, TimeUnit.SECONDS);
+    // Reached through a stub tunnel, the only way to a daemon (qits-780), while the row's (fake)
+    // container runs.
+    tunnels =
+        StubDaemonTunnels.install(
+            daemonVertx,
+            AgentDispatchControllerTest.latchedPort(),
+            StubDaemonTunnels.whileItsContainerRuns(containerRuntime, workspaceRows));
   }
 
   @AfterEach
   void stopFakeDaemon() throws Exception {
+    if (tunnels != null) {
+      tunnels.close();
+      tunnels = null;
+    }
     if (daemonVertx != null) {
       daemonVertx.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
       daemonVertx = null;
@@ -140,14 +157,12 @@ public class AgentTurnDeliveryTest {
   private String seedRepository() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 
   /** A workspace whose (fake) container is already provisioned, so its daemon answers at once. */
   private Long workspaceWithContainer(String repoId, String label, String branch) {
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, label, "master", branch));
+    workspaceService.createWorkspace(repoId, label, "master", branch, null, false, false, true);
     Long rowId = workspaceIds.of(repoId, label);
     workspaceService.ensureContainer(rowId);
     return rowId;
@@ -155,8 +170,7 @@ public class AgentTurnDeliveryTest {
 
   /** A workspace with no container at all — an idle-stopped one, from this side. */
   private Long workspaceWithoutContainer(String repoId, String label, String branch) {
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, label, "master", branch));
+    workspaceService.createWorkspace(repoId, label, "master", branch, null, false, false, true);
     return workspaceIds.of(repoId, label);
   }
 

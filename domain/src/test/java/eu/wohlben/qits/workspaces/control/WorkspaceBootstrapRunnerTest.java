@@ -92,12 +92,10 @@ public class WorkspaceBootstrapRunnerTest {
   private String repoWithWorkspace(String name, String configYaml) throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     if (configYaml != null) {
       commitConfig(repoId, configYaml);
     }
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "work", "master", "work"));
+    workspaceService.createWorkspace(repoId, "work", "master", "work", null, false, false, true);
     return repoId;
   }
 

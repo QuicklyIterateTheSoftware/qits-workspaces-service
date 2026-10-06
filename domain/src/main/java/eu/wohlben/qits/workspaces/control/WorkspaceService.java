@@ -527,7 +527,7 @@ public class WorkspaceService {
    * managed row already, so the clear rides their transaction; the row write here is for the paths
    * that do not.
    */
-  void decommissionFor(Long rowId) {
+  private void decommissionFor(Long rowId) {
     if (!commissioner.isResolvable() || rowId == null) {
       return;
     }
@@ -622,24 +622,28 @@ public class WorkspaceService {
     // browser polls this route, so a git host that is briefly away must not 500 the page it is on.
     RepoMirror mirror = mirrors.of(repoId);
     refreshQuietly(mirror);
+    // The branch tree shows only live workspaces; resolved ones live in the history view.
+    List<Workspace> rows = workspaceRepository.findActiveByRepositoryId(repoId);
     // Live container set (one listing call to the orchestrator), so RUNNING stays accurate even
     // when container state changed out-of-band; the persisted column carries the
-    // STOPPED/PROVISIONING/FAILED signal otherwise.
+    // STOPPED/PROVISIONING/FAILED signal otherwise. Asked only when a row here is on the direct
+    // path at all (qits-780: in practice an admin one) — a repository of RUNNER rows, which is every
+    // regular workspace, costs qits-containers nothing.
     Set<String> runningIds =
-        containers.listWorkspaceContainers(repoId).stream()
-            // ps -a lists stopped containers too; only genuinely-running ones count as RUNNING (a
-            // deliberately stopped or Exited container is present but must read as STOPPED).
-            .filter(ContainerRuntime.ContainerInfo::running)
-            .map(ContainerRuntime.ContainerInfo::workspaceId)
-            .collect(Collectors.toSet());
+        rows.stream().noneMatch(wt -> wt.placement == WorkspacePlacement.DIRECT)
+            ? Set.of()
+            : containers.listWorkspaceContainers(repoId).stream()
+                // ps -a lists stopped containers too; only genuinely-running ones count as RUNNING
+                // (a deliberately stopped or Exited container is present but must read as STOPPED).
+                .filter(ContainerRuntime.ContainerInfo::running)
+                .map(ContainerRuntime.ContainerInfo::workspaceId)
+                .collect(Collectors.toSet());
     // The newest daemon build connected anywhere is the registry-only "latest agent version"
     // (docs/epics/qits-workspace-registry/): a RUNNING workspace whose build is strictly older is
     // flagged daemonOutdated so the UI can offer a Recreate. Computed once per list, across all
     // repos' live daemons — the notion is registry-wide, not per-repository.
     WorkspaceDaemonInfo.Info latestDaemon =
         daemonInfo.isResolvable() ? latestDaemon(daemonInfo.get().all()) : null;
-    // The branch tree shows only live workspaces; resolved ones live in the history view.
-    List<Workspace> rows = workspaceRepository.findActiveByRepositoryId(repoId);
     // The runners' names, in one read, and none at all when no row is on a runner.
     Map<UUID, String> runnerNames =
         runnerRepository.namesById(
@@ -662,11 +666,7 @@ public class WorkspaceService {
               WorkspaceRuntimeStatus runtime =
                   wt.placement == WorkspacePlacement.RUNNER
                       ? runnerRuntime(wt)
-                      : runningIds.contains(wt.workspaceId)
-                          ? WorkspaceRuntimeStatus.RUNNING
-                          : wt.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
-                              ? WorkspaceRuntimeStatus.STOPPED
-                              : wt.runtimeStatus;
+                      : directRuntime(wt, runningIds);
               // Clean/dirty is only knowable while the daemon is connected (RUNNING); otherwise it
               // stays null (unknown ⇒ no badge). The daemon re-reports on reconnect.
               Boolean clean =
@@ -712,7 +712,6 @@ public class WorkspaceService {
                   wt.placement,
                   runnerRef(wt.runnerId, runnerNames),
                   wt.queuedAt,
-                  pushedFor(wt, repoId, mirror),
                   wt.editor);
             })
         .toList();
@@ -874,6 +873,7 @@ public class WorkspaceService {
    * same composition {@code EditorKeepalive} and the editor proxy already make.
    */
   private WorkspaceDto describeEditor(Workspace workspace) {
+    WorkspacePlacements.requireDirectAllowed(workspace);
     WorkspaceRuntimeStatus runtime =
         containers.isRunning(containers.containerName(workspace.workspaceId, workspace.repositoryId))
             ? WorkspaceRuntimeStatus.RUNNING
@@ -922,20 +922,21 @@ public class WorkspaceService {
         // The editor is always DIRECT (ck_workspace_runner_posture), so it is on no runner.
         null,
         workspace.queuedAt,
-        // Not a regular row, so the move gate's push question is not asked of it.
-        null,
         true);
   }
 
   /**
-   * {@link WorkspaceDto#pushed}: asked only of a regular DIRECT row (qits-776), the one row the
-   * move-to-runner door applies to, so a listing of RUNNER rows costs no {@code ls-remote} at all.
+   * A DIRECT row's runtime status as listed: RUNNING when qits-containers' listing has it running,
+   * a stale persisted RUNNING read as STOPPED, otherwise the persisted status. Behind the router's
+   * refusal, like every other DIRECT read (qits-780).
    */
-  private Boolean pushedFor(Workspace wt, String repoId, RepoMirror mirror) {
-    if (wt.placement != WorkspacePlacement.DIRECT || wt.admin || wt.editor) {
-      return null;
-    }
-    return pushedState(repoId, mirror, wt.workspaceId, wt.id, wt.branch).orElse(null);
+  private static WorkspaceRuntimeStatus directRuntime(Workspace wt, Set<String> runningIds) {
+    WorkspacePlacements.requireDirectAllowed(wt);
+    return runningIds.contains(wt.workspaceId)
+        ? WorkspaceRuntimeStatus.RUNNING
+        : wt.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
+            ? WorkspaceRuntimeStatus.STOPPED
+            : wt.runtimeStatus;
   }
 
   /**
@@ -1011,8 +1012,7 @@ public class WorkspaceService {
     if (wt != null) {
       // The working tree lives in the container; a dirty tree or unpushed commits (which the
       // origin-side ahead/behind above cannot see) both mean cleanup could destroy work.
-      if (!isWorkspaceClean(repoId, wt)
-          || !isFullyPushed(repoId, mirror, wt.workspaceId, wt.id, wt.branch)) {
+      if (!isWorkspaceClean(repoId, wt) || !isFullyPushed(mirror, wt)) {
         return false;
       }
     }
@@ -1025,52 +1025,33 @@ public class WorkspaceService {
    * commits, so without this a "safe" cleanup could delete unpushed work. A missing container means
    * nothing is left to lose, so treat it as pushed.
    */
-  boolean isFullyPushed(
-      String repoId, RepoMirror mirror, String workspaceId, Long rowId, String branch) {
-    // Unknown — no live daemon, nothing reported yet, no registry bean at all (cli, tests), or a git
-    // host that did not answer — is NOT "in sync": refuse, exactly as an unreadable container used
-    // to.
-    return pushedState(repoId, mirror, workspaceId, rowId, branch).orElse(false);
-  }
-
-  /** {@link #isFullyPushed} for a row, against its repository's mirror (qits-776's move gate). */
-  boolean isFullyPushed(Workspace row) {
-    return isFullyPushed(
-        row.repositoryId, mirrors.of(row.repositoryId), row.workspaceId, row.id, row.branch);
-  }
-
-  /**
-   * {@link #isFullyPushed}'s answer with UNKNOWN kept apart: {@code Optional.of(true)} pushed (or no
-   * container, so nothing is left to lose), {@code Optional.of(false)} a reported head the git host
-   * does not hold at the branch, empty when it cannot be said — no head reported, or the git host
-   * did not answer. {@link WorkspaceDto#pushed} is this, with empty as null.
-   */
-  Optional<Boolean> pushedState(
-      String repoId, RepoMirror mirror, String workspaceId, Long rowId, String branch) {
-    String container = containers.containerName(workspaceId, repoId);
-    if (!containers.exists(container)) {
-      return Optional.of(true);
+  private boolean isFullyPushed(RepoMirror mirror, Workspace wt) {
+    if (!directContainerExists(wt)) {
+      return true;
     }
+    String branch = wt.branch;
+    Long rowId = wt.id;
     if (branch == null || branch.isBlank()) {
-      return Optional.of(true);
+      return true;
     }
     // The daemon reports its head on every GitStatus frame and auto-pushes committed work, so
     // comparing that against the origin's ref answers this without reaching into the container.
+    // Unknown — no live daemon, nothing reported yet, or no registry bean at all (cli, tests) — is
+    // NOT "in sync": refuse, exactly as an unreadable container used to.
     Optional<String> reportedHead =
         gitStatus.isUnsatisfied() ? Optional.empty() : gitStatus.get().head(rowId);
     if (reportedHead.isEmpty()) {
-      return Optional.empty();
+      return false;
     }
     try {
       // ls-remote, not the mirror: this compares a container's HEAD against what the git host holds
       // right now, and a cached answer here would call unpushed work pushed.
-      return Optional.of(
-          mirror
-              .remoteBranchSha(branch)
-              .map(sha -> reportedHead.get().trim().equals(sha))
-              .orElse(false));
+      return mirror
+          .remoteBranchSha(branch)
+          .map(sha -> reportedHead.get().trim().equals(sha))
+          .orElse(false);
     } catch (GitMirrorException e) {
-      return Optional.empty();
+      return false;
     }
   }
 
@@ -1107,8 +1088,7 @@ public class WorkspaceService {
    * probe on a live container stays dirty: that state is genuinely unknown, never delete blindly.
    */
   private boolean isWorkspaceClean(String repoId, Workspace wt) {
-    String container = containers.containerName(wt.workspaceId, repoId);
-    if (!containers.exists(container)) {
+    if (!directContainerExists(wt)) {
       return true;
     }
     // Only an explicit CLEAN from the daemon counts. Unknown — no live daemon, none reported yet,
@@ -1163,8 +1143,7 @@ public class WorkspaceService {
    * container.
    */
   private void requireSyncedSourceForIntegration(String repoId, Workspace sourceWorkspace) {
-    if (sourceWorkspace == null
-        || !containers.exists(containers.containerName(sourceWorkspace.workspaceId, repoId))) {
+    if (sourceWorkspace == null || !directContainerExists(sourceWorkspace)) {
       return;
     }
     // No push from here: requireCleanWorkingTree has just established the daemon reports CLEAN,
@@ -1172,6 +1151,20 @@ public class WorkspaceService {
     // branch. The `docker exec git push` this used to run was a host-side second opinion on state
     // the daemon owns.
     requireCleanWorkingTree(repoId, sourceWorkspace, "integrate");
+  }
+
+  /**
+   * Whether a row's container exists on the platform host, asked of qits-containers only behind the
+   * router's refusal (qits-780). A RUNNER row's container is on its runner's node, never there, so it
+   * answers false with no call — what the by-name lookup on the platform host always answered for it
+   * — and the absent-means-nothing-to-lose readings above carry on as they did.
+   */
+  private boolean directContainerExists(Workspace wt) {
+    if (wt.placement == WorkspacePlacement.RUNNER) {
+      return false;
+    }
+    WorkspacePlacements.requireDirectAllowed(wt);
+    return containers.exists(containers.containerName(wt.workspaceId, wt.repositoryId));
   }
 
   /** True when another workspace forks from {@code branch} (i.e. lists it as its parent). */
@@ -2080,57 +2073,6 @@ public class WorkspaceService {
       """;
 
   /**
-   * Creates the default workspace for a repository's main branch: a workspace on the
-   * <em>existing</em> main branch (not a fork of a new branch), so working in it commits directly
-   * to main. The workspace id is the branch name as a slug; it has no parent, since the main branch
-   * is the root of the branch tree. Like {@link #createWorkspace} this writes only the durable row
-   * — the container (with its checkout) is provisioned lazily on first use via {@link
-   * #ensureContainer}. Idempotent: returns the existing workspace if one with the derived id is
-   * already present. Called by {@link RepositoryService} so every freshly added repository starts
-   * with its main branch workable.
-   */
-  @Transactional
-  public Workspace createMainWorkspace(String repoId, String branch) {
-    var repo = repositories.require(repoId);
-    if (branch == null || branch.isBlank() || branch.startsWith("-")) {
-      throw new BadRequestException("Invalid main branch: " + branch);
-    }
-    String workspaceId = toWorkspaceSlug(branch);
-
-    // Idempotent on the BRANCH, not on the derived id: the branch is what this workspace claims, so
-    // "main is already workable" is answered by whoever owns the main branch — whatever it happens
-    // to be called. Keying the check on the id instead made a workspace that merely *slugged* to
-    // the same name (owning some other branch) look like the main workspace and be handed back in
-    // its place.
-    Optional<Workspace> existing = workspaceRepository.findActiveByRepositoryAndBranch(repoId, branch);
-    if (existing.isPresent()) {
-      return existing.get();
-    }
-
-    // The main branch already exists in the origin, so there is no durable state to create beyond
-    // the row below — no branch ref, no container. ensureContainer provisions on first use.
-    Workspace workspace = new Workspace();
-    workspace.workspaceId = workspaceId;
-    workspace.repositoryId = repoId;
-    workspace.parent = null; // the main branch is the tree root — it has no fork point
-    workspace.branch = branch;
-    workspace.status = WorkspaceStatus.ACTIVE;
-    workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
-    // A main workspace's agent pushes nothing: the default branch moves only through a release
-    // request. Any other branch keeps the ordinary default, its own branch.
-    workspace.gitRefs = GitRefs.write(GitRefs.defaultFor(branch, defaultMainBranch(repo)));
-    workspaceRepository.persist(workspace);
-    recordEvent(workspace, WorkspaceEventType.CREATED, branch, null, null);
-
-    WorkspaceMetadata metadata = new WorkspaceMetadata();
-    metadata.workspaceId = workspaceId;
-    metadata.parent = null;
-    workspaceMetadata.write(repoId, metadata);
-
-    return workspace;
-  }
-
-  /**
    * Find or write <b>the</b> editor workspace — the single row the platform's one shared editor
    * container runs as. Idempotent, and the second caller gets the first caller's row.
    *
@@ -2153,9 +2095,9 @@ public class WorkspaceService {
    *
    * <p><b>No lock, and the race is settled by the index.</b> Two callers can find nothing at the same
    * moment and both try to write; {@code uq_workspace_active_editor} makes the loser's insert fail
-   * rather than making a second editor, which is the arrangement {@code createMainWorkspace} has with
-   * {@code uq_workspace_active_branch} and for the same reason — a constraint holds under a race and
-   * an agreement does not. The loser's caller retries by polling the door, which it is doing anyway.
+   * rather than making a second editor, which is the arrangement every create has with {@code
+   * uq_workspace_active_branch} and for the same reason — a constraint holds under a race and an
+   * agreement does not. The loser's caller retries by polling the door, which it is doing anyway.
    *
    * <p>It writes the same {@code CREATED} history entry every other creation writes, because the one
    * thing this row shares with every workspace is that somebody asked for it and it now exists.
@@ -2225,9 +2167,6 @@ public class WorkspaceService {
    */
   private record BranchParent(String branch, String parent, boolean editor, String entityId) {}
 
-  /** A resolved workspace reduced to what the container/path machinery addresses it by. */
-  private record WorkspaceRef(String repoId, String workspaceId) {}
-
   /**
    * Guarantees a running container for an ACTIVE workspace whose branch still exists, provisioning
    * one on demand — the container is a recreatable cache of the durable branch, so losing it is a
@@ -2258,14 +2197,20 @@ public class WorkspaceService {
     // Its own transaction: this is called from worker threads (the bootstrap runner's manual-run
     // executor) where no session is open, and the rest of ensureContainer already brackets each of
     // its own reads the same way.
-    WorkspaceRef target =
-        QuarkusTransaction.requiringNew()
-            .call(
-                () -> {
-                  Workspace workspace = requireActive(id);
-                  return new WorkspaceRef(workspace.repositoryId, workspace.workspaceId);
-                });
-    ensureContainer(target.repoId(), target.workspaceId(), id, null);
+    Workspace row = QuarkusTransaction.requiringNew().call(() -> requireActive(id));
+    // A runner-placed row's container is the runner's, never the direct ladder's (qits-780): the
+    // bootstrap's manual run needs it up, so a RUNNING one goes ahead and anything else is asked to
+    // start first rather than provisioned on the platform host.
+    if (row.placement == WorkspacePlacement.RUNNER) {
+      if (row.runtimeStatus != WorkspaceRuntimeStatus.RUNNING) {
+        throw new BadRequestException(
+            "Workspace '"
+                + row.workspaceId
+                + "' runs on a workspace runner and is not running: start it, then run again.");
+      }
+      return;
+    }
+    ensureContainer(row.repositoryId, row.workspaceId, id, null);
   }
 
   /**
@@ -2282,6 +2227,7 @@ public class WorkspaceService {
     if (resolved.placement == WorkspacePlacement.RUNNER) {
       return beginRunnerStart(resolved);
     }
+    WorkspacePlacements.requireDirectAllowed(resolved);
     // A start already under way is joined, not doubled. Creating a workspace starts it (qits-853),
     // so a client that still presses ensure-container straight after the create lands here while
     // that start is cloning — before its container exists, when the ladder below would provision a
@@ -2346,6 +2292,7 @@ public class WorkspaceService {
     if (resolved.placement == WorkspacePlacement.RUNNER) {
       return beginRunnerRecreate(resolved);
     }
+    WorkspacePlacements.requireDirectAllowed(resolved);
     String repoId = resolved.repositoryId;
     String workspaceId = resolved.workspaceId;
     Long rowId = resolved.id;
@@ -2386,7 +2333,8 @@ public class WorkspaceService {
    * {@code Optional.of(true)} passes.
    */
   private void requireCleanForRecreate(String workspaceId, Long rowId) {
-    Optional<Boolean> clean = reportedCleanliness(rowId);
+    Optional<Boolean> clean =
+        gitStatus.isResolvable() ? gitStatus.get().isClean(rowId) : Optional.empty();
     if (!clean.equals(Optional.of(Boolean.TRUE))) {
       String state = clean.map(c -> c ? "clean" : "dirty").orElse("unknown");
       throw new BadRequestException(
@@ -2396,17 +2344,6 @@ public class WorkspaceService {
               + state
               + ". Commit or discard changes, and ensure its daemon is connected, first.");
     }
-  }
-
-  /**
-   * The daemon-reported tri-state recreate's gate reads: {@code Optional.of(true)} only for an
-   * explicit CLEAN, {@code Optional.of(false)} for dirty, empty when no daemon has reported (or no
-   * registry bean exists). The move gate ({@link MoveGate}, qits-776) reads the same answer, so the
-   * rule "only an explicit clean passes" is written once, in {@link #requireCleanForRecreate}'s
-   * terms.
-   */
-  Optional<Boolean> reportedCleanliness(Long rowId) {
-    return gitStatus.isResolvable() ? gitStatus.get().isClean(rowId) : Optional.empty();
   }
 
   /**
@@ -2431,6 +2368,11 @@ public class WorkspaceService {
                           .findActiveByRepositoryAndWorkspaceId(repoId, workspaceId)
                           .orElseThrow(
                               () -> new NotFoundException("Workspace not found: " + workspaceId));
+                  // The ladder's one gate (qits-780): every qits-containers call below — isRunning,
+                  // exists/start, the provision's run and its rm, the branch-gone volume reap — is
+                  // behind it. It is also what refuses a RUNNER row that reached this ladder through
+                  // ensureContainer(Long), which does not branch on placement.
+                  WorkspacePlacements.requireDirectAllowed(wt);
                   if (containers.isRunning(container)) {
                     wt.runtimeStatus = WorkspaceRuntimeStatus.RUNNING;
                     wt.runtimeError = null;
@@ -2647,6 +2589,7 @@ public class WorkspaceService {
       stopOnRunner(placed);
       return;
     }
+    WorkspacePlacements.requireDirectAllowed(placed);
     QuarkusTransaction.joiningExisting().run(() -> stopDirectContainer(id));
   }
 
@@ -2706,22 +2649,18 @@ public class WorkspaceService {
       deleteOnRunner(placed);
       return;
     }
+    WorkspacePlacements.requireDirectAllowed(placed);
     QuarkusTransaction.joiningExisting().run(() -> deleteDirectContainer(id));
   }
 
   /**
-   * The DIRECT container's teardown, delete-container's order: settle its services (immediate, when
-   * {@code settleServices}), a graceful stop, the {@code rm}, then the per-workspace volume. Shared
-   * with the move onto a runner ({@link DirectPlacementMove}, qits-776), whose orphan retry passes
-   * {@code settleServices} false: by then the row's services may be a runner container's, and
-   * settling them would stop the wrong ones. The container is removed before the volume (docker
-   * refuses an in-use volume).
+   * The DIRECT container's teardown, delete-container's order: settle its services (immediate), a
+   * graceful stop, the {@code rm}, then the per-workspace volume. The container is removed before
+   * the volume (docker refuses an in-use volume).
    */
-  void tearDownDirect(String repoId, String workspaceId, Long rowId, boolean settleServices) {
+  private void tearDownDirect(String repoId, String workspaceId, Long rowId) {
     String container = containers.containerName(workspaceId, repoId);
-    if (settleServices) {
-      containerEvents.fireStopping(repoId, workspaceId, rowId, false);
-    }
+    containerEvents.fireStopping(repoId, workspaceId, rowId, false);
     stopBeforeRemove(container);
     containers.rm(container);
     containers.removeWorkspaceVolume(workspaceId);
@@ -2732,7 +2671,7 @@ public class WorkspaceService {
     Workspace workspace = requireActive(id);
     String repoId = workspace.repositoryId;
     String workspaceId = workspace.workspaceId;
-    tearDownDirect(repoId, workspaceId, workspace.id, true);
+    tearDownDirect(repoId, workspaceId, workspace.id);
     // The row stays ACTIVE and fires no WorkspaceResolved, but the CONTAINER is gone — and the
     // credential's lifetime is the container's, not the row's. So it goes back here too, and the
     // next ensure commissions a fresh one for the container it provisions. This is the path an
@@ -3276,12 +3215,12 @@ public class WorkspaceService {
    * after a resolution a no-op, which the caller — best-effort, and free to retry — needs.
    *
    * <p><b>The main workspace is refused on both belts.</b> A row whose {@code parent} is null (what
-   * {@link #createMainWorkspace} writes, and nothing else does), and a branch equal to the
-   * repository's default branch, are two independent readings of the same fact: the first is this
-   * service's own record, the second is qits-projects'. Both are checked, because a main branch
-   * renamed between the two would leave exactly one of them right, and the cost of being wrong is
-   * the workspace a whole repository is worked in. Nothing else in this class refuses to discard a
-   * main workspace; that hole is not inherited here.
+   * the retired per-project editor's main workspaces carry, and nothing else does), and a branch
+   * equal to the repository's default branch, are two independent readings of the same fact: the
+   * first is this service's own record, the second is qits-projects'. Both are checked, because a
+   * main branch renamed between the two would leave exactly one of them right, and the cost of being
+   * wrong is the workspace a whole repository is worked in. An ordinary discard still resolves such
+   * a row, but {@link #doDiscard} keeps its branch on the same two belts (qits-780).
    *
    * <p><b>A dirty or unpushed container is LOGGED and never refused.</b> This is the one place this
    * service knowingly discards uncommitted work, and it is still the better answer: the branch is
@@ -3402,10 +3341,12 @@ public class WorkspaceService {
       String target,
       String commit,
       boolean deleteBranch) {
+    boolean deletesBranch = deleteBranch && !keepsBranch(repoId, workspace);
     if (workspace.placement == WorkspacePlacement.RUNNER) {
-      discardOnRunner(repoId, workspace, resolution, result, target, commit, deleteBranch);
+      discardOnRunner(repoId, workspace, resolution, result, target, commit, deletesBranch);
       return;
     }
+    WorkspacePlacements.requireDirectAllowed(workspace);
     try {
       String branch = workspace.branch;
 
@@ -3442,7 +3383,7 @@ public class WorkspaceService {
       workspace.commissionedClientId = null;
       decommission(commissioned);
 
-      if (deleteBranch && branch != null && !branch.isBlank()) {
+      if (deletesBranch && branch != null && !branch.isBlank()) {
         try {
           mirrors.of(repoId).deleteBranch(branch);
         } catch (GitMirrorException ignored) {
@@ -3474,6 +3415,49 @@ public class WorkspaceService {
     } catch (Exception e) {
       throw new InternalServerErrorException("Git discard failed: " + e.getMessage());
     }
+  }
+
+  /**
+   * Whether a resolution must leave this workspace's branch on the git host: <b>a main workspace's
+   * branch is never deleted</b> (qits-780). Two independent readings, as {@link
+   * #resolveReleasedBranch} makes them: a row with no {@code parent} (what the retired per-project
+   * editor's main workspaces carry, and nothing else), and a branch equal to the repository's
+   * default branch. A repository the registry cannot name keeps the branch too, since deleting is
+   * the direction this has to fail away from. Each keep is logged.
+   */
+  private boolean keepsBranch(String repoId, Workspace workspace) {
+    String branch = workspace.branch;
+    if (branch == null || branch.isBlank()) {
+      return false;
+    }
+    if (workspace.parent == null || workspace.parent.isBlank()) {
+      LOG.infof(
+          "Workspace %s (row %s) has no parent branch, so it is a main workspace: its branch '%s'"
+              + " is kept on the git host",
+          workspace.workspaceId, workspace.id, branch);
+      return true;
+    }
+    Optional<RepositoryLookup.RepositoryView> repo;
+    try {
+      repo = repositories.find(repoId);
+    } catch (RuntimeException e) {
+      repo = Optional.empty();
+    }
+    if (repo.isEmpty()) {
+      LOG.warnf(
+          "Repository %s could not be read, so workspace %s (row %s) keeps its branch '%s' on the"
+              + " git host",
+          repoId, workspace.workspaceId, workspace.id, branch);
+      return true;
+    }
+    if (branch.equals(defaultMainBranch(repo.get()))) {
+      LOG.infof(
+          "Branch '%s' of workspace %s (row %s) is the repository's default branch: it is kept on"
+              + " the git host",
+          branch, workspace.workspaceId, workspace.id);
+      return true;
+    }
+    return false;
   }
 
   // --- RUNNER placement (epic qits-624, qits-853) ----------------------------------------------
@@ -3521,22 +3505,6 @@ public class WorkspaceService {
    * answered, and the row's runtime status is the whole of its progress (qits-853).
    */
   private String beginRunnerStart(Workspace row, boolean narrate) {
-    return beginRunnerStart(row, narrate, null);
-  }
-
-  /**
-   * The RUNNER start for a row a move just put on the runners (qits-776), narrated onto the move's
-   * own process so its {@code queued}, {@code container} and {@code clone} segments follow {@code
-   * move-check} and {@code move-teardown} in one stream. With a null {@code process} it opens its
-   * own, as a start does.
-   */
-  String startOnRunner(Long rowId, WorkspaceProcessTracker.Handle process) {
-    return beginRunnerStart(
-        QuarkusTransaction.requiringNew().call(() -> requireActive(rowId)), true, process);
-  }
-
-  private String beginRunnerStart(
-      Workspace row, boolean narrate, WorkspaceProcessTracker.Handle given) {
     if (row.runnerId != null && !runnerPresent(row.runnerId)) {
       throw RunnerRefusals.unavailable(row.id, "start");
     }
@@ -3548,9 +3516,7 @@ public class WorkspaceService {
         return narrate ? open.get().id() : null;
       }
       WorkspaceProcessTracker.Handle process =
-          narrate
-              ? given != null ? given : tracker(row.repositoryId, row.workspaceId, row.id)
-              : null;
+          narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null;
       if (process != null) {
         // A queued row nothing could take says why it waits (qits-774): it is not an error, the
         // row is simply parked until a runner is enabled.
@@ -3571,20 +3537,18 @@ public class WorkspaceService {
     try {
       addressPlanes.plane();
     } catch (EdgePlaneUnconfigured refused) {
-      return failUnplaceable(row, refused.getMessage(), narrate, given);
+      return failUnplaceable(row, refused.getMessage(), narrate);
     }
     // The workspace token, after the plane and BEFORE the queue, outside every transaction: the
     // mint is an HTTP call to qits-idp. A row that already holds one keeps it — a STOPPED row's
     // container carries it in its spec, and the start re-presents that spec unchanged.
     String unminted = ensureRunnerToken(row);
     if (unminted != null) {
-      return failUnplaceable(row, unminted, narrate, given);
+      return failUnplaceable(row, unminted, narrate);
     }
 
     WorkspaceProcessTracker.Handle process =
-        narrate
-              ? given != null ? given : tracker(row.repositoryId, row.workspaceId, row.id)
-              : null;
+        narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null;
     if (process != null) {
       process.openSegment(RunnerClaims.QUEUED_SEGMENT);
       process.appendLine(RunnerClaims.QUEUED_SEGMENT, waitingFor(row.runnerId));
@@ -3617,8 +3581,7 @@ public class WorkspaceService {
    * WORKSPACE_TOKEN_UNAVAILABLE: …}), the start's process — when it is narrated — failed with one
    * {@code container} segment saying the same, and nothing queued.
    */
-  private String failUnplaceable(
-      Workspace row, String reason, boolean narrate, WorkspaceProcessTracker.Handle given) {
+  private String failUnplaceable(Workspace row, String reason, boolean narrate) {
     LOG.errorf(
         "Workspace %s/%s cannot be placed on a runner: %s",
         row.repositoryId, row.workspaceId, reason);
@@ -3635,9 +3598,7 @@ public class WorkspaceService {
                         }));
     changePublisher.runtimeChanged(row.repositoryId, row.id);
     WorkspaceProcessTracker.Handle process =
-        narrate
-              ? given != null ? given : tracker(row.repositoryId, row.workspaceId, row.id)
-              : null;
+        narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null;
     if (process == null) {
       return null;
     }
@@ -3999,7 +3960,7 @@ public class WorkspaceService {
    * WorkspaceProcessTracker} is installed — every call site already treats null as "run it
    * unnarrated", which is the pre-streaming behaviour.
    */
-  WorkspaceProcessTracker.Handle tracker(String repoId, String workspaceId, Long rowId) {
+  private WorkspaceProcessTracker.Handle tracker(String repoId, String workspaceId, Long rowId) {
     return processes.isResolvable() ? processes.get().begin(repoId, workspaceId, rowId) : null;
   }
 

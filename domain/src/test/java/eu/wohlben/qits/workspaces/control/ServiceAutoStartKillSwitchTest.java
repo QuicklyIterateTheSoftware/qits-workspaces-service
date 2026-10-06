@@ -37,7 +37,6 @@ public class ServiceAutoStartKillSwitchTest {
     driver.reset();
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     workspaceService.createWorkspace(repoId, "work", "master", "work");
     String serviceId = "auto";
     configReader.setConfig(

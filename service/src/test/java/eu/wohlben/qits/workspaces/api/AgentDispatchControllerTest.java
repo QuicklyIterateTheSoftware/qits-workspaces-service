@@ -11,10 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.FakeContainerRuntime;
+import eu.wohlben.qits.workspaces.daemonhost.StubDaemonTunnels;
 import eu.wohlben.qits.workspaces.control.FakeCredentialCommissioner;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.GitRefs;
-import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceContainer;
 import eu.wohlben.qits.workspaces.control.WorkspaceContainerFactory;
@@ -75,17 +75,14 @@ public class AgentDispatchControllerTest {
   private static final String PORT_PROPERTY = "qits.test.agent-dispatch.daemon-port";
 
   /**
-   * The port the fake daemon binds, chosen by the profile and handed to the test through a system
-   * property.
+   * The port the fake daemon binds, handed to the stub tunnel ({@link StubDaemonTunnels}) the test
+   * installs, and latched in a system property so every caller in the JVM agrees on it.
    *
-   * <p>It has to travel that way, and the <em>first caller wins</em>. Unlike a service's web-view
-   * port, the daemon's comes from configuration, so it must be fixed before the application boots —
-   * and {@link QuarkusTestProfile} is instantiated in more than one classloader, so {@code
-   * getConfigOverrides()} runs more than once. A plain static initializer picks a different port each
-   * time; an unconditional {@code setProperty} lets the later call overwrite the value the
-   * application was actually configured with. Either way the proxy targets a port nothing is
-   * listening on, and the symptom is every proxying assertion failing with a bare, bodyless 502 that
-   * says nothing about why. Latching the first value is what makes both halves agree.
+   * <p>It used to be configuration — the direct {@code container:<port>} fallback read it as {@code
+   * qits.workspace.daemon-api-port}, so it had to be fixed before boot and survive {@link
+   * QuarkusTestProfile} being instantiated in more than one classloader. That fallback and the key
+   * are gone (qits-780); the tunnel stub takes the port at {@code @BeforeEach}. The latch stays
+   * because the classes below share it, and one value per JVM is still what keeps them agreeing.
    *
    * <p>Package-private, and the module's only such latch: {@link AgentTurnDeliveryTest}, {@link
    * ContainerProxyRouteTest} and {@link AgentTurnCompactionAndWindowTest} all stub a daemon on it.
@@ -108,11 +105,10 @@ public class AgentDispatchControllerTest {
   }
 
   /**
-   * <b>A profile of its own, and it has to be one.</b> A fake daemon binds a port that the
-   * application must already be configured with, and configuration is fixed before boot — so the
-   * port, and the token that goes with it, can live nowhere but a profile. That is a different kind
-   * of claim from the dials in {@code SharedTuningProfile}, where the value only makes an assertion
-   * cheap.
+   * <b>A profile of its own, and it has to be one.</b> The fake daemon checks the bearer this
+   * service presents, and the token is configuration fixed before boot — so it can live nowhere but
+   * a profile. That is a different kind of claim from the dials in {@code SharedTuningProfile},
+   * where the value only makes an assertion cheap.
    *
    * <p>What it cannot share is the class it is closest to. {@link
    * AgentTurnCompactionAndWindowTest}'s subject is the launch window EXPIRING, so its window is
@@ -126,7 +122,6 @@ public class AgentDispatchControllerTest {
     @Override
     public Map<String, String> getConfigOverrides() {
       return Map.of(
-          "qits.workspace.daemon-api-port", String.valueOf(latchedPort()),
           "qits.workspace.daemon-api-token", TOKEN,
           // The wait is the feature; the shipped two-second tick would make every assertion here a
           // sleep. The window stays short so a stub that is gone cannot leave a thread polling for
@@ -148,6 +143,8 @@ public class AgentDispatchControllerTest {
   String dataDir;
 
   private Vertx daemonVertx;
+
+  private StubDaemonTunnels tunnels;
 
   /** What the stub answers {@code GET /commands?status=RUNNING} with. Nothing running by default. */
   private final AtomicReference<String> runningCommands =
@@ -251,11 +248,22 @@ public class AgentDispatchControllerTest {
         .toCompletionStage()
         .toCompletableFuture()
         .get(10, TimeUnit.SECONDS);
+    // The stub is reached through a tunnel, the only way to a daemon (qits-780), and answers while
+    // the row's (fake) container runs — which is when a real daemon would have dialled back.
+    tunnels =
+        StubDaemonTunnels.install(
+            daemonVertx,
+            latchedPort(),
+            StubDaemonTunnels.whileItsContainerRuns(containerRuntime, workspaceRepository));
   }
 
   /** Awaited, for {@link ContainerProxyRouteTest#stopFakeDaemon}'s reason: the port must be free. */
   @AfterEach
   void stopFakeDaemon() throws Exception {
+    if (tunnels != null) {
+      tunnels.close();
+      tunnels = null;
+    }
     if (daemonVertx != null) {
       daemonVertx.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
       daemonVertx = null;
@@ -275,14 +283,12 @@ public class AgentDispatchControllerTest {
   private String seedRepository() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 
   /** A workspace whose (fake) container is already provisioned, so its daemon answers at once. */
   private Long workspaceWithContainer(String repoId, String label, String branch) {
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, label, "master", branch));
+    workspaceService.createWorkspace(repoId, label, "master", branch, null, false, false, true);
     Long rowId = workspaceIds.of(repoId, label);
     workspaceService.ensureContainer(rowId);
     return rowId;
@@ -476,10 +482,8 @@ public class AgentDispatchControllerTest {
   public void aDispatchOntoALegacyDirectRowStartsItAndLaunchesTheAgent() throws Exception {
     String repoId = seedRepository();
     Long rowId =
-        LegacyDirectRows.direct(
-                () ->
-                    workspaceService.createWorkspace(
-                        repoId, "ticket-legacy", "master", "ticket/legacy"))
+        workspaceService.createWorkspace(
+            repoId, "ticket-legacy", "master", "ticket/legacy", null, false, false, true)
             .id;
 
     JsonPath answer =
@@ -745,8 +749,8 @@ public class AgentDispatchControllerTest {
   @Test
   public void aLiteralFirstSegmentBranchPushesTheDispatchToTheDashShape() throws Exception {
     String repoId = seedRepository();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "ticket", "master", "ticket"));
+    workspaceService.createWorkspace(
+        repoId, "ticket", "master", "ticket", null, false, false, true);
 
     JsonPath answer = dispatch(body(repoId, "ticket/fix-login", "the goal", "go"), 200);
 
@@ -953,8 +957,7 @@ public class AgentDispatchControllerTest {
     String repoId = seedRepository();
     String label = "ticket-no-container";
     String branch = "ticket/no-container";
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, label, "master", branch));
+    workspaceService.createWorkspace(repoId, label, "master", branch, null, false, false, true);
     Long rowId = workspaceIds.of(repoId, label);
     String containerName = containerRuntime.containerName(label, repoId);
     assertFalse(
@@ -1104,8 +1107,7 @@ public class AgentDispatchControllerTest {
     String repoId = seedRepository();
     String label = "ticket-entity-cold";
     String branch = "ticket/entity-cold";
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, label, "master", branch));
+    workspaceService.createWorkspace(repoId, label, "master", branch, null, false, false, true);
     Long rowId = workspaceIds.of(repoId, label);
     String containerName = containerRuntime.containerName(label, repoId);
 
@@ -1133,8 +1135,7 @@ public class AgentDispatchControllerTest {
     String repoId = seedRepository();
     String label = "ticket-entity-spec";
     String branch = "ticket/entity-spec";
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, label, "master", branch));
+    workspaceService.createWorkspace(repoId, label, "master", branch, null, false, false, true);
     Long rowId = workspaceIds.of(repoId, label);
 
     entity(entityBody(repoId, branch, "Boots marked", "REFINED", true), 200);
@@ -1272,8 +1273,8 @@ public class AgentDispatchControllerTest {
     Long abandoned = dispatch(request, 200).getLong("workspace.id");
     workspaceService.discardWorkspace(abandoned, null, true);
     Long active = dispatch(request, 200).getLong("workspace.id");
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "hand-made-history", "master", "hand-made-history"));
+    workspaceService.createWorkspace(
+        repoId, "hand-made-history", "master", "hand-made-history", null, false, false, true);
 
     JsonPath open =
         given().get("/workspaces/api/work/workspaces").then().statusCode(200).extract().jsonPath();

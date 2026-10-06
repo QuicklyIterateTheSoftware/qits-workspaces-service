@@ -18,8 +18,8 @@ package eu.wohlben.qits.workspaces.control;
  * <p><b>{@code container}, not {@code daemon}.</b> {@code /workspaces/daemon/{id}} is taken by the
  * control socket, and that literal is a baked cross-repo contract — {@code
  * WorkspaceContainerFactory} injects it as {@code QITS_WORKSPACE_DAEMON_URL} and only a container
- * recreate re-injects it, which is the whole reason {@code LegacyDaemonControlSocket} exists.
- * Overloading the one segment that is hardest to change would be the wrong economy.
+ * recreate re-injects it. Overloading the one segment that is hardest to change would be the wrong
+ * economy.
  *
  * <p>The workspace is named by its own {@code Long} id, like every other route here: the
  * branch-derived label is unique only per repository and only among ACTIVE rows.
@@ -27,6 +27,15 @@ package eu.wohlben.qits.workspaces.control;
 public final class ContainerProxyPath {
 
   public static final String PREFIX = "/workspaces/container/";
+
+  /**
+   * The port the daemon's HTTP API binds inside its container — <b>never dialled from here</b>.
+   * Every daemon is reached through its reverse tunnel's loopback port (qits-780 deleted the direct
+   * {@code container:13338} fallback and the {@code qits.workspace.daemon-api-port} key with it), so
+   * this is only the authority a proxied request presents: {@code localhost:13338} whichever port
+   * the tunnel happened to bind, which keeps the daemon's view of who called it constant.
+   */
+  public static final int DAEMON_API_PORT = 13338;
 
   private ContainerProxyPath() {}
 

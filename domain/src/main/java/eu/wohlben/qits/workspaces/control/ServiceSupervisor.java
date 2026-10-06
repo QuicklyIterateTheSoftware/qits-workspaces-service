@@ -320,13 +320,21 @@ public class ServiceSupervisor {
    * to record and the {@link ContainerRuntime} is never asked for one — on this host that name would
    * reach nothing or, worse, somebody else's container. The web-view proxy reaches such a service
    * through the daemon's reverse tunnel, by its id, and never reads this origin.
+   *
+   * <p>A DIRECT row is asked about only behind the router's refusal (qits-780): the direct path is
+   * for admin and editor workspaces, so a regular row reaching it is refused rather than resolved.
+   * {@code row} is null when it could not be read, which keeps the direct answer it always had.
    */
-  private void resolveOrigin(Instance instance, boolean runner) {
+  private void resolveOrigin(Instance instance, Workspace row) {
     Integer httpPort =
         instance.definition.webView() != null ? instance.definition.webView().port() : null;
+    boolean runner = row != null && row.placement == WorkspacePlacement.RUNNER;
     if (httpPort == null || runner) {
       instance.origin = null;
       return;
+    }
+    if (row != null) {
+      WorkspacePlacements.requireDirectAllowed(row);
     }
     String container = containers.containerName(instance.workspaceId, instance.repoId);
     instance.origin = containers.resolveTarget(container, httpPort);
@@ -357,21 +365,17 @@ public class ServiceSupervisor {
   }
 
   /**
-   * Whether {@code workspaceRowId} is a RUNNER row. A row that cannot be read is not one — every
-   * row was DIRECT before placement, and the direct path is what this answer leaves untouched. Its
-   * own transaction because the caller is the daemon's sink-dispatch thread, which holds none.
+   * The ACTIVE row {@code workspaceRowId} names, for its placement and posture, or null. A row that
+   * cannot be read is not a RUNNER one — every row was DIRECT before placement, and the direct path
+   * is what this answer leaves untouched. Its own transaction because the caller is the daemon's
+   * sink-dispatch thread, which holds none.
    */
-  private boolean isRunnerRow(Long workspaceRowId) {
+  private Workspace placedRow(Long workspaceRowId) {
     if (workspaceRowId == null) {
-      return false;
+      return null;
     }
     return QuarkusTransaction.requiringNew()
-        .call(
-            () ->
-                workspaceRows
-                    .findActiveById(workspaceRowId)
-                    .map(w -> w.placement == WorkspacePlacement.RUNNER)
-                    .orElse(Boolean.FALSE));
+        .call(() -> workspaceRows.findActiveById(workspaceRowId).orElse(null));
   }
 
   /**
@@ -520,7 +524,7 @@ public class ServiceSupervisor {
       }
       // The placement is read before the monitor is taken: it is a row read, and nothing that
       // blocks belongs inside the monitor (see start(Long, String)).
-      boolean runner = mapped == ServiceStatus.READY && isRunnerRow(workspaceRowId);
+      Workspace placed = mapped == ServiceStatus.READY ? placedRow(workspaceRowId) : null;
       synchronized (ServiceSupervisor.this) {
         Instance instance = findByName(workspaceRowId, serviceName);
         if (instance == null) {
@@ -539,7 +543,7 @@ public class ServiceSupervisor {
           instances.put(new Key(workspaceRowId, definition.id()), instance);
         }
         if (mapped == ServiceStatus.READY) {
-          resolveOrigin(instance, runner); // the service is bound now — resolve the proxy target
+          resolveOrigin(instance, placed); // the service is bound now — resolve the proxy target
         }
         if (mapped == ServiceStatus.RESTARTING) {
           instance.restartCount++;

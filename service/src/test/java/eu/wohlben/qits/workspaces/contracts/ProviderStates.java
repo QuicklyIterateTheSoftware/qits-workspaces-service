@@ -210,6 +210,8 @@ public class ProviderStates {
     row.branch = branch;
     row.status = status;
     row.runtimeStatus = runtime;
+    // A regular workspace runs on a runner: an ACTIVE regular DIRECT row is refused (V15, qits-780).
+    row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
     row.workId = workId;
     row.entityId = qualifiedId;
     if (workId != null && workId.equals(EPIC_ID)) {

@@ -205,9 +205,9 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
    * and why the alternative is a new cross-context door.
    *
    * <p><b>EVERY active row, not only the root ones, and that is the whole of this query's history.</b>
-   * It used to read {@code parent is null}, back when a root row meant something: {@code
-   * createMainWorkspace} wrote one per project and the per-project editor was the thing that called
-   * it. That door is gone, and with it the only production writer of a parentless row —
+   * It used to read {@code parent is null}, back when a root row meant something: the per-project
+   * editor wrote one main workspace per project, through a create of its own. That door is gone
+   * (its create went too, in qits-780), and with it the only writer of a parentless row —
    * {@code createWorkspace} always sets a parent — so the narrow form would have answered EMPTY on a
    * live platform and the shared editor would have cloned nothing, which is precisely the failure
    * the feature exists to prevent. The cost of the wide form is one {@code find} per repository
@@ -451,45 +451,6 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
         WorkspaceRuntimeStatus.QUEUED,
         WorkspaceStatus.ACTIVE,
         runnerId);
-  }
-
-  // --- the move off the platform host (qits-776) ------------------------------------------------
-
-  /**
-   * The ACTIVE regular rows still on the direct path — written DIRECT before qits-774 — oldest
-   * {@code createdAt} first: the direct-migration sweep's candidates. Admin and editor rows are
-   * DIRECT by design and never listed.
-   */
-  public List<Workspace> findActiveDirectRegular() {
-    return list(
-        "status = ?1 and placement = ?2 and admin = false and editor = false"
-            + " order by createdAt, id",
-        WorkspaceStatus.ACTIVE,
-        WorkspacePlacement.DIRECT);
-  }
-
-  /** Every ACTIVE RUNNER row, by id: what a {@code direct-orphan} container could belong to. */
-  public List<Workspace> findActiveOnAnyRunner() {
-    return list(
-        "status = ?1 and placement = ?2 order by id",
-        WorkspaceStatus.ACTIVE,
-        WorkspacePlacement.RUNNER);
-  }
-
-  /**
-   * <b>The move's compare-and-swap</b> (qits-776): a DIRECT row becomes a RUNNER row on no runner,
-   * STOPPED and unqueued — the state delete-container leaves a RUNNER row in. The WHERE clause is the
-   * whole race: of two moves of one row, the second re-reads it RUNNER after the first commits and
-   * changes nothing. Answers the changed-row count, 0 or 1.
-   */
-  public int moveToRunner(Long id) {
-    return update(
-        "placement = ?1, runnerId = null, runtimeStatus = ?2, runtimeError = null, queuedAt = null"
-            + " where id = ?3 and placement = ?4",
-        WorkspacePlacement.RUNNER,
-        WorkspaceRuntimeStatus.STOPPED,
-        id,
-        WorkspacePlacement.DIRECT);
   }
 
   /** This runner's ACTIVE rows, locked for an update that has to see them as they are. */

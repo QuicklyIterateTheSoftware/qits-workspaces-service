@@ -25,8 +25,6 @@ public interface WorkspaceMapper {
   // The runner's name is another table's; this thin view carries none. A row is never placed on a
   // runner at create anyway: a runner takes it later, from the queue.
   @Mapping(target = "runner", ignore = true)
-  // Whether the container's commits are on the git host is an ls-remote, asked by the listing for a
-  // regular DIRECT row only (qits-776); `editor` is the row's own column and maps by name.
-  @Mapping(target = "pushed", ignore = true)
+  // `editor` is the row's own column and maps by name.
   WorkspaceDto toDto(Workspace entity);
 }

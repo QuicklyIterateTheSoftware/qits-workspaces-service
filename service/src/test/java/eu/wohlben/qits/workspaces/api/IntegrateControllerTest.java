@@ -61,7 +61,6 @@ public class IntegrateControllerTest {
   private String seedRepository() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 

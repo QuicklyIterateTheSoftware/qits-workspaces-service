@@ -44,9 +44,6 @@ public class WorkspaceHistoryServiceTest {
   private String clonedRepo() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    // cloneRepository used to register the main branch's workspace row as part of cloning; that
-    // call lives in this context, so the fixture makes it directly.
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 
@@ -65,8 +62,8 @@ public class WorkspaceHistoryServiceTest {
   @Test
   public void discardKeepsTheRowAsAbandonedHistory() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", "build the feature"));
+    workspaceService.createWorkspace(
+        repoId, "feat", "master", "feat", "build the feature", false, false, true);
     assertTrue(activeContains(repoId, "feat"));
 
     workspaceService.discardWorkspace(workspaceIds.of(repoId, "feat"), "did not work out");
@@ -86,8 +83,7 @@ public class WorkspaceHistoryServiceTest {
   public void cleanupResolvesAsIntegrated() throws Exception {
     String repoId = clonedRepo();
     // A freshly forked workspace has no commits ahead of master and a clean tree → cleanable.
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "ff", "master", "ff", null));
+    workspaceService.createWorkspace(repoId, "ff", "master", "ff", null, false, false, true);
 
     workspaceService.cleanupBranch(repoId, "ff", "merged upstream");
 
@@ -98,13 +94,11 @@ public class WorkspaceHistoryServiceTest {
   @Test
   public void workspaceIdCanBeReusedAfterResolution() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.discardWorkspace(workspaceIds.of(repoId, "feat"), null);
 
     // Reuse the id — only an ACTIVE duplicate is rejected, so this succeeds.
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
 
     assertTrue(activeContains(repoId, "feat"));
     long featRows =

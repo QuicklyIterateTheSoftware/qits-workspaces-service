@@ -40,9 +40,6 @@ public class WorkspaceDefaultMainBranchTest {
   private String clonedRepo() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    // cloneRepository used to register the main branch's workspace row as part of cloning; that
-    // call lives in this context, so the fixture makes it directly.
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 

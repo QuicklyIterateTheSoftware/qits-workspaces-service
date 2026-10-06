@@ -49,7 +49,6 @@ public class GcControllerTest {
     try {
       String repoId = TestOrigin.create(dataDir);
       repositories.register(repoId);
-      workspaceService.createMainWorkspace(repoId, "master");
       Path origin = Path.of(dataDir, repoId, "origin").toAbsolutePath();
       // A fully-merged plain branch (a tip that IS master's) and a fully-merged deploy ref.
       TestGit.exec(origin.toFile(), "git", "branch", "merged-work", "master");

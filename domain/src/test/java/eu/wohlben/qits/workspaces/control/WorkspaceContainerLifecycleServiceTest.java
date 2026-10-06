@@ -55,9 +55,6 @@ public class WorkspaceContainerLifecycleServiceTest {
   private String clonedRepo() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    // cloneRepository used to register the main branch's workspace row as part of cloning; that
-    // call lives in this context, so the fixture makes it directly.
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 
@@ -71,8 +68,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void createWorkspaceDoesNotProvisionAContainerUntilFirstUse() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     String container = containers.containerName("feat", repoId);
 
     // Creation writes only durable state: the branch ref in origin and the STOPPED row.
@@ -103,8 +99,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void cleanFlagIsSurfacedOnlyWhileRunningAndReported() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
 
     // STOPPED (not provisioned): the daemon can't be connected, so clean stays unknown even if a
     // stale value were reported.
@@ -129,8 +124,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void agentActivityIsSurfacedOnlyWhileRunningAndReported() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
 
     // STOPPED: no daemon, so activity stays unknown even if a stale value were reported.
     agentActivity.report(workspaceIds.of(repoId, "feat"), AgentActivityState.BUSY);
@@ -152,23 +146,6 @@ public class WorkspaceContainerLifecycleServiceTest {
   }
 
   @Test
-  public void mainWorkspaceIsCreatedLazilyToo() throws Exception {
-    String repoId = clonedRepo();
-    // cloneRepository created the main workspace ("master") — a row only, no container.
-    String container = containers.containerName("master", repoId);
-    assertFalse(containers.exists(container), "the main workspace starts without a container");
-    assertEquals(WorkspaceRuntimeStatus.STOPPED, workspaceDto(repoId, "master").runtimeStatus());
-
-    // First use checks out the existing main branch (no branch ref to create).
-    workspaceService.ensureContainer(workspaceIds.of(repoId, "master"));
-    assertTrue(containers.exists(container));
-    Path originPath = Path.of(dataDir, repoId, "origin");
-    assertEquals(
-        TestGit.exec(originPath.toFile(), "git", "rev-parse", "refs/heads/master").trim(),
-        containerHead(container));
-  }
-
-  @Test
   public void mergeWorkspaceSucceedsWithoutASourceContainer() throws Exception {
     String repoId = clonedRepo();
     // The seed path: fork off the fixture's 'feature' branch (which carries a commit master
@@ -177,8 +154,8 @@ public class WorkspaceContainerLifecycleServiceTest {
     // is written by integrate alone now, and its 409 would stand in front of what this test is
     // about. Repointing main is one line and leaves the merge under test byte-for-byte the same.
     repositories.setMainBranch(repoId, "feature");
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feeder", "feature", "feeder", null));
+    workspaceService.createWorkspace(
+        repoId, "feeder", "feature", "feeder", null, false, false, true);
     Path originPath = Path.of(dataDir, repoId, "origin");
     String masterBefore =
         TestGit.exec(originPath.toFile(), "git", "rev-parse", "refs/heads/master").trim();
@@ -198,8 +175,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void aNeverProvisionedWorkspaceIsCleanable() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
 
     // A fresh fork has nothing to lose: no container means no dirty tree and no unpushed commits,
     // so cleanup must be offered exactly as for a provisioned-but-level workspace.
@@ -211,8 +187,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void ensureContainerRecreatesALostContainerFromTheBranch() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
     assertTrue(containers.exists(container));
@@ -234,8 +209,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void ensureContainerIsANoOpWhenAlreadyRunning() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
 
     // Should not throw and should leave the (same) container running.
@@ -248,8 +222,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   public void ensureContainerRestartsAnExitedContainerInPlaceKeepingUnpushedWork()
       throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
     String head = commitInContainer(container, "unpushed.txt");
@@ -271,8 +244,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void ensureContainerAbandonsWhenTheBranchIsGone() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
 
@@ -294,8 +266,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void stopContainerPausesInPlaceKeepingTheWorkspaceActive() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
 
@@ -318,8 +289,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void stopContainerPreservesUncommittedWorkingTreeChanges() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
 
@@ -347,8 +317,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void deleteContainerRemovesTheContainerButKeepsBranchAndWorkspace() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
     // The realistic entry point: the UI offers "Delete container" on a stopped workspace, whose
@@ -375,8 +344,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void deleteContainerFiresStoppingImmediatelyBeforeRm() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     stoppingRecorder.clear();
 
@@ -401,8 +369,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   public void unpushedWorkSurvivesAnUnexpectedlyRemovedContainerOnThePersistentVolume()
       throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
     String head = commitInContainer(container, "survivor.txt");
@@ -466,8 +433,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void ensureContainerFiresStartedOnFreshProvision() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     startedRecorder.clear();
 
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
@@ -480,8 +446,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void ensureContainerFiresStartedOnExitedRestart() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
     ((FakeContainerRuntime) containers).markExited(container);
@@ -498,8 +463,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void ensureContainerDoesNotFireStartedWhenAlreadyRunning() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     // Wait for the fresh provision's (async) event to land before clearing, so a late delivery of
     // it
@@ -521,8 +485,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void stopContainerFiresStoppingWhileTheContainerIsStillRunning() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     stoppingRecorder.clear();
 
@@ -540,8 +503,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void discardFiresStoppingImmediatelyBeforeRm() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     gitStatus.report(workspaceIds.of(repoId, "feat"), true); // a discard is destructive: only an explicit CLEAN permits it
     stoppingRecorder.clear();
@@ -559,8 +521,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void discardStopsTheContainerBeforeRemovingIt() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     gitStatus.report(workspaceIds.of(repoId, "feat"), true);
     String container = containers.containerName("feat", repoId);
@@ -578,8 +539,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void discardRemovesTheContainerEvenWhenTheGracefulStopFails() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     gitStatus.report(workspaceIds.of(repoId, "feat"), true);
     String container = containers.containerName("feat", repoId);
@@ -593,8 +553,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void deleteContainerStopsTheContainerBeforeRemovingIt() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
     fakeContainers.clearTeardownCalls();
@@ -610,8 +569,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void deleteContainerRemovesTheContainerEvenWhenTheGracefulStopFails() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
     fakeContainers.throwOnNextStop(container);
@@ -639,8 +597,7 @@ public class WorkspaceContainerLifecycleServiceTest {
     // is written by integrate alone now, and its 409 would stand in front of what this test is
     // about. Repointing main is one line and leaves the merge under test byte-for-byte the same.
     repositories.setMainBranch(repoId, "feature");
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     makeDirty(containers.containerName("feat", repoId));
     gitStatus.report(workspaceIds.of(repoId, "feat"), false); // the daemon is what tells the host a tree is dirty
@@ -659,8 +616,7 @@ public class WorkspaceContainerLifecycleServiceTest {
     // is written by integrate alone now, and its 409 would stand in front of what this test is
     // about. Repointing main is one line and leaves the merge under test byte-for-byte the same.
     repositories.setMainBranch(repoId, "feature");
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     makeDirty(containers.containerName("feat", repoId));
     gitStatus.report(workspaceIds.of(repoId, "feat"), false); // the daemon is what tells the host a tree is dirty
@@ -684,8 +640,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   public void abandonWithForceDiscardsADirtyWorkspace() throws Exception {
     String repoId = clonedRepo();
     repositories.setMainBranch(repoId, "feature");
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     makeDirty(containers.containerName("feat", repoId));
     gitStatus.report(workspaceIds.of(repoId, "feat"), false);
@@ -703,8 +658,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void abandonSucceedsOnACleanWorkspace() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     gitStatus.report(workspaceIds.of(repoId, "feat"), true); // "clean" is now a daemon report, not a host git status
 
@@ -719,8 +673,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void beginRecreateContainerKeepsThePersistentVolumeAndItsCheckout() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
     String head = commitInContainer(container, "keep.txt"); // committed ⇒ working tree clean
@@ -744,8 +697,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void deleteContainerRemovesThePersistentVolumeSoStartReClonesFresh() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
     String unpushed = commitInContainer(container, "doomed.txt");
@@ -768,8 +720,7 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Test
   public void discardWorkspaceRemovesThePersistentVolume() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     assertTrue(
         workspaceVolumeExists("feat"), "precondition: the workspace has a persistent volume");

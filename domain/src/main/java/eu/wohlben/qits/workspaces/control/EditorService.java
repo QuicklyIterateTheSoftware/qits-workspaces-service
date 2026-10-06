@@ -30,7 +30,8 @@ import java.util.Optional;
  * <p><b>What that replaced was a derivation.</b> The editor used to be a project's wrapper
  * repository's main workspace — one per project, launched from the editor image because of what
  * that workspace <em>was</em> — so this door took a repository id, refused anything that was not a
- * wrapper, and leaned on {@code createMainWorkspace}. None of that survives a single editor: there
+ * wrapper, and leaned on the per-project main workspace that door wrote (deleted with it in
+ * qits-780). None of that survives a single editor: there
  * is no project, so there is no wrapper to check and no repository to be sent at the wrong one of.
  *
  * <p><b>The answer still carries the workspace's row id, and for the same reason it always did.</b>
@@ -42,8 +43,7 @@ import java.util.Optional;
  *
  * <p>Double-provision safety is structural and predates this door. {@code createEditorWorkspace} is
  * find-or-write, {@code uq_workspace_active_editor} makes that true under a race rather than by
- * agreement — the same arrangement {@code createMainWorkspace} has with {@code
- * uq_workspace_active_branch} — and the orchestrator's ensure is a PUT per {@code (owner, workload,
+ * agreement — the same arrangement every create has with {@code uq_workspace_active_branch} — and the orchestrator's ensure is a PUT per {@code (owner, workload,
  * ref)}, so a second ensure adopts the place the first one made. What this class adds is not a lock
  * but a reason not to ask: an ensure is not started while a technical process is already running for
  * the workspace, or while its container is up with a daemon on the socket. Without that, a client

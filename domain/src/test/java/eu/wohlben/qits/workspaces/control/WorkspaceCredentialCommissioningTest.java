@@ -62,7 +62,6 @@ public class WorkspaceCredentialCommissioningTest {
   private String clonedRepo() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 
@@ -73,8 +72,7 @@ public class WorkspaceCredentialCommissioningTest {
   @Test
   public void aFreshProvisionCommissionsAPairAndPutsItOnTheWorkspace() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
 
     // Creating a workspace commissions nothing: there is no container yet, and the credential's
     // lifetime is the container's.
@@ -105,8 +103,7 @@ public class WorkspaceCredentialCommissioningTest {
   @Test
   public void aStoppedContainerThatIsStartedAgainKeepsItsCredential() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     WorkspaceCredential first = credentialOf(repoId, "feat").orElseThrow();
 
@@ -123,8 +120,7 @@ public class WorkspaceCredentialCommissioningTest {
   @Test
   public void aRecreateCommissionsAFreshPairAndHandsTheOldOneBack() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     WorkspaceCredential first = credentialOf(repoId, "feat").orElseThrow();
     // Recreate admits only an explicit-clean daemon report.
@@ -148,8 +144,7 @@ public class WorkspaceCredentialCommissioningTest {
   @Test
   public void deletingTheContainerHandsTheCredentialBackWhileTheRowStaysActive() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     WorkspaceCredential first = credentialOf(repoId, "feat").orElseThrow();
 
@@ -170,8 +165,7 @@ public class WorkspaceCredentialCommissioningTest {
   @Test
   public void abandoningAWorkspaceHandsTheCredentialBack() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     WorkspaceCredential credential = credentialOf(repoId, "feat").orElseThrow();
     gitStatus.report(workspaceIds.of(repoId, "feat"), true); // a discard needs an explicit clean
@@ -185,8 +179,7 @@ public class WorkspaceCredentialCommissioningTest {
   @Test
   public void theBranchGoneAbandonHandsTheCredentialBack() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     WorkspaceCredential credential = credentialOf(repoId, "feat").orElseThrow();
 
@@ -208,8 +201,7 @@ public class WorkspaceCredentialCommissioningTest {
       throws Exception {
     commissioner.reset(); // back to the shipped posture: the port answers empty
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
 
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
 
@@ -221,8 +213,7 @@ public class WorkspaceCredentialCommissioningTest {
   @Test
   public void aCommissioningFailureFailsTheProvisionAndStartsNoContainer() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     commissioner.failCommissioning("qits-idp is unreachable");
 
     // Loudly, and before anything runs: a workspace must never launch half-credentialed, and

@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
-import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.SharedTuningProfile;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
@@ -189,9 +188,7 @@ public class DaemonStreamRouteTest {
   private Long workspace() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "work", "master", "work"));
+    workspaceService.createWorkspace(repoId, "work", "master", "work", null, false, false, true);
     return workspaceIds.of(repoId, "work");
   }
 
@@ -240,9 +237,10 @@ public class DaemonStreamRouteTest {
     Long id = workspace();
     connectFakeDaemon(id, DaemonProtocol.TUNNEL_CAPABILITY_VERSION - 1);
 
-    // It is still listening on qits-net, so the direct branch is right — and here that means the
-    // FakeContainerRuntime origin, which no container is behind, so a 502. What matters is that no
-    // stream was asked for: asking one of these for a tunnel would hang until the nonce expired.
+    // There is no direct branch to fall back on any more (qits-780): such a daemon simply has no
+    // route, and with no container behind this row the answer is the "not running" 502. What
+    // matters is that no stream was asked for: asking one of these for a tunnel would hang until
+    // the nonce expired.
     given().get("/workspaces/container/" + id + "/files").then().statusCode(502);
 
     assertTrue(asked.isEmpty(), "a daemon that still listens must not be asked to dial back");

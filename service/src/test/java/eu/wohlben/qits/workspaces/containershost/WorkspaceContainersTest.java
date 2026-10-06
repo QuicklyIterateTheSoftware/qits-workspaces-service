@@ -612,49 +612,6 @@ class WorkspaceContainersTest {
   }
 
   @Test
-  void aVolumeTheOrchestratorHoldsExistsAndIsAskedForByName() {
-    stub.script(200, "{\"id\":null,\"owner\":\"" + OWNER + "\",\"name\":\"qits_workspace_work\","
-        + "\"desired\":\"PRESENT\",\"existed\":true,\"detail\":null}");
-
-    assertTrue(adapter().workspaceVolumeExists("work"));
-
-    StubContainersServer.Received read = stub.last();
-    assertEquals("GET", read.method());
-    assertEquals("/containers/api/volumes/" + OWNER + "/qits_workspace_work", read.path());
-  }
-
-  @Test
-  void onlyA404SaysTheVolumeIsGone() {
-    // The move gate's trivial pass rests on this answer, so doubt reads as "it may be there".
-    stub.script(404, "{\"code\":\"NOT_FOUND\",\"message\":\"no such volume\"}");
-    assertFalse(adapter().workspaceVolumeExists("work"));
-
-    stub.script(503, "{\"code\":\"UNAVAILABLE\",\"message\":\"down\"}");
-    assertTrue(adapter().workspaceVolumeExists("work"), "an orchestrator that is down is not a no");
-
-    stub.scriptSilence();
-    assertTrue(adapter().workspaceVolumeExists("work"), "nor is one that does not answer");
-  }
-
-  @Test
-  void theOwnerWideListingAnswersEveryWorkspaceContainerName() {
-    stub.script(200, "{\"containers\":[" + envelope("qits-ws-a-repo1234", "RUNNING") + ","
-        + envelope("qits-ws-b-other999", "EXITED") + "," + envelope("qits-ct-someone-else", "RUNNING")
-        + "]}");
-
-    assertEquals(
-        java.util.Set.of("qits-ws-a-repo1234", "qits-ws-b-other999"),
-        adapter().workspaceContainerNames());
-  }
-
-  @Test
-  void aFailedOwnerWideListingAnswersNothing() {
-    stub.fallback(503, "{\"code\":\"UNAVAILABLE\",\"message\":\"down\"}");
-
-    assertTrue(adapter().workspaceContainerNames().isEmpty());
-  }
-
-  @Test
   void aStoppedContainerStillExistsAndIsNotRunning() {
     // The distinction the whole start-in-place path rests on: a deliberate stop leaves the place
     // there, so `exists` must stay true while `isRunning` goes false.

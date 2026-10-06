@@ -46,9 +46,6 @@ public class WorkspaceRecreateContainerServiceTest {
   private String clonedRepo() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    // cloneRepository used to register the main branch's workspace row as part of cloning; that
-    // call lives in this context, so the fixture makes it directly.
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 
@@ -71,8 +68,7 @@ public class WorkspaceRecreateContainerServiceTest {
   @Test
   public void recreateTearsDownAndReprovisionsAFreshContainerWhenClean() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     ensureRunning(repoId, "feat");
     String container = containers.containerName("feat", repoId);
 
@@ -104,8 +100,7 @@ public class WorkspaceRecreateContainerServiceTest {
   @Test
   public void recreateStopsTheOldContainerBeforeRemovingIt() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     ensureRunning(repoId, "feat");
     String container = containers.containerName("feat", repoId);
     gitStatus.report(workspaceIds.of(repoId, "feat"), true);
@@ -124,8 +119,7 @@ public class WorkspaceRecreateContainerServiceTest {
   @Test
   public void recreateReprovisionsEvenWhenTheGracefulStopOfTheOldContainerFails() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     ensureRunning(repoId, "feat");
     String container = containers.containerName("feat", repoId);
     gitStatus.report(workspaceIds.of(repoId, "feat"), true);
@@ -147,8 +141,7 @@ public class WorkspaceRecreateContainerServiceTest {
   @Test
   public void recreateRefusesADirtyWorkspace() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     ensureRunning(repoId, "feat");
     String container = containers.containerName("feat", repoId);
     containers.exec(container, "/workspace", Map.of(), "bash", "-lc", "echo wip > marker.txt");
@@ -171,8 +164,7 @@ public class WorkspaceRecreateContainerServiceTest {
   @Test
   public void recreateRefusesAnUnknownWorkingTree() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     ensureRunning(repoId, "feat");
     String container = containers.containerName("feat", repoId);
     containers.exec(container, "/workspace", Map.of(), "bash", "-lc", "echo wip > marker.txt");

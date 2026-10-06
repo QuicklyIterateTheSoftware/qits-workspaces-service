@@ -60,7 +60,6 @@ public class GitRefNarrowingTest {
   private String repository() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 
@@ -74,10 +73,20 @@ public class GitRefNarrowingTest {
         null,
         false,
         false,
-        false,
+        true,
         WorkspaceSubject.none(),
         EPIC_LIST);
     return workspaceIds.of(repoId, "epic-e");
+  }
+
+  /**
+   * A workspace standing on the repository's default branch — an admin one adopting {@code master},
+   * since the direct path these commissions belong to is admin and editor only (qits-780) and the
+   * per-project main workspace that used to stand there is retired.
+   */
+  private Long mainWorkspace(String repoId) {
+    workspaceService.createWorkspace(repoId, "master", "master", "master", null, true, false, true);
+    return workspaceIds.of(repoId, "master");
   }
 
   private List<String> refsOf(Long rowId) {
@@ -125,13 +134,16 @@ public class GitRefNarrowingTest {
         .run(
             () -> {
               var row = workspaceRepository.findActiveById(epic).orElseThrow();
+              // A regular row: an admin one is never RUNNER (ck_workspace_runner_posture).
+              row.admin = false;
               row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
               row.commissionedTokenId = "tok-id-epic";
               row.commissionedTokenSubject = "tok-workspace-epic";
               row.commissionedToken = "qits_tok_epic";
             });
 
-    workspaceService.createWorkspace(repoId, "task-e-a", "epic/e", "task/e/a");
+    workspaceService.createWorkspace(
+        repoId, "task-e-a", "epic/e", "task/e/a", null, false, false, true);
 
     await(() -> !commissioner.tokenGitRefUpdates().isEmpty(), "the token's Git ref update");
     assertEquals(
@@ -146,7 +158,7 @@ public class GitRefNarrowingTest {
   @Test
   public void aWorkspaceCreatedWithoutGitRefsMayPushItsOwnBranch() throws Exception {
     String repoId = repository();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat");
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     Long feat = workspaceIds.of(repoId, "feat");
 
     assertEquals(List.of("refs/heads/feat"), refsOf(feat));
@@ -170,7 +182,7 @@ public class GitRefNarrowingTest {
   @Test
   public void aRowFromBeforeTheColumnIsCommissionedWithItsOwnBranch() throws Exception {
     String repoId = repository();
-    workspaceService.createWorkspace(repoId, "old", "master", "old");
+    workspaceService.createWorkspace(repoId, "old", "master", "old", null, false, false, true);
     Long old = workspaceIds.of(repoId, "old");
     QuarkusTransaction.requiringNew()
         .run(() -> workspaceRepository.findActiveById(old).orElseThrow().gitRefs = null);
@@ -183,7 +195,7 @@ public class GitRefNarrowingTest {
   @Test
   public void aMainWorkspaceMayPushNothing() throws Exception {
     String repoId = repository();
-    Long main = workspaceIds.of(repoId, "master");
+    Long main = mainWorkspace(repoId);
 
     assertEquals(List.of(), refsOf(main), "the default branch moves only through a release request");
 
@@ -203,7 +215,7 @@ public class GitRefNarrowingTest {
         null,
         false,
         false,
-        false,
+        true,
         WorkspaceSubject.none(),
         List.of("refs/heads/epic/m", "refs/heads/master", "refs/heads/task/m/*"));
     Long epic = workspaceIds.of(repoId, "epic-m");
@@ -217,7 +229,7 @@ public class GitRefNarrowingTest {
   @Test
   public void aMainRowFromBeforeTheColumnIsCommissionedWithNothing() throws Exception {
     String repoId = repository();
-    Long main = workspaceIds.of(repoId, "master");
+    Long main = mainWorkspace(repoId);
     QuarkusTransaction.requiringNew()
         .run(() -> workspaceRepository.findActiveById(main).orElseThrow().gitRefs = null);
 
@@ -230,7 +242,7 @@ public class GitRefNarrowingTest {
   @Test
   public void aStoredListThatNamesTheDefaultBranchIsCommissionedWithoutIt() throws Exception {
     String repoId = repository();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat");
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     Long feat = workspaceIds.of(repoId, "feat");
     // A list stored before the default-branch rule.
     QuarkusTransaction.requiringNew()
@@ -256,7 +268,8 @@ public class GitRefNarrowingTest {
     workspaceService.ensureContainer(epic);
     String epicClient = clientOf(epic);
 
-    workspaceService.createWorkspace(repoId, "task-e-a", "epic/e", "task/e/a");
+    workspaceService.createWorkspace(
+        repoId, "task-e-a", "epic/e", "task/e/a", null, false, false, true);
     Long task = workspaceIds.of(repoId, "task-e-a");
 
     // The exact ref leaves the list; the epic's own branch, the other task and the pattern stay.
@@ -278,7 +291,8 @@ public class GitRefNarrowingTest {
     String repoId = repository();
     Long epic = epicWorkspace(repoId);
 
-    workspaceService.createWorkspace(repoId, "task-e-a", "epic/e", "task/e/a");
+    workspaceService.createWorkspace(
+        repoId, "task-e-a", "epic/e", "task/e/a", null, false, false, true);
 
     List<String> narrowed = List.of(EPIC, TASK_B, FEATURES);
     assertEquals(narrowed, refsOf(epic));
@@ -297,7 +311,8 @@ public class GitRefNarrowingTest {
     Long epic = epicWorkspace(repoId);
     String sibling = repository(); // same project
 
-    workspaceService.createWorkspace(sibling, "epic-e", "master", "epic/e");
+    workspaceService.createWorkspace(
+        sibling, "epic-e", "master", "epic/e", null, false, false, true);
 
     assertEquals(EPIC_LIST, refsOf(epic), "the epic's own branch is never narrowed away");
   }
@@ -309,7 +324,8 @@ public class GitRefNarrowingTest {
     String elsewhere = TestOrigin.create(dataDir);
     repositories.registerInProject(elsewhere, "another-project");
 
-    workspaceService.createWorkspace(elsewhere, "task-e-a", "master", "task/e/a");
+    workspaceService.createWorkspace(
+        elsewhere, "task-e-a", "master", "task/e/a", null, false, false, true);
 
     assertEquals(EPIC_LIST, refsOf(epic), "a list is scoped to its own project");
   }
@@ -322,7 +338,8 @@ public class GitRefNarrowingTest {
     String epicClient = clientOf(epic);
     commissioner.failGitRefUpdates(true);
 
-    workspaceService.createWorkspace(repoId, "task-e-a", "epic/e", "task/e/a");
+    workspaceService.createWorkspace(
+        repoId, "task-e-a", "epic/e", "task/e/a", null, false, false, true);
     await(() -> commissioner.gitRefUpdates().size() == 1, "the first, failing update");
     assertTrue(pendingOf(epic), "a failed update stays pending");
 
@@ -341,7 +358,8 @@ public class GitRefNarrowingTest {
   public void closingTheTaskWorkspaceGivesTheEpicNothingBack() throws Exception {
     String repoId = repository();
     Long epic = epicWorkspace(repoId);
-    workspaceService.createWorkspace(repoId, "task-e-a", "epic/e", "task/e/a");
+    workspaceService.createWorkspace(
+        repoId, "task-e-a", "epic/e", "task/e/a", null, false, false, true);
     Long task = workspaceIds.of(repoId, "task-e-a");
     workspaceService.ensureContainer(task);
     gitStatus.report(task, true); // a discard needs an explicit clean report

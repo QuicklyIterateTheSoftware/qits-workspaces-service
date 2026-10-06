@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.AgentActivityState;
+import eu.wohlben.qits.workspaces.daemonhost.StubDaemonTunnels;
 import eu.wohlben.qits.workspaces.control.DispatchService;
 import eu.wohlben.qits.workspaces.control.FakeAgentActivity;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
-import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
@@ -81,8 +81,6 @@ public class AgentTurnCompactionAndWindowTest {
     @Override
     public Map<String, String> getConfigOverrides() {
       return Map.of(
-          "qits.workspace.daemon-api-port",
-              String.valueOf(AgentDispatchControllerTest.latchedPort()),
           "qits.workspace.daemon-api-token", "test-delivery-daemon-token",
           "qits.workspace.agent-dispatch.poll-interval-ms", "50",
           // Short enough to watch expire, long enough that a healthy daemon in the other test
@@ -109,6 +107,12 @@ public class AgentTurnCompactionAndWindowTest {
   String dataDir;
 
   private Vertx daemonVertx;
+
+  private StubDaemonTunnels tunnels;
+
+  @Inject eu.wohlben.qits.workspaces.control.FakeContainerRuntime containerRuntime;
+
+  @Inject eu.wohlben.qits.workspaces.persistence.WorkspaceRepository workspaceRows;
 
   private final AtomicReference<String> runningCommands =
       new AtomicReference<>(AN_AGENT_IS_RUNNING);
@@ -162,10 +166,21 @@ public class AgentTurnCompactionAndWindowTest {
         .toCompletionStage()
         .toCompletableFuture()
         .get(10, TimeUnit.SECONDS);
+    // Reached through a stub tunnel, the only way to a daemon (qits-780), while the row's (fake)
+    // container runs.
+    tunnels =
+        StubDaemonTunnels.install(
+            daemonVertx,
+            AgentDispatchControllerTest.latchedPort(),
+            StubDaemonTunnels.whileItsContainerRuns(containerRuntime, workspaceRows));
   }
 
   @AfterEach
   void stopFakeDaemon() throws Exception {
+    if (tunnels != null) {
+      tunnels.close();
+      tunnels = null;
+    }
     closeDaemon();
   }
 
@@ -177,8 +192,7 @@ public class AgentTurnCompactionAndWindowTest {
   }
 
   private Long aWorkspaceWithAContainer(String repoId, String label, String branch) {
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, label, "master", branch));
+    workspaceService.createWorkspace(repoId, label, "master", branch, null, false, false, true);
     Long rowId = workspaceIds.of(repoId, label);
     workspaceService.ensureContainer(rowId);
     return rowId;
@@ -187,7 +201,6 @@ public class AgentTurnCompactionAndWindowTest {
   private String seedRepository() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 

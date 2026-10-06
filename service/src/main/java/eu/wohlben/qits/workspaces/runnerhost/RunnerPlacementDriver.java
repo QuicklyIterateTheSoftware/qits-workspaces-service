@@ -70,13 +70,6 @@ public class RunnerPlacementDriver implements RunnerPlacement {
   }
 
   @Override
-  public java.util.Set<UUID> servingRunnerIds() {
-    return registry.connectedRunnerIds().stream()
-        .filter(id -> registry.serving(id) != null)
-        .collect(java.util.stream.Collectors.toUnmodifiableSet());
-  }
-
-  @Override
   public void estateChanged(UUID runnerId) {
     afterCommit(() -> registry.estateChanged(runnerId));
   }

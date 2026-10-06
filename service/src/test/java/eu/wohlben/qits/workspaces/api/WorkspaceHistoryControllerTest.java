@@ -60,7 +60,6 @@ public class WorkspaceHistoryControllerTest {
   private Long workspace(String label) throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     workspaceService.createWorkspace(repoId, label, "master", label);
     return workspaceIds.of(repoId, label);
   }

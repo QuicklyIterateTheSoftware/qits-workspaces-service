@@ -39,14 +39,12 @@ public class WorkspaceDaemonOutdatedTest {
   private String clonedRepo() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    // cloneRepository used to register the main branch's workspace row as part of cloning; that
-    // call lives in this context, so the fixture makes it directly.
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 
+  /** An admin workspace, running on the direct path (admin and editor only, qits-780). */
   private WorkspaceDto runningWorkspace(String repoId, String id, String parent) {
-    workspaceService.createWorkspace(repoId, id, parent, id, null);
+    workspaceService.createWorkspace(repoId, id, parent, id, null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, id));
     return workspaceService.listWorkspaces(repoId).stream()
         .filter(w -> id.equals(w.workspaceId()))

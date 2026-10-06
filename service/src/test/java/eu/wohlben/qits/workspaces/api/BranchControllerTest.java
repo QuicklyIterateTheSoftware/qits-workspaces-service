@@ -45,7 +45,6 @@ public class BranchControllerTest {
     try {
       String repoId = TestOrigin.create(dataDir);
       repositories.register(repoId);
-      workspaceService.createMainWorkspace(repoId, "master");
       return repoId;
     } catch (Exception e) {
       throw new IllegalStateException("failed to seed a test origin", e);

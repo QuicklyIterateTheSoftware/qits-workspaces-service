@@ -63,12 +63,16 @@ public class CommissionReconcilerTest {
     commissioner.reset();
   }
 
-  /** A repository with a live workspace whose container holds a commissioned credential. */
+  /**
+   * A repository with a live workspace whose container holds a commissioned credential — an admin
+   * one: the commissioned pair is the direct path's credential, and that path is admin and editor
+   * only (qits-780).
+   */
   private String liveWorkspace(String workspaceId) throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
-    workspaceService.createWorkspace(repoId, workspaceId, "master", workspaceId, null);
+    workspaceService.createWorkspace(
+        repoId, workspaceId, "master", workspaceId, null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, workspaceId));
     return repoId;
   }
@@ -136,7 +140,6 @@ public class CommissionReconcilerTest {
   public void aNarrowingTheIdpDidNotTakeIsSentAgainByTheReconcile() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     workspaceService.createWorkspace(
         repoId,
         "epic-e",
@@ -145,7 +148,7 @@ public class CommissionReconcilerTest {
         null,
         false,
         false,
-        false,
+        true,
         WorkspaceSubject.none(),
         List.of("refs/heads/epic/e", "refs/heads/task/e/a"));
     Long epic = workspaceIds.of(repoId, "epic-e");

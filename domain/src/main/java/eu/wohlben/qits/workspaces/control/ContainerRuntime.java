@@ -215,15 +215,6 @@ public interface ContainerRuntime {
   /** All workspace containers for a repository. */
   List<ContainerInfo> listWorkspaceContainers(String repoId);
 
-  /**
-   * The names of every workspace container this service holds on the platform host, whatever its
-   * repository — one owner-wide listing (qits-776). What the direct-migration sweep finds a
-   * {@code direct-orphan} by: a name here that belongs to a row now placed on a runner is a DIRECT
-   * container whose teardown failed, and nothing else has to remember it. A read that fails answers
-   * the empty set, which costs a retry one tick later and claims nothing.
-   */
-  java.util.Set<String> workspaceContainerNames();
-
   // --- Per-workspace /workspace volumes -------------------------------------------------------
   //
   // A workspace's checkout lives on a per-workspace named volume mounted at /workspace (not the
@@ -261,20 +252,6 @@ public interface ContainerRuntime {
    * work is being discarded (delete-container reclaim, branch discard/abandon, repo delete, GC).
    */
   void removeWorkspaceVolume(String workspaceId);
-
-  /**
-   * Whether the per-workspace {@code /workspace} volume exists on the platform host (qits-776).
-   * <b>Only a definite "no such volume" answers false</b>; an orchestrator that could not be asked,
-   * or any answer it is not sure of, is true. The one reader is the move gate's trivial pass — a
-   * DIRECT row whose container AND volume are both gone has nothing to lose — and the safe
-   * direction for that question is "something may still be there", so a doubtful answer never lets
-   * a row through without the clean-and-pushed check.
-   *
-   * <p>This is the DIRECT placement's question only. A RUNNER row's volume is on its runner's node,
-   * and that placement does not implement this interface at all ({@code RunnerPlacement} is its
-   * port), so no RUNNER answer exists to give.
-   */
-  boolean workspaceVolumeExists(String workspaceId);
 
   /**
    * All qits-managed per-workspace volumes. <b>No production caller</b>, and refused by the

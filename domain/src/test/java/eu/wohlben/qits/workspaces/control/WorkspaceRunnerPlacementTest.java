@@ -881,12 +881,11 @@ public class WorkspaceRunnerPlacementTest {
     WorkspaceRunner runner = eligibleRunner();
     placement.connect(runner.id);
     String repoId = repo();
-    // A regular DIRECT row as the estate still holds them (qits-774): no create writes one any more,
-    // so the RUNNER row a create writes is rewritten as a pre-qits-774 DIRECT row.
+    // The direct path is admin and editor only (qits-780), so the DIRECT row is an admin one.
     Workspace created =
-        workspaceService.createWorkspace(repoId, "direct", "master", "direct", null);
+        workspaceService.createWorkspace(
+            repoId, "direct", "master", "direct", null, false, false, true);
     rows.add(created.id);
-    LegacyDirectRows.demote(workspaceRepository, created.id);
     placement.clearCalls();
     String container = containers.containerName("direct", repoId);
 
@@ -909,6 +908,100 @@ public class WorkspaceRunnerPlacementTest {
         List.of(),
         placement.calls(),
         "a DIRECT row never reaches RunnerPlacement");
+  }
+
+  // --- the direct path is admin and editor only (qits-780) ---------------------------------------
+
+  /**
+   * The one entry that did not branch on placement, {@code ensureContainer(Long)} (the bootstrap
+   * runner's manual run), used to provision a RUNNER row on the platform host. Now a stopped RUNNER
+   * row is asked to start first and a RUNNING one goes ahead — neither ever reaches qits-containers.
+   */
+  @Test
+  public void aRunnerRowNeverReachesTheDirectLadderThroughTheManualRun() throws Exception {
+    String repoId = repo();
+    Workspace created = createRunnerRow(repoId, "routed", false);
+    String container = containers.containerName("routed", repoId);
+
+    assertThrows(BadRequestException.class, () -> workspaceService.ensureContainer(created.id));
+    assertFalse(containers.exists(container), "nothing was started on the platform host");
+
+    update(created.id, w -> w.runtimeStatus = WorkspaceRuntimeStatus.RUNNING);
+    workspaceService.ensureContainer(created.id);
+    assertFalse(containers.exists(container), "a running runner row is left to its runner");
+    assertEquals(WorkspacePlacement.RUNNER, read(created.id).placement);
+  }
+
+  /**
+   * The owner-wide qits-containers listing is asked for only when the repository has a DIRECT row:
+   * a repository of regular workspaces — all RUNNER — costs it nothing, and an admin row brings it
+   * back.
+   */
+  @Test
+  public void aRepositoryOfRunnerRowsCostsNoContainerListing() throws Exception {
+    String repoId = repo();
+    createRunnerRow(repoId, "one", false);
+    createRunnerRow(repoId, "two", false);
+
+    assertEquals(2, workspaceService.listWorkspaces(repoId).size());
+    assertEquals(0, containers.listingsOf(repoId), "no qits-containers listing for RUNNER rows");
+
+    Workspace admin =
+        workspaceService.createWorkspace(repoId, "adm", "master", "adm", null, false, false, true);
+    rows.add(admin.id);
+    workspaceService.listWorkspaces(repoId);
+    assertEquals(
+        1, containers.listingsOf(repoId), "an admin row is listed through qits-containers");
+  }
+
+  /**
+   * Discarding a MAIN workspace keeps its branch (qits-780) — belt one, this service's own record:
+   * a row with no parent, which is what the retired per-project editor's main workspaces carry. It
+   * resolves as any other discard does, and the ref stays on the git host.
+   */
+  @Test
+  public void discardingAParentlessWorkspaceKeepsItsBranch() throws Exception {
+    String repoId = repo();
+    Long id =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  Workspace row = new Workspace();
+                  row.workspaceId = "parentless";
+                  row.repositoryId = repoId;
+                  row.parent = null;
+                  row.branch = "feature";
+                  row.placement = WorkspacePlacement.RUNNER;
+                  workspaceRepository.persist(row);
+                  return row.id;
+                });
+    rows.add(id);
+
+    workspaceService.discardWorkspace(id, null, true);
+
+    assertEquals(WorkspaceStatus.ABANDONED, read(id).status);
+    assertTrue(
+        workspaceService.branchExists(repoId, "feature"), "the main workspace's branch stays");
+  }
+
+  /**
+   * Belt two, qits-projects' record: a workspace standing on the repository's default branch keeps
+   * it too, parent or none. An ordinary workspace's own branch still goes, as it always did.
+   */
+  @Test
+  public void discardingAWorkspaceOnTheDefaultBranchKeepsIt() throws Exception {
+    String repoId = repo();
+    Workspace onMaster =
+        workspaceService.createWorkspace(repoId, "on-master", "master", "master", null, true);
+    rows.add(onMaster.id);
+    Workspace ordinary = createRunnerRow(repoId, "ordinary", false);
+
+    workspaceService.discardWorkspace(onMaster.id, null, true);
+    workspaceService.discardWorkspace(ordinary.id, null, true);
+
+    assertEquals(WorkspaceStatus.ABANDONED, read(onMaster.id).status);
+    assertTrue(workspaceService.branchExists(repoId, "master"), "the default branch stays");
+    assertFalse(workspaceService.branchExists(repoId, "ordinary"), "an own branch still goes");
   }
 
   // --- helpers ------------------------------------------------------------------------------------

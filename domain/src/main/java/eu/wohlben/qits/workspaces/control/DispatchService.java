@@ -552,9 +552,8 @@ public class DispatchService {
 
   /**
    * {@link Dispatch#agentIdentity}: the principal the row's own container is bound to, read the
-   * same way {@code DaemonAgentBindingCheck.boundSubjectOf} reads it for the non-legacy path — this
-   * module may not depend on that class, which is in {@code service}, so the rule is restated here
-   * rather than shared. A RUNNER row carries no commissioned client at all ({@link
+   * same way {@code DaemonAgentBindingCheck.boundSubjectOf} reads it — this module may not depend
+   * on that class, which is in {@code service}, so the rule is restated here rather than shared. A RUNNER row carries no commissioned client at all ({@link
    * WorkspaceCredential} is the DIRECT pair's own type), so its workspace token's subject is the
    * one name that matches what the container actually presents; a DIRECT row has no token, so its
    * commissioned client id is. Read in a transaction of its own for {@link #view}'s reason.

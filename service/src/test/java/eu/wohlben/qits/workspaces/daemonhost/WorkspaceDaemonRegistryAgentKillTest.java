@@ -180,7 +180,10 @@ class WorkspaceDaemonRegistryAgentKillTest {
             commandId + "-" + row, null, state, hookEvent, null, null, sequence++));
   }
 
-  /** An ACTIVE DIRECT row whose container is up, carrying {@code runtimeError}. */
+  /**
+   * An ACTIVE DIRECT row whose container is up, carrying {@code runtimeError} — an admin one, since
+   * the direct path is admin and editor only (qits-780).
+   */
   private Long running(String runtimeError) {
     Long id =
         QuarkusTransaction.requiringNew()
@@ -193,6 +196,7 @@ class WorkspaceDaemonRegistryAgentKillTest {
                   workspace.branch = label;
                   workspace.status = WorkspaceStatus.ACTIVE;
                   workspace.placement = WorkspacePlacement.DIRECT;
+                  workspace.admin = true;
                   workspace.runtimeStatus = WorkspaceRuntimeStatus.RUNNING;
                   workspace.runtimeError = runtimeError;
                   workspaceRepository.persist(workspace);
