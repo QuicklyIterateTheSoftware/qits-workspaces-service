@@ -90,7 +90,7 @@
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
         <qits.arch-rules.version>2026.1002.70617</qits.arch-rules.version>
         <qits.auth-core.version>2026.1002.70617</qits.auth-core.version>
-        <qits.containers-client.version>2026.1004.211528</qits.containers-client.version>
+        <qits.containers-client.version>2026.1006.193445</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
