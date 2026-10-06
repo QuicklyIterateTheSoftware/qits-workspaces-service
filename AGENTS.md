@@ -1604,9 +1604,15 @@ than per caller. A second role invented here would be a vocabulary qits-idp does
 
 A workspace's container runs either **DIRECT** (the platform host, through qits-containers — every
 workspace that existed before) or **RUNNER** (a workspace runner's node). `Workspace.placement` is
-written once, by `recordWorkspace` ("stated or DIRECT"), and only `POST /workspaces/api/workspaces`
-states it; the editor, the main workspace and every dispatch are DIRECT. RUNNER with `admin` is a 400;
-RUNNER with no eligible runner is a 409 `NO_RUNNER`. The refusal codes live in `error/RunnerRefusals`.
+written once, by `recordWorkspace`, from `WorkspacePlacements.forNewRow(admin, editor)`: **a
+regular workspace is always RUNNER, and only admin and editor workspaces are DIRECT** (qits-774) —
+create door and dispatch alike, whether or not any runner is eligible. With none, the row waits
+QUEUED on no runner and its start's `queued` line reads `no enabled workspace runner`
+(`WorkspaceService.NO_ENABLED_RUNNER`); that is a waiting state, not a refusal. Only `POST
+/workspaces/api/workspaces` may state a placement, and only one that agrees: RUNNER with `admin` is a
+400, DIRECT without it a 400 `DIRECT_PLACEMENT_REFUSED`. Regular DIRECT rows written before qits-774
+keep working untouched; tests that prove the DIRECT ladder make one with the test-side
+`LegacyDirectRows`. The refusal codes live in `error/RunnerRefusals`.
 
 - **One branch per verb, at its top.** `beginEnsureContainer`, `stopContainer`, `deleteContainer`,
   `beginRecreateContainer` and `doDiscard` each test `placement == RUNNER` first and hand a RUNNER row

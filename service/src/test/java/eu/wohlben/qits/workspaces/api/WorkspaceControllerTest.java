@@ -110,9 +110,11 @@ public class WorkspaceControllerTest {
   }
 
   /**
-   * The create field {@code placement} (qits-853): absent is DIRECT, a RUNNER admin workspace is a
-   * 400, and a RUNNER workspace with no eligible runner (this suite registers none) is a 409 that
-   * names itself {@code NO_RUNNER}. Both refusals come before any branch is pushed.
+   * The create field {@code placement} (qits-853, qits-774): absent is RUNNER for a regular
+   * workspace even though this suite registers no runner at all, a RUNNER admin workspace is a 400,
+   * a DIRECT regular workspace is a 400 that names itself {@code DIRECT_PLACEMENT_REFUSED}, and a
+   * stated RUNNER with no runner is no refusal either. Both refusals come before any branch is
+   * pushed.
    */
   @Test
   public void testCreatePlacement() {
@@ -127,7 +129,8 @@ public class WorkspaceControllerTest {
         .post("/workspaces/api/workspaces")
         .then()
         .statusCode(Response.Status.OK.getStatusCode())
-        .body("workspace.placement", equalTo("DIRECT"));
+        .body("workspace.placement", equalTo("RUNNER"))
+        .body("workspace.runner", nullValue());
 
     given()
         .contentType(ContentType.JSON)
@@ -149,6 +152,26 @@ public class WorkspaceControllerTest {
         .body(
             java.util.Map.of(
                 "repositoryId", repoId,
+                "id", "direct-01",
+                "parent", "master",
+                "branch", "direct-01",
+                "placement", "DIRECT"))
+        .when()
+        .post("/workspaces/api/workspaces")
+        .then()
+        .statusCode(Response.Status.BAD_REQUEST.getStatusCode())
+        .body("code", equalTo("DIRECT_PLACEMENT_REFUSED"))
+        .body(
+            "message",
+            equalTo(
+                "Regular workspaces run on a workspace runner; only admin and editor workspaces"
+                    + " use the direct path."));
+
+    given()
+        .contentType(ContentType.JSON)
+        .body(
+            java.util.Map.of(
+                "repositoryId", repoId,
                 "id", "run-01",
                 "parent", "master",
                 "branch", "run-01",
@@ -156,15 +179,91 @@ public class WorkspaceControllerTest {
         .when()
         .post("/workspaces/api/workspaces")
         .then()
-        .statusCode(Response.Status.CONFLICT.getStatusCode())
-        .body("code", equalTo("NO_RUNNER"));
+        .statusCode(Response.Status.OK.getStatusCode())
+        .body("workspace.placement", equalTo("RUNNER"));
+
+    given()
+        .contentType(ContentType.JSON)
+        .body(
+            java.util.Map.of(
+                "repositoryId", repoId,
+                "id", "adm-02",
+                "parent", "master",
+                "branch", "adm-02",
+                "admin", true))
+        .when()
+        .post("/workspaces/api/workspaces")
+        .then()
+        .statusCode(Response.Status.OK.getStatusCode())
+        .body("workspace.placement", equalTo("DIRECT"));
 
     org.junit.jupiter.api.Assertions.assertFalse(workspaceService.branchExists(repoId, "adm-01"));
-    org.junit.jupiter.api.Assertions.assertFalse(workspaceService.branchExists(repoId, "run-01"));
+    org.junit.jupiter.api.Assertions.assertFalse(
+        workspaceService.branchExists(repoId, "direct-01"));
+
+    // The two RUNNER rows abandoned outright, so neither is left for a later suite's fake runner.
+    for (String label : java.util.List.of("plain-01", "run-01")) {
+      Long rowId = workspaceIds.of(repoId, label);
+      io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  workspaceRepository.findById(rowId).status =
+                      eu.wohlben.qits.workspaces.entity.WorkspaceStatus.ABANDONED);
+    }
   }
 
   /**
-   * Creating a workspace starts it (qits-853): the answer carries the start's process, and an
+   * With no runner at all (qits-774), a plain create is written RUNNER and an ensure-container
+   * answers QUEUED rather than any error: the row simply waits for a runner. Queued through the
+   * RUNNER start, so it needs the edge plane (a public domain).
+   */
+  @Test
+  public void testEnsureWithNoRunnerAnswersQueued() {
+    io.quarkus.test.junit.QuarkusMock.installMockForType(
+        eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerAddressesFixture.planesWithDomain(
+            "wohlben.eu"),
+        eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes.class);
+    String repoId = createProjectAndRepository();
+    try {
+      given()
+          .contentType(ContentType.JSON)
+          .body(
+              java.util.Map.of(
+                  "repositoryId", repoId, "id", "parked-01", "parent", "master", "branch",
+                  "parked-01"))
+          .when()
+          .post("/workspaces/api/workspaces")
+          .then()
+          .statusCode(Response.Status.OK.getStatusCode())
+          .body("workspace.placement", equalTo("RUNNER"))
+          .body("workspace.runtimeStatus", equalTo("QUEUED"));
+
+      given()
+          .contentType(ContentType.JSON)
+          .when()
+          .post(
+              "/workspaces/api/workspaces/"
+                  + workspaceIds.of(repoId, "parked-01")
+                  + "/ensure-container")
+          .then()
+          .statusCode(Response.Status.OK.getStatusCode())
+          .body("workspace.runtimeStatus", equalTo("QUEUED"))
+          .body("technicalProcessId", notNullValue());
+    } finally {
+      // Abandoned outright: a QUEUED row left behind would be a reservation for the next suite's
+      // fake runner to take.
+      Long rowId = workspaceIds.of(repoId, "parked-01");
+      io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  workspaceRepository.findById(rowId).status =
+                      eu.wohlben.qits.workspaces.entity.WorkspaceStatus.ABANDONED);
+    }
+  }
+
+  /**
+   * Creating a DIRECT workspace — an admin one, the only kind the create door still places DIRECT
+   * (qits-774) — starts it (qits-853): the answer carries the start's process, and an
    * ensure-container sent after it — what every client did before — still answers. That the second
    * call joins the start rather than provisioning again is the domain's {@code
    * WorkspaceRunnerPlacementTest.creatingADirectWorkspaceStartsItOnce}, which can count the runs.
@@ -177,7 +276,8 @@ public class WorkspaceControllerTest {
             .contentType(ContentType.JSON)
             .body(
                 java.util.Map.of(
-                    "repositoryId", repoId, "id", "started-01", "parent", "master", "branch", "started-01"))
+                    "repositoryId", repoId, "id", "started-01", "parent", "master", "branch",
+                    "started-01", "admin", true))
             .when()
             .post("/workspaces/api/workspaces")
             .then()
@@ -507,6 +607,11 @@ public class WorkspaceControllerTest {
         .body("entries.find { it.workspace.workspaceId == 'ab-wt' }.workspace.behind", equalTo(0));
   }
 
+  /**
+   * A regular workspace through the create door, rewritten as a regular DIRECT row of the kind that
+   * predates qits-774 ({@link eu.wohlben.qits.workspaces.control.LegacyDirectRows}): the tests using
+   * it prove what the DIRECT container verbs do, and the door itself only writes RUNNER rows now.
+   */
   private void createWorkspace(String repoId, String id, String parent, String branch) {
     given()
         .contentType(ContentType.JSON)
@@ -515,6 +620,7 @@ public class WorkspaceControllerTest {
         .post("/workspaces/api/workspaces")
         .then()
         .statusCode(Response.Status.OK.getStatusCode());
+    eu.wohlben.qits.workspaces.control.LegacyDirectRows.demote(workspaceIds.of(repoId, id));
   }
 
   private void mergeInto(String repoId, String workspaceId, String target) {
@@ -763,16 +869,10 @@ public class WorkspaceControllerTest {
   public void stopThenEnsureContainerRoundTripsTheRuntimeStatus() {
     String repoId = createProjectAndRepository();
 
-    // Creation is lazy: the fresh workspace has no container yet, so it reports STOPPED.
-    given()
-        .contentType(ContentType.JSON)
-        .body(
-            new WorkspaceController.CreateWorkspaceRequest(repoId, "wt-run", "master", "run-branch", null))
-        .when()
-        .post("/workspaces/api/workspaces")
-        .then()
-        .statusCode(Response.Status.OK.getStatusCode())
-        .body("workspace.runtimeStatus", equalTo("STOPPED"));
+    // A regular DIRECT row as the estate still holds them (qits-774): it has no container yet, so
+    // it reports STOPPED.
+    createWorkspace(repoId, "wt-run", "master", "run-branch");
+    assertRuntimeStatus(repoId, "wt-run", "STOPPED");
 
     // First use provisions the container from the durable branch (asynchronously — the response
     // carries the technical-process id; completion is awaited via /active-process).

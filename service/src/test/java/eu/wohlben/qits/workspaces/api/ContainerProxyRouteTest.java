@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
@@ -190,7 +191,8 @@ public class ContainerProxyRouteTest {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
     workspaceService.createMainWorkspace(repoId, "master");
-    workspaceService.createWorkspace(repoId, "work", "master", "work");
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "work", "master", "work"));
     Long id = workspaceIds.of(repoId, "work");
     workspaceService.ensureContainer(id);
     return id;

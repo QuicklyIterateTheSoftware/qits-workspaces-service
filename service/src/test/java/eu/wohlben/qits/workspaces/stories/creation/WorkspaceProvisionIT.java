@@ -119,6 +119,10 @@ public class WorkspaceProvisionIT {
       what comes back is a place to work in: a branch of their own on the git host, a container with
       the toolchain in it, and a checkout of that branch inside the container.
 
+      This is the direct path, and since qits-774 only an admin workspace (and the editor) takes it:
+      a regular workspace always goes to a workspace runner, and with none it waits QUEUED. The
+      operator here asks for an admin workspace, so the container is put on the platform host.
+
       The branch comes first, and it is created by a PUSH like every other ref this service moves —
       `push refs/heads/<parent>:refs/heads/<new>`, an ordinary one, carrying no push option. It used
       to be a filesystem write into the served bare, which fired no post-receive and is why no
@@ -445,7 +449,11 @@ public class WorkspaceProvisionIT {
     }
   }
 
-  /** The create request, as the workspaces client sends it. */
+  /**
+   * The create request, as the workspaces client sends it — for an ADMIN workspace, because since
+   * qits-774 that (and the editor) is the only kind still provisioned DIRECT through qits-containers;
+   * a regular workspace is written RUNNER and waits for a workspace runner instead.
+   */
   private static String createBody() {
     return "{\"repositoryId\":\""
         + StoryTarget.WORKSPACE_REPO_ID
@@ -455,7 +463,7 @@ public class WorkspaceProvisionIT {
         + StoryTarget.MAIN
         + "\",\"branch\":\""
         + StoryTarget.WORKSPACE_LABEL
-        + "\",\"preamble\":null,\"adoptExisting\":false,\"branchTree\":false,\"admin\":false}";
+        + "\",\"preamble\":null,\"adoptExisting\":false,\"branchTree\":false,\"admin\":true}";
   }
 
   private static void from(String actor, String kind, String label) {

@@ -54,7 +54,8 @@ public class ServiceSupervisorProjectionTest {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
     workspaceService.createMainWorkspace(repoId, "master");
-    workspaceService.createWorkspace(repoId, "work", "master", "work");
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "work", "master", "work"));
     // The proxy origin resolves against a real (fake) container; provision it up front.
     workspaceService.ensureContainer(workspaceIds.of(repoId, "work"));
     // Provisioning fires the ready-for-services event asynchronously, and the lifecycle coupler

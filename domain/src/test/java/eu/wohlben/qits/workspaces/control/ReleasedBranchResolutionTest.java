@@ -85,7 +85,8 @@ public class ReleasedBranchResolutionTest {
   @Test
   public void aWorkspaceOnTheReleasedBranchResolvesAsIntegrated() throws Exception {
     String repoId = clonedRepo();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
     Long rowId = workspaceIds.of(repoId, "feat");
     workspaceService.ensureContainer(rowId);
     String container = containers.containerName("feat", repoId);
@@ -129,7 +130,8 @@ public class ReleasedBranchResolutionTest {
   @Test
   public void theBranchIsLeftAloneBecauseTheReleaseAlreadyDeletedIt() throws Exception {
     String repoId = clonedRepo();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
 
     workspaceService.resolveReleasedBranch(repoId, "feat", "2026.905.120000", null, null);
 
@@ -141,7 +143,8 @@ public class ReleasedBranchResolutionTest {
   @Test
   public void aBranchWithNoWorkspaceIsTheOrdinaryAnswerAndNothingIsTornDown() throws Exception {
     String repoId = clonedRepo();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
 
     WorkspaceService.BranchResolution answer =
@@ -182,7 +185,8 @@ public class ReleasedBranchResolutionTest {
   @Test
   public void aWorkspaceOnTheDefaultBranchIsRefusedEvenWithAParent() throws Exception {
     String repoId = clonedRepo();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
     repositories.setMainBranch(repoId, "feat");
 
     BadRequestException refused =
@@ -200,7 +204,8 @@ public class ReleasedBranchResolutionTest {
   @Test
   public void aSecondCallAfterTheResolutionAnswersFalse() throws Exception {
     String repoId = clonedRepo();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
     Long rowId = workspaceIds.of(repoId, "feat");
     workspaceService.ensureContainer(rowId);
 

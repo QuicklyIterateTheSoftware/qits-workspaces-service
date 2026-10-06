@@ -145,10 +145,12 @@ public class WorkspaceController {
    * does not issue and a gate nothing could pass.
    *
    * <p>{@code placement} is where the container runs (epic qits-624): {@code DIRECT} on the platform
-   * host, or {@code RUNNER} on a workspace runner's node. Absent is DIRECT, which is what every
-   * existing client sends. RUNNER is an admin's explicit request in this epic; with {@code admin} it
-   * is a 400 (an admin workspace always runs DIRECT), and with no eligible runner a 409 {@code
-   * NO_RUNNER}, so nothing waits forever unseen. Decided here and never changed.
+   * host, or {@code RUNNER} on a workspace runner's node. It is not a choice (qits-774): a regular
+   * workspace is always RUNNER and an admin workspace always DIRECT, so absent means exactly that,
+   * and a stated value may only agree. {@code RUNNER} with {@code admin} is a 400; {@code DIRECT}
+   * without it is a 400 {@code DIRECT_PLACEMENT_REFUSED} (the domain's refusal, answered in the
+   * usual {@code message}/{@code code} envelope). No eligible runner is not an error: the row is
+   * written RUNNER and waits QUEUED. Decided here and never changed.
    */
   public static record CreateWorkspaceRequest(
       @NotBlank String repositoryId,
@@ -160,7 +162,7 @@ public class WorkspaceController {
       boolean branchTree,
       boolean admin,
       WorkspacePlacement placement) {
-    /** The form before placement existed: a DIRECT workspace. */
+    /** The form before placement existed: the placement the rule answers. */
     public CreateWorkspaceRequest(
         String repositoryId,
         String id,

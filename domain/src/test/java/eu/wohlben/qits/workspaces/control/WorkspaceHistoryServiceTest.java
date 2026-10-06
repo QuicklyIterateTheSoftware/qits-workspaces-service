@@ -65,7 +65,8 @@ public class WorkspaceHistoryServiceTest {
   @Test
   public void discardKeepsTheRowAsAbandonedHistory() throws Exception {
     String repoId = clonedRepo();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat", "build the feature");
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "feat", "master", "feat", "build the feature"));
     assertTrue(activeContains(repoId, "feat"));
 
     workspaceService.discardWorkspace(workspaceIds.of(repoId, "feat"), "did not work out");
@@ -85,7 +86,8 @@ public class WorkspaceHistoryServiceTest {
   public void cleanupResolvesAsIntegrated() throws Exception {
     String repoId = clonedRepo();
     // A freshly forked workspace has no commits ahead of master and a clean tree → cleanable.
-    workspaceService.createWorkspace(repoId, "ff", "master", "ff", null);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "ff", "master", "ff", null));
 
     workspaceService.cleanupBranch(repoId, "ff", "merged upstream");
 
@@ -96,11 +98,13 @@ public class WorkspaceHistoryServiceTest {
   @Test
   public void workspaceIdCanBeReusedAfterResolution() throws Exception {
     String repoId = clonedRepo();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
     workspaceService.discardWorkspace(workspaceIds.of(repoId, "feat"), null);
 
     // Reuse the id — only an ACTIVE duplicate is rejected, so this succeeds.
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
 
     assertTrue(activeContains(repoId, "feat"));
     long featRows =

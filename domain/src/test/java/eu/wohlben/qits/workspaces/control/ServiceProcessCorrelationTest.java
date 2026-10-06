@@ -66,7 +66,8 @@ public class ServiceProcessCorrelationTest {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
     workspaceService.createMainWorkspace(repoId, "master");
-    workspaceService.createWorkspace(repoId, "work", "master", "work");
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "work", "master", "work"));
     configReader.setConfig(
         workspaceIds.of(repoId, "work"),
         new QitsConfig(

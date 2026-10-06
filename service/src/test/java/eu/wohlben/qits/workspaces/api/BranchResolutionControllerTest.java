@@ -11,6 +11,7 @@ import static org.hamcrest.Matchers.nullValue;
 import eu.wohlben.qits.workspaces.control.ContainerRuntime;
 import eu.wohlben.qits.workspaces.control.FakeCredentialCommissioner;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceCredential;
 import eu.wohlben.qits.workspaces.control.WorkspaceCredentials;
@@ -104,7 +105,8 @@ public class BranchResolutionControllerTest {
   @Test
   public void theWorkspaceOnAReleasedBranchResolvesAsIntegrated() {
     String repoId = seedOrigin();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
     Long rowId = workspaceIds.of(repoId, "feat");
     workspaceService.ensureContainer(rowId);
     String container = containers.containerName("feat", repoId);
@@ -141,7 +143,8 @@ public class BranchResolutionControllerTest {
   @Test
   public void aBranchWithNoWorkspaceAnswersFalseAndTearsNothingDown() {
     String repoId = seedOrigin();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
 
     JsonPath answer = resolve(repoId, body("never-had-a-workspace", "v1", null, null), 200);
@@ -167,7 +170,8 @@ public class BranchResolutionControllerTest {
   @Test
   public void aWorkspaceOnTheDefaultBranchIsRefusedEvenWithAParent() {
     String repoId = seedOrigin();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
     repositories.setMainBranch(repoId, "feat");
 
     JsonPath refusal = resolve(repoId, body("feat", "v1", null, null), 400);
@@ -178,7 +182,8 @@ public class BranchResolutionControllerTest {
   @Test
   public void aSecondCallAfterTheResolutionAnswersFalse() {
     String repoId = seedOrigin();
-    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
 
     assertThat(resolve(repoId, body("feat", "v1", null, null), 200).getBoolean("resolved"), is(true));

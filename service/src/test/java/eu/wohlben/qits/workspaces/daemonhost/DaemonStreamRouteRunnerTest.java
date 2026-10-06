@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
@@ -171,7 +172,7 @@ class DaemonStreamRouteRunnerTest {
     repositories.register(repoId);
     workspaceService.createMainWorkspace(repoId, "master");
     String label = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
-    workspaceService.createWorkspace(repoId, label, "master", label);
+    LegacyDirectRows.direct(() -> workspaceService.createWorkspace(repoId, label, "master", label));
     return workspaceIds.of(repoId, label);
   }
 

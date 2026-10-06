@@ -1332,26 +1332,13 @@ public class WorkspaceService {
       throw new BadRequestException("Invalid workspace id: " + workspaceId);
     }
 
-    // Where the container runs, decided once and here (qits-837, epic qits-626): RUNNER is the
-    // default for a regular workspace once a runner is eligible, admin and editor stay DIRECT, and a
-    // stated placement is honoured as stated. Refused before the branch is pushed, so a placement
-    // that cannot be honoured costs nothing. The refusal reads the RAW stated value, not the rule's
-    // answer: an admin asking for RUNNER is still a 400 even though WorkspacePlacements would answer
-    // DIRECT for it, and an explicit RUNNER with no eligible runner is still a 409 even though the
-    // "nothing stated" branch would have fallen back to DIRECT.
+    // Where the container runs, decided once and here (qits-837, qits-774): a regular workspace
+    // always runs on a runner and admin stays DIRECT; whether any runner is eligible is not asked —
+    // with none, the RUNNER row simply waits QUEUED. A stated placement that contradicts the rule is
+    // refused before the branch is pushed, so it costs nothing. The editor is written by its own door.
     refuseUnplaceable(placement, admin);
-    // The eligibility query is skipped whenever the answer cannot change the outcome: admin/editor
-    // never consult it, and an explicit DIRECT or RUNNER needs no default. Only "nothing stated" on
-    // a regular workspace asks, and asks once.
-    boolean runnerEligible = placement == null && !admin && runnerRepository.existsEligible();
-    WorkspacePlacement placed =
-        WorkspacePlacements.forNewRow(
-            admin, false, Optional.ofNullable(placement), runnerEligible);
-    if (placement == null) {
-      LOG.infof(
-          "Workspace %s/%s placement=%s (default: %s eligible runners)",
-          repoId, workspaceId, placed, runnerEligible ? "has" : "no");
-    }
+    WorkspacePlacement placed = WorkspacePlacements.forNewRow(admin, false);
+    LOG.infof("Workspace %s/%s placement=%s", repoId, workspaceId, placed);
 
     RepoMirror mirror = mirrors.of(repoId);
 
@@ -1459,27 +1446,21 @@ public class WorkspaceService {
   }
 
   /**
-   * Refuses a RUNNER placement that cannot be honoured: 400 for an admin workspace (it holds the
-   * host's docker socket and always runs on the platform host, {@code ck_workspace_runner_posture}),
-   * and 409 {@code NO_RUNNER} when no runner is eligible at all, so nothing waits forever unseen.
-   *
-   * <p>Reads the raw stated placement (not {@link WorkspacePlacements#forNewRow}'s answer): the two
-   * refusals exist whether or not a <em>default</em> would quietly fall back to DIRECT. A null
-   * placement (nothing stated) is never RUNNER and always returns at once. The editor and the main
-   * workspace are written by their own doors, never through here; so is every dispatch, which states
-   * nothing and leaves the default rule to decide.
+   * Refuses a stated placement that contradicts {@link WorkspacePlacements#forNewRow}: 400 for an
+   * admin workspace asked onto a runner (it holds the host's docker socket and always runs DIRECT,
+   * {@code ck_workspace_runner_posture}), and 400 {@code DIRECT_PLACEMENT_REFUSED} for a regular
+   * workspace asked onto the direct path (qits-774: a regular workspace runs on a runner). The
+   * agreeing statements — DIRECT for admin, RUNNER for a regular workspace — and a null placement
+   * (nothing stated) pass. The editor is written by its own door, never through here.
    */
   private void refuseUnplaceable(WorkspacePlacement placement, boolean admin) {
-    if (placement != WorkspacePlacement.RUNNER) {
-      return;
-    }
-    if (admin) {
+    if (placement == WorkspacePlacement.RUNNER && admin) {
       throw new BadRequestException(
           "An admin workspace holds the host's docker socket and always runs DIRECT; it cannot be"
               + " placed on a runner");
     }
-    if (!runnerRepository.existsEligible()) {
-      throw RunnerRefusals.noRunner();
+    if (placement == WorkspacePlacement.DIRECT && !admin) {
+      throw RunnerRefusals.directPlacementRefused();
     }
   }
 
@@ -1628,10 +1609,13 @@ public class WorkspaceService {
   }
 
   /**
-   * The widest form and the only one that places: {@code placement} is where the container runs,
-   * {@code DIRECT} or {@code RUNNER} (epic qits-624), null meaning DIRECT. A RUNNER request with
-   * {@code admin} is a 400, and one with no eligible runner a 409 {@code NO_RUNNER}, both before any
-   * ref is pushed. Every other overload delegates here with null.
+   * The widest form, and the only one taking a stated {@code placement}: where the container runs,
+   * {@code DIRECT} or {@code RUNNER} (epic qits-624). It is never a choice — admin is DIRECT and a
+   * regular workspace RUNNER ({@link WorkspacePlacements#forNewRow}), null meaning "the rule" — so a
+   * statement can only agree or be refused: RUNNER with {@code admin} is a 400, and DIRECT without it
+   * a 400 {@code DIRECT_PLACEMENT_REFUSED}, both before any ref is pushed. No eligible runner is not
+   * a refusal: the RUNNER row is written and waits QUEUED. Every other overload delegates here with
+   * null.
    *
    * <p>A RUNNER row is queued by its create once the row committed, through the RUNNER start: the
    * edge plane is built and the workspace token minted first (qits-625), the row goes QUEUED with
@@ -3462,8 +3446,10 @@ public class WorkspaceService {
    * </ul>
    *
    * <p>The process it answers opens segment {@code queued} ("waiting for a slot on &lt;runner&gt;",
-   * or "waiting for a runner" for a row on none); the claim settles it and opens {@code container},
-   * and the runner's {@code launched} or {@code launchFailed} settles that.
+   * "waiting for a runner" for a row on none, or "no enabled workspace runner" when no runner could
+   * take it at all — the same line a re-press on such a queued row answers); the claim settles it
+   * and opens {@code container}, and the runner's {@code launched} or {@code launchFailed} settles
+   * that.
    */
   private String beginRunnerStart(Workspace row) {
     return beginRunnerStart(row, true);
@@ -3488,9 +3474,13 @@ public class WorkspaceService {
       WorkspaceProcessTracker.Handle process =
           narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null;
       if (process != null) {
+        // A queued row nothing could take says why it waits (qits-774): it is not an error, the
+        // row is simply parked until a runner is enabled.
         process.completeNoOp(
             RunnerClaims.QUEUED_SEGMENT,
-            "Already " + row.runtimeStatus.name().toLowerCase() + " — nothing to do.");
+            row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED && noRunnerCanTake(row.runnerId)
+                ? NO_ENABLED_RUNNER
+                : "Already " + row.runtimeStatus.name().toLowerCase() + " — nothing to do.");
       }
       return process == null ? null : process.id();
     }
@@ -3688,10 +3678,26 @@ public class WorkspaceService {
     return null;
   }
 
-  /** The {@code queued} segment's line: which runner the row waits for, or that it waits for any. */
+  /**
+   * Why a QUEUED RUNNER row on no runner is waiting, when it is because no runner could take it at
+   * all (qits-774): none registered, in service and with slots. A regular workspace is written
+   * RUNNER whatever the estate holds, so this is a waiting state, never a refusal.
+   */
+  static final String NO_ENABLED_RUNNER = "no enabled workspace runner";
+
+  /** Whether {@code runnerId} is none and no runner is eligible to take the row at all. */
+  private boolean noRunnerCanTake(UUID runnerId) {
+    return runnerId == null
+        && !QuarkusTransaction.requiringNew().call(() -> runnerRepository.existsEligible());
+  }
+
+  /**
+   * The {@code queued} segment's line: which runner the row waits for, that it waits for any, or
+   * {@link #NO_ENABLED_RUNNER} when there is none it could wait for.
+   */
   private String waitingFor(UUID runnerId) {
     if (runnerId == null) {
-      return "waiting for a runner";
+      return noRunnerCanTake(null) ? NO_ENABLED_RUNNER : "waiting for a runner";
     }
     String name =
         QuarkusTransaction.requiringNew()

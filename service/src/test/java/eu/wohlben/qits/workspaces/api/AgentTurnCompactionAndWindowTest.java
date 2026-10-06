@@ -10,6 +10,7 @@ import eu.wohlben.qits.workspaces.control.AgentActivityState;
 import eu.wohlben.qits.workspaces.control.DispatchService;
 import eu.wohlben.qits.workspaces.control.FakeAgentActivity;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
@@ -176,7 +177,8 @@ public class AgentTurnCompactionAndWindowTest {
   }
 
   private Long aWorkspaceWithAContainer(String repoId, String label, String branch) {
-    workspaceService.createWorkspace(repoId, label, "master", branch);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, label, "master", branch));
     Long rowId = workspaceIds.of(repoId, label);
     workspaceService.ensureContainer(rowId);
     return rowId;

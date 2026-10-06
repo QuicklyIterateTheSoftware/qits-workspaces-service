@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.FakeWorkspaceConfigReader;
 import eu.wohlben.qits.workspaces.control.FakeWorkspaceServiceDriver;
@@ -188,7 +189,8 @@ public class ServiceProxyRouteTest {
     // The workspace exists before its config is staged, because the config is keyed by the
     // workspace's id and there is no id until the row is written. Creation writes only the row (the
     // container is provisioned below), so nothing reads the config in between.
-    workspaceService.createWorkspace(repoId, "work", "master", "work");
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "work", "master", "work"));
     configReader.setConfig(
         workspaceIds.of(repoId, "work"),
         new QitsConfig(

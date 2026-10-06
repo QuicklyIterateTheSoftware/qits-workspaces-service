@@ -1,13 +1,17 @@
 package eu.wohlben.qits.workspaces.error;
 
 /**
- * The refusals of a RUNNER-placed workspace's verbs (epic qits-624), each with the {@code code} a
- * client branches on — the vocabulary the runners page and the workspaces SPA read, spelled once.
+ * The refusals of a RUNNER-placed workspace's verbs (epic qits-624), and of a create that asks a
+ * regular workspace off the runners (qits-774), each with the {@code code} a client branches on —
+ * the vocabulary the runners page and the workspaces SPA read, spelled once.
  */
 public final class RunnerRefusals {
 
-  /** A RUNNER workspace was asked for while no runner could ever take it. */
-  public static final String NO_RUNNER = "NO_RUNNER";
+  /**
+   * A regular workspace was asked for on the direct path (qits-774): it runs on a runner, and only
+   * admin and editor workspaces are DIRECT.
+   */
+  public static final String DIRECT_PLACEMENT_REFUSED = "DIRECT_PLACEMENT_REFUSED";
 
   /** The row's runner is offline beyond the reconnect grace: nothing can reach its container. */
   public static final String RUNNER_UNAVAILABLE = "RUNNER_UNAVAILABLE";
@@ -17,12 +21,13 @@ public final class RunnerRefusals {
 
   private RunnerRefusals() {}
 
-  /** 409 {@link #NO_RUNNER}. */
-  public static ConflictException noRunner() {
-    return new ConflictException(
-        NO_RUNNER,
-        "No workspace runner is registered, in service and with slots, so a RUNNER workspace would"
-            + " wait forever; create and register one first, or place the workspace DIRECT");
+  /** 400 {@link #DIRECT_PLACEMENT_REFUSED}. */
+  public static DomainException directPlacementRefused() {
+    return new DomainException(
+        400,
+        DIRECT_PLACEMENT_REFUSED,
+        "Regular workspaces run on a workspace runner; only admin and editor workspaces use the"
+            + " direct path.");
   }
 
   /** 409 {@link #RUNNER_UNAVAILABLE}, naming the workspace and what was asked. */

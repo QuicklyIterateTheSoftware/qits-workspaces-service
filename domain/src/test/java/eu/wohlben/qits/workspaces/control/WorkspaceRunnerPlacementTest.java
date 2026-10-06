@@ -118,17 +118,25 @@ public class WorkspaceRunnerPlacementTest {
     assertFalse(workspaceService.branchExists(repoId, "adm"), "nothing was pushed");
   }
 
+  /**
+   * No eligible runner is not a refusal (qits-774): an explicit RUNNER with only a quarantined
+   * runner about is written RUNNER, on no runner, and waits QUEUED — the branch is pushed as for any
+   * create.
+   */
   @Test
-  public void aRunnerWorkspaceWithNoEligibleRunnerIs409NoRunner() throws Exception {
+  public void aRunnerWorkspaceWithNoEligibleRunnerIsWrittenAndWaitsQueued() throws Exception {
     // A runner exists, but it is quarantined (registered and not yet health-checked): not eligible.
     WorkspaceRunner quarantined = runner(1);
     runners.markRegistered(quarantined.id, "client-" + quarantined.id, null);
     String repoId = repo();
 
-    ConflictException refused =
-        assertThrows(ConflictException.class, () -> createRunnerRow(repoId, "none", false));
-    assertEquals(RunnerRefusals.NO_RUNNER, refused.code());
-    assertFalse(workspaceService.branchExists(repoId, "none"), "nothing was pushed");
+    Workspace created = createRunnerRow(repoId, "none", false);
+
+    Workspace row = read(created.id);
+    assertEquals(WorkspacePlacement.RUNNER, row.placement);
+    assertNull(row.runnerId);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
+    assertTrue(workspaceService.branchExists(repoId, "none"), "the create went through");
   }
 
   /**
@@ -158,32 +166,34 @@ public class WorkspaceRunnerPlacementTest {
   }
 
   /**
-   * A stated placement is honoured as stated, whatever the default would have answered: DIRECT
-   * stated with an eligible runner sitting right there stays DIRECT rather than being upgraded.
-   * {@code WorkspaceServicePlacementTest} covers the {@code forNewRow} default itself (qits-837) —
-   * this is about the explicit case only.
+   * A stated DIRECT on a regular workspace is refused (qits-774) — an eligible runner sitting right
+   * there or not — with 400 {@code DIRECT_PLACEMENT_REFUSED}, before any branch is pushed.
+   * {@code WorkspaceServicePlacementTest} covers the rule's no-runner side.
    */
   @Test
-  public void aStatedDirectPlacementStaysDirectEvenWithAnEligibleRunner() throws Exception {
+  public void aStatedDirectPlacementOnARegularWorkspaceIsRefused() throws Exception {
     eligibleRunner();
     String repoId = repo();
 
-    Workspace created =
-        workspaceService.createWorkspace(
-            repoId,
-            "plain",
-            "master",
-            "plain",
-            null,
-            false,
-            false,
-            false,
-            WorkspaceSubject.none(),
-            null,
-            WorkspacePlacement.DIRECT);
-    rows.add(created.id);
-
-    assertEquals(WorkspacePlacement.DIRECT, read(created.id).placement);
+    DomainException refused =
+        assertThrows(
+            DomainException.class,
+            () ->
+                workspaceService.createWorkspace(
+                    repoId,
+                    "plain",
+                    "master",
+                    "plain",
+                    null,
+                    false,
+                    false,
+                    false,
+                    WorkspaceSubject.none(),
+                    null,
+                    WorkspacePlacement.DIRECT));
+    assertEquals(400, refused.statusCode());
+    assertEquals(RunnerRefusals.DIRECT_PLACEMENT_REFUSED, refused.code());
+    assertFalse(workspaceService.branchExists(repoId, "plain"), "nothing was pushed");
   }
 
   // --- create starts (qits-853) -------------------------------------------------------------------
@@ -215,8 +225,9 @@ public class WorkspaceRunnerPlacementTest {
   }
 
   /**
-   * Creating a DIRECT workspace starts the ladder on the platform host: one {@code run}, however
-   * soon an ensure-container follows — mid-start it joins the start's process, after it a no-op.
+   * Creating a DIRECT workspace — an admin one, the only kind the create door still places DIRECT
+   * (qits-774) — starts the ladder on the platform host: one {@code run}, however soon an
+   * ensure-container follows — mid-start it joins the start's process, after it a no-op.
    */
   @Test
   public void creatingADirectWorkspaceStartsItOnce() throws Exception {
@@ -224,7 +235,20 @@ public class WorkspaceRunnerPlacementTest {
     String container = containers.containerName("made-direct", repoId);
 
     WorkspaceService.CreatedWorkspace created =
-        createAndStart(repoId, "made-direct", WorkspacePlacement.DIRECT);
+        workspaceService.createAndStartWorkspace(
+            repoId,
+            "made-direct",
+            "master",
+            "made-direct",
+            null,
+            false,
+            false,
+            true,
+            WorkspaceSubject.none(),
+            null,
+            null);
+    rows.add(created.workspace().id);
+    assertEquals(WorkspacePlacement.DIRECT, created.workspace().placement);
 
     Long id = created.workspace().id;
     assertNull(created.startError());
@@ -857,22 +881,13 @@ public class WorkspaceRunnerPlacementTest {
     WorkspaceRunner runner = eligibleRunner();
     placement.connect(runner.id);
     String repoId = repo();
-    // Stated DIRECT explicitly (qits-837): an eligible runner is connected, so a create that stated
-    // nothing would now default to RUNNER, which is not what this test is about.
+    // A regular DIRECT row as the estate still holds them (qits-774): no create writes one any more,
+    // so the RUNNER row a create writes is rewritten as a pre-qits-774 DIRECT row.
     Workspace created =
-        workspaceService.createWorkspace(
-            repoId,
-            "direct",
-            "master",
-            "direct",
-            null,
-            false,
-            false,
-            false,
-            WorkspaceSubject.none(),
-            null,
-            WorkspacePlacement.DIRECT);
+        workspaceService.createWorkspace(repoId, "direct", "master", "direct", null);
     rows.add(created.id);
+    LegacyDirectRows.demote(workspaceRepository, created.id);
+    placement.clearCalls();
     String container = containers.containerName("direct", repoId);
 
     workspaceService.beginEnsureContainer(created.id);

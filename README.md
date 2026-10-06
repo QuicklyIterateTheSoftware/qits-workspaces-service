@@ -225,22 +225,18 @@ is the qits-net alias. Set it when the bus lives somewhere else:
 ### Where a workspace runs
 
 `Workspace.placement` (DIRECT or RUNNER, `V12`) is decided once, at create, and never changed
-afterwards (qits-837, epic qits-626). The rule, `WorkspacePlacements.forNewRow`:
-
-- **Admin and editor workspaces are always DIRECT.** An admin workspace holds the host's docker
-  socket and always runs on the platform host; the shared editor checks nothing out and never
-  consults a runner. Both ignore whatever the request stated.
-- **A stated placement on an ordinary workspace is honoured as stated.** An explicit RUNNER with no
-  eligible runner is still refused 409 `NO_RUNNER` before anything is written.
-- **Otherwise RUNNER is the default once an eligible workspace runner exists** — registered, with
-  slots, not quarantined (`WorkspaceRunnerRepository.existsEligible()`; a runner's live connection is
-  deliberately not consulted, only whether one *could* take the row) — **and DIRECT when none does.**
-  This is what makes a workspace runner the ordinary place new work lands rather than an opt-in.
-
-**Dropping every runner's slots to 0 is the rollback lever.** `existsEligible()` then answers false,
-so the very next workspace created states nothing and lands DIRECT, with no flag to flip and no
-redeploy. Nothing already written moves: an existing row's placement is fixed at its own create, so
-neither raising nor lowering the slot count ever relocates a workspace that is already running.
+afterwards (qits-837, qits-774). The rule, `WorkspacePlacements.forNewRow(admin, editor)`: **a
+regular workspace always goes to a workspace runner, and the direct path is only for admin and
+editor workspaces.** An admin workspace holds the host's docker socket and always runs on the
+platform host; the shared editor checks nothing out and never consults a runner. Whether a runner is
+registered, connected or eligible does not enter into it: with none that could take it, a regular
+workspace is still written RUNNER on no runner and waits `QUEUED`, and `ensure-container` answers
+`QUEUED` with the reason `no enabled workspace runner` rather than an error (a dispatch parks its
+launch on that QUEUED row the same way). A create may state a placement, but only one that agrees:
+`placement: "RUNNER"` on an admin workspace is a 400, and `placement: "DIRECT"` on a regular one a
+400 `DIRECT_PLACEMENT_REFUSED`. Nothing already written moves — regular rows created DIRECT before
+qits-774 stay DIRECT and keep working — and dropping every runner's slots to 0 no longer routes new
+work to the platform host: it parks it QUEUED until a runner has a slot again.
 
 ### The credential a workspace container holds
 

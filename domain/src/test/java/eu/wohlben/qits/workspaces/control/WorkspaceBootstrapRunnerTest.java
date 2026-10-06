@@ -96,7 +96,8 @@ public class WorkspaceBootstrapRunnerTest {
     if (configYaml != null) {
       commitConfig(repoId, configYaml);
     }
-    workspaceService.createWorkspace(repoId, "work", "master", "work");
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "work", "master", "work"));
     return repoId;
   }
 

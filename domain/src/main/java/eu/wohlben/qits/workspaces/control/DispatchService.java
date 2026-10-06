@@ -494,11 +494,12 @@ public class DispatchService {
         fresh = false;
       }
     }
-    // A workspace this door creates states no placement (qits-853), so it takes whatever
-    // WorkspacePlacements.forNewRow answers for a plain create — DIRECT with no eligible runner,
-    // RUNNER once one exists (qits-837) — exactly as one it FOUND may already be. A runner that is
-    // offline past the grace is refused here, before anything is written; a queued row is waited for
-    // (withAgent, and the class javadoc's "A queued workspace parks its launch").
+    // A workspace this door creates states no placement (qits-853), so it takes what
+    // WorkspacePlacements.forNewRow answers for a regular create: RUNNER, always (qits-774), with or
+    // without an eligible runner — none is not a refusal, the row waits QUEUED. One it FOUND may be
+    // either placement, an older row being DIRECT. A runner that is offline past the grace is
+    // refused here, before anything is written; a queued row is waited for (withAgent, and the class
+    // javadoc's "A queued workspace parks its launch").
     RunnerSide side = runnerSide(rowId);
     refuseUnavailable(rowId, side, "take an agent");
     if (facts != null) {

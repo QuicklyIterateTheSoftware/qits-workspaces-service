@@ -14,6 +14,7 @@ import eu.wohlben.qits.workspaces.control.FakeContainerRuntime;
 import eu.wohlben.qits.workspaces.control.FakeCredentialCommissioner;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.GitRefs;
+import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceContainer;
 import eu.wohlben.qits.workspaces.control.WorkspaceContainerFactory;
@@ -280,7 +281,8 @@ public class AgentDispatchControllerTest {
 
   /** A workspace whose (fake) container is already provisioned, so its daemon answers at once. */
   private Long workspaceWithContainer(String repoId, String label, String branch) {
-    workspaceService.createWorkspace(repoId, label, "master", branch);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, label, "master", branch));
     Long rowId = workspaceIds.of(repoId, label);
     workspaceService.ensureContainer(rowId);
     return rowId;
@@ -418,32 +420,77 @@ public class AgentDispatchControllerTest {
 
   /**
    * The whole arc from one call: a branch that did not exist, a workspace on it carrying the goal,
-   * a container start to watch, and — minutes later in production, a moment later here — an agent.
+   * and its agent launch — onto a workspace runner (qits-774). A fresh dispatch's row is RUNNER, and
+   * with no runner at all that is no 409: the row waits QUEUED and the launch is parked on it
+   * (qits-626), so nothing reaches a daemon on the platform host. Queued through the RUNNER start,
+   * so it needs the edge plane (a public domain).
    */
   @Test
-  public void aFreshDispatchCreatesTheBranchTheWorkspaceAndTheAgent() throws Exception {
+  public void aFreshDispatchCreatesTheBranchAQueuedRunnerWorkspaceAndParksTheAgent()
+      throws Exception {
+    io.quarkus.test.junit.QuarkusMock.installMockForType(
+        eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerAddressesFixture.planesWithDomain(
+            "wohlben.eu"),
+        eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes.class);
     String repoId = seedRepository();
 
     JsonPath answer =
         dispatch(
             body(repoId, "ticket/fix-login", "# Fix the login\n\nIt 500s.", "start with the test"),
             200);
+    Long rowId = workspaceIds.of(repoId, "ticket-fix-login");
+    try {
+      assertThat(answer.getBoolean("fresh"), is(true));
+      assertThat(answer.getString("agentLaunch"), is("SCHEDULED"));
+      assertThat(answer.getString("workspace.branch"), is("ticket/fix-login"));
+      assertThat(answer.getString("workspace.parent"), is("master"));
+      assertThat(answer.getString("workspace.preamble"), is("# Fix the login\n\nIt 500s."));
+      assertThat(answer.getString("workspace.placement"), is("RUNNER"));
+      assertThat(answer.getString("workspace.runtimeStatus"), is("QUEUED"));
+      assertNull(answer.getString("workspace.runner"), "no runner has taken it");
 
-    assertThat(answer.getBoolean("fresh"), is(true));
+      // The durable half: the ref really is on the git host, not just a row claiming it.
+      assertTrue(
+          workspaceService.branchExists(repoId, "ticket/fix-login"),
+          "the dispatch created a row but never pushed the branch");
+      assertNull(
+          launches.get("/workspaces/container/" + rowId + "/agents"),
+          "nothing was launched on the platform host");
+    } finally {
+      // Stopped (which drops the parked launch) and abandoned outright: a QUEUED row left behind
+      // would be a reservation for the next suite's fake runner to take.
+      workspaceService.stopContainer(rowId);
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  workspaceRepository.findById(rowId).status =
+                      eu.wohlben.qits.workspaces.entity.WorkspaceStatus.ABANDONED);
+    }
+  }
+
+  /**
+   * A dispatch onto a regular DIRECT row that predates qits-774 still launches its agent on the
+   * platform host, as it always did: the row is found, not created, and its container is started.
+   */
+  @Test
+  public void aDispatchOntoALegacyDirectRowStartsItAndLaunchesTheAgent() throws Exception {
+    String repoId = seedRepository();
+    Long rowId =
+        LegacyDirectRows.direct(
+                () ->
+                    workspaceService.createWorkspace(
+                        repoId, "ticket-legacy", "master", "ticket/legacy"))
+            .id;
+
+    JsonPath answer =
+        dispatch(body(repoId, "ticket/legacy", "the goal", "start with the test"), 200);
+
+    assertThat(answer.getBoolean("fresh"), is(false));
     assertThat(answer.getString("agentLaunch"), is("SCHEDULED"));
-    assertThat(answer.getString("workspace.branch"), is("ticket/fix-login"));
-    assertThat(answer.getString("workspace.parent"), is("master"));
-    assertThat(answer.getString("workspace.preamble"), is("# Fix the login\n\nIt 500s."));
+    assertThat(answer.getString("workspace.placement"), is("DIRECT"));
     // The container start is asynchronous and the caller watches it; a dispatch that answered no
     // process id would leave it with nothing to poll but the workspace itself.
     assertThat(answer.getString("technicalProcessId"), is(notNullValue()));
-
-    // The durable half: the ref really is on the git host, not just a row claiming it.
-    assertTrue(
-        workspaceService.branchExists(repoId, "ticket/fix-login"),
-        "the dispatch created a row but never pushed the branch");
-
-    Long rowId = workspaceIds.of(repoId, "ticket-fix-login");
     assertThat(awaitLaunch(rowId).getString("initialContext"), is("start with the test"));
   }
 
@@ -698,7 +745,8 @@ public class AgentDispatchControllerTest {
   @Test
   public void aLiteralFirstSegmentBranchPushesTheDispatchToTheDashShape() throws Exception {
     String repoId = seedRepository();
-    workspaceService.createWorkspace(repoId, "ticket", "master", "ticket");
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "ticket", "master", "ticket"));
 
     JsonPath answer = dispatch(body(repoId, "ticket/fix-login", "the goal", "go"), 200);
 
@@ -905,7 +953,8 @@ public class AgentDispatchControllerTest {
     String repoId = seedRepository();
     String label = "ticket-no-container";
     String branch = "ticket/no-container";
-    workspaceService.createWorkspace(repoId, label, "master", branch);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, label, "master", branch));
     Long rowId = workspaceIds.of(repoId, label);
     String containerName = containerRuntime.containerName(label, repoId);
     assertFalse(
@@ -1055,7 +1104,8 @@ public class AgentDispatchControllerTest {
     String repoId = seedRepository();
     String label = "ticket-entity-cold";
     String branch = "ticket/entity-cold";
-    workspaceService.createWorkspace(repoId, label, "master", branch);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, label, "master", branch));
     Long rowId = workspaceIds.of(repoId, label);
     String containerName = containerRuntime.containerName(label, repoId);
 
@@ -1083,7 +1133,8 @@ public class AgentDispatchControllerTest {
     String repoId = seedRepository();
     String label = "ticket-entity-spec";
     String branch = "ticket/entity-spec";
-    workspaceService.createWorkspace(repoId, label, "master", branch);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, label, "master", branch));
     Long rowId = workspaceIds.of(repoId, label);
 
     entity(entityBody(repoId, branch, "Boots marked", "REFINED", true), 200);
@@ -1221,7 +1272,8 @@ public class AgentDispatchControllerTest {
     Long abandoned = dispatch(request, 200).getLong("workspace.id");
     workspaceService.discardWorkspace(abandoned, null, true);
     Long active = dispatch(request, 200).getLong("workspace.id");
-    workspaceService.createWorkspace(repoId, "hand-made-history", "master", "hand-made-history");
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, "hand-made-history", "master", "hand-made-history"));
 
     JsonPath open =
         given().get("/workspaces/api/work/workspaces").then().statusCode(200).extract().jsonPath();

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
@@ -145,7 +146,8 @@ public class AgentTurnDeliveryTest {
 
   /** A workspace whose (fake) container is already provisioned, so its daemon answers at once. */
   private Long workspaceWithContainer(String repoId, String label, String branch) {
-    workspaceService.createWorkspace(repoId, label, "master", branch);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, label, "master", branch));
     Long rowId = workspaceIds.of(repoId, label);
     workspaceService.ensureContainer(rowId);
     return rowId;
@@ -153,7 +155,8 @@ public class AgentTurnDeliveryTest {
 
   /** A workspace with no container at all — an idle-stopped one, from this side. */
   private Long workspaceWithoutContainer(String repoId, String label, String branch) {
-    workspaceService.createWorkspace(repoId, label, "master", branch);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, label, "master", branch));
     return workspaceIds.of(repoId, label);
   }
 

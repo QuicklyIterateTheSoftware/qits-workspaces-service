@@ -3,6 +3,7 @@ package eu.wohlben.qits.workspaces.daemonhost;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
@@ -69,8 +70,10 @@ class DaemonControlSocketAgentBindingTest {
     String suffix = UUID.randomUUID().toString().substring(0, 8);
     labelA = "bind-a-" + suffix;
     labelB = "bind-b-" + suffix;
-    workspaceService.createWorkspace(repoId, labelA, "master", labelA);
-    workspaceService.createWorkspace(repoId, labelB, "master", labelB);
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, labelA, "master", labelA));
+    LegacyDirectRows.direct(() ->
+        workspaceService.createWorkspace(repoId, labelB, "master", labelB));
     rowA = workspaceIds.of(repoId, labelA);
     rowB = workspaceIds.of(repoId, labelB);
     clientA = "dyn-workspace-" + rowA + "-" + suffix;
