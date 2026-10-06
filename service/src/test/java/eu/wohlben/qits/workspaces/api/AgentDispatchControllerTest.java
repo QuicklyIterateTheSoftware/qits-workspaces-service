@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.FakeContainerRuntime;
+import eu.wohlben.qits.workspaces.control.FakeCredentialCommissioner;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.GitRefs;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
@@ -140,6 +141,7 @@ public class AgentDispatchControllerTest {
   @Inject WorkspaceRepository workspaceRepository;
   @Inject FakeContainerRuntime containerRuntime;
   @Inject WorkspaceContainerFactory containerFactory;
+  @Inject FakeCredentialCommissioner credentials;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -257,6 +259,16 @@ public class AgentDispatchControllerTest {
       daemonVertx.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
       daemonVertx = null;
     }
+  }
+
+  /**
+   * {@link FakeCredentialCommissioner} is a bean for every {@code @QuarkusTest} in this module, so a
+   * class that wires it resets it — the fake's own javadoc rule — or it leaks a minted client id
+   * into whatever runs next.
+   */
+  @AfterEach
+  void resetCredentials() {
+    credentials.reset();
   }
 
   private String seedRepository() throws Exception {
@@ -767,6 +779,42 @@ public class AgentDispatchControllerTest {
     // "later".
     Thread.sleep(300);
     assertNull(launches.get("/workspaces/container/" + rowId + "/agents"));
+  }
+
+  /**
+   * qits-938: {@code agentIdentity} is the principal the dispatched agent's own calls are stamped
+   * with — a DIRECT row's commissioned client id. {@link #workspaceWithContainer} ensures the
+   * container synchronously, so with the issuer wired the commission has already landed on the row
+   * by the time this re-dispatch reads it back.
+   */
+  @Test
+  public void aDispatchAnswersTheCommissionedClientIdAsAgentIdentity() throws Exception {
+    credentials.wire();
+    String repoId = seedRepository();
+    Long rowId = workspaceWithContainer(repoId, "ticket-identity", "ticket/identity");
+    String commissionedClientId = storedRow(rowId).commissionedClientId;
+    assertThat(
+        "the fixture must actually have commissioned a client",
+        commissionedClientId,
+        is(notNullValue()));
+
+    JsonPath answer = dispatch(body(repoId, "ticket/identity", "the goal", "go"), 200);
+
+    assertThat(answer.getString("agentIdentity"), is(commissionedClientId));
+  }
+
+  /**
+   * qits-938: before anything is commissioned — the issuer unwired, the shipped posture — the field
+   * is null rather than some other sentinel. Never a secret either way: this is a name, never
+   * {@code commissionedClientSecret}.
+   */
+  @Test
+  public void aDispatchWithNoCommissionAnswersANullAgentIdentity() throws Exception {
+    String repoId = seedRepository();
+
+    JsonPath answer = dispatch(body(repoId, "ticket/no-commission", "the goal", "go"), 200);
+
+    assertNull(answer.getString("agentIdentity"));
   }
 
   private JsonPath blocked(String repositoryId, String branch, boolean isBlocked, int status) {
