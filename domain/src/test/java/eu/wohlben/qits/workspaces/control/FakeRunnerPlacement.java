@@ -110,6 +110,11 @@ public class FakeRunnerPlacement implements RunnerPlacement {
   }
 
   @Override
+  public Set<UUID> servingRunnerIds() {
+    return Set.copyOf(connected);
+  }
+
+  @Override
   public void estateChanged(UUID runnerId) {
     calls.add("estate:" + runnerId);
   }

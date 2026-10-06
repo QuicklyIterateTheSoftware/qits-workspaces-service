@@ -1,5 +1,6 @@
 package eu.wohlben.qits.workspaces.api;
 
+import eu.wohlben.qits.workspaces.control.DirectPlacementMove;
 import eu.wohlben.qits.workspaces.control.WorkspaceProcessTracker;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.control.WorkspaceSubject;
@@ -50,6 +51,8 @@ public class WorkspaceController {
   @Inject WorkspaceService workspaceService;
 
   @Inject WorkspaceMapper workspaceMapper;
+
+  @Inject DirectPlacementMove directPlacementMove;
 
   /**
    * Optional, like everywhere else this context touches the technical-process framework: with no
@@ -354,6 +357,40 @@ public class WorkspaceController {
     String technicalProcessId = workspaceService.beginRecreateContainer(id);
     return new RecreateContainerRequest.Response(
         workspaceService.getWorkspace(id), technicalProcessId);
+  }
+
+  public static record MoveToRunnerRequest() {
+    /**
+     * The workspace's state at submit time plus the technical process streaming the move — {@code
+     * move-check}, {@code move-teardown}, then a running workspace's start on a runner.
+     */
+    public record Response(WorkspaceDto workspace, String technicalProcessId) {}
+  }
+
+  /**
+   * Move a regular workspace that still runs on the platform host onto a runner (qits-776) — by
+   * recreating it from its branch, never by adopting the container. Refuses with 400 {@code
+   * NOT_REGULAR} (an admin or editor workspace), {@code PROVISIONING}, {@code DIRTY}, {@code
+   * UNKNOWN} (no daemon has reported its tree) or {@code UNPUSHED}, and 409 {@code ALREADY_MOVED}
+   * when it is on the runners already. A stopped container (or a gone one whose volume survives) is
+   * brought up first to read its tree, and then the gate's refusal arrives on the process instead.
+   */
+  @POST
+  @Path("/{id}/move-to-runner")
+  @APIResponse(responseCode = "200", description = "The move is under way.")
+  @APIResponse(
+      responseCode = "400",
+      description =
+          "NOT_REGULAR, PROVISIONING, DIRTY, UNKNOWN or UNPUSHED: moving it now could lose work, or"
+              + " it is not a workspace that moves.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @APIResponse(
+      responseCode = "409",
+      description = "ALREADY_MOVED: the workspace is placed on the runners already.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
+  public MoveToRunnerRequest.Response moveToRunner(@PathParam("id") Long id) {
+    String technicalProcessId = directPlacementMove.beginMove(id);
+    return new MoveToRunnerRequest.Response(workspaceService.getWorkspace(id), technicalProcessId);
   }
 
   public static record MergeWorkspaceRequest(String target) {

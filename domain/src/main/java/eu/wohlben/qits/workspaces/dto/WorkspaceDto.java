@@ -84,11 +84,20 @@ import java.time.Instant;
  *     are privileged cannot say so, and "which ones have the socket" is the question this whole
  *     posture exists to keep answerable
  * @param placement where the workspace's container runs: {@code DIRECT} on the platform host, or
- *     {@code RUNNER} on a workspace runner's node. Decided at create and never changed
+ *     {@code RUNNER} on a workspace runner's node. Decided at create, and changed once at most: a
+ *     regular DIRECT row written before qits-774 is moved onto a runner (qits-776)
  * @param runner the runner a RUNNER workspace is placed on, with its name; null for every DIRECT
  *     workspace and for a RUNNER workspace no runner has taken yet
  * @param queuedAt when a RUNNER workspace was last asked to start, while it waits for a slot
  *     ({@code runtimeStatus} {@code QUEUED}); null otherwise
+ * @param pushed whether every commit the container holds is on the git host (qits-776) — the
+ *     move gate's {@code UNPUSHED} half, answered ONLY for a regular DIRECT row, because that is
+ *     the one row the move-to-runner door applies to and the answer costs an {@code ls-remote}.
+ *     {@code true} also when the row has no container (nothing is left to lose); null for every
+ *     RUNNER, admin and editor row, and null when it cannot be said (no head reported, or the git
+ *     host did not answer)
+ * @param editor whether this is the platform's one web-editor workspace (it has no branch and no
+ *     repository); a client tells it apart from a regular DIRECT row by this flag
  */
 public record WorkspaceDto(
     Long id,
@@ -117,4 +126,6 @@ public record WorkspaceDto(
     boolean admin,
     WorkspacePlacement placement,
     WorkspaceRunnerRefDto runner,
-    Instant queuedAt) {}
+    Instant queuedAt,
+    Boolean pushed,
+    boolean editor) {}

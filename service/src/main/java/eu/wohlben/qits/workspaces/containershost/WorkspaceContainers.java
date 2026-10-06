@@ -650,6 +650,28 @@ public class WorkspaceContainers implements ContainerRuntime {
   }
 
   /**
+   * Every workspace container of this owner, by name, in the same one listing call {@link
+   * #listWorkspaceContainers} makes — without the repository filter (qits-776's orphan arm). A read
+   * failure answers empty and says so at WARN, for that method's reason.
+   */
+  @Override
+  public Set<String> workspaceContainerNames() {
+    ContainersAnswer<List<Envelope>> answer = containers.list(owner, WORKLOAD, READ_TIMEOUT);
+    if (!answer.succeeded()) {
+      LOG.warnf("Failed to list workspace containers: %s", answer.detail());
+      return Set.of();
+    }
+    Set<String> names = new java.util.HashSet<>();
+    for (Envelope envelope : answer.value() == null ? List.<Envelope>of() : answer.value()) {
+      String name = envelope.containerName();
+      if (name != null && name.startsWith(NAME_PREFIX)) {
+        names.add(name);
+      }
+    }
+    return Set.copyOf(names);
+  }
+
+  /**
    * On the shared network qits reaches a container by its DNS name and the real container port — no
    * host publish, no create-time port constraint, and no round trip to find out.
    *
@@ -697,6 +719,26 @@ public class WorkspaceContainers implements ContainerRuntime {
     if (!answer.succeeded() && !gone(answer)) {
       LOG.debugf("Failed to remove workspace volume %s: %s", name, answer.detail());
     }
+  }
+
+  /**
+   * The volume door's status read, {@code GET /containers/api/volumes/{owner}/{name}} (qits-776).
+   * A 404 is the one answer that means "no such volume"; every other refusal, an unreachable
+   * orchestrator and any answer at all are "it may be there" — see {@link
+   * ContainerRuntime#workspaceVolumeExists} for why doubt reads as true.
+   */
+  @Override
+  public boolean workspaceVolumeExists(String workspaceId) {
+    String name = containerFactory.workspaceVolumeName(workspaceId);
+    ContainersAnswer<VolumeEnvelope> answer = containers.volume(owner, name, READ_TIMEOUT);
+    if (gone(answer)) {
+      return false;
+    }
+    if (!answer.succeeded()) {
+      LOG.debugf("Could not read workspace volume %s; reading it as present: %s", name,
+          answer.detail());
+    }
+    return true;
   }
 
   // --- what the orchestrator has no verb for ----------------------------------------------------

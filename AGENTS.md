@@ -1614,6 +1614,20 @@ QUEUED on no runner and its start's `queued` line reads `no enabled workspace ru
 keep working untouched; tests that prove the DIRECT ladder make one with the test-side
 `LegacyDirectRows`. The refusal codes live in `error/RunnerRefusals`.
 
+**Such a row is moved onto a runner by recreation, never adoption** (qits-776; README "Moving a
+workspace off the platform host"). `control/MoveGate` is the one gate and reuses
+`WorkspaceService.reportedCleanliness` (recreate's explicit-CLEAN rule) and `isFullyPushed` rather
+than copying them; `control/DirectPlacementMove` is the swap (`WorkspaceRepository.moveToRunner`),
+the teardown (`WorkspaceService.tearDownDirect`, shared with delete-container) and the RUNNER start
+on the same process (`startOnRunner`), and holds both the door's body and the sweep's tick, with its
+codes in `error/MoveRefusals`. `containershost/DirectMigrationSweep` is only the clock, and it skips
+every tick in the TEST launch mode: the suites share one database, so a tick would move another
+test's DIRECT row from under it. The domain suite drives `sweep(scope)` with its own rows as scope.
+The free-slot check reads `RunnerPlacement.servingRunnerIds()` (the registry's greeted sessions)
+against the rows (`WorkspaceRunner.eligible`, `countLiveOnRunner < slots`). A `direct-orphan` is
+derived, not stored: `ContainerRuntime.workspaceContainerNames()` intersected with the ACTIVE RUNNER
+rows' DIRECT container names. `ContainerRuntime.workspaceVolumeExists` answers false on a 404 alone.
+
 - **One branch per verb, at its top.** `beginEnsureContainer`, `stopContainer`, `deleteContainer`,
   `beginRecreateContainer` and `doDiscard` each test `placement == RUNNER` first and hand a RUNNER row
   to a method in the "RUNNER placement" section of `WorkspaceService`; the DIRECT code below the
