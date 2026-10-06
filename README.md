@@ -224,8 +224,8 @@ is the qits-net alias. Set it when the bus lives somewhere else:
 
 ### Where a workspace runs
 
-`Workspace.placement` (DIRECT or RUNNER, `V12`) is decided once, at create, and never changed
-afterwards (qits-837, qits-774). The rule, `WorkspacePlacements.forNewRow(admin, editor)`: **a
+`Workspace.placement` (DIRECT or RUNNER, `V12`) is decided once, at create, and changed afterwards
+only by the one move below (qits-837, qits-774, qits-776). The rule, `WorkspacePlacements.forNewRow(admin, editor)`: **a
 regular workspace always goes to a workspace runner, and the direct path is only for admin and
 editor workspaces.** An admin workspace holds the host's docker socket and always runs on the
 platform host; the shared editor checks nothing out and never consults a runner. Whether a runner is
@@ -234,9 +234,54 @@ workspace is still written RUNNER on no runner and waits `QUEUED`, and `ensure-c
 `QUEUED` with the reason `no enabled workspace runner` rather than an error (a dispatch parks its
 launch on that QUEUED row the same way). A create may state a placement, but only one that agrees:
 `placement: "RUNNER"` on an admin workspace is a 400, and `placement: "DIRECT"` on a regular one a
-400 `DIRECT_PLACEMENT_REFUSED`. Nothing already written moves — regular rows created DIRECT before
-qits-774 stay DIRECT and keep working — and dropping every runner's slots to 0 no longer routes new
-work to the platform host: it parks it QUEUED until a runner has a slot again.
+400 `DIRECT_PLACEMENT_REFUSED`. Regular rows created DIRECT before qits-774 keep working on the
+platform host until they are moved (next section), and dropping every runner's slots to 0 no longer
+routes new work to the platform host: it parks it QUEUED until a runner has a slot again.
+
+### Moving a workspace off the platform host
+
+A regular workspace still placed DIRECT (written before qits-774) moves onto a runner **by
+recreation from its branch, never by adoption**: its platform-host container and `/workspace`
+volume are destroyed and a runner clones the branch afresh (qits-776, `control/DirectPlacementMove`).
+So the move is only made when nothing can be lost, and one gate (`control/MoveGate`) decides that
+for both ways in:
+
+- the row is ACTIVE and regular — an admin or editor workspace is 400 `NOT_REGULAR` — and still
+  DIRECT (409 `ALREADY_MOVED`), and its container is not `PROVISIONING` (400);
+- then either its DIRECT container **and** volume are both gone (it passes: nothing to lose), or the
+  daemon reports an explicit clean tree (dirty is 400 `DIRTY`, no report 400 `UNKNOWN` — recreate's
+  rule) **and** every commit is on the git host (the daemon's head equals `ls-remote` of the branch,
+  else 400 `UNPUSHED`).
+
+The move is a compare-and-swap (`placement=RUNNER, runner_id=NULL WHERE placement='DIRECT'`, its own
+committed transaction, 0 rows = 409 `ALREADY_MOVED`), then delete-container's teardown on the
+platform host (services settled, graceful stop, `rm`, volume), then the container's commissioned
+client given back and its columns cleared. A row that was RUNNING is started on the runners (RUNNING,
+or QUEUED while no slot is free); any other stays STOPPED on no runner. The technical process shows
+`move-check`, `move-teardown`, then a start's `queued`/`container`/`clone`.
+
+- **The door**: `POST /workspaces/api/workspaces/{id}/move-to-runner` (`qits:admin`, beside
+  `recreate-container`), answering `{workspace, technicalProcessId}`. A refusal it can see at once
+  is the 400/409 above. When the container is stopped, or gone while its volume is not, the door
+  first brings it up on the platform host (ensure's start-in-place or provision) and waits, bounded by
+  `qits.workspace.provision.connect-timeout-ms`, for the daemon's first report; the gate's refusal
+  then fails the process instead.
+- **The sweep**: `containershost/DirectMigrationSweep`, every 5 minutes, first tick 2 minutes after
+  boot, constants in code. Nothing happens unless a connected runner in service holds fewer live
+  workspaces than its slots. Then at most **one** row, oldest first: one with no container and no
+  volume, or a RUNNING one whose daemon is connected, whose agent session is absent or `ENDED`
+  (never `BUSY`, `WAITING` or `IDLE`) and which passes the gate. It never starts a stopped container;
+  a gone container with a surviving volume is left to the door.
+- **One INFO line per decision**: `direct-migration moved <rowId> <reason>` /
+  `direct-migration skipped <rowId> <reason>`.
+- **A failed teardown is never silent**: the row is RUNNER by then, a WARN
+  `direct-orphan <containerName>` names what is left, and the row is not started on a runner while
+  its old container may still run. Nothing new is stored to remember it — a platform-host container
+  whose name belongs to an ACTIVE RUNNER row can only be one a move did not remove — so every sweep
+  tick first re-runs the teardown for exactly those, then logs it.
+- **The read model**: `WorkspaceDto.pushed` answers the `UNPUSHED` half for regular DIRECT rows only
+  (null for every other row, and when unknown), so a listing of RUNNER rows costs no `ls-remote`;
+  `WorkspaceDto.editor` tells the editor row apart.
 
 ### The credential a workspace container holds
 

@@ -453,6 +453,45 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
         runnerId);
   }
 
+  // --- the move off the platform host (qits-776) ------------------------------------------------
+
+  /**
+   * The ACTIVE regular rows still on the direct path — written DIRECT before qits-774 — oldest
+   * {@code createdAt} first: the direct-migration sweep's candidates. Admin and editor rows are
+   * DIRECT by design and never listed.
+   */
+  public List<Workspace> findActiveDirectRegular() {
+    return list(
+        "status = ?1 and placement = ?2 and admin = false and editor = false"
+            + " order by createdAt, id",
+        WorkspaceStatus.ACTIVE,
+        WorkspacePlacement.DIRECT);
+  }
+
+  /** Every ACTIVE RUNNER row, by id: what a {@code direct-orphan} container could belong to. */
+  public List<Workspace> findActiveOnAnyRunner() {
+    return list(
+        "status = ?1 and placement = ?2 order by id",
+        WorkspaceStatus.ACTIVE,
+        WorkspacePlacement.RUNNER);
+  }
+
+  /**
+   * <b>The move's compare-and-swap</b> (qits-776): a DIRECT row becomes a RUNNER row on no runner,
+   * STOPPED and unqueued — the state delete-container leaves a RUNNER row in. The WHERE clause is the
+   * whole race: of two moves of one row, the second re-reads it RUNNER after the first commits and
+   * changes nothing. Answers the changed-row count, 0 or 1.
+   */
+  public int moveToRunner(Long id) {
+    return update(
+        "placement = ?1, runnerId = null, runtimeStatus = ?2, runtimeError = null, queuedAt = null"
+            + " where id = ?3 and placement = ?4",
+        WorkspacePlacement.RUNNER,
+        WorkspaceRuntimeStatus.STOPPED,
+        id,
+        WorkspacePlacement.DIRECT);
+  }
+
   /** This runner's ACTIVE rows, locked for an update that has to see them as they are. */
   public List<Workspace> lockActiveOnRunner(UUID runnerId) {
     return find("runnerId = ?1 and status = ?2 order by id", runnerId, WorkspaceStatus.ACTIVE)

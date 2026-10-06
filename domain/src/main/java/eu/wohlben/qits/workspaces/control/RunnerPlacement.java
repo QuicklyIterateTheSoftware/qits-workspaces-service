@@ -75,6 +75,13 @@ public interface RunnerPlacement {
   boolean presence(UUID runnerId);
 
   /**
+   * The runners that could take a workspace this moment: connected on a greeted, current session
+   * that is not draining. In memory, no row read; whether such a runner is in service and has a
+   * free slot is the rows' question (the direct-migration sweep's, qits-776, asks it of them).
+   */
+  java.util.Set<UUID> servingRunnerIds();
+
+  /**
    * The set of ACTIVE rows {@code runnerId} owns changed (a row resolved, or was cleared off it by a
    * delete-container): a connected runner is sent a fresh {@code estate}.
    */

@@ -602,14 +602,19 @@ components:
       properties:
         workspace:
           $ref: "#/components/schemas/WorkspaceDto"
+    Response11:
+      type: object
+      properties:
+        workspace:
+          $ref: "#/components/schemas/WorkspaceDto"
         technicalProcessId:
           type: string
-    Response11:
+    Response12:
       type: object
       properties:
         success:
           type: boolean
-    Response12:
+    Response13:
       type: object
       properties:
         workspace:
@@ -618,43 +623,48 @@ components:
           type: string
         startError:
           type: string
-    Response13:
+    Response14:
       type: object
       properties:
         technicalProcessId:
           type: string
-    Response14:
+    Response15:
       type: object
       properties:
         workspace:
           $ref: "#/components/schemas/WorkspaceHistoryDetailDto"
-    Response15:
+    Response16:
       type: object
       properties:
         entries:
           type: array
           items:
             $ref: "#/components/schemas/Entry2"
-    Response16:
+    Response17:
       type: object
       properties:
         workspace:
           $ref: "#/components/schemas/WorkspaceHistoryDetailDto"
-    Response17:
+    Response18:
       type: object
       properties:
         lines:
           type: array
           items:
             type: string
-    Response18:
+    Response19:
       type: object
       properties:
         sessions:
           type: array
           items:
             $ref: "#/components/schemas/ArchivedSessionDto"
-    Response19:
+    Response2:
+      type: object
+      properties:
+        success:
+          type: boolean
+    Response20:
       type: object
       properties:
         id:
@@ -667,24 +677,19 @@ components:
           $ref: "#/components/schemas/PromptAttachmentSource"
         createdAt:
           $ref: "#/components/schemas/Instant"
-    Response2:
-      type: object
-      properties:
-        success:
-          type: boolean
-    Response20:
+    Response21:
       type: object
       properties:
         attachments:
           type: array
           items:
             $ref: "#/components/schemas/WorkspacePromptAttachmentDataDto"
-    Response21:
+    Response22:
       type: object
       properties:
         draft:
           $ref: "#/components/schemas/WorkspacePromptDraftDto"
-    Response22:
+    Response23:
       type: object
       properties:
         draft:
@@ -713,20 +718,27 @@ components:
     Response6:
       type: object
       properties:
+        workspace:
+          $ref: "#/components/schemas/WorkspaceDto"
+        technicalProcessId:
+          type: string
+    Response7:
+      type: object
+      properties:
         commitHash:
           type: string
         hasConflicts:
           type: boolean
         output:
           type: string
-    Response7:
+    Response8:
       type: object
       properties:
         entries:
           type: array
           items:
             $ref: "#/components/schemas/Entry1"
-    Response8:
+    Response9:
       type: object
       properties:
         commitSha:
@@ -735,11 +747,6 @@ components:
           type: string
         targetBranch:
           type: string
-    Response9:
-      type: object
-      properties:
-        workspace:
-          $ref: "#/components/schemas/WorkspaceDto"
     RunnerOwnedWorkspace:
       type: object
       properties:
@@ -980,6 +987,10 @@ components:
           $ref: "#/components/schemas/WorkspaceRunnerRefDto"
         queuedAt:
           $ref: "#/components/schemas/Instant"
+        pushed:
+          type: boolean
+        editor:
+          type: boolean
     WorkspaceEventDto:
       type: object
       properties:
@@ -1639,7 +1650,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response15"
+                $ref: "#/components/schemas/Response16"
         "401":
           description: Not Authorized
         "403":
@@ -1672,7 +1683,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response14"
+                $ref: "#/components/schemas/Response15"
         "401":
           description: Not Authorized
         "403":
@@ -1697,7 +1708,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response16"
+                $ref: "#/components/schemas/Response17"
         "401":
           description: Not Authorized
         "403":
@@ -1724,7 +1735,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response18"
+                $ref: "#/components/schemas/Response19"
         "401":
           description: Not Authorized
         "403":
@@ -1756,7 +1767,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response17"
+                $ref: "#/components/schemas/Response18"
         "401":
           description: Not Authorized
         "403":
@@ -2292,7 +2303,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response7"
+                $ref: "#/components/schemas/Response8"
         "401":
           description: Not Authorized
         "403":
@@ -2318,7 +2329,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response12"
+                $ref: "#/components/schemas/Response13"
         "401":
           description: Not Authorized
         "403":
@@ -2346,7 +2357,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response9"
+                $ref: "#/components/schemas/Response10"
         "404":
           description: No such ACTIVE workspace.
           content:
@@ -2379,7 +2390,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response13"
+                $ref: "#/components/schemas/Response14"
         "401":
           description: Not Authorized
         "403":
@@ -2476,7 +2487,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response11"
+                $ref: "#/components/schemas/Response12"
         "401":
           description: Not Authorized
         "403":
@@ -2504,7 +2515,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response10"
+                $ref: "#/components/schemas/Response11"
         "401":
           description: Not Authorized
         "403":
@@ -2536,7 +2547,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response8"
+                $ref: "#/components/schemas/Response9"
         "400":
           description: "No summary, an oversized one, or a workspace with no branch\
             \ to integrate."
@@ -2590,7 +2601,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response6"
+                $ref: "#/components/schemas/Response7"
         "409":
           description: "The target is the repository's default branch. Use /integrate,\
             \ or ask qits-projects for a release request."
@@ -2616,6 +2627,45 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+  /workspaces/api/workspaces/{id}/move-to-runner:
+    post:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        "200":
+          description: The move is under way.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response6"
+        "400":
+          description: "NOT_REGULAR, PROVISIONING, DIRTY, UNKNOWN or UNPUSHED: moving\
+            \ it now could lose work, or it is not a workspace that moves."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: "ALREADY_MOVED: the workspace is placed on the runners already."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Move To Runner
+      tags:
+      - Workspace Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
   /workspaces/api/workspaces/{id}/prompt-attachments:
     get:
       parameters:
@@ -2631,7 +2681,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response20"
+                $ref: "#/components/schemas/Response21"
         "404":
           description: No such ACTIVE workspace.
           content:
@@ -2669,7 +2719,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response19"
+                $ref: "#/components/schemas/Response20"
         "400":
           description: "Not valid base64, not a PNG or JPEG, or an unknown source."
           content:
@@ -2724,7 +2774,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response19"
+                $ref: "#/components/schemas/Response20"
         "400":
           description: "Not valid base64, not a PNG or JPEG, or an unknown source."
           content:
@@ -2842,7 +2892,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response21"
+                $ref: "#/components/schemas/Response22"
         "400":
           description: The content is not a well-formed JSON document.
           content:
@@ -2885,7 +2935,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response22"
+                $ref: "#/components/schemas/Response23"
         "404":
           description: "No such ACTIVE workspace, or it has no saved draft."
           content:
