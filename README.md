@@ -84,6 +84,7 @@ the consuming application implements:
 | `WorkspaceProcessTracker` | *implemented here* | `TechnicalProcessRegistry` is the default; the port stays so an application can substitute its own |
 | `WorkspaceAgentLauncher` | *implemented here* | `DaemonAgentClient` is the default; absent means the agent-dispatch door creates the workspace and starts the container but never launches an agent, and the delivery door says nothing to anybody |
 | `CredentialCommissioner` | no | no container is given a platform credential — today's behaviour |
+| `ContainerRuntime` | *implemented here* | `WorkspaceContainers`, over qits-containers — **admin and editor workspaces only**; every regular workspace runs on a workspace runner (`RunnerPlacement`) and never reaches it (qits-780) |
 
 One port points the **other way**: `LogLineClassifier` (with `LogSeverity`) is *implemented* here
 and consumed by the command context's log persister, so a workspace's `?severity=` filter and the
@@ -224,64 +225,58 @@ is the qits-net alias. Set it when the bus lives somewhere else:
 
 ### Where a workspace runs
 
-`Workspace.placement` (DIRECT or RUNNER, `V12`) is decided once, at create, and changed afterwards
-only by the one move below (qits-837, qits-774, qits-776). The rule, `WorkspacePlacements.forNewRow(admin, editor)`: **a
-regular workspace always goes to a workspace runner, and the direct path is only for admin and
-editor workspaces.** An admin workspace holds the host's docker socket and always runs on the
-platform host; the shared editor checks nothing out and never consults a runner. Whether a runner is
-registered, connected or eligible does not enter into it: with none that could take it, a regular
-workspace is still written RUNNER on no runner and waits `QUEUED`, and `ensure-container` answers
-`QUEUED` with the reason `no enabled workspace runner` rather than an error (a dispatch parks its
-launch on that QUEUED row the same way). A create may state a placement, but only one that agrees:
-`placement: "RUNNER"` on an admin workspace is a 400, and `placement: "DIRECT"` on a regular one a
-400 `DIRECT_PLACEMENT_REFUSED`. Regular rows created DIRECT before qits-774 keep working on the
-platform host until they are moved (next section), and dropping every runner's slots to 0 no longer
-routes new work to the platform host: it parks it QUEUED until a runner has a slot again.
+`Workspace.placement` (DIRECT or RUNNER, `V12`) is decided once, at create, and never changed
+(qits-837, qits-774). The split is by posture and nothing else: **a regular workspace runs on a
+workspace runner (RUNNER), and only admin and editor workspaces use the direct path** — a container
+on the platform host through qits-containers (DIRECT). An admin workspace holds the host's docker
+socket, and the shared editor is the platform's one container; neither may run on a node the
+platform does not own. `WorkspacePlacements.forNewRow(admin, editor)` writes it.
 
-### Moving a workspace off the platform host
+Three things hold the rule, from the schema in:
 
-A regular workspace still placed DIRECT (written before qits-774) moves onto a runner **by
-recreation from its branch, never by adoption**: its platform-host container and `/workspace`
-volume are destroyed and a runner clones the branch afresh (qits-776, `control/DirectPlacementMove`).
-So the move is only made when nothing can be lost, and one gate (`control/MoveGate`) decides that
-for both ways in:
+- **`ck_workspace_runner_posture`** (`V12`): an admin or editor row is never RUNNER.
+- **`ck_workspace_direct_only_admin_editor`** (`V15`, qits-780): an ACTIVE row is RUNNER, or admin,
+  or editor — so no ACTIVE regular row can be DIRECT. Resolved rows keep their placement as history.
+  `V15` first abandoned the leftover main workspaces of the retired per-project editor (no parent;
+  in SQL, so their default branch stayed on the git host).
+- **The router's refusal**: every DIRECT branch of every verb — start, recreate, stop,
+  delete-container, discard, the listing, the editor's read, the clean/pushed probes, the daemon
+  proxy's lookup and the dev-server origin — calls `WorkspacePlacements.requireDirectAllowed` before
+  it reaches `ContainerRuntime`, and a regular row there is an ERROR `direct placement refused for
+  regular workspace <id>` and an `IllegalStateException`, never a container on the platform host.
 
-- the row is ACTIVE and regular — an admin or editor workspace is 400 `NOT_REGULAR` — and still
-  DIRECT (409 `ALREADY_MOVED`), and its container is not `PROVISIONING` (400);
-- then either its DIRECT container **and** volume are both gone (it passes: nothing to lose), or the
-  daemon reports an explicit clean tree (dirty is 400 `DIRTY`, no report 400 `UNKNOWN` — recreate's
-  rule) **and** every commit is on the git host (the daemon's head equals `ls-remote` of the branch,
-  else 400 `UNPUSHED`).
+Whether a runner is registered, connected or eligible does not enter into it: with none that could
+take it, a regular workspace is still written RUNNER on no runner and waits `QUEUED`, and
+`ensure-container` answers `QUEUED` with the reason `no enabled workspace runner` rather than an error
+(a dispatch parks its launch on that QUEUED row the same way). A create may state a placement, but
+only one that agrees: `placement: "RUNNER"` on an admin workspace is a 400, and `placement: "DIRECT"`
+on a regular one a 400 `DIRECT_PLACEMENT_REFUSED`. Dropping every runner's slots to 0 parks new work
+QUEUED until a runner has a slot again; it never routes it to the platform host. The owner-wide
+qits-containers listing a workspace listing used to make is asked for only when the repository has
+a DIRECT row, so a repository of regular workspaces costs qits-containers nothing.
 
-The move is a compare-and-swap (`placement=RUNNER, runner_id=NULL WHERE placement='DIRECT'`, its own
-committed transaction, 0 rows = 409 `ALREADY_MOVED`), then delete-container's teardown on the
-platform host (services settled, graceful stop, `rm`, volume), then the container's commissioned
-client given back and its columns cleared. A row that was RUNNING is started on the runners (RUNNING,
-or QUEUED while no slot is free); any other stays STOPPED on no runner. The technical process shows
-`move-check`, `move-teardown`, then a start's `queued`/`container`/`clone`.
+**Kept for the direct path, deliberately.** All of it serves the admin and editor workspaces, and
+none of it is a leftover of regular DIRECT rows:
 
-- **The door**: `POST /workspaces/api/workspaces/{id}/move-to-runner` (`qits:admin`, beside
-  `recreate-container`), answering `{workspace, technicalProcessId}`. A refusal it can see at once
-  is the 400/409 above. When the container is stopped, or gone while its volume is not, the door
-  first brings it up on the platform host (ensure's start-in-place or provision) and waits, bounded by
-  `qits.workspace.provision.connect-timeout-ms`, for the daemon's first report; the gate's refusal
-  then fails the process instead.
-- **The sweep**: `containershost/DirectMigrationSweep`, every 5 minutes, first tick 2 minutes after
-  boot, constants in code. Nothing happens unless a connected runner in service holds fewer live
-  workspaces than its slots. Then at most **one** row, oldest first: one with no container and no
-  volume, or a RUNNING one whose daemon is connected, whose agent session is absent or `ENDED`
-  (never `BUSY`, `WAITING` or `IDLE`) and which passes the gate. It never starts a stopped container;
-  a gone container with a surviving volume is left to the door.
-- **One INFO line per decision**: `direct-migration moved <rowId> <reason>` /
-  `direct-migration skipped <rowId> <reason>`.
-- **A failed teardown is never silent**: the row is RUNNER by then, a WARN
-  `direct-orphan <containerName>` names what is left, and the row is not started on a runner while
-  its old container may still run. Nothing new is stored to remember it — a platform-host container
-  whose name belongs to an ACTIVE RUNNER row can only be one a move did not remove — so every sweep
-  tick first re-runs the teardown for exactly those, then logs it.
-- **The read model**: `WorkspaceDto.pushed` answers the `UNPUSHED` half for regular DIRECT rows only
-  (null for every other row, and when unknown), so a listing of RUNNER rows costs no `ls-remote`;
-  `WorkspaceDto.editor` tells the editor row apart.
+- `containershost/WorkspaceContainers` and `containers/ContainersClientProducer` — the
+  `ContainerRuntime` over qits-containers that admin and editor containers are started, stopped and
+  removed through.
+- `qits.containers.url` / `QITS_CONTAINERS_URL` — where that orchestrator answers.
+- `qits.workspace.containers.owner` — the owner every admin and editor container and volume is
+  claimed under, so two environments never name each other's.
+- `qits.workspace.containers.launch-patience` — admin and editor launches still use the retry loop
+  in `WorkspaceContainers.run`.
+- `EditorKeepalive` and `qits.editor.*` — the editor is a DIRECT container, with its own image pin,
+  idle-stop switch and keepalive.
+- The internal-plane keys — `qits.workspace.network`, `qits.workspace.git-host`,
+  `qits.workspace.qits-port`, `qits.workspace.container-git-url` — what a container on `qits-net`
+  dials home and clones through.
+- The volume and resource keys — `qits.workspace.workspace-volume-prefix`, `claude-volume`,
+  `maven-volume`, `pnpm-volume`, `memory-limit`, `memory-swap-limit` — the platform host's volumes
+  and limits for admin and editor containers (the two limits are also the defaults a runner row's
+  own lay over).
+- `commissionFor`, `CommissionReconciler` and the `V3` columns — the commissioned client pair is the
+  admin and editor container's credential (a RUNNER row holds a workspace token instead).
 
 ### The credential a workspace container holds
 
@@ -426,31 +421,31 @@ unreachable `/capture`. `application.properties` spells the value once, as `qits
 
 `/workspaces/daemon/{id}` is a **cross-repo contract**: `WorkspaceContainerFactory` injects
 `ws://<qits-host>:<port>/workspaces/daemon/<id>` as `QITS_WORKSPACE_DAEMON_URL` into every container
-it creates, and qits-workspace-daemon dials exactly that. `LegacyDaemonControlSocket` still answers
-the pre-segment label path for containers provisioned before the move; its own javadoc says why it
-keeps no `/workspaces` segment.
+it creates, and qits-workspace-daemon dials exactly that. The pre-segment label path
+(`LegacyDaemonControlSocket`, `/api/workspace-daemon/{label}`) is gone (qits-780): no daemon had
+dialled it in a week.
 
 `/workspaces/container/{id}/*` is **the only way anything reaches a workspace-daemon.** Its HTTP API
 — the file browser, commands, coding agents, services, bootstrap and the two interactive websockets
 — had no address at all before it: no gateway route, and no `QITS_WORKSPACE_DAEMON_API_TOKEN`
-injected, so the daemon's server did not even bind. This service injects that token and proxies to
-`13338` on the container's own DNS name, resolved from the workspace row and from nothing in the
+injected, so the daemon's server did not even bind. This service injects that token and proxies
+through the daemon's reverse tunnel, found from the workspace row id and from nothing in the
 request. The daemon is deliberately **not** a gateway route — one process per container, living for
 one container lifetime, has no stable address to configure — and `container` rather than `daemon`
 because the control socket already owns that segment and its literal is baked into running
 containers. `ContainerProxyPath` carries the argument; `DaemonProxyTargets` does the lookup.
 
-**A daemon at `DaemonProtocol.TUNNEL_CAPABILITY_VERSION` or above is not reached at `13338` at all.**
-It binds `127.0.0.1` and has no address on `qits-net`, so the proxy's origin is instead a loopback
-listener this service opens per workspace (`WorkspaceTunnels`); each accepted connection mints a
-single-use nonce, asks that workspace's daemon over the control socket to come and get it, and the
-daemon dials back to `/workspaces/daemon/stream/{nonce}` and pipes it to its own API. The tunnel
-carries bytes, so an HTTP request and a WebSocket upgrade traverse it identically.
-
-The two ways are keyed by that one version and are strictly complementary — a daemon that serves
-streams has stopped listening, one that still listens knows nothing about `OpenStream` — so there is
-no ambiguous middle, and a daemon that has not said hello yet counts as not capable. That is the
-safe direction: an image old enough to predate the tunnel is old enough to still be listening.
+**The reverse tunnel is the only way to a daemon.** A daemon at
+`DaemonProtocol.TUNNEL_CAPABILITY_VERSION` or above binds `127.0.0.1` and has no address on
+`qits-net`, so the proxy's origin is a loopback listener this service opens per workspace
+(`WorkspaceTunnels`); each accepted connection mints a single-use nonce, asks that workspace's daemon
+over the control socket to come and get it, and the daemon dials back to
+`/workspaces/daemon/stream/{nonce}` and pipes it to its own API. The tunnel carries bytes, so an HTTP
+request and a WebSocket upgrade traverse it identically. The direct `container:13338` fallback for
+older daemons, and the `qits.workspace.daemon-api-port` key it read, were deleted in qits-780 (no
+live daemon was below the tunnel capability): a daemon with no tunnel answers 503 `workspace daemon
+not connected`, or 502 when its DIRECT container is not running. `13338` survives only as the
+authority a proxied request presents (`ContainerProxyPath.DAEMON_API_PORT`), never as an address.
 
 Two things it does not do, both on purpose. It does not authorize the caller — qits is single-user
 and a workspace has no owner; the check is that the id names an ACTIVE row, and an unknown id, a

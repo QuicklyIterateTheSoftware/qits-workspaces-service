@@ -54,7 +54,6 @@ public class CaptureResourceTest {
   private String repository(boolean withFeatureBranch) throws Exception {
     String repoId = TestOrigin.create(dataDir, withFeatureBranch);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 
@@ -243,12 +242,12 @@ public class CaptureResourceTest {
         .then()
         .statusCode(Response.Status.NOT_FOUND.getStatusCode());
 
-    // Nothing leaked: only the auto-created main workspace exists.
+    // Nothing leaked: the repository has no workspace at all.
     given()
         .when()
         .get("/workspaces/api/workspaces?repositoryId=" + repoId)
         .then()
-        .body("entries", hasSize(1));
+        .body("entries", hasSize(0));
   }
 
   @Test
@@ -285,7 +284,7 @@ public class CaptureResourceTest {
         .when()
         .get("/workspaces/api/workspaces?repositoryId=" + repoId)
         .then()
-        .body("entries", hasSize(1));
+        .body("entries", hasSize(0));
   }
 
   @Test

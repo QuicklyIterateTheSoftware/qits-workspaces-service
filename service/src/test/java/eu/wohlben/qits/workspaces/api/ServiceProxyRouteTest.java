@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
-import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.FakeWorkspaceConfigReader;
 import eu.wohlben.qits.workspaces.control.FakeWorkspaceServiceDriver;
@@ -182,15 +181,13 @@ public class ServiceProxyRouteTest {
   private Setup startService(String basePath) throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     // Unique per setup: the proxy/supervisor key instances by (workspaceId, serviceId) alone, so a
     // fixed id would collide with a previous test's stopped instance ("work" repeats across repos).
     String serviceId = SERVICE_NAME + "-" + serviceSeq.incrementAndGet();
     // The workspace exists before its config is staged, because the config is keyed by the
     // workspace's id and there is no id until the row is written. Creation writes only the row (the
     // container is provisioned below), so nothing reads the config in between.
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "work", "master", "work"));
+    workspaceService.createWorkspace(repoId, "work", "master", "work", null, false, false, true);
     configReader.setConfig(
         workspaceIds.of(repoId, "work"),
         new QitsConfig(
@@ -386,12 +383,19 @@ public class ServiceProxyRouteTest {
 
   // --- RUNNER rows reach the dev server through the tunnel (qits-625, qits-815) ----------------
 
-  /** Mark the row RUNNER-placed, as qits-624's RUNNER start branch writes it. */
+  /**
+   * Mark the row a regular RUNNER-placed one, as qits-624's RUNNER start branch writes it. The row
+   * these tests start from is an admin one (the direct path is admin and editor only, qits-780), and
+   * an admin row is never RUNNER, so the posture goes with it.
+   */
   private void placeOnRunner(Long rowId) {
     QuarkusTransaction.requiringNew()
         .run(
-            () -> workspaceRows.findActiveById(rowId).orElseThrow().placement =
-                WorkspacePlacement.RUNNER);
+            () -> {
+              var row = workspaceRows.findActiveById(rowId).orElseThrow();
+              row.admin = false;
+              row.placement = WorkspacePlacement.RUNNER;
+            });
   }
 
   /**

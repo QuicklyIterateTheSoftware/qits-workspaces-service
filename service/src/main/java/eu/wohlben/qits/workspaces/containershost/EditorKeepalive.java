@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.containershost;
 
 import eu.wohlben.qits.workspaces.control.ContainerRuntime;
+import eu.wohlben.qits.workspaces.control.WorkspacePlacements;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -170,6 +171,9 @@ public class EditorKeepalive {
         return;
       }
       Workspace row = workspace.get();
+      // Only the editor is ever touched here; the router's refusal still stands in front of
+      // qits-containers, as at every other direct call (qits-780).
+      WorkspacePlacements.requireDirectAllowed(row);
       containers.touch(containers.containerName(row.workspaceId, row.repositoryId));
     } catch (RuntimeException e) {
       LOG.debugf(e, "editor keepalive failed for workspace %s", workspaceRowId);

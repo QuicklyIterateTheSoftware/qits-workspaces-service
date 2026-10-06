@@ -1,8 +1,6 @@
 package eu.wohlben.qits.workspaces.daemonhost;
 
-import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
-import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -12,22 +10,21 @@ import io.smallrye.mutiny.infrastructure.Infrastructure;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.security.Principal;
-import java.util.List;
 import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.logging.Logger;
 
 /**
  * Binds an agent's control socket to its own workspace.
  *
- * <p>Both control sockets ({@link DaemonControlSocket}, {@link LegacyDaemonControlSocket}) take the
- * workspace from the path. {@code qits:system} callers are trusted to name any workspace, as today.
+ * <p>The control socket ({@link DaemonControlSocket}) takes the workspace from the path. {@code qits:system} callers are trusted to name any workspace, as today.
  * A {@code qits:agent} caller is not (phase 4 of principal-bound-git-refs-plan.md): the token's
  * {@code sub} must be the identity bound to that workspace's container: for a DIRECT row the idp
  * client commissioned for it ({@code commissioned_client_id}), and for a RUNNER row the subject of
  * its workspace token ({@code commissioned_token_subject}, qits-625 — the {@code sub} the edge puts
  * on the JWT it mints for the token). Anything else is refused with 403 before the socket opens: a
  * RUNNER row's client id never matches, because it holds none, and another row's token never does.
- * The legacy label path binds the client only, because a RUNNER row's daemon never dials it.
+ * (The pre-id label path, {@code LegacyDaemonControlSocket}, is gone with its label branch here:
+ * qits-780, after a week with no daemon dialling it.)
  *
  * <p>A caller that holds both roles is treated as {@code qits:system}: agents switch to their own
  * role later, and until then a workspace container still presents the owner's roles.
@@ -49,8 +46,7 @@ public class DaemonAgentBindingCheck implements HttpUpgradeCheck {
 
   @Override
   public boolean appliesTo(String endpointId) {
-    return DaemonControlSocket.class.getName().equals(endpointId)
-        || LegacyDaemonControlSocket.class.getName().equals(endpointId);
+    return DaemonControlSocket.class.getName().equals(endpointId);
   }
 
   @Override
@@ -64,11 +60,10 @@ public class DaemonAgentBindingCheck implements HttpUpgradeCheck {
                 // own @RolesAllowed to refuse.
                 return CheckResult.permitUpgrade();
               }
-              boolean legacy = LegacyDaemonControlSocket.class.getName().equals(context.endpointId());
-              String segment = context.pathParam(legacy ? "workspaceId" : "id");
+              String segment = context.pathParam("id");
               String caller = subjectOf(identity);
               return Uni.createFrom()
-                  .item(() -> boundSubjectOf(legacy, segment))
+                  .item(() -> boundSubjectOf(segment))
                   .runSubscriptionOn(Infrastructure.getDefaultWorkerPool())
                   .map(
                       held -> {
@@ -99,23 +94,16 @@ public class DaemonAgentBindingCheck implements HttpUpgradeCheck {
 
   /**
    * The subject an agent must present for the workspace the path names: its token subject on a
-   * RUNNER row, its commissioned client on a DIRECT one (and on the legacy label path, which a RUNNER
-   * daemon never dials). Null — no such ACTIVE workspace, no credential, a segment that is not an id,
-   * or a legacy label more than one workspace carries — never matches a caller.
+   * RUNNER row, its commissioned client on a DIRECT one. Null — no such ACTIVE workspace, no
+   * credential, or a segment that is not an id — never matches a caller.
    */
-  String boundSubjectOf(boolean legacy, String segment) {
+  String boundSubjectOf(String segment) {
     if (segment == null || segment.isBlank()) {
       return null;
     }
     return QuarkusTransaction.requiringNew()
         .call(
             () -> {
-              if (legacy) {
-                List<Workspace> matches =
-                    workspaces.list(
-                        "workspaceId = ?1 and status = ?2", segment, WorkspaceStatus.ACTIVE);
-                return matches.size() == 1 ? matches.get(0).commissionedClientId : null;
-              }
               Long id;
               try {
                 id = Long.valueOf(segment);

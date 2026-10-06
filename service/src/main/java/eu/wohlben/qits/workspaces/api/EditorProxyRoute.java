@@ -242,7 +242,9 @@ public class EditorProxyRoute {
     }
     // No tunnel: no daemon, or one too old to know what an editor is. Then — and only then — ask
     // whether the container is even up, because that is what tells a stopped workspace's splash from
-    // a starting one's. There is no second way in to fall back to; see the class note.
+    // a starting one's. There is no second way in to fall back to; see the class note. The row is
+    // the editor's by its query (findActiveEditor), so this direct read is the editor's own and
+    // stands inside the router's rule (qits-780) by construction.
     String container = containers.containerName(target.workspaceId(), target.repositoryId());
     return new Resolved(target, state, null, containers.isRunning(container));
   }

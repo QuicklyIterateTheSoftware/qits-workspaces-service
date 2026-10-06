@@ -5,7 +5,6 @@ import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
-import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
@@ -107,9 +106,8 @@ public class ContainerProxyDbPatienceTest {
   private Long workspaceWithoutContainer() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "patience", "master", "patience"));
+    workspaceService.createWorkspace(
+        repoId, "patience", "master", "patience", null, false, false, true);
     return workspaceIds.of(repoId, "patience");
   }
 

@@ -49,7 +49,6 @@ public class WorkspaceControllerTest {
     try {
       String repoId = TestOrigin.create(dataDir);
       repositories.register(repoId);
-      workspaceService.createMainWorkspace(repoId, "master");
       return repoId;
     } catch (Exception e) {
       throw new IllegalStateException("failed to seed a test origin", e);
@@ -608,19 +607,13 @@ public class WorkspaceControllerTest {
   }
 
   /**
-   * A regular workspace through the create door, rewritten as a regular DIRECT row of the kind that
-   * predates qits-774 ({@link eu.wohlben.qits.workspaces.control.LegacyDirectRows}): the tests using
-   * it prove what the DIRECT container verbs do, and the door itself only writes RUNNER rows now.
+   * An ADMIN workspace, written STOPPED and not started: the tests using it prove what the DIRECT
+   * container verbs do, and the direct path is admin and editor only (qits-780) — a regular row
+   * through the door is RUNNER and never reaches them. Made through the service rather than the door
+   * because the door starts what it creates (qits-853), and these tests start it themselves.
    */
   private void createWorkspace(String repoId, String id, String parent, String branch) {
-    given()
-        .contentType(ContentType.JSON)
-        .body(new WorkspaceController.CreateWorkspaceRequest(repoId, id, parent, branch, null))
-        .when()
-        .post("/workspaces/api/workspaces")
-        .then()
-        .statusCode(Response.Status.OK.getStatusCode());
-    eu.wohlben.qits.workspaces.control.LegacyDirectRows.demote(workspaceIds.of(repoId, id));
+    workspaceService.createWorkspace(repoId, id, parent, branch, null, false, false, true);
   }
 
   private void mergeInto(String repoId, String workspaceId, String target) {
@@ -806,39 +799,15 @@ public class WorkspaceControllerTest {
   }
 
   @Test
-  public void testFreshRepositoryHasADefaultMainWorkspace() {
-    String repoId = createProjectAndRepository();
-
-    // Adding a repository now checks out its main branch in a default workspace (a root with no
-    // parent), so the workspace list is never empty for a fresh repo.
-    given()
-        .contentType(ContentType.JSON)
-        .when()
-        .get("/workspaces/api/workspaces?repositoryId=" + repoId)
-        .then()
-        .statusCode(Response.Status.OK.getStatusCode())
-        .body("entries", hasSize(1))
-        .body("entries[0].workspace.branch", equalTo("master"))
-        .body("entries[0].workspace.workspaceId", equalTo("master"))
-        .body("entries[0].workspace.parent", nullValue());
-  }
-
-
-
-
-
-
-
-
-  @Test
   public void testFileContentMissingFileReturns404() {
     String repoId = createProjectAndRepository();
+    createWorkspace(repoId, "files", "master", "files");
     given()
         .contentType(ContentType.JSON)
         .when()
         .get(
             "/workspaces/api/workspaces/"
-                + workspaceIds.of(repoId, "master")
+                + workspaceIds.of(repoId, "files")
                 + "/files/content?path=does-not-exist.txt")
         .then()
         .statusCode(Response.Status.NOT_FOUND.getStatusCode());

@@ -40,7 +40,6 @@ public class IntegrateSyncsSourceContainerTest {
   private String clonedRepo() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 
@@ -58,7 +57,9 @@ public class IntegrateSyncsSourceContainerTest {
     // is written by integrate alone now, and its 409 would stand in front of what this test is
     // about. Repointing main is one line and leaves the merge under test byte-for-byte the same.
     repositories.setMainBranch(repoId, "feature");
-    workspaceService.createWorkspace(repoId, "dirty-ws", "master", "dirty-b", null);
+    // An admin workspace: the container probed here is a DIRECT one, admin and editor only (qits-780).
+    workspaceService.createWorkspace(
+        repoId, "dirty-ws", "master", "dirty-b", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "dirty-ws"));
     String container = containers.containerName("dirty-ws", repoId);
     // An uncommitted change in the container: the origin-side merge would silently leave it behind.

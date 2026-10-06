@@ -425,7 +425,8 @@ public class WorkspaceRunnersTest {
 
   @Test
   public void everyRowIsDirectUnlessItSaysOtherwise() {
-    Long id = insert(w -> {});
+    // An admin row: an ACTIVE regular one may not be DIRECT at all (V15, below).
+    Long id = insert(w -> w.admin = true);
     Workspace row = QuarkusTransaction.requiringNew().call(() -> workspaceRepository.findById(id));
     assertEquals(WorkspacePlacement.DIRECT, row.placement);
     assertNull(row.runnerId);
@@ -463,8 +464,30 @@ public class WorkspaceRunnersTest {
   @Test
   public void onlyARunnerRowNamesARunner() {
     RuntimeException refused =
-        assertThrows(RuntimeException.class, () -> insert(w -> w.runnerId = UUID.randomUUID()));
+        assertThrows(
+            RuntimeException.class,
+            () ->
+                insert(
+                    w -> {
+                      w.admin = true;
+                      w.runnerId = UUID.randomUUID();
+                    }));
     assertTrue(names(refused, "ck_workspace_runner_placement"), messages(refused));
+  }
+
+  /**
+   * V15 (qits-780): the direct path is admin and editor only, as the schema keeps it. An ACTIVE
+   * regular row may not be DIRECT; an admin one may, a RUNNER one may, and a resolved regular row
+   * keeps whatever placement it had as history.
+   */
+  @Test
+  public void anActiveRegularRowIsNeverDirect() {
+    RuntimeException refused = assertThrows(RuntimeException.class, () -> insert(w -> {}));
+    assertTrue(names(refused, "ck_workspace_direct_only_admin_editor"), messages(refused));
+
+    assertDoesNotThrow(() -> insert(w -> w.admin = true));
+    assertDoesNotThrow(() -> insert(w -> w.placement = WorkspacePlacement.RUNNER));
+    assertDoesNotThrow(() -> insert(w -> w.status = WorkspaceStatus.ABANDONED));
   }
 
   @Test
@@ -495,7 +518,8 @@ public class WorkspaceRunnersTest {
   public void aWorkspaceReadsItsPlacementAndItsRunnersName() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
+    // The DIRECT side is an admin workspace: the direct path is admin and editor only (qits-780).
+    workspaceService.createWorkspace(repoId, "adm", "master", "adm", null, false, false, true);
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null);
     WorkspaceRunner runner = create(uniqueName());
     java.time.Instant queuedAt = java.time.Instant.parse("2026-10-05T10:00:00Z");

@@ -11,10 +11,9 @@ import eu.wohlben.qits.runner.protocol.Nothing;
 import eu.wohlben.qits.runner.protocol.Reserve;
 import eu.wohlben.qits.runner.protocol.RunnerMessage;
 import eu.wohlben.qits.workspaces.control.ContainerProxyPath;
-import eu.wohlben.qits.workspaces.control.DaemonProxyTargets;
+import eu.wohlben.qits.workspaces.daemonhost.StubDaemonTunnels;
 import eu.wohlben.qits.workspaces.control.DispatchService;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
-import eu.wohlben.qits.workspaces.control.ProxyOrigin;
 import eu.wohlben.qits.workspaces.control.TestGit;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes;
@@ -63,7 +62,7 @@ import org.junit.jupiter.api.Test;
  * and the real {@code WorkspaceTaken} after its commit. The daemon is a stub HTTP server answering
  * the two calls a launch makes, reached by the real {@code DaemonAgentClient}: a RUNNER row's
  * daemon is reached only through its reverse tunnel, which no container in this suite dials, so
- * {@link DaemonProxyTargets} is replaced for the test to point a row whose container "came up" at
+ * {@link StubDaemonTunnels} stands in for the tunnels and points a row whose container "came up" at
  * the stub — what is under test is when the launch is <em>sent</em>, not the tunnel.
  *
  * <p>Named {@code *Test} rather than {@code *IT}: surefire runs {@code *Test}, and failsafe's
@@ -97,6 +96,8 @@ class DispatchRunnerTest {
 
   private StubDaemon daemon;
 
+  private StubDaemonTunnels tunnels;
+
   @BeforeEach
   void setUp() throws Exception {
     QuarkusMock.installMockForType(
@@ -106,7 +107,7 @@ class DispatchRunnerTest {
         WorkspaceRunnerAddressesFixture.planesWithDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
         WorkspaceAddressPlanes.class);
     daemon = StubDaemon.start(vertx);
-    QuarkusMock.installMockForType(daemon.targets(), DaemonProxyTargets.class);
+    tunnels = StubDaemonTunnels.install(vertx, daemon.port(), daemon::isUp);
     rows = new RunnerRows();
   }
 
@@ -115,6 +116,7 @@ class DispatchRunnerTest {
     if (runner != null) {
       runner.close();
     }
+    tunnels.close();
     daemon.close();
     rows.clear();
   }
@@ -258,17 +260,13 @@ class DispatchRunnerTest {
       up.add(rowId);
     }
 
-    /** The targets a RUNNER row would have with a tunnel: the stub, once its container is up. */
-    DaemonProxyTargets targets() {
-      int port = server.actualPort();
-      return new DaemonProxyTargets() {
-        @Override
-        public DaemonTarget resolve(Long workspaceRowId) {
-          return up.contains(workspaceRowId)
-              ? new DaemonTarget(Reachability.READY, new ProxyOrigin("127.0.0.1", port))
-              : new DaemonTarget(Reachability.NOT_CONNECTED, null);
-        }
-      };
+    /** Whether a RUNNER row's daemon would hold its tunnel: once its container is up. */
+    boolean isUp(long rowId) {
+      return up.contains(rowId);
+    }
+
+    int port() {
+      return server.actualPort();
     }
 
     String awaitLaunch(Long rowId) throws InterruptedException {

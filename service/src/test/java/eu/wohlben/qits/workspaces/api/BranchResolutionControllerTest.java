@@ -11,7 +11,6 @@ import static org.hamcrest.Matchers.nullValue;
 import eu.wohlben.qits.workspaces.control.ContainerRuntime;
 import eu.wohlben.qits.workspaces.control.FakeCredentialCommissioner;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
-import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceCredential;
 import eu.wohlben.qits.workspaces.control.WorkspaceCredentials;
@@ -55,6 +54,7 @@ public class BranchResolutionControllerTest {
   @Inject WorkspaceCredentials credentials;
   @Inject WorkspaceService workspaceService;
   @Inject WorkspaceIds workspaceIds;
+  @Inject eu.wohlben.qits.workspaces.persistence.WorkspaceRepository workspaceRows;
   @Inject ContainerRuntime containers;
 
   @BeforeEach
@@ -72,7 +72,6 @@ public class BranchResolutionControllerTest {
     try {
       String repoId = TestOrigin.create(dataDir);
       repositories.register(repoId);
-      workspaceService.createMainWorkspace(repoId, "master");
       return repoId;
     } catch (Exception e) {
       throw new IllegalStateException("failed to seed a test origin", e);
@@ -105,8 +104,7 @@ public class BranchResolutionControllerTest {
   @Test
   public void theWorkspaceOnAReleasedBranchResolvesAsIntegrated() {
     String repoId = seedOrigin();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     Long rowId = workspaceIds.of(repoId, "feat");
     workspaceService.ensureContainer(rowId);
     String container = containers.containerName("feat", repoId);
@@ -143,8 +141,7 @@ public class BranchResolutionControllerTest {
   @Test
   public void aBranchWithNoWorkspaceAnswersFalseAndTearsNothingDown() {
     String repoId = seedOrigin();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
 
     JsonPath answer = resolve(repoId, body("never-had-a-workspace", "v1", null, null), 200);
@@ -159,6 +156,20 @@ public class BranchResolutionControllerTest {
   @Test
   public void theMainWorkspaceIsRefusedBecauseItHasNoParent() {
     String repoId = seedOrigin();
+    // A parentless row on master, as the retired per-project editor's main workspaces were written
+    // (their create is gone, qits-780): RUNNER, since an ACTIVE regular row is never DIRECT now.
+    io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              eu.wohlben.qits.workspaces.entity.Workspace main =
+                  new eu.wohlben.qits.workspaces.entity.Workspace();
+              main.workspaceId = "master";
+              main.repositoryId = repoId;
+              main.parent = null;
+              main.branch = "master";
+              main.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
+              workspaceRows.persist(main);
+            });
     repositories.setMainBranch(repoId, "trunk");
 
     JsonPath refusal = resolve(repoId, body("master", "v1", null, null), 400);
@@ -170,8 +181,7 @@ public class BranchResolutionControllerTest {
   @Test
   public void aWorkspaceOnTheDefaultBranchIsRefusedEvenWithAParent() {
     String repoId = seedOrigin();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     repositories.setMainBranch(repoId, "feat");
 
     JsonPath refusal = resolve(repoId, body("feat", "v1", null, null), 400);
@@ -182,8 +192,7 @@ public class BranchResolutionControllerTest {
   @Test
   public void aSecondCallAfterTheResolutionAnswersFalse() {
     String repoId = seedOrigin();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
 
     assertThat(resolve(repoId, body("feat", "v1", null, null), 200).getBoolean("resolved"), is(true));

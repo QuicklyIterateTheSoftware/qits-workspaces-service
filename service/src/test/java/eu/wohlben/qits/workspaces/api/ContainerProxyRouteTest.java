@@ -5,7 +5,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
-import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
+import eu.wohlben.qits.workspaces.daemonhost.StubDaemonTunnels;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
@@ -31,14 +31,12 @@ import org.junit.jupiter.api.Test;
 /**
  * Exercises the workspace-daemon proxy against a real loopback origin: a Vert.x server plays the
  * in-container {@code WorkspaceApi} — echoing the path it was called on, the {@code Authorization}
- * it was given and the {@code Host} it saw — and {@code FakeContainerRuntime} resolves the target to
- * {@code 127.0.0.1} + the configured daemon port, so that port <em>is</em> the port the proxy
- * targets. No docker involved; the sibling of {@link ServiceProxyRouteTest} and deliberately the
- * same kind of test.
- *
- * <p>The port has to be fixed before the application starts, because unlike a service's web-view
- * port it comes from configuration rather than from a staged config document — see {@link
- * AgentDispatchControllerTest#latchedPort()} for how it gets there and why it is latched.
+ * it was given and the {@code Host} it saw — reached through {@link
+ * eu.wohlben.qits.workspaces.daemonhost.StubDaemonTunnels}, a tunnel whose loopback port is the
+ * stub's while the row's (fake) container runs. The tunnel is the only way to a daemon since
+ * qits-780 deleted the direct {@code container:13338} fallback. No docker involved; the sibling of
+ * {@link ServiceProxyRouteTest} and deliberately the same kind of test. The port is {@link
+ * AgentDispatchControllerTest#latchedPort()}, shared with the classes beside it.
  *
  * <p><b>It runs under {@link AgentDispatchControllerTest}'s profile rather than one of its own.</b>
  * That profile is a strict superset of what this class needs, and the two things that used to keep
@@ -72,6 +70,12 @@ public class ContainerProxyRouteTest {
   String dataDir;
 
   private Vertx daemonVertx;
+
+  private StubDaemonTunnels tunnels;
+
+  @Inject eu.wohlben.qits.workspaces.control.FakeContainerRuntime containerRuntime;
+
+  @Inject eu.wohlben.qits.workspaces.persistence.WorkspaceRepository workspaceRows;
   private HttpServer daemonServer;
   private final AtomicInteger daemonHits = new AtomicInteger();
   private final AtomicReference<String> lastAuthorization = new AtomicReference<>();
@@ -161,6 +165,13 @@ public class ContainerProxyRouteTest {
             .toCompletionStage()
             .toCompletableFuture()
             .get(10, TimeUnit.SECONDS);
+    // Reached through a stub tunnel, the only way to a daemon (qits-780), while the row's (fake)
+    // container runs.
+    tunnels =
+        StubDaemonTunnels.install(
+            daemonVertx,
+            daemonPort(),
+            StubDaemonTunnels.whileItsContainerRuns(containerRuntime, workspaceRows));
     daemonHits.set(0);
   }
 
@@ -179,6 +190,10 @@ public class ContainerProxyRouteTest {
    */
   @AfterEach
   void stopFakeDaemon() throws Exception {
+    if (tunnels != null) {
+      tunnels.close();
+      tunnels = null;
+    }
     if (daemonVertx != null) {
       daemonVertx.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
       daemonVertx = null;
@@ -190,9 +205,7 @@ public class ContainerProxyRouteTest {
   private Long workspaceWithContainer() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "work", "master", "work"));
+    workspaceService.createWorkspace(repoId, "work", "master", "work", null, false, false, true);
     Long id = workspaceIds.of(repoId, "work");
     workspaceService.ensureContainer(id);
     return id;
@@ -245,9 +258,11 @@ public class ContainerProxyRouteTest {
 
     given().get("/workspaces/container/" + id + "/detection").then().statusCode(200);
 
-    // Not qits' own Host and not the container's DNS name: a constant, so the daemon's view of who
-    // called it does not change when the origin does.
-    assertEquals("localhost:" + daemonPort(), lastHost.get());
+    // Not qits' own Host and not the tunnel's loopback port: the daemon's own port, a constant, so
+    // the daemon's view of who called it does not change when the origin does.
+    assertEquals(
+        "localhost:" + eu.wohlben.qits.workspaces.control.ContainerProxyPath.DAEMON_API_PORT,
+        lastHost.get());
   }
 
   @Test
@@ -426,17 +441,17 @@ public class ContainerProxyRouteTest {
 
   /**
    * qits-812: a RUNNER row with no live tunnel has no direct path. It answers 503 "workspace daemon
-   * not connected" and never dials the container's {@code qits-net} address — even here, where a
-   * DIRECT container of the same name is running and would answer.
+   * not connected" and never dials anything.
    */
   @Test
   public void aRunnerRowWithNoTunnelIs503AndNeverDialsTheContainer() throws Exception {
-    Long id = workspaceWithContainer();
-    io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
-        .run(
-            () ->
-                workspaceRepository.findActiveById(id).orElseThrow().placement =
-                    eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER);
+    String repoId = TestOrigin.create(dataDir);
+    repositories.register(repoId);
+    Long id = workspaceService.createWorkspace(repoId, "runner", "master", "runner", null).id;
+    assertEquals(
+        eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER,
+        io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
+            .call(() -> workspaceRepository.findActiveById(id).orElseThrow().placement));
 
     int hitsBefore = daemonHits.get();
     given()
@@ -444,6 +459,26 @@ public class ContainerProxyRouteTest {
         .then()
         .statusCode(503)
         .body(containsString("workspace daemon not connected"));
-    assertEquals(hitsBefore, daemonHits.get(), "a RUNNER row is never forwarded to qits-net");
+    assertEquals(hitsBefore, daemonHits.get(), "a RUNNER row is never forwarded to");
+  }
+
+  /**
+   * qits-780: the direct {@code container:13338} fallback is gone. An admin row whose container runs
+   * and answers, but whose daemon holds no tunnel — what a daemon older than the tunnel capability
+   * looks like — answers the same 503 as one that is not connected, and nothing is dialled.
+   */
+  @Test
+  public void aRunningContainerWithNoTunnelIsNotDialledDirectly() throws Exception {
+    Long id = workspaceWithContainer();
+    tunnels.close();
+    tunnels = StubDaemonTunnels.install(daemonVertx, daemonPort(), row -> false);
+
+    int hitsBefore = daemonHits.get();
+    given()
+        .get("/workspaces/container/" + id + "/files")
+        .then()
+        .statusCode(503)
+        .body(containsString("workspace daemon not connected"));
+    assertEquals(hitsBefore, daemonHits.get(), "no direct dial to the container's address");
   }
 }

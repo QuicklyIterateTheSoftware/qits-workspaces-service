@@ -38,7 +38,6 @@ public class GitIdentityAttributionTest {
   private String clonedRepo() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 

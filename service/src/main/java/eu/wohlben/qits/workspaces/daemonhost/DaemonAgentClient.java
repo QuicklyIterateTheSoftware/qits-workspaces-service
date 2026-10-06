@@ -1,21 +1,15 @@
 package eu.wohlben.qits.workspaces.daemonhost;
 
 import eu.wohlben.qits.workspaces.control.ContainerProxyPath;
-import eu.wohlben.qits.workspaces.control.DaemonProxyTargets;
 import eu.wohlben.qits.workspaces.control.EntityFacts;
-import eu.wohlben.qits.workspaces.control.ProxyOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceAgentLauncher;
 import io.vertx.core.Future;
-import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
-import io.vertx.core.http.HttpClientOptions;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.RequestOptions;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.SocketAddress;
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.Optional;
@@ -27,18 +21,17 @@ import org.jboss.logging.Logger;
  * The host's own client for a workspace-daemon's coding-agent surface — {@link
  * WorkspaceAgentLauncher} over the wire.
  *
- * <p><b>It reaches a daemon the way {@code ContainerProxyRoute} does, and nothing about that is
- * copied for tidiness.</b> The resolution is the same two branches in the same order — the reverse
- * tunnel when the daemon serves one, the container's own address otherwise — because those two are
- * strictly complementary and getting the order wrong means dialling a port a modern daemon has
- * stopped listening on. The tunnel's client is used and never a shared one, for the reason {@link
+ * <p><b>It reaches a daemon the way {@code ContainerProxyRoute} does: through its reverse tunnel,
+ * and only that.</b> The direct {@code container:13338} fallback for daemons older than the tunnel
+ * is gone (qits-780), so a daemon with no tunnel is simply unreachable and the caller asks again.
+ * The tunnel's client is used and never a shared one, for the reason {@link
  * WorkspaceTunnels} spells out at length: an ephemeral port is reused, and a pooled connection
  * behind a shared client is how one workspace's request lands in another's container. The bearer is
  * this service's own peer credential, set rather than forwarded, because there is nobody to forward
  * one from — the caller here is a scheduler thread. And the authority is pinned to {@code
  * localhost:<daemon port>} exactly as the proxy's {@code hostRewrite} pins it, so the daemon cannot
- * tell whether a request arrived through the tunnel, through the container's address, or from the
- * host at all — and must not be able to.
+ * tell whether a request arrived through the proxy or from the host itself — and must not be able
+ * to.
  *
  * <p><b>It lives beside the tunnel rather than in {@code api/}.</b> Nothing here serves a route:
  * this is the host talking to a container, which is what {@code daemonhost} is. {@code
@@ -49,10 +42,8 @@ import org.jboss.logging.Logger;
  * own {@code CommandJson}: two keys out and three read, against a native image that would otherwise
  * need a databind registration for a shape this small.
  *
- * <p><b>No {@code DbRetry} around the row lookup</b>, unlike the proxy's. That wrap is placement-
- * sensitive and deliberately rare, and it exists there because a browser is holding a request open
- * and a blip costs a live workspace its file browser. Here the caller is a poll: a lookup that fails
- * during a postgres cutover reads as UNREACHABLE, and the next tick asks again.
+ * <p><b>No row lookup at all</b>, unlike the proxy's: that one only says which absence a missing
+ * tunnel is, so a browser can be told, and every absence reads the same to a poll.
  */
 @ApplicationScoped
 public class DaemonAgentClient implements WorkspaceAgentLauncher {
@@ -88,19 +79,11 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
    */
   private static final String SURFACE = "ticket.dispatch";
 
-  @Inject Vertx vertx;
-
-  @Inject DaemonProxyTargets targets;
-
   @Inject WorkspaceTunnels tunnels;
 
   /** The bearer the daemon requires; the same value {@code WorkspaceContainerFactory} injects. */
   @ConfigProperty(name = "qits.workspace.daemon-api-token", defaultValue = "qits-workspace-daemon")
   String daemonApiToken;
-
-  /** Not where we connect — the authority we present. See {@code ContainerProxyRoute}'s twin. */
-  @ConfigProperty(name = "qits.workspace.daemon-api-port", defaultValue = "13338")
-  int daemonApiPort;
 
   /**
    * How long one call to a daemon may take. Short: both calls are local to the host or one hop down
@@ -123,31 +106,6 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
       name = "qits.workspace.agent-dispatch.blocked-timeout-ms",
       defaultValue = "5000")
   long blockedTimeoutMs;
-
-  /**
-   * The direct branch's client; the tunnel branch must use the tunnel's own.
-   *
-   * <p><b>Keep-alive is off, deliberately.</b> A pooled connection outlives the container it was
-   * opened to, and a workspace container is stopped, recreated and replaced under a name and an
-   * address that are then reused — which is the hazard {@link WorkspaceTunnels} refuses to share a
-   * client over, one layer out. {@code ContainerProxyRoute} can afford a pool because it is serving
-   * a browser's stream of requests; this client makes one call every couple of seconds per
-   * workspace, so a pool buys nothing and the connection it would hold open is one that can only go
-   * stale. A stale one costs the whole request timeout before the caller learns anything.
-   */
-  private HttpClient directClient;
-
-  @PostConstruct
-  void open() {
-    directClient = vertx.createHttpClient(new HttpClientOptions().setKeepAlive(false));
-  }
-
-  @PreDestroy
-  void close() {
-    if (directClient != null) {
-      directClient.close();
-    }
-  }
 
   /**
    * {@code GET /commands?status=RUNNING} — one question, answered by whether any of them is an
@@ -367,42 +325,25 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
   private record Answer(int status, String body) {}
 
   /**
-   * The proxy's resolution, minus the four ways it distinguishes an absence: this caller acts the
-   * same on all of them — it waits and asks again.
+   * The daemon's reverse tunnel, or null when it holds none — the only route there is (qits-780).
+   * This caller acts the same on every absence: it waits and asks again.
    */
   private Route route(Long workspaceRowId) {
     Optional<WorkspaceTunnels.TunnelOrigin> tunnel = tunnels.originFor(workspaceRowId);
-    if (tunnel.isPresent()) {
-      return new Route(
-          workspaceRowId, tunnel.get().client(), "127.0.0.1", tunnel.get().port());
-    }
-    DaemonProxyTargets.DaemonTarget target;
-    try {
-      target = targets.resolve(workspaceRowId);
-    } catch (RuntimeException e) {
-      LOG.debugf(e, "could not resolve workspace %s's daemon", workspaceRowId);
-      return null;
-    }
-    if (target.reachability() == DaemonProxyTargets.Reachability.NOT_CONNECTED) {
-      // A RUNNER row with no tunnel (qits-812): there is no direct path, so nothing is dialled. The
-      // callers read it as unreachable and ask again, as for every other absence.
+    if (tunnel.isEmpty()) {
       LOG.debugf("workspace %s's daemon is not connected", workspaceRowId);
       return null;
     }
-    if (target.reachability() != DaemonProxyTargets.Reachability.READY) {
-      return null;
-    }
-    ProxyOrigin origin = target.origin();
-    return new Route(workspaceRowId, directClient, origin.host(), origin.port());
+    return new Route(workspaceRowId, tunnel.get().client(), "127.0.0.1", tunnel.get().port());
   }
 
   /**
    * One request to a daemon, blocking.
    *
    * <p>{@code setServer} is where we connect and {@code setHost}/{@code setPort} are what we claim
-   * to be calling — which is how the authority stays {@code localhost:<daemon port>} whether the
-   * connection went to the container's address or to a loopback tunnel port. The path is the FULL
-   * proxied one ({@link ContainerProxyPath#base}), because that prefix is the daemon's own address:
+   * to be calling — which is how the authority stays {@code localhost:<daemon port>} whichever
+   * loopback port the tunnel bound. The path is the FULL proxied one ({@link
+   * ContainerProxyPath#base}), because that prefix is the daemon's own address:
    * {@code WorkspaceContainerFactory} injected it at container creation, and the proxy forwards
    * paths verbatim for exactly this reason. A client that posted a bare {@code /agents} would 404
    * against every container this service ever made.
@@ -434,7 +375,7 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
             .setMethod(method)
             .setServer(SocketAddress.inetSocketAddress(route.port(), route.host()))
             .setHost("localhost")
-            .setPort(Integer.valueOf(daemonApiPort))
+            .setPort(Integer.valueOf(ContainerProxyPath.DAEMON_API_PORT))
             .setURI(ContainerProxyPath.base(route.workspaceRowId()) + path)
             .setTimeout(timeoutMs);
     try {

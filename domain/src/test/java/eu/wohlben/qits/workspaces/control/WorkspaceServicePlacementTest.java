@@ -352,12 +352,14 @@ public class WorkspaceServicePlacementTest {
     assertFalse(workspaceService.branchExists(repoId, "stated-direct"), "nothing was pushed");
   }
 
-  /** A regular row created DIRECT before qits-774 stays DIRECT: nothing rewrites a placement. */
+  /** An admin row is DIRECT and stays DIRECT: nothing rewrites a placement. */
   @Test
-  public void aLegacyDirectRowNeverMoves() throws Exception {
+  public void anAdminRowNeverMoves() throws Exception {
     String repoId = repo();
-    Workspace created = create(repoId, "early");
-    LegacyDirectRows.demote(workspaceRepository, created.id);
+    Workspace created =
+        workspaceService.createWorkspace(
+            repoId, "early", "master", "early", null, false, false, true);
+    rows.add(created.id);
 
     eligibleRunner(1);
 

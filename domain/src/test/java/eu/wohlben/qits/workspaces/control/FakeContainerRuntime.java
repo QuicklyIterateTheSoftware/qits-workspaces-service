@@ -221,20 +221,9 @@ public class FakeContainerRuntime implements ContainerRuntime {
     return byName.containsKey(container) && !stopped.contains(container);
   }
 
-  /** Every {@code start}, by container name, newest last (qits-776: the sweep never starts one). */
-  private final List<String> starts = Collections.synchronizedList(new ArrayList<>());
-
-  /** How many times this container was {@code start}ed. */
-  public int startCount(String container) {
-    synchronized (starts) {
-      return (int) starts.stream().filter(container::equals).count();
-    }
-  }
-
   @Override
   public void start(String repoId, String workspaceId, Long rowId, String branch, String parent) {
     String container = containerName(workspaceId, repoId);
-    starts.add(container);
     if (!byName.containsKey(container)) {
       throw new IllegalStateException("No such container: " + container);
     }
@@ -311,19 +300,9 @@ public class FakeContainerRuntime implements ContainerRuntime {
     touches.clear();
   }
 
-  private final Set<String> throwOnRm = ConcurrentHashMap.newKeySet();
-
-  /** Test hook: the next {@link #rm} of this container throws and removes nothing (qits-776). */
-  public void throwOnNextRm(String container) {
-    throwOnRm.add(container);
-  }
-
   @Override
   public void rm(String container) {
     teardownCalls.add("rm:" + container);
-    if (throwOnRm.remove(container)) {
-      throw new RuntimeException("fake rm failure for " + container);
-    }
     stopped.remove(container);
     Info info = byName.remove(container);
     if (info == null) {
@@ -364,8 +343,17 @@ public class FakeContainerRuntime implements ContainerRuntime {
     // no-op: nothing to restart for a host-clone stand-in
   }
 
+  /** How many owner-wide listings were asked for, by repository (qits-780). */
+  private final Map<String, Integer> listings = new ConcurrentHashMap<>();
+
+  /** How many times {@link #listWorkspaceContainers} was asked about this repository. */
+  public int listingsOf(String repoId) {
+    return listings.getOrDefault(repoId, 0);
+  }
+
   @Override
   public List<ContainerInfo> listWorkspaceContainers(String repoId) {
+    listings.merge(repoId, 1, Integer::sum);
     List<ContainerInfo> infos = new ArrayList<>();
     for (Info info : byName.values()) {
       if (info.repoId().equals(repoId)) {
@@ -399,33 +387,6 @@ public class FakeContainerRuntime implements ContainerRuntime {
       throw new RuntimeException(e);
     }
     volumes.put(workspaceId, new Volume(repoId, workspaceId, branch, parent, dir));
-  }
-
-  /**
-   * What {@link #workspaceVolumeExists} answers per workspace when a test said so (qits-776); a
-   * workspace not named here answers whether this fake holds its volume.
-   */
-  private final Map<String, Boolean> volumePresence = new ConcurrentHashMap<>();
-
-  /** Test hook: {@link #workspaceVolumeExists} answers {@code present} for this workspace. */
-  public void setVolumeExists(String workspaceId, boolean present) {
-    volumePresence.put(workspaceId, present);
-  }
-
-  /** Test hook: back to answering from the volumes this fake holds. */
-  public void clearVolumeExists(String workspaceId) {
-    volumePresence.remove(workspaceId);
-  }
-
-  @Override
-  public boolean workspaceVolumeExists(String workspaceId) {
-    Boolean said = volumePresence.get(workspaceId);
-    return said != null ? said : volumes.containsKey(workspaceId);
-  }
-
-  @Override
-  public java.util.Set<String> workspaceContainerNames() {
-    return java.util.Set.copyOf(byName.keySet());
   }
 
   @Override

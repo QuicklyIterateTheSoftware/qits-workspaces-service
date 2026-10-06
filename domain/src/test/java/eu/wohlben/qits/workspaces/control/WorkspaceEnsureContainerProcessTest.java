@@ -57,9 +57,8 @@ public class WorkspaceEnsureContainerProcessTest {
   private String repoWithWorkspace(String workspaceId) throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, workspaceId, "master", workspaceId));
+    workspaceService.createWorkspace(
+        repoId, workspaceId, "master", workspaceId, null, false, false, true);
     return repoId;
   }
 

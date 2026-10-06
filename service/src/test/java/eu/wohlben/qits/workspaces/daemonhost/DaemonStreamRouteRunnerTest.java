@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
-import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
@@ -158,6 +157,8 @@ class DaemonStreamRouteRunnerTest {
         .run(
             () -> {
               var row = workspaceRepository.findActiveById(id).orElseThrow();
+              // A regular row: an admin one is never RUNNER (ck_workspace_runner_posture).
+              row.admin = false;
               row.placement = WorkspacePlacement.RUNNER;
               row.commissionedTokenId = "tok-id-" + id;
               row.commissionedTokenSubject = subject;
@@ -170,9 +171,8 @@ class DaemonStreamRouteRunnerTest {
   private Long workspace(String prefix) throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     String label = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
-    LegacyDirectRows.direct(() -> workspaceService.createWorkspace(repoId, label, "master", label));
+    workspaceService.createWorkspace(repoId, label, "master", label, null, false, false, true);
     return workspaceIds.of(repoId, label);
   }
 

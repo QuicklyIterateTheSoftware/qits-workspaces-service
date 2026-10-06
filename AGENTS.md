@@ -331,12 +331,11 @@ The socket takes that id as a **`String` and parses it**: websockets-next reject
 build time — `@PathParam must be java.lang.String` — and the failure surfaces as an unloadable test
 class, not as a compile error, so it is worth knowing before you type `Long`.
 
-`LegacyDaemonControlSocket` serves the old label path for containers provisioned before the move —
-their `QITS_WORKSPACE_DAEMON_URL` was injected at creation and only a recreate re-injects it. It
-resolves the label and **refuses when more than one active workspace carries it**, which is the
-collision the id exists to remove. Its path deliberately keeps no `/workspaces` segment: the address
-is not ours to pick, it is whatever is already baked into a running container. Delete it once no
-such container can still be running.
+`LegacyDaemonControlSocket`, which served the old label path (`/api/workspace-daemon/{label}`) for
+containers provisioned before the move, is **deleted** (qits-780): measured live, no daemon had
+dialled it in seven days, and every container carries the id-addressed URL. Its label branch in
+`DaemonAgentBindingCheck` went with it. A container that still dialled the label path would simply
+have no control socket until recreated.
 
 ## Where this service answers
 
@@ -358,7 +357,7 @@ the sixth raw route and carries no path at all — see below):
   presents it on every upgrade; the endpoint requires `qits:system` or `qits:agent`. A caller with
   `qits:agent` and not `qits:system` may open only its own workspace's socket: `DaemonAgentBindingCheck`
   (an `HttpUpgradeCheck`, so the refusal is a real 403 before the upgrade) compares the token's `sub`
-  with the row's `commissioned_client_id`, on this path and on the legacy label path alike — and,
+  with the row's `commissioned_client_id` — and,
   on a RUNNER row, with its `commissioned_token_subject` instead (qits-812; a client id never
   matches there). `DaemonSocketBearerLifetime` drops the bearer's expiry on this path for a `tok-`
   subject only, so a RUNNER daemon's socket outlives the edge's 300 s JWT and a DIRECT one keeps its
@@ -662,8 +661,9 @@ Four things about it are decided rather than incidental:
   That path asks qits-projects nothing at all: the common answer must not cost a round trip.
 - **The main workspace is refused on BOTH belts** — `parent == null` on the row, and the branch
   equalling the repository's default branch — because they are independent readings (ours and
-  qits-projects') and a main branch renamed between them leaves exactly one right. Nothing else here
-  refuses to discard a main workspace; that hole is deliberately not inherited.
+  qits-projects') and a main branch renamed between them leaves exactly one right. An ordinary
+  discard still resolves a main workspace, but since qits-780 `doDiscard` keeps its branch on the
+  same two belts.
 - **`doDiscard` gained a `deleteBranch` flag rather than a copy.** The ref is already gone, so the
   push would be a round trip whose only outcome is the failure that method's catch swallows — a
   stated no-op instead of a silent one, the reading `ensureContainer`'s branch-gone abandon already
@@ -934,7 +934,8 @@ which is what makes the two ways out of a stuck editor the ordinary container ve
 `/workspaces/{id}/stop-container` and `/recreate-container`, the routes that already existed.
 
 **What it replaced was PER PROJECT and derived.** Until then a project's editor was its wrapper
-repository's main workspace — the per-project singleton `createMainWorkspace` maintains — started
+repository's main workspace — the per-project singleton `createMainWorkspace` maintained (that create
+went in qits-780, and `V15` abandoned the rows it left) — started
 from the richer image because of what that workspace *was*: `WorkspacePostures.isWrapperMain` was
 repository archetype `PROJECT` plus branch == that repository's main branch, and there was
 deliberately no column, because a derivation cannot go stale while a fourth copy of somebody else's
@@ -1353,15 +1354,15 @@ Five decisions, each of which is a way to get this wrong:
   second caller of that API and makes the same promise.
 
 **`DaemonAgentClient` (in `daemonhost/`) is the transport**, behind the `WorkspaceAgentLauncher` port
-so `domain` stays free of Vert.x. It resolves a daemon exactly as `ContainerProxyRoute` does — the
-reverse tunnel first, using *that tunnel's* client, the container's own address otherwise — sets
-qits' own bearer rather than forwarding one, and pins the authority to `localhost:<daemon port>` so
-the daemon cannot tell which road a request took. The path is the **full proxied one**
+so `domain` stays free of Vert.x. It reaches a daemon exactly as `ContainerProxyRoute` does —
+through its reverse tunnel, using *that tunnel's* client, and no other way (the direct
+`container:13338` fallback is gone, qits-780) — sets qits' own bearer rather than forwarding one, and
+pins the authority to `localhost:13338` (`ContainerProxyPath.DAEMON_API_PORT`) so the daemon cannot
+tell which tunnel port a request took. The path is the **full proxied one**
 (`ContainerProxyPath.base(rowId) + "agents"`), because that prefix is the daemon's own address; a
 bare `/agents` would 404 against every container this service ever made. Two things about it were
-paid for on 2026-09-08 and are worth not undoing: the direct client has **keep-alive off** (a pool
-keyed on a container address that gets reused can only go stale, and this client makes one call every
-couple of seconds), and each exchange is **composed and awaited once** — awaiting the response and
+paid for on 2026-09-08; one is still worth not undoing (the other, a direct client with keep-alive
+off, went with the direct path): each exchange is **composed and awaited once** — awaiting the response and
 then asking it for its body is two blocking steps with an event loop between them, and the body can
 already have been delivered and dropped by the time the second one is reached, so the call sits on
 its whole timeout and reports the daemon unreachable while the daemon answered.
@@ -1602,31 +1603,36 @@ than per caller. A second role invented here would be a vocabulary qits-idp does
 
 ## Placement: DIRECT and RUNNER (epic qits-624)
 
-A workspace's container runs either **DIRECT** (the platform host, through qits-containers — every
-workspace that existed before) or **RUNNER** (a workspace runner's node). `Workspace.placement` is
-written once, by `recordWorkspace`, from `WorkspacePlacements.forNewRow(admin, editor)`: **a
-regular workspace is always RUNNER, and only admin and editor workspaces are DIRECT** (qits-774) —
-create door and dispatch alike, whether or not any runner is eligible. With none, the row waits
-QUEUED on no runner and its start's `queued` line reads `no enabled workspace runner`
-(`WorkspaceService.NO_ENABLED_RUNNER`); that is a waiting state, not a refusal. Only `POST
-/workspaces/api/workspaces` may state a placement, and only one that agrees: RUNNER with `admin` is a
-400, DIRECT without it a 400 `DIRECT_PLACEMENT_REFUSED`. Regular DIRECT rows written before qits-774
-keep working untouched; tests that prove the DIRECT ladder make one with the test-side
-`LegacyDirectRows`. The refusal codes live in `error/RunnerRefusals`.
+A workspace's container runs either **DIRECT** (the platform host, through qits-containers) or
+**RUNNER** (a workspace runner's node). `Workspace.placement` is written once, by `recordWorkspace`,
+from `WorkspacePlacements.forNewRow(admin, editor)`: **a regular workspace is always RUNNER, and only
+admin and editor workspaces are DIRECT** (qits-774) — create door and dispatch alike, whether or not
+any runner is eligible. With none, the row waits QUEUED on no runner and its start's `queued` line
+reads `no enabled workspace runner` (`WorkspaceService.NO_ENABLED_RUNNER`); that is a waiting state,
+not a refusal. Only `POST /workspaces/api/workspaces` may state a placement, and only one that
+agrees: RUNNER with `admin` is a 400, DIRECT without it a 400 `DIRECT_PLACEMENT_REFUSED`. The
+refusal codes live in `error/RunnerRefusals`.
 
-**Such a row is moved onto a runner by recreation, never adoption** (qits-776; README "Moving a
-workspace off the platform host"). `control/MoveGate` is the one gate and reuses
-`WorkspaceService.reportedCleanliness` (recreate's explicit-CLEAN rule) and `isFullyPushed` rather
-than copying them; `control/DirectPlacementMove` is the swap (`WorkspaceRepository.moveToRunner`),
-the teardown (`WorkspaceService.tearDownDirect`, shared with delete-container) and the RUNNER start
-on the same process (`startOnRunner`), and holds both the door's body and the sweep's tick, with its
-codes in `error/MoveRefusals`. `containershost/DirectMigrationSweep` is only the clock, and it skips
-every tick in the TEST launch mode: the suites share one database, so a tick would move another
-test's DIRECT row from under it. The domain suite drives `sweep(scope)` with its own rows as scope.
-The free-slot check reads `RunnerPlacement.servingRunnerIds()` (the registry's greeted sessions)
-against the rows (`WorkspaceRunner.eligible`, `countLiveOnRunner < slots`). A `direct-orphan` is
-derived, not stored: `ContainerRuntime.workspaceContainerNames()` intersected with the ACTIVE RUNNER
-rows' DIRECT container names. `ContainerRuntime.workspaceVolumeExists` answers false on a 404 alone.
+**No regular row is DIRECT any more, and three things hold that** (qits-780): `V15`'s
+`ck_workspace_direct_only_admin_editor` (an ACTIVE row is RUNNER, admin or editor), the create rule
+above, and **the router's refusal** — `WorkspacePlacements.requireDirectAllowed(Workspace)`, called at
+every DIRECT branch before `ContainerRuntime` is touched: the top of `beginEnsureContainer`,
+`beginRecreateContainer`, `stopContainer`, `deleteContainer` and `doDiscard`; the ensure ladder's
+snapshot; `ensureContainer(Long)`, the bootstrap runner's manual-run entry, which leaves a
+RUNNING runner row to its runner and asks a stopped one to start first (400); `describeEditor`; the listing's per-row DIRECT status; `directContainerExists`
+behind `isFullyPushed`, `isWorkspaceClean` and the integration source check (a RUNNER row answers
+false there with no call, as the by-name lookup always did); `DaemonProxyTargets.resolve`;
+`ServiceSupervisor.resolveOrigin`; and `EditorKeepalive`. A regular row there is an ERROR `direct
+placement refused for regular workspace <id>` and an `IllegalStateException`. The listing asks
+qits-containers only when the repository has a DIRECT row at all. Tests that prove the DIRECT ladder
+use **admin** rows (`createWorkspace(…, admin = true)`); the qits-776 move onto a runner
+(`DirectPlacementMove`, `MoveGate`, the `move-to-runner` door, `DirectMigrationSweep`) and its
+test-side `LegacyDirectRows` are deleted with the rows they existed for.
+
+**A discard never deletes a main workspace's branch** (qits-780): `doDiscard` keeps the ref when the
+row has no `parent` or its branch is the repository's default branch, logging that it kept it, on
+both placements. It used to push the deletion, which is why `V15` abandoned the last leftover main
+workspace in SQL rather than through the door.
 
 - **One branch per verb, at its top.** `beginEnsureContainer`, `stopContainer`, `deleteContainer`,
   `beginRecreateContainer` and `doDiscard` each test `placement == RUNNER` first and hand a RUNNER row
@@ -1664,9 +1670,11 @@ rows' DIRECT container names. `ContainerRuntime.workspaceVolumeExists` answers f
   `EDGE_PLANE_UNCONFIGURED` and queues nothing. Its credential is the row's workspace token
   (`QITS_TOKEN`, `QITS_TOKEN_SUBJECT`, the git helper on the plane's githost), and it carries the
   DIRECT spec's daemon API token and two path bases; none of the DIRECT pair block.
-- **No direct path for a RUNNER row** (qits-812): `DaemonProxyTargets` answers `NOT_CONNECTED`
-  without asking the runtime, and `ContainerProxyRoute` answers 503 "workspace daemon not connected"
-  when the tunnel is not there.
+- **No direct path to any daemon** (qits-812, qits-780): `DaemonProxyTargets` never answers an
+  origin. A RUNNER row is `NOT_CONNECTED` without asking the runtime, a DIRECT one asks only whether
+  its container runs (`NO_CONTAINER`, 502 "not running"), and `ContainerProxyRoute` and
+  `DaemonAgentClient` answer a missing tunnel as 503 "workspace daemon not connected" / unreachable.
+  The `container:13338` fallback and `qits.workspace.daemon-api-port` are deleted.
 
 ### The runners themselves: the doors, the socket and the pin (qits-848/850/851/859)
 

@@ -40,7 +40,6 @@ public class WorkspaceBootstrapRunControllerTest {
   private Seeded workspace(String label) throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     workspaceService.createWorkspace(repoId, label, "master", label);
     return new Seeded(repoId, label, workspaceIds.of(repoId, label));
   }

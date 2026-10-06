@@ -1,9 +1,9 @@
 package eu.wohlben.qits.workspaces.daemonhost;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
-import eu.wohlben.qits.workspaces.control.LegacyDirectRows;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
@@ -66,14 +66,11 @@ class DaemonControlSocketAgentBindingTest {
   void twoCommissionedWorkspaces() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     String suffix = UUID.randomUUID().toString().substring(0, 8);
     labelA = "bind-a-" + suffix;
     labelB = "bind-b-" + suffix;
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, labelA, "master", labelA));
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, labelB, "master", labelB));
+    workspaceService.createWorkspace(repoId, labelA, "master", labelA, null, false, false, true);
+    workspaceService.createWorkspace(repoId, labelB, "master", labelB, null, false, false, true);
     rowA = workspaceIds.of(repoId, labelA);
     rowB = workspaceIds.of(repoId, labelB);
     clientA = "dyn-workspace-" + rowA + "-" + suffix;
@@ -121,21 +118,26 @@ class DaemonControlSocketAgentBindingTest {
   }
 
   @Test
-  void theLegacyPathBindsTheAgentToItsOwnWorkspaceToo() throws Exception {
+  void theLegacyLabelPathIsGone() throws Exception {
+    // LegacyDaemonControlSocket was deleted in qits-780: no daemon had dialled it in a week, and
+    // every live daemon carries the id-addressed URL. Its own agent's bearer opens nothing there.
     String token = DaemonMachineTokens.tokenWithRoles(clientA, AGENT, PLATFORM_AUDIENCE);
 
-    assertEquals(101, connect("/api/workspace-daemon/" + labelA, token));
-    assertEquals(403, connect("/api/workspace-daemon/" + labelB, token));
+    assertNotEquals(101, connect("/api/workspace-daemon/" + labelA, token));
   }
 
   // --- a RUNNER row binds its token subject (qits-625, qits-812) ---------------------------------
 
-  /** Row A turned RUNNER, holding a workspace token with {@code subject} (and its stale client). */
+  /**
+   * Row A turned a regular RUNNER row (an admin row is never RUNNER), holding a workspace token
+   * with {@code subject} (and its stale client).
+   */
   private void runnerWithToken(Long rowId, String subject) {
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
               var row = workspaceRepository.findActiveById(rowId).orElseThrow();
+              row.admin = false;
               row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
               row.commissionedTokenId = "tok-id-" + rowId;
               row.commissionedTokenSubject = subject;

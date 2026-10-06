@@ -43,6 +43,7 @@ public class ReleasedBranchResolutionTest {
   @Inject FakeCredentialCommissioner commissioner;
   @Inject WorkspaceCredentials credentials;
   @Inject WorkspaceIds workspaceIds;
+  @Inject eu.wohlben.qits.workspaces.persistence.WorkspaceRepository workspaceRepository;
   @Inject WorkspaceService workspaceService;
   @Inject WorkspaceHistoryService history;
   @Inject ContainerRuntime containers;
@@ -68,7 +69,6 @@ public class ReleasedBranchResolutionTest {
   private String clonedRepo() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     return repoId;
   }
 
@@ -85,8 +85,7 @@ public class ReleasedBranchResolutionTest {
   @Test
   public void aWorkspaceOnTheReleasedBranchResolvesAsIntegrated() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     Long rowId = workspaceIds.of(repoId, "feat");
     workspaceService.ensureContainer(rowId);
     String container = containers.containerName("feat", repoId);
@@ -130,8 +129,7 @@ public class ReleasedBranchResolutionTest {
   @Test
   public void theBranchIsLeftAloneBecauseTheReleaseAlreadyDeletedIt() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
 
     workspaceService.resolveReleasedBranch(repoId, "feat", "2026.905.120000", null, null);
 
@@ -143,8 +141,7 @@ public class ReleasedBranchResolutionTest {
   @Test
   public void aBranchWithNoWorkspaceIsTheOrdinaryAnswerAndNothingIsTornDown() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
 
     WorkspaceService.BranchResolution answer =
@@ -164,6 +161,20 @@ public class ReleasedBranchResolutionTest {
   @Test
   public void theMainWorkspaceIsRefusedBecauseItHasNoParent() throws Exception {
     String repoId = clonedRepo();
+    // A parentless row on master, as the retired per-project editor's main workspaces were written
+    // (their create is gone, qits-780): RUNNER, since an ACTIVE regular row is never DIRECT now.
+    io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              eu.wohlben.qits.workspaces.entity.Workspace main =
+                  new eu.wohlben.qits.workspaces.entity.Workspace();
+              main.workspaceId = "master";
+              main.repositoryId = repoId;
+              main.parent = null;
+              main.branch = "master";
+              main.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
+              workspaceRepository.persist(main);
+            });
     repositories.setMainBranch(repoId, "trunk");
 
     BadRequestException refused =
@@ -185,8 +196,7 @@ public class ReleasedBranchResolutionTest {
   @Test
   public void aWorkspaceOnTheDefaultBranchIsRefusedEvenWithAParent() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     repositories.setMainBranch(repoId, "feat");
 
     BadRequestException refused =
@@ -204,8 +214,7 @@ public class ReleasedBranchResolutionTest {
   @Test
   public void aSecondCallAfterTheResolutionAnswersFalse() throws Exception {
     String repoId = clonedRepo();
-    LegacyDirectRows.direct(() ->
-        workspaceService.createWorkspace(repoId, "feat", "master", "feat", null));
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     Long rowId = workspaceIds.of(repoId, "feat");
     workspaceService.ensureContainer(rowId);
 

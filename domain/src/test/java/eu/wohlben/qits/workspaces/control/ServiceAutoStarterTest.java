@@ -63,7 +63,6 @@ public class ServiceAutoStarterTest {
   private String repoWithWorkspace() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createMainWorkspace(repoId, "master");
     workspaceService.createWorkspace(repoId, "work", "master", "work");
     return repoId;
   }
