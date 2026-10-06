@@ -169,9 +169,21 @@ public class DispatchService {
    * @param agentLaunch what happened about the agent
    * @param technicalProcessId the container start this call joined or began, to watch at {@code
    *     /workspaces/api/technical-processes/{id}/events}; null when no start was needed
+   * @param agentIdentity the principal the dispatched agent's own calls are stamped with —
+   *     {@code DaemonAgentBindingCheck}'s own reading of the row, read here because that class is
+   *     a {@code service}-module concern this one may not depend on: the workspace token's subject
+   *     on a RUNNER row ({@code commissioned_token_subject}, the {@code sub} the edge puts on the
+   *     JWT it mints for the token), the idp client commissioned for it on a DIRECT row
+   *     ({@code commissioned_client_id}) otherwise. Null before either is commissioned — before the
+   *     first provision, after a teardown, and in a deployment with no issuer wired. Never a secret:
+   *     both are names, not credentials
    */
   public record Dispatch(
-      WorkspaceDto workspace, boolean fresh, AgentLaunch agentLaunch, String technicalProcessId) {}
+      WorkspaceDto workspace,
+      boolean fresh,
+      AgentLaunch agentLaunch,
+      String technicalProcessId,
+      String agentIdentity) {}
 
   /**
    * What {@link #deliver} answers: which workspace was spoken to, what was done about it, and a
@@ -509,7 +521,8 @@ public class DispatchService {
     if (state == WorkspaceAgentLauncher.AgentState.RUNNING) {
       // Somebody is already working here. Launching beside them would put two agents on one
       // checkout, which is a merge conflict with itself.
-      return new Dispatch(view(rowId), fresh, AgentLaunch.SKIPPED_RUNNING, activeProcess(rowId));
+      return new Dispatch(
+          view(rowId), fresh, AgentLaunch.SKIPPED_RUNNING, activeProcess(rowId), agentIdentity(rowId));
     }
 
     String technicalProcessId = activeProcess(rowId);
@@ -522,7 +535,8 @@ public class DispatchService {
       technicalProcessId = workspaces.beginEnsureContainer(rowId);
     }
     schedule(rowId, instruction);
-    return new Dispatch(view(rowId), fresh, AgentLaunch.SCHEDULED, technicalProcessId);
+    return new Dispatch(
+        view(rowId), fresh, AgentLaunch.SCHEDULED, technicalProcessId, agentIdentity(rowId));
   }
 
   /**
@@ -533,6 +547,29 @@ public class DispatchService {
    */
   private WorkspaceDto view(Long rowId) {
     return QuarkusTransaction.requiringNew().call(() -> workspaces.getWorkspace(rowId));
+  }
+
+  /**
+   * {@link Dispatch#agentIdentity}: the principal the row's own container is bound to, read the
+   * same way {@code DaemonAgentBindingCheck.boundSubjectOf} reads it for the non-legacy path — this
+   * module may not depend on that class, which is in {@code service}, so the rule is restated here
+   * rather than shared. A RUNNER row carries no commissioned client at all ({@link
+   * WorkspaceCredential} is the DIRECT pair's own type), so its workspace token's subject is the
+   * one name that matches what the container actually presents; a DIRECT row has no token, so its
+   * commissioned client id is. Read in a transaction of its own for {@link #view}'s reason.
+   */
+  private String agentIdentity(Long rowId) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                workspaceRepository
+                    .findActiveById(rowId)
+                    .map(
+                        w ->
+                            w.placement == WorkspacePlacement.RUNNER
+                                ? w.commissionedTokenSubject
+                                : w.commissionedClientId)
+                    .orElse(null));
   }
 
   /**
