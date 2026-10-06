@@ -84,7 +84,7 @@
              (qits-runner-protocol), and the install script template plus RunnerIdentity
              (qits-runner-toolkit). One release carries both, so one property pins both. -->
         <qits.runner.version>2026.1004.235414</qits.runner.version>
-        <qits.coding-agents.version>2026.1005.130142</qits.coding-agents.version>
+        <qits.coding-agents.version>2026.1006.54410</qits.coding-agents.version>
         <qits.eventstream.version>2026.1003.44717</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
