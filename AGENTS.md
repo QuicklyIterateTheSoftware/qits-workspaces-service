@@ -174,6 +174,14 @@ inline `runtime_status` check is replaced by `ck_workspace_runtime_status`, whic
 and never set beside it. Columns on a `CausedRow` again; see "The credential a workspace container
 holds".
 
+**`V14__runner_workspace_memory_limits.sql` adds `workspace_memory_limit` and
+`workspace_memory_swap_limit` to `workspace_runner`** (qits-951), qits-ci's `step_memory_limit`
+pointed at workspaces: nullable docker sizes an operator sets per runner, null meaning the platform's
+`qits.workspace.memory-limit`/`memory-swap-limit`. `WorkspaceRunners` validates them (a swap needs a
+memory and is at least it, or `-1`); `RunnerReservations` reads the row at each take and
+`RunnerWorkspaceSpecs.limitsFor` lays it over the defaults, a memory with no swap being a hard cap.
+DIRECT workspaces never read them. Columns on a `CausedRow`, so no `ArchRulesTest` decision.
+
 **The target is PostgreSQL 18.4** — the tag `components/qits-database/qits-database-oci` is built
 from, and the version the suites' embedded binaries are, so a migration is proved against the engine it ships on.
 Two H2 habits are gone with it: a rule that applies to some rows is a **partial unique index** now

@@ -1,0 +1,29 @@
+-- A runner may give its workspaces more (or less) memory than the platform's default (qits-951),
+-- qits-ci's V26__runner_step_memory_limit.sql pointed at workspace containers.
+--
+-- WHY PER RUNNER. Every workspace container is capped by two global keys, qits.workspace.memory-limit
+-- (4g) and qits.workspace.memory-swap-limit (8g), sent as the spec's --memory and --memory-swap.
+-- Those are sized for the platform host, which a DIRECT workspace shares with every platform
+-- service; a runner is a machine a person owns, and on a 16 GiB runner host real agent sessions
+-- were still OOM-killed at 4g. What a node can give a workspace is the node's, so the cap becomes
+-- the runner's to override.
+--
+--   workspace_memory_limit       the --memory this runner's workspaces get, as a docker size
+--                                string ("12g", "12288m"); WorkspaceRunners.MEMORY_LIMIT is the
+--                                grammar and the only writer. NULL means "the platform default,
+--                                qits.workspace.memory-limit".
+--   workspace_memory_swap_limit  the --memory-swap, docker's TOTAL of memory plus swap, the same
+--                                grammar or -1 for unlimited swap. NULL means: the row's own
+--                                memory when that is set (a hard cap, so a row's 12g is never paired
+--                                with the default 8g, which docker refuses), and otherwise the
+--                                platform default, qits.workspace.memory-swap-limit.
+--
+-- Nothing is backfilled, so no workspace anywhere gets a different cap until an operator sets one.
+-- Both are read off the row when a runner takes a workspace, so an edit reaches the next launch and
+-- never a running container. A DIRECT workspace has no runner row and never reads either.
+-- varchar(32): sixteen characters is the grammar's widest value. No check constraint: the door
+-- validates, and the cross-field rule (swap at least memory) needs the sizes parsed.
+--
+-- Columns on an entity that is already a CausedRow, so no ArchRulesTest decision.
+alter table workspace_runner add column workspace_memory_limit varchar(32);
+alter table workspace_runner add column workspace_memory_swap_limit varchar(32);

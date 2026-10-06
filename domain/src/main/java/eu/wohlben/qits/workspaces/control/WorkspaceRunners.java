@@ -49,6 +49,12 @@ import java.util.regex.Pattern;
  * is sticky to its runner because its volume lives on that node; deleting the runner would strand
  * it. A resolved workspace naming the runner never holds it up: {@code workspace.runner_id} has no
  * foreign key.
+ *
+ * <p><b>The workspace memory limits are the operator's, per runner</b> (qits-951), as qits-ci's
+ * step memory limit is: two docker sizes on the row, validated at create and patch ({@link
+ * #MEMORY_LIMIT}, {@link #requireMemoryPair}), and read by {@code RunnerWorkspaceSpecs} when a
+ * runner takes a workspace. Unset is the platform's own {@code qits.workspace.memory-limit} and
+ * {@code memory-swap-limit}.
  */
 @ApplicationScoped
 public class WorkspaceRunners {
@@ -68,6 +74,24 @@ public class WorkspaceRunners {
    * first health check says it can.
    */
   public static final String AWAITING_FIRST_HEALTH_CHECK = "awaiting first health check";
+
+  /**
+   * A runner's workspace memory limit, and its swap limit: qits-ci's {@code STEP_MEMORY_LIMIT}
+   * grammar — digits and an optional {@code b}, {@code k}, {@code m} or {@code g} — the docker size
+   * a runner passes on as {@code --memory}/{@code --memory-swap} (qits-951). Checked here, at the
+   * door, so a typo is a 400 to the operator rather than a launch the runner's docker refuses.
+   */
+  public static final Pattern MEMORY_LIMIT = Pattern.compile("[0-9]{1,15}[bkmgBKMG]?");
+
+  /**
+   * The smallest memory limit a runner's workspaces are given, in bytes: docker's own floor for
+   * {@code --memory} (6 MiB). It is also why {@code 0}, which some docker versions read as "no limit
+   * at all", is not a value here.
+   */
+  public static final long MEMORY_LIMIT_MIN_BYTES = 6L * 1024 * 1024;
+
+  /** The one swap limit that is not a size: docker's {@code --memory-swap -1}, unlimited swap. */
+  public static final String UNLIMITED_SWAP = "-1";
 
   @Inject WorkspaceRunnerRepository runners;
 
@@ -98,13 +122,129 @@ public class WorkspaceRunners {
   }
 
   /**
+   * 400 unless {@code limit} is a workspace memory limit a runner can apply — see {@link
+   * #MEMORY_LIMIT} and {@link #MEMORY_LIMIT_MIN_BYTES}. Null and blank pass: both mean the platform
+   * default, and which of "leave it" or "clear it" they are is the caller's.
+   */
+  public static void requireWorkspaceMemoryLimit(String limit) {
+    requireMemorySize("workspaceMemoryLimit", limit, false);
+  }
+
+  /**
+   * 400 unless {@code limit} is a workspace swap limit: a {@link #MEMORY_LIMIT} size, or {@link
+   * #UNLIMITED_SWAP}. Null and blank pass, as for {@link #requireWorkspaceMemoryLimit}. Whether it
+   * fits the memory limit beside it is {@link #requireMemoryPair}'s, on the row's resulting values.
+   */
+  public static void requireWorkspaceMemorySwapLimit(String limit) {
+    requireMemorySize("workspaceMemorySwapLimit", limit, true);
+  }
+
+  /**
+   * 400 unless the two limits a row would hold go together. Docker's {@code --memory-swap} is the
+   * TOTAL of memory and swap, so a set swap below the memory is refused, and a set swap with no
+   * memory of the row's own is refused too: it would be paired with the platform's default memory,
+   * a value this row does not state and an operator can change under it. {@link #UNLIMITED_SWAP}
+   * fits any memory, the default included. Both arguments are stored values: trimmed, null for
+   * unset, each already valid on its own.
+   */
+  public static void requireMemoryPair(String memory, String swap) {
+    if (swap == null || UNLIMITED_SWAP.equals(swap)) {
+      return;
+    }
+    if (memory == null) {
+      throw new BadRequestException(
+          "workspaceMemorySwapLimit needs workspaceMemoryLimit: the swap limit is memory plus swap,"
+              + " so it is set only beside a memory limit of the runner's own (or -1 for unlimited"
+              + " swap)");
+    }
+    if (bytesOf(swap) < bytesOf(memory)) {
+      throw new BadRequestException(
+          "workspaceMemorySwapLimit is memory plus swap, so it cannot be below"
+              + " workspaceMemoryLimit ("
+              + swap
+              + " < "
+              + memory
+              + ")");
+    }
+  }
+
+  private static void requireMemorySize(String field, String limit, boolean unlimitedAllowed) {
+    if (limit == null || limit.isBlank()) {
+      return;
+    }
+    String value = limit.strip();
+    if (unlimitedAllowed && UNLIMITED_SWAP.equals(value)) {
+      return;
+    }
+    if (!MEMORY_LIMIT.matcher(value).matches()) {
+      throw new BadRequestException(
+          field
+              + " is a docker size: digits and an optional unit b, k, m or g (e.g. 12g, 12288m)"
+              + (unlimitedAllowed ? ", -1 for unlimited swap," : ",")
+              + " or blank for the platform default");
+    }
+    long bytes = bytesOf(value);
+    if (bytes < 0) {
+      throw new BadRequestException(field + " " + value + " is larger than any machine");
+    }
+    if (bytes < MEMORY_LIMIT_MIN_BYTES) {
+      throw new BadRequestException(
+          field + " is at least 6m — docker refuses a smaller --memory");
+    }
+  }
+
+  /**
+   * A {@link #MEMORY_LIMIT} size in bytes, or -1 when it overflows a long. Only ever asked about a
+   * value the grammar has already matched.
+   */
+  static long bytesOf(String size) {
+    char unit = Character.toLowerCase(size.charAt(size.length() - 1));
+    long factor =
+        switch (unit) {
+          case 'k' -> 1024L;
+          case 'm' -> 1024L * 1024;
+          case 'g' -> 1024L * 1024 * 1024;
+          default -> 1L;
+        };
+    String digits = Character.isDigit(unit) ? size : size.substring(0, size.length() - 1);
+    long amount = Long.parseLong(digits);
+    if (amount > Long.MAX_VALUE / factor) {
+      return -1;
+    }
+    return amount * factor;
+  }
+
+  /** The value a memory limit is stored as: trimmed, and null for null or blank. */
+  static String memoryLimitOf(String limit) {
+    return limit == null || limit.isBlank() ? null : limit.strip();
+  }
+
+  /**
    * Everything a create can be refused for, asked <b>before</b> a registration token is
    * commissioned: a malformed name, slots or description (400), and a taken name (409).
    */
   public void requireCreatable(String name, String description, Integer slots) {
+    requireCreatable(name, description, slots, null, null);
+  }
+
+  /**
+   * {@link #requireCreatable(String, String, Integer)}, and the two workspace memory limits with it
+   * (400 for a malformed one, or a pair that does not fit — {@link #requireMemoryPair}). Null or
+   * blank is unset: the platform default.
+   */
+  public void requireCreatable(
+      String name,
+      String description,
+      Integer slots,
+      String workspaceMemoryLimit,
+      String workspaceMemorySwapLimit) {
     requireName(name);
     requireSlots(slots);
     requireDescription(description);
+    requireWorkspaceMemoryLimit(workspaceMemoryLimit);
+    requireWorkspaceMemorySwapLimit(workspaceMemorySwapLimit);
+    requireMemoryPair(
+        memoryLimitOf(workspaceMemoryLimit), memoryLimitOf(workspaceMemorySwapLimit));
     boolean taken =
         QuarkusTransaction.requiringNew().call(() -> runners.findByName(name).isPresent());
     if (taken) {
@@ -126,7 +266,26 @@ public class WorkspaceRunners {
       Integer slots,
       String registrationTokenId,
       String registrationTokenSubject) {
-    requireCreatable(name, description, slots);
+    return create(
+        id, name, description, slots, null, null, registrationTokenId, registrationTokenSubject);
+  }
+
+  /**
+   * {@link #create(UUID, String, String, Integer, String, String)}, with the runner's two workspace
+   * memory limits: null or blank leaves each unset, the platform default.
+   *
+   * @throws ConflictException when the name was taken in between
+   */
+  public WorkspaceRunner create(
+      UUID id,
+      String name,
+      String description,
+      Integer slots,
+      String workspaceMemoryLimit,
+      String workspaceMemorySwapLimit,
+      String registrationTokenId,
+      String registrationTokenSubject) {
+    requireCreatable(name, description, slots, workspaceMemoryLimit, workspaceMemorySwapLimit);
     try {
       return QuarkusTransaction.requiringNew()
           .call(
@@ -136,6 +295,8 @@ public class WorkspaceRunners {
                 runner.name = name;
                 runner.description = blankToNull(description);
                 runner.slots = slots == null ? DEFAULT_SLOTS : slots;
+                runner.workspaceMemoryLimit = memoryLimitOf(workspaceMemoryLimit);
+                runner.workspaceMemorySwapLimit = memoryLimitOf(workspaceMemorySwapLimit);
                 runner.registrationTokenId = registrationTokenId;
                 runner.registrationTokenSubject = registrationTokenSubject;
                 runner.createdAt = Instant.now();
@@ -189,18 +350,51 @@ public class WorkspaceRunners {
    * slots is the caller's.
    */
   public WorkspaceRunner patch(UUID id, Integer slots, String description) {
+    return patch(id, slots, description, null, null);
+  }
+
+  /**
+   * {@link #patch(UUID, Integer, String)}, and the two workspace memory limits with it, each as
+   * qits-ci patches a step memory limit: null leaves it, blank clears it back to the platform
+   * default, anything else must be a {@link #MEMORY_LIMIT} (or, for the swap, {@link
+   * #UNLIMITED_SWAP}). The pair is checked as the row would hold it after the change ({@link
+   * #requireMemoryPair}), so clearing the memory under a set swap is refused as setting a swap below
+   * a stored memory is, and nothing is written. Nothing is pushed to a connected runner: the limits
+   * travel in each {@code take}, read off the row when the runner takes a workspace, so a change
+   * reaches its next launch and never a container already running.
+   */
+  public WorkspaceRunner patch(
+      UUID id,
+      Integer slots,
+      String description,
+      String workspaceMemoryLimit,
+      String workspaceMemorySwapLimit) {
     requireSlots(slots);
     requireDescription(description);
+    requireWorkspaceMemoryLimit(workspaceMemoryLimit);
+    requireWorkspaceMemorySwapLimit(workspaceMemorySwapLimit);
     return QuarkusTransaction.requiringNew()
         .call(
             () -> {
               WorkspaceRunner runner = found(id);
+              String memory =
+                  workspaceMemoryLimit == null
+                      ? runner.workspaceMemoryLimit
+                      : memoryLimitOf(workspaceMemoryLimit);
+              String swap =
+                  workspaceMemorySwapLimit == null
+                      ? runner.workspaceMemorySwapLimit
+                      : memoryLimitOf(workspaceMemorySwapLimit);
+              // Before any field moves: a refusal throws out of the transaction, which rolls back.
+              requireMemoryPair(memory, swap);
               if (slots != null) {
                 runner.slots = slots;
               }
               if (description != null) {
                 runner.description = blankToNull(description);
               }
+              runner.workspaceMemoryLimit = memory;
+              runner.workspaceMemorySwapLimit = swap;
               return runner;
             });
   }

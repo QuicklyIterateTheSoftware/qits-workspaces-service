@@ -114,6 +114,127 @@ public class WorkspaceRunnersTest {
     assertNull(drained.description, "a blank description clears it");
   }
 
+  // --- the workspace memory limits (qits-951) -----------------------------------------------------
+
+  @Test
+  public void aWorkspaceMemoryLimitIsADockerSizeOfAtLeast6m() {
+    for (String accepted : new String[] {null, "", "  ", "6m", "12g", "12G", "12288m", " 16g "}) {
+      assertDoesNotThrow(() -> WorkspaceRunners.requireWorkspaceMemoryLimit(accepted), accepted);
+      assertDoesNotThrow(
+          () -> WorkspaceRunners.requireWorkspaceMemorySwapLimit(accepted), accepted);
+    }
+    for (String refused :
+        new String[] {"0", "5m", "6291455", "12gb", "1.5g", "-1", "twelve", "99999999999999999g"}) {
+      BadRequestException e =
+          assertThrows(
+              BadRequestException.class,
+              () -> WorkspaceRunners.requireWorkspaceMemoryLimit(refused),
+              refused);
+      assertEquals(400, e.statusCode());
+      assertTrue(e.getMessage().startsWith("workspaceMemoryLimit"), e.getMessage());
+    }
+    assertDoesNotThrow(() -> WorkspaceRunners.requireWorkspaceMemorySwapLimit("-1"));
+    assertDoesNotThrow(() -> WorkspaceRunners.requireWorkspaceMemorySwapLimit(" -1 "));
+    BadRequestException swap =
+        assertThrows(
+            BadRequestException.class, () -> WorkspaceRunners.requireWorkspaceMemorySwapLimit("-2"));
+    assertTrue(swap.getMessage().startsWith("workspaceMemorySwapLimit"), swap.getMessage());
+  }
+
+  @Test
+  public void aSwapLimitIsAtLeastTheMemoryAndNeedsOne() {
+    assertDoesNotThrow(() -> WorkspaceRunners.requireMemoryPair(null, null));
+    assertDoesNotThrow(() -> WorkspaceRunners.requireMemoryPair("12g", null));
+    assertDoesNotThrow(() -> WorkspaceRunners.requireMemoryPair("12g", "12g"));
+    assertDoesNotThrow(() -> WorkspaceRunners.requireMemoryPair("12g", "12289m"));
+    assertDoesNotThrow(() -> WorkspaceRunners.requireMemoryPair("12g", "-1"));
+    assertDoesNotThrow(
+        () -> WorkspaceRunners.requireMemoryPair(null, "-1"), "unlimited fits the default too");
+
+    BadRequestException below =
+        assertThrows(
+            BadRequestException.class, () -> WorkspaceRunners.requireMemoryPair("12g", "8g"));
+    assertTrue(below.getMessage().contains("cannot be below workspaceMemoryLimit"), below.getMessage());
+    BadRequestException alone =
+        assertThrows(
+            BadRequestException.class, () -> WorkspaceRunners.requireMemoryPair(null, "16g"));
+    assertTrue(alone.getMessage().contains("needs workspaceMemoryLimit"), alone.getMessage());
+  }
+
+  @Test
+  public void createStoresTheLimitsTrimmedAndRefusesAPairThatDoesNotFit() {
+    String name = uniqueName();
+    assertThrows(
+        BadRequestException.class, () -> runners.requireCreatable(name, null, 1, "12g", "8g"));
+    assertThrows(
+        BadRequestException.class, () -> runners.requireCreatable(name, null, 1, null, "8g"));
+    assertThrows(
+        BadRequestException.class, () -> runners.requireCreatable(name, null, 1, "4", null));
+    UUID refusedId = UUID.randomUUID();
+    assertThrows(
+        BadRequestException.class,
+        () -> runners.create(refusedId, name, null, 1, "12g", "8g", "t-" + refusedId, "s"));
+    assertFalse(runnerExists(refusedId), "a refused create writes no row");
+
+    UUID id = UUID.randomUUID();
+    runners.create(id, name, null, 1, " 12g ", "16g", "token-" + id, "sub-" + id);
+    createdRunners.add(id);
+    WorkspaceRunner stored = runners.get(id);
+    assertEquals("12g", stored.workspaceMemoryLimit);
+    assertEquals("16g", stored.workspaceMemorySwapLimit);
+    WorkspaceRunnerDto view = runners.view(stored);
+    assertEquals("12g", view.workspaceMemoryLimit());
+    assertEquals("16g", view.workspaceMemorySwapLimit());
+
+    WorkspaceRunner unset = create(uniqueName());
+    assertNull(runners.get(unset.id).workspaceMemoryLimit, "nothing is the platform default");
+    assertNull(runners.get(unset.id).workspaceMemorySwapLimit);
+    UUID blankId = UUID.randomUUID();
+    runners.create(blankId, uniqueName(), null, 1, " ", "", "token-" + blankId, "sub-" + blankId);
+    createdRunners.add(blankId);
+    assertNull(runners.get(blankId).workspaceMemoryLimit, "blank is unset");
+    assertNull(runners.get(blankId).workspaceMemorySwapLimit);
+  }
+
+  @Test
+  public void patchLeavesOnNullClearsOnBlankAndChecksThePairItWouldLeave() {
+    WorkspaceRunner runner = create(uniqueName());
+
+    WorkspaceRunner set = runners.patch(runner.id, null, null, "12g", null);
+    assertEquals("12g", set.workspaceMemoryLimit);
+    assertNull(set.workspaceMemorySwapLimit);
+
+    set = runners.patch(runner.id, null, null, null, "16g");
+    assertEquals("12g", set.workspaceMemoryLimit, "null leaves the memory");
+    assertEquals("16g", set.workspaceMemorySwapLimit);
+
+    // The resulting pair is what is checked: a memory raised above the stored swap is refused, and
+    // clearing the memory under a set swap is too — and neither writes anything.
+    assertThrows(BadRequestException.class, () -> runners.patch(runner.id, 3, null, "20g", null));
+    assertThrows(BadRequestException.class, () -> runners.patch(runner.id, 3, null, "", null));
+    WorkspaceRunner unchanged = runners.get(runner.id);
+    assertEquals("12g", unchanged.workspaceMemoryLimit);
+    assertEquals("16g", unchanged.workspaceMemorySwapLimit);
+    assertEquals(WorkspaceRunners.DEFAULT_SLOTS, unchanged.slots, "a refused patch moves nothing");
+
+    WorkspaceRunner both = runners.patch(runner.id, null, null, "20g", "24g");
+    assertEquals("20g", both.workspaceMemoryLimit);
+    assertEquals("24g", both.workspaceMemorySwapLimit);
+
+    WorkspaceRunner unlimited = runners.patch(runner.id, null, null, null, "-1");
+    assertEquals("-1", unlimited.workspaceMemorySwapLimit);
+
+    assertThrows(BadRequestException.class, () -> runners.patch(runner.id, null, null, "5m", null));
+
+    WorkspaceRunner cleared = runners.patch(runner.id, null, null, "", "");
+    assertNull(cleared.workspaceMemoryLimit, "blank clears it back to the platform default");
+    assertNull(cleared.workspaceMemorySwapLimit);
+    assertNull(runners.get(runner.id).workspaceMemoryLimit);
+
+    WorkspaceRunner described = runners.patch(runner.id, 2, "only slots");
+    assertNull(described.workspaceMemoryLimit, "the old patch leaves the limits alone");
+  }
+
   // --- registration and standing ------------------------------------------------------------------
 
   @Test

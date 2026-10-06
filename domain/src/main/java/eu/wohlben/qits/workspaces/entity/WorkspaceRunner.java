@@ -65,6 +65,24 @@ public class WorkspaceRunner extends PanacheEntityBase implements CausedRow {
   @Column(nullable = false)
   public int slots;
 
+  /**
+   * The {@code --memory} this runner's workspace containers get, as a docker size string ({@code
+   * 12g}, {@code 12288m}); see {@code WorkspaceRunners.MEMORY_LIMIT}. Null is the platform's own
+   * {@code qits.workspace.memory-limit}. Read when a runner takes a workspace, so a change reaches
+   * the next launch. See {@code V14__runner_workspace_memory_limits.sql}.
+   */
+  @Column(name = "workspace_memory_limit", length = 32)
+  public String workspaceMemoryLimit;
+
+  /**
+   * The {@code --memory-swap} this runner's workspace containers get: docker's total of memory plus
+   * swap, the same grammar or {@code -1} for unlimited swap. Null is {@link #workspaceMemoryLimit}
+   * when that is set (no swap beyond it) and the platform's {@code qits.workspace.memory-swap-limit}
+   * otherwise; {@code RunnerWorkspaceSpecs.limitsFor} is that rule.
+   */
+  @Column(name = "workspace_memory_swap_limit", length = 32)
+  public String workspaceMemorySwapLimit;
+
   /** What the runner last said about itself, as a JSON object's text; null until it registers. */
   @JdbcTypeCode(SqlTypes.JSON)
   @Column(columnDefinition = "jsonb")

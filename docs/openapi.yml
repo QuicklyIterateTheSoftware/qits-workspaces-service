@@ -200,6 +200,17 @@ components:
           format: int32
           description: How many workspaces it may run at once; 0 drains it. Default
             1
+        workspaceMemoryLimit:
+          type: string
+          description: "The --memory its workspace containers get, a docker size:\
+            \ digits and an optional unit b, k, m or g (e.g. 12g), at least 6m. Absent\
+            \ or blank is the platform default"
+        workspaceMemorySwapLimit:
+          type: string
+          description: "Their --memory-swap: memory plus swap, the same grammar and\
+            \ at least workspaceMemoryLimit, which it needs; or -1 for unlimited swap.\
+            \ Absent or blank is workspaceMemoryLimit when that is set (no swap),\
+            \ else the platform default"
     CreateWorkspaceRequest:
       type: object
       required:
@@ -507,6 +518,16 @@ components:
         description:
           type: string
           description: Blank clears it; absent leaves it
+        workspaceMemoryLimit:
+          type: string
+          description: "A docker size (e.g. 12g, at least 6m); blank clears it back\
+            \ to the platform default; absent leaves it. Reaches the next workspace\
+            \ launched on the runner, never a running one"
+        workspaceMemorySwapLimit:
+          type: string
+          description: "Memory plus swap, a docker size at least the resulting workspaceMemoryLimit,\
+            \ which it needs; or -1 for unlimited swap. Blank clears it; absent leaves\
+            \ it"
     PromptAttachmentSource:
       type: string
       enum:
@@ -1075,6 +1096,10 @@ components:
         slots:
           type: integer
           format: int32
+        workspaceMemoryLimit:
+          type: string
+        workspaceMemorySwapLimit:
+          type: string
         version:
           type: string
         arch:
@@ -1799,7 +1824,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RunnerRegistrationDto"
         "400":
-          description: "A malformed name, slots or description"
+          description: "A malformed name, slots, description or memory limit, or a\
+            \ swap limit that does not fit the memory limit"
         "409":
           description: The name is taken
         "502":
@@ -1848,7 +1874,8 @@ paths:
         - qits:agent
   /workspaces/api/runners/{id}:
     patch:
-      summary: Change a workspace runner's slots or description
+      summary: "Change a workspace runner's slots, description or workspace memory\
+        \ limits"
       parameters:
       - name: id
         in: path
@@ -1869,7 +1896,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/WorkspaceRunnerDto"
         "400":
-          description: Negative slots or an overlong description
+          description: "Negative slots, an overlong description, a malformed memory\
+            \ limit, or limits that would not fit together once applied"
         "404":
           description: No such runner
         "401":
@@ -2951,4 +2979,4 @@ paths:
         - qits:admin
 info:
   title: qits-workspaces API
-  version: 2026.1005.112909
+  version: 2026.1005.203201

@@ -5,6 +5,7 @@ import eu.wohlben.qits.workspaces.control.RunnerClaims;
 import eu.wohlben.qits.workspaces.control.RunnerLaunchSpec;
 import eu.wohlben.qits.workspaces.control.RunnerWorkspaceSpecs;
 import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes;
+import eu.wohlben.qits.workspaces.control.WorkspaceRunners;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspacesrunner.protocol.Mount;
 import eu.wohlben.qits.workspacesrunner.protocol.Take;
@@ -31,6 +32,11 @@ import org.jboss.logging.Logger;
  * an {@code EdgePlaneUnconfigured} domain among the reasons — is failed on the spot ({@link
  * RunnerClaims#launchFailed}), so it frees its slot and says why, rather than sitting PROVISIONING.
  *
+ * <p><b>The memory limits are read off the runner's row here, at the take</b> (qits-951): the
+ * session's copy is the one it was greeted with, and an operator's edit since must reach this
+ * launch. A row read fresh per take is qits-ci's reading of a step memory limit when the step
+ * starts; a container already running keeps what it was launched with.
+ *
  * <p>A draining connection — told to upgrade — takes nothing whatever it asks, and neither does a
  * deployment that knows no public domain to name the image by. After a take, the runner is sent a
  * fresh {@code estate}: the row is its own now.
@@ -47,6 +53,8 @@ public class RunnerReservations {
   @Inject WorkspaceRunnerAddresses addresses;
 
   @Inject WorkspaceAddressPlanes planes;
+
+  @Inject WorkspaceRunners runners;
 
   @Inject WorkspaceRunnerRegistry registry;
 
@@ -80,7 +88,7 @@ public class RunnerReservations {
     Workspace row = claimed.orElseThrow();
     WorkspaceSpec spec;
     try {
-      spec = wire(specs.compose(row, planes.plane()));
+      spec = wire(specs.compose(row, planes.plane(), runners.get(row.runnerId)));
     } catch (RuntimeException uncomposable) {
       LOG.errorf(
           "Runner %s took workspace %d and its launch spec could not be composed: %s",

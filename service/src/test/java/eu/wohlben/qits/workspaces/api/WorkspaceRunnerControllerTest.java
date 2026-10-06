@@ -1,10 +1,12 @@
 package eu.wohlben.qits.workspaces.api;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
+import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -200,6 +202,110 @@ class WorkspaceRunnerControllerTest {
     as("qits:system").when().delete(RUNNERS + "/" + id).then().statusCode(204);
     assertTrue(idp.lines("DELETE").contains("DELETE /api/tokens/t-2"), idp.lines().toString());
     as("qits:admin").when().get(RUNNERS + "/" + id).then().statusCode(404);
+  }
+
+  /**
+   * The workspace memory limits (qits-951): accepted at create, listed on the runner, patched with
+   * qits-ci's semantics — absent leaves, blank clears, anything else is checked — and a value or a
+   * pair that does not fit is a 400 naming the field.
+   */
+  @Test
+  void theWorkspaceMemoryLimitsAreCreatedListedPatchedAndChecked() {
+    as("qits:admin")
+        .contentType(ContentType.JSON)
+        .body(
+            Map.of(
+                "name", "pantry", "workspaceMemoryLimit", "12g", "workspaceMemorySwapLimit", "8g"))
+        .when()
+        .post(RUNNERS)
+        .then()
+        .statusCode(400)
+        .body("message", containsString("cannot be below workspaceMemoryLimit"));
+    as("qits:admin")
+        .contentType(ContentType.JSON)
+        .body(Map.of("name", "pantry", "workspaceMemoryLimit", "4"))
+        .when()
+        .post(RUNNERS)
+        .then()
+        .statusCode(400)
+        .body("message", startsWith("workspaceMemoryLimit"));
+    assertTrue(idp.requests().isEmpty(), "a refused create commissions nothing");
+
+    JsonPath created =
+        as("qits:admin")
+            .contentType(ContentType.JSON)
+            .body(
+                Map.of(
+                    "name", "pantry", "workspaceMemoryLimit", "12g", "workspaceMemorySwapLimit",
+                    "16g"))
+            .when()
+            .post(RUNNERS)
+            .then()
+            .statusCode(201)
+            .extract()
+            .jsonPath();
+    String id = created.getString("runner.id");
+    rows.track(UUID.fromString(id));
+    assertEquals("12g", created.getString("runner.workspaceMemoryLimit"));
+    assertEquals("16g", created.getString("runner.workspaceMemorySwapLimit"));
+    List<Map<String, Object>> listed =
+        as("qits:admin")
+            .when()
+            .get(RUNNERS)
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath()
+            .getList("findAll { it.id == '" + id + "' }");
+    assertEquals("12g", listed.get(0).get("workspaceMemoryLimit"));
+    assertEquals("16g", listed.get(0).get("workspaceMemorySwapLimit"));
+
+    // Absent leaves both.
+    as("qits:admin")
+        .contentType(ContentType.JSON)
+        .body(Map.of("slots", 2))
+        .when()
+        .patch(RUNNERS + "/" + id)
+        .then()
+        .statusCode(200)
+        .body("workspaceMemoryLimit", is("12g"))
+        .body("workspaceMemorySwapLimit", is("16g"));
+    // The pair it would leave is checked: memory above the stored swap is a 400, nothing moves.
+    as("qits:admin")
+        .contentType(ContentType.JSON)
+        .body(Map.of("workspaceMemoryLimit", "20g"))
+        .when()
+        .patch(RUNNERS + "/" + id)
+        .then()
+        .statusCode(400)
+        .body("message", containsString("cannot be below"));
+    as("qits:admin")
+        .contentType(ContentType.JSON)
+        .body(Map.of("workspaceMemoryLimit", ""))
+        .when()
+        .patch(RUNNERS + "/" + id)
+        .then()
+        .statusCode(400)
+        .body("message", containsString("needs workspaceMemoryLimit"));
+    as("qits:admin")
+        .contentType(ContentType.JSON)
+        .body(Map.of("workspaceMemoryLimit", "20g", "workspaceMemorySwapLimit", "-1"))
+        .when()
+        .patch(RUNNERS + "/" + id)
+        .then()
+        .statusCode(200)
+        .body("workspaceMemoryLimit", is("20g"))
+        .body("workspaceMemorySwapLimit", is("-1"));
+    // Blank clears both back to the platform default.
+    as("qits:admin")
+        .contentType(ContentType.JSON)
+        .body(Map.of("workspaceMemoryLimit", "", "workspaceMemorySwapLimit", ""))
+        .when()
+        .patch(RUNNERS + "/" + id)
+        .then()
+        .statusCode(200)
+        .body("workspaceMemoryLimit", nullValue())
+        .body("workspaceMemorySwapLimit", nullValue());
   }
 
   /**

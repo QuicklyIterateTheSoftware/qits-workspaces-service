@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
+import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -268,6 +269,68 @@ class RunnerWorkspaceSpecsTest {
         java.util.Arrays.stream(RunnerLaunchSpec.class.getRecordComponents())
             .map(java.lang.reflect.RecordComponent::getName)
             .toList());
+  }
+
+  // --- the taking runner's memory limits (qits-951) ----------------------------------------------
+
+  private static WorkspaceRunner runner(String memory, String swap) {
+    WorkspaceRunner runner = new WorkspaceRunner();
+    runner.workspaceMemoryLimit = memory;
+    runner.workspaceMemorySwapLimit = swap;
+    return runner;
+  }
+
+  private static RunnerLaunchSpec.Limits limitsOn(WorkspaceRunner runner) {
+    return specs(WorkspaceContainerFactoryGoldenSpecTest.factory())
+        .compose(row(), PLANE, runner)
+        .limits();
+  }
+
+  @Test
+  void aRunnerThatSetsBothLimitsGetsBoth() {
+    assertEquals(
+        new RunnerLaunchSpec.Limits("12g", "16g", "4096", "2", 600),
+        limitsOn(runner("12g", "16g")));
+    assertEquals(
+        new RunnerLaunchSpec.Limits("12g", "-1", "4096", "2", 600), limitsOn(runner("12g", "-1")));
+  }
+
+  @Test
+  void aRunnerThatSetsNoLimitGetsThePlatformDefaults() {
+    RunnerLaunchSpec.Limits defaults = new RunnerLaunchSpec.Limits("4g", "8g", "4096", "2", 600);
+    assertEquals(defaults, limitsOn(runner(null, null)));
+    assertEquals(defaults, limitsOn(null), "no runner row reads as one that sets nothing");
+    assertEquals(defaults, spec().limits());
+  }
+
+  /** A row's memory is never paired with the default swap: 12g beside 8g is refused by docker. */
+  @Test
+  void aRunnerThatSetsOnlyMemoryGetsSwapEqualToIt() {
+    assertEquals(
+        new RunnerLaunchSpec.Limits("12g", "12g", "4096", "2", 600), limitsOn(runner("12g", null)));
+    assertEquals(
+        new RunnerLaunchSpec.Limits("2g", "2g", "4096", "2", 600),
+        limitsOn(runner("2g", null)),
+        "a smaller memory is a hard cap too, not the default 8g of swap");
+  }
+
+  @Test
+  void anUnlimitedSwapAloneKeepsTheDefaultMemory() {
+    assertEquals(
+        new RunnerLaunchSpec.Limits("4g", "-1", "4096", "2", 600), limitsOn(runner(null, "-1")));
+  }
+
+  /** The DIRECT spec takes no runner, and keeps the configured limits whatever a runner sets. */
+  @Test
+  void aDirectSpecIsUnaffectedByAnyRunner() {
+    WorkspaceContainerFactory factory = WorkspaceContainerFactoryGoldenSpecTest.factory();
+    specs(factory).compose(row(), PLANE, runner("12g", "16g"));
+
+    WorkspaceContainer direct =
+        factory.forWorkspace("repo12345678abc", "work", 7L, "task/a", "epic/b", "qits-614");
+    assertEquals("4g", direct.memory());
+    assertEquals("8g", direct.memorySwap());
+    assertEquals(new RunnerLaunchSpec.Limits("4g", "8g", "4096", "2", 600), factory.limits());
   }
 
   @Test

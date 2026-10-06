@@ -125,11 +125,36 @@ public class WorkspaceRunnerController {
       @Schema(description = "[a-z][a-z0-9-]{0,63}, unique", required = true) String name,
       @Schema(description = "Free text, at most 1024 characters") String description,
       @Schema(description = "How many workspaces it may run at once; 0 drains it. Default 1")
-          Integer slots) {}
+          Integer slots,
+      @Schema(
+              description =
+                  "The --memory its workspace containers get, a docker size: digits and an"
+                      + " optional unit b, k, m or g (e.g. 12g), at least 6m. Absent or blank is"
+                      + " the platform default")
+          String workspaceMemoryLimit,
+      @Schema(
+              description =
+                  "Their --memory-swap: memory plus swap, the same grammar and at least"
+                      + " workspaceMemoryLimit, which it needs; or -1 for unlimited swap. Absent or"
+                      + " blank is workspaceMemoryLimit when that is set (no swap), else the"
+                      + " platform default")
+          String workspaceMemorySwapLimit) {}
 
   public record PatchRunnerRequest(
       @Schema(description = "0 drains the runner; absent leaves it") Integer slots,
-      @Schema(description = "Blank clears it; absent leaves it") String description) {}
+      @Schema(description = "Blank clears it; absent leaves it") String description,
+      @Schema(
+              description =
+                  "A docker size (e.g. 12g, at least 6m); blank clears it back to the platform"
+                      + " default; absent leaves it. Reaches the next workspace launched on the"
+                      + " runner, never a running one")
+          String workspaceMemoryLimit,
+      @Schema(
+              description =
+                  "Memory plus swap, a docker size at least the resulting workspaceMemoryLimit,"
+                      + " which it needs; or -1 for unlimited swap. Blank clears it; absent leaves"
+                      + " it")
+          String workspaceMemorySwapLimit) {}
 
   /**
    * A runner with the secret-bearing answer only the request that minted it gets: the registration
@@ -176,7 +201,11 @@ public class WorkspaceRunnerController {
       responseCode = "201",
       description = "The runner, its registration token and the install line carrying it",
       content = @Content(schema = @Schema(implementation = RunnerRegistrationDto.class)))
-  @APIResponse(responseCode = "400", description = "A malformed name, slots or description")
+  @APIResponse(
+      responseCode = "400",
+      description =
+          "A malformed name, slots, description or memory limit, or a swap limit that does not"
+              + " fit the memory limit")
   @APIResponse(responseCode = "409", description = "The name is taken")
   @APIResponse(responseCode = "502", description = "qits-idp refused the registration token")
   @APIResponse(
@@ -190,7 +219,12 @@ public class WorkspaceRunnerController {
     if (request == null) {
       throw new BadRequestException("A runner needs a name");
     }
-    runners.requireCreatable(request.name(), request.description(), request.slots());
+    runners.requireCreatable(
+        request.name(),
+        request.description(),
+        request.slots(),
+        request.workspaceMemoryLimit(),
+        request.workspaceMemorySwapLimit());
     requireCommissioning();
     installScript.requireRenderable();
     UUID id = UUID.randomUUID();
@@ -203,6 +237,8 @@ public class WorkspaceRunnerController {
               request.name(),
               request.description(),
               request.slots(),
+              request.workspaceMemoryLimit(),
+              request.workspaceMemorySwapLimit(),
               token.tokenId(),
               token.subject());
     } catch (RuntimeException refused) {
@@ -260,15 +296,27 @@ public class WorkspaceRunnerController {
   @Path("/{id}")
   @Consumes(MediaType.APPLICATION_JSON)
   @RolesAllowed({ADMIN_ROLE, SYSTEM_ROLE})
-  @Operation(summary = "Change a workspace runner's slots or description")
+  @Operation(
+      summary = "Change a workspace runner's slots, description or workspace memory limits")
   @APIResponse(responseCode = "200", description = "The runner as it now is")
-  @APIResponse(responseCode = "400", description = "Negative slots or an overlong description")
+  @APIResponse(
+      responseCode = "400",
+      description =
+          "Negative slots, an overlong description, a malformed memory limit, or limits that would"
+              + " not fit together once applied")
   @APIResponse(responseCode = "404", description = "No such runner")
   public WorkspaceRunnerDto patch(@PathParam("id") String id, PatchRunnerRequest request) {
     requireMachineAudience();
-    PatchRunnerRequest change = request == null ? new PatchRunnerRequest(null, null) : request;
+    PatchRunnerRequest change =
+        request == null ? new PatchRunnerRequest(null, null, null, null) : request;
     UUID runnerId = runnerId(id);
-    WorkspaceRunner patched = runners.patch(runnerId, change.slots(), change.description());
+    WorkspaceRunner patched =
+        runners.patch(
+            runnerId,
+            change.slots(),
+            change.description(),
+            change.workspaceMemoryLimit(),
+            change.workspaceMemorySwapLimit());
     if (change.slots() != null) {
       // A connected runner learns its slots only from an ack.
       registry.slotsChanged(runnerId);

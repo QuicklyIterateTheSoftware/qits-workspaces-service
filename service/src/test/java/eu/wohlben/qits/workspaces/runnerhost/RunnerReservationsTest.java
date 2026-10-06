@@ -13,6 +13,7 @@ import eu.wohlben.qits.runner.protocol.Nothing;
 import eu.wohlben.qits.runner.protocol.Reserve;
 import eu.wohlben.qits.runner.protocol.RunnerMessage;
 import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes;
+import eu.wohlben.qits.workspaces.control.WorkspaceRunners;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.daemonhost.DaemonControlSocketMachineAuthTest;
 import eu.wohlben.qits.workspaces.daemonhost.DaemonMachineTokens;
@@ -74,6 +75,8 @@ class RunnerReservationsTest {
   @Inject RunnerPlacementDriver placement;
 
   @Inject WorkspaceService workspaceService;
+
+  @Inject WorkspaceRunners workspaceRunners;
 
   private RunnerRows rows;
 
@@ -180,6 +183,33 @@ class RunnerReservationsTest {
     runner.send(new Launched(queued, "c-1"));
 
     awaitStatus(queued, WorkspaceRuntimeStatus.RUNNING);
+  }
+
+  /**
+   * The take carries the runner row's memory limits as they are at the take (qits-951): an edit
+   * made after the runner was greeted reaches it, a memory with no swap is a hard cap, and a runner
+   * that sets none launches under the platform's defaults.
+   */
+  @Test
+  void theTakeCarriesTheRunnersMemoryLimitsReadAtTheTake() throws Exception {
+    WorkspaceRunner row = rows.eligible("wr-memory", 2);
+    FakeWorkspacesRunner runner = greeted("wr-memory");
+
+    Long defaulted = rows.queued(row.id, Instant.now());
+    runner.send(new Reserve());
+    Take first = (Take) answer(runner);
+    assertEquals(defaulted.longValue(), first.rowId());
+    WorkspaceSpec platform = first.spec();
+    assertEquals("4g", platform.memoryLimit(), "no row limit is the platform default");
+    assertEquals("8g", platform.memorySwapLimit());
+
+    // Edited after the greeting: the session's copy of the row is stale, the take's is not.
+    workspaceRunners.patch(row.id, null, null, "12g", null);
+    rows.queued(row.id, Instant.now());
+    runner.send(new Reserve());
+    WorkspaceSpec own = ((Take) answer(runner)).spec();
+    assertEquals("12g", own.memoryLimit());
+    assertEquals("12g", own.memorySwapLimit(), "never the default 8g beside a 12g memory");
   }
 
   /** Two runners racing for one never-placed row: exactly one is answered {@code take}. */

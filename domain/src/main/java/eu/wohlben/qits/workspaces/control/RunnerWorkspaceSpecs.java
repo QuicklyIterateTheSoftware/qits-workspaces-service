@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.control;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.Collections;
@@ -38,6 +39,13 @@ import java.util.Map;
  * three are host-to-daemon values — a constant and two paths of this service's own routes — and
  * name no address, so the plane has nothing to say about them.
  *
+ * <p><b>The memory limits are the taking runner's</b> (qits-951): its row's {@code
+ * workspaceMemoryLimit}/{@code workspaceMemorySwapLimit} where set, the factory's configured
+ * defaults where not — {@link #limitsFor} is the whole rule. The caller reads the row when the
+ * runner takes the workspace, as qits-ci reads a step memory limit when the step starts, so an
+ * operator's edit reaches the next launch and never a running container. The other limits (pids,
+ * cpus, oom score) are the factory's for every placement.
+ *
  * <p><b>What it still leaves out</b>: the host-side placement fields (no docker socket — admin rows
  * are never RUNNER — and no user).
  *
@@ -55,11 +63,21 @@ public class RunnerWorkspaceSpecs {
   @Inject WorkspaceContainerFactory factory;
 
   /**
-   * The launch spec for {@code row}, every address from {@code plane} ({@link
-   * WorkspaceAddressPlanes#plane} builds the configured one, and refuses a deployment with no public
-   * domain before anything is composed).
+   * {@link #compose(Workspace, WorkspaceAddressPlane, WorkspaceRunner)} under the platform's own
+   * limits, as for a runner that set none.
    */
   public RunnerLaunchSpec compose(Workspace row, WorkspaceAddressPlane plane) {
+    return compose(row, plane, null);
+  }
+
+  /**
+   * The launch spec for {@code row}, every address from {@code plane} ({@link
+   * WorkspaceAddressPlanes#plane} builds the configured one, and refuses a deployment with no public
+   * domain before anything is composed), its memory limits from {@code runner} — the row of the
+   * runner taking it, read at the take — where that sets them ({@link #limitsFor}).
+   */
+  public RunnerLaunchSpec compose(
+      Workspace row, WorkspaceAddressPlane plane, WorkspaceRunner runner) {
     if (plane == null) {
       throw new IllegalStateException("A runner launch spec needs the address plane");
     }
@@ -128,7 +146,41 @@ public class RunnerWorkspaceSpecs {
         Collections.unmodifiableMap(env),
         mounts,
         Collections.unmodifiableMap(labels),
-        factory.limits(),
+        limitsFor(factory.limits(), runner),
         true);
+  }
+
+  /**
+   * The limits a workspace on {@code runner} is launched under: {@code defaults} (the factory's
+   * configured ones) with the runner row's memory limits laid over them (qits-951).
+   *
+   * <ul>
+   *   <li>memory is the row's {@code workspaceMemoryLimit}, or the default when it sets none;
+   *   <li>memory-swap is the row's {@code workspaceMemorySwapLimit}; else, when the row sets a
+   *       memory, that same memory — a hard cap, because the default swap is sized for the default
+   *       memory, and a row's {@code 12g} paired with the default {@code 8g} is a {@code
+   *       --memory-swap} below {@code --memory}, which docker refuses; else the default.
+   * </ul>
+   *
+   * A null runner, or one that sets neither, is the defaults unchanged.
+   */
+  static RunnerLaunchSpec.Limits limitsFor(
+      RunnerLaunchSpec.Limits defaults, WorkspaceRunner runner) {
+    if (runner == null
+        || (runner.workspaceMemoryLimit == null && runner.workspaceMemorySwapLimit == null)) {
+      return defaults;
+    }
+    String memory =
+        runner.workspaceMemoryLimit != null ? runner.workspaceMemoryLimit : defaults.memory();
+    String swap;
+    if (runner.workspaceMemorySwapLimit != null) {
+      swap = runner.workspaceMemorySwapLimit;
+    } else if (runner.workspaceMemoryLimit != null) {
+      swap = runner.workspaceMemoryLimit;
+    } else {
+      swap = defaults.memorySwap();
+    }
+    return new RunnerLaunchSpec.Limits(
+        memory, swap, defaults.pids(), defaults.cpus(), defaults.oomScoreAdj());
   }
 }

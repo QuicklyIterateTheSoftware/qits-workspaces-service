@@ -69,6 +69,8 @@ public class WorkspaceRunnerMapper {
         runner.name,
         runner.description,
         runner.slots,
+        runner.workspaceMemoryLimit,
+        runner.workspaceMemorySwapLimit,
         WorkspaceRunnerCapabilities.text(said, WorkspaceRunnerCapabilities.VERSION),
         WorkspaceRunnerCapabilities.text(said, "arch"),
         WorkspaceRunnerCapabilities.text(said, WorkspaceRunnerCapabilities.DOT_CLAUDE_VOLUME),

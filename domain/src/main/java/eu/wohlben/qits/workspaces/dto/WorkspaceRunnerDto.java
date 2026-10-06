@@ -14,6 +14,11 @@ import java.util.UUID;
  * @param name unique, {@code [a-z][a-z0-9-]{0,63}}
  * @param description the operator's words, or null
  * @param slots how many workspace containers it may run at once; 0 is a drained runner
+ * @param workspaceMemoryLimit the {@code --memory} its workspace containers get, a docker size such
+ *     as {@code 12g}; null means the platform's own {@code qits.workspace.memory-limit} (qits-951)
+ * @param workspaceMemorySwapLimit their {@code --memory-swap}, memory plus swap, or {@code -1} for
+ *     unlimited swap; null means {@code workspaceMemoryLimit} when that is set (no swap beyond it)
+ *     and the platform's own {@code qits.workspace.memory-swap-limit} otherwise
  * @param version the runner binary's version, as it last reported it; null until it has
  * @param arch the node's architecture, as the runner last reported it; null until it has
  * @param dotClaudeVolume the node-local agent home volume the runner reported; null until it has
@@ -52,6 +57,8 @@ public record WorkspaceRunnerDto(
     String name,
     String description,
     int slots,
+    String workspaceMemoryLimit,
+    String workspaceMemorySwapLimit,
     String version,
     String arch,
     String dotClaudeVolume,

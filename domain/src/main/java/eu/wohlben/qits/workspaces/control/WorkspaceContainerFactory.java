@@ -231,6 +231,10 @@ public class WorkspaceContainerFactory {
    * cgroup limit in place the JVMs size against it automatically (container support is default-on),
    * so no per-tool {@code -Xmx} plumbing is needed. Blank/absent disables the cap; the shipped
    * default is {@code 4g}. Optional because SmallRye treats an empty property value as "no value".
+   *
+   * <p>The platform host's value: a RUNNER workspace gets it only when its runner's row sets no
+   * {@code workspaceMemoryLimit} of its own ({@code RunnerWorkspaceSpecs.limitsFor}, qits-951). The
+   * swap key below is the same kind of default.
    */
   @ConfigProperty(name = "qits.workspace.memory-limit")
   Optional<String> memoryLimit;
