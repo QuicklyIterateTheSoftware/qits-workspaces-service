@@ -3,6 +3,7 @@ package eu.wohlben.qits.workspaces.daemonhost;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import eu.wohlben.qits.workspaces.containershost.EditorKeepalive;
 import eu.wohlben.qits.workspaces.control.AgentActivityState;
+import eu.wohlben.qits.workspaces.control.AgentKills;
 import eu.wohlben.qits.workspaces.control.AgentSessionReporter;
 import eu.wohlben.qits.workspaces.control.EditorLifecycle;
 import eu.wohlben.qits.workspaces.control.ProvisionResult;
@@ -142,6 +143,23 @@ public class WorkspaceDaemonRegistry
    * unset, so this call costs one map operation on the socket thread in the shipped configuration.
    */
   @Inject EditorKeepalive editorKeepalive;
+
+  /**
+   * Where a killed agent is written onto the workspace row, and taken back off it (qits-951). See
+   * {@link #onAgentKill}.
+   */
+  @Inject AgentKills agentKills;
+
+  /**
+   * The {@code hookEvent} of the {@code ENDED} frame a daemon at capability 7 sends itself for an
+   * agent that died by SIGKILL — {@code DaemonProtocol.AgentEvent}'s two values, spelled here
+   * because the protocol this service is pinned to predates the constants. Mirrored by name, as
+   * {@link AgentActivityState} mirrors {@code DaemonProtocol.AgentState}; switch to the constants
+   * when the pin carries them.
+   */
+  static final String OOM_KILLED_EVENT = "OomKilled";
+
+  static final String KILLED_EVENT = "Killed";
 
   /**
    * Last working-tree cleanliness each live daemon reported ({@link GitStatus}). In-memory only —
@@ -571,6 +589,7 @@ public class WorkspaceDaemonRegistry
     if (state == null) {
       return; // unknown state string — lineage above still ran; nothing to cache/flip
     }
+    onAgentKill(workspaceId, activity, state);
     long now = System.currentTimeMillis();
     // An agent that is working is the workspace being used. Debounced on the keepalive's side, and
     // a no-op entirely while nothing is idle-stopped.
@@ -580,6 +599,50 @@ public class WorkspaceDaemonRegistry
     if (before != rollup(workspaceId, now)) {
       fireActivityFlip(repoId, workspaceId);
     }
+  }
+
+  /**
+   * The row's half of a killed agent (qits-951). The rollup above takes the frame's {@code ENDED}
+   * like any other — and that is all a kill could ever say through it, because {@code ENDED} is also
+   * what a clean {@code SessionEnd} says. Before the daemon sent the frame at all, the rollup simply
+   * kept the last state it heard, usually {@code IDLE}: a turn that died mid-work read as a turn
+   * that finished, to the SPA and to a dispatcher alike. So the kill is written onto the row as a
+   * {@code runtimeError} ({@link AgentKills} says why that field), where {@code /workspaces/{id}}
+   * carries it, a disconnect does not drop it and no TTL expires it.
+   *
+   * <p>The other direction: a {@code BUSY} — an agent in this workspace has started a turn again —
+   * takes the kill back off, since the row then has a working agent and an error still standing would
+   * read as this turn failing too. A clean finish needs no such step; the error is already gone by
+   * then.
+   *
+   * <p>Both are DB writes, so both go to {@link #sinkDispatch}, never the socket thread, and in
+   * arrival order — a kill and the relaunch's first {@code BUSY} cannot swap. A failure is logged and
+   * dropped, as every sink here is: it must not close the control socket.
+   */
+  private void onAgentKill(Long workspaceId, AgentActivity activity, AgentActivityState state) {
+    boolean oom = OOM_KILLED_EVENT.equals(activity.hookEvent());
+    boolean killed =
+        state == AgentActivityState.ENDED
+            && (oom || KILLED_EVENT.equals(activity.hookEvent()));
+    if (!killed && state != AgentActivityState.BUSY) {
+      return;
+    }
+    // The pinned protocol's frame has no exit code or sentence (capability 7 adds both, as
+    // AgentActivity.exitCode()/message()); until the pin moves, the host's own sentence stands in.
+    String error = killed ? AgentKills.describe(oom, activity.commandId(), null) : null;
+    sinkDispatch.execute(
+        () -> {
+          try {
+            if (killed) {
+              agentKills.record(workspaceId, error);
+            } else {
+              agentKills.clear(workspaceId);
+            }
+          } catch (RuntimeException e) {
+            LOG.warnf(
+                e, "could not update workspace %s's row for its agent's activity", workspaceId);
+          }
+        });
   }
 
   /**

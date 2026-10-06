@@ -352,6 +352,43 @@ public class RunnerClaimsTest {
     assertTrue(placement.calls().contains("backlog:" + provisioningNotHeld));
   }
 
+  /**
+   * qits-951: the OOM killer takes the agent and leaves the container running, so the inventory
+   * goes on reporting it held running. Clearing the column on that report — which is right for a
+   * start's error — would erase the kill within one inventory, and the measured symptom (RUNNING,
+   * no error) would be back with a lag.
+   */
+  @Test
+  public void anAgentKillSurvivesTheInventoryAndAStartsErrorDoesNot() {
+    WorkspaceRunner a = eligibleRunner(2);
+    String kill = AgentKills.describe(true, "cmd-1", null);
+    Long killed =
+        insert(
+            w -> {
+              w.runnerId = a.id;
+              w.runtimeStatus = WorkspaceRuntimeStatus.RUNNING;
+              w.runtimeError = kill;
+            });
+    Long failed =
+        insert(
+            w -> {
+              w.runnerId = a.id;
+              w.runtimeStatus = WorkspaceRuntimeStatus.FAILED;
+              w.runtimeError = "pull refused";
+            });
+
+    claims.reconcile(
+        a.id,
+        List.of(
+            new RunnerClaims.HeldContainer(killed, true),
+            new RunnerClaims.HeldContainer(failed, true)));
+
+    assertEquals(WorkspaceRuntimeStatus.RUNNING, read(killed).runtimeStatus);
+    assertEquals(kill, read(killed).runtimeError);
+    assertEquals(WorkspaceRuntimeStatus.RUNNING, read(failed).runtimeStatus);
+    assertNull(read(failed).runtimeError, "a running container is news to a start's error");
+  }
+
   // --- reads --------------------------------------------------------------------------------------
 
   @Test
