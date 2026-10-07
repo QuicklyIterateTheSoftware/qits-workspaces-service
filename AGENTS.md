@@ -182,6 +182,15 @@ memory and is at least it, or `-1`); `RunnerReservations` reads the row at each 
 `RunnerWorkspaceSpecs.limitsFor` lays it over the defaults, a memory with no swap being a hard cap.
 DIRECT workspaces never read them. Columns on a `CausedRow`, so no `ArchRulesTest` decision.
 
+**`V16__resolved_runner_rows_stopped.sql` sets `runtime_status = 'STOPPED'` on resolved RUNNER
+rows** (qits-1064): `discardOnRunner` never wrote it and the runner's `Deleted` never reaches a
+resolved row, so they kept reading RUNNING. The code writes it now.
+
+**`V17__pending_agent_launch.sql` adds `pending_agent_launch`** (qits-1064): the agent launch held for
+a QUEUED runner workspace, keyed by the workspace id, with a `claimed_by`/`claimed_at` claim.
+`PendingAgentLaunch` is **`@Uncaused`**, for the prompt draft's reasons — a native insert, and a row
+rewritten by its claim. See "Dispatching an agent onto a branch".
+
 **The target is PostgreSQL 18.4** — the tag `components/qits-database/qits-database-oci` is built
 from, and the version the suites' embedded binaries are, so a migration is proved against the engine it ships on.
 Two H2 habits are gone with it: a rule that applies to some rows is a **partial unique index** now
@@ -1329,10 +1338,9 @@ Five decisions, each of which is a way to get this wrong:
   requested name: a repository holding `refs/heads/ticket` can hold no `refs/heads/ticket/*`, so
   `ticket/fix-login` becomes `ticket-fix-login` rather than failing on a push nothing here could
   explain. Only the first segment flips, and the workspace slug is identical either way.
-- **The scheduled launch is IN MEMORY and a restart drops it.** No queue, no row, no outbox — the
-  caller holds the intent worth persisting, and a second copy of an intent is how a ticket gets two
-  agents. Recovery is the same call the caller already knows how to make. A launch that fails is a
-  WARN and nothing else; it is deliberately not a workspace event, because `WorkspaceEventType` is a
+- **A launch for a row that is not queued is IN MEMORY and a restart drops it** — it waits seconds
+  to minutes for a daemon. A launch held for a QUEUED row is not: see the next point. A launch that
+  fails is a WARN and nothing else; it is deliberately not a workspace event, because `WorkspaceEventType` is a
   five-value *lifecycle* vocabulary about the branch and an agent that did not start is not something
   that happened to the branch.
 - **A workspace queued for a runner PARKS its launch** (qits-626). The launch window starts when a
@@ -1340,8 +1348,15 @@ Five decisions, each of which is a way to get this wrong:
   row id under the same `pending` claim, on no thread, until `WorkspaceTaken` (fired by
   `RunnerClaims` after the claim commits) submits it, or `WorkspaceUnqueued` (fired by
   `RunnerClaims.abandonStart` — stop, delete, recreate, resolution) drops it with an INFO. The row is
-  re-read after parking, so a claim landing in between cannot strand it. Still in memory: a restart
-  drops it, a re-press parks it again (once). The answer is unchanged in shape — `SCHEDULED`,
+  re-read after parking, so a claim landing in between cannot strand it. **Since qits-1064 the held
+  launch is also a row** (`pending_agent_launch`, `V17`, behind the `HeldAgentLaunches` port): "a
+  re-press recovers it" was the old premise and nobody is ever told to re-press, so every deploy
+  stranded the queued workspaces' launches. One row per workspace is the one-launch rule; whoever
+  wins a conditional claim on it delivers it, and it is deleted once the daemon answered or the
+  window closed, on unqueue, and on resolution. A boot drain and `wiring/HeldAgentLaunchSweep` (every
+  `qits.workspace.agent-dispatch.held-launch-sweep-interval`) resume what nobody delivers; a stopping
+  process gives its claims back, and a claim older than twice the launch window is takeable. The
+  `DispatchService` class javadoc has the whole design. The answer is unchanged in shape — `SCHEDULED`,
   `runtimeStatus: QUEUED`. A row whose runner is offline past the grace is 409 `RUNNER_UNAVAILABLE`
   naming the runner, never parked.
 - **The instruction is not stored.** It rides into the launch and nowhere else; keeping it beside

@@ -707,6 +707,10 @@ public class WorkspaceRunnerPlacementTest {
     workspaceService.discardWorkspace(created.id, null, true);
 
     assertEquals(WorkspaceStatus.ABANDONED, read(created.id).status);
+    assertEquals(
+        WorkspaceRuntimeStatus.STOPPED,
+        read(created.id).runtimeStatus,
+        "a resolved row reads STOPPED; the runner's Deleted never reaches a resolved row");
     assertTrue(placement.calls().contains("released:" + created.id));
     assertFalse(placement.calls().stream().anyMatch(c -> c.startsWith("delete:")), "no wait");
     assertEquals(List.of(), containers.teardownCalls(), "qits-containers was not asked");
@@ -785,6 +789,7 @@ public class WorkspaceRunnerPlacementTest {
     assertEquals(
         claims.trackedStart(created.id).orElseThrow().id(), answer.technicalProcessId());
     assertTrue(dispatchService.isParked(created.id), "the launch waits for a runner");
+    assertTrue(dispatchService.isHeld(created.id), "and is stored, so a restart keeps it");
     assertEquals(1, placement.calls().stream().filter(c -> c.startsWith("backlog:")).count());
 
     DispatchService.Dispatch again =
@@ -802,6 +807,22 @@ public class WorkspaceRunnerPlacementTest {
 
     assertFalse(dispatchService.isParked(created.id), "the stop dropped the parked launch");
     assertFalse(dispatchService.isPending(created.id), "and released its claim");
+    assertFalse(dispatchService.isHeld(created.id), "and deleted it from the table");
+  }
+
+  /** A resolution deletes the launch a queued row holds, in the resolving transaction (qits-1064). */
+  @Test
+  public void aResolutionDeletesTheHeldLaunch() throws Exception {
+    eligibleRunner();
+    String repoId = repo();
+    Workspace created = stoppedRunnerRow(repoId, "held-resolved");
+    dispatchService.dispatch(repoId, "held-resolved", false, null, WorkspaceSubject.none(), "go");
+    assertTrue(dispatchService.isHeld(created.id));
+
+    workspaceService.discardWorkspace(created.id, null, true);
+
+    assertFalse(dispatchService.isHeld(created.id));
+    assertFalse(dispatchService.isParked(created.id));
   }
 
   /** A row whose runner is offline past the grace is refused loudly, naming the runner. */
@@ -844,10 +865,13 @@ public class WorkspaceRunnerPlacementTest {
     assertEquals(WorkspaceRuntimeStatus.QUEUED, read(created.id).runtimeStatus);
     assertTrue(dispatchService.isParked(created.id));
 
+    assertTrue(dispatchService.isHeld(created.id));
+
     workspaceService.deleteContainer(created.id);
 
     assertFalse(dispatchService.isParked(created.id));
     assertFalse(dispatchService.isPending(created.id));
+    assertFalse(dispatchService.isHeld(created.id));
   }
 
   /** A delivery onto an UNAVAILABLE row: 409, naming the runner, and nothing queued. */

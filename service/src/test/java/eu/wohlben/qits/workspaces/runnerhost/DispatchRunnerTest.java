@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.runnerhost;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -12,6 +13,7 @@ import eu.wohlben.qits.runner.protocol.Reserve;
 import eu.wohlben.qits.runner.protocol.RunnerMessage;
 import eu.wohlben.qits.workspaces.control.ContainerProxyPath;
 import eu.wohlben.qits.workspaces.daemonhost.StubDaemonTunnels;
+import eu.wohlben.qits.workspaces.control.DispatchRestarts;
 import eu.wohlben.qits.workspaces.control.DispatchService;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.TestGit;
@@ -165,6 +167,60 @@ class DispatchRunnerTest {
     assertEquals(b.longValue(), ((Take) answer(runner)).rowId());
     daemon.comesUp(b);
     assertEquals("work on B", daemon.awaitLaunch(b));
+  }
+
+  /**
+   * A restart while B waits in the queue loses nothing (qits-1064): the held launch is a row, the
+   * restarted process's drain parks it again, and the take that follows launches it with no
+   * re-press. The restart is stood in for by forgetting the process's memory and draining, because a
+   * test may not shut the shared bean down.
+   */
+  @Test
+  void aQueuedDispatchSurvivesARestartAndIsLaunchedByTheTake() throws Exception {
+    rows.eligible("wr-restart", 1);
+    String repoId = TestOrigin.create(dataDir);
+    repositories.register(repoId);
+    Path origin = Path.of(dataDir, repoId, "origin");
+    TestGit.exec(origin.toFile(), "git", "branch", "task-a", "master");
+    TestGit.exec(origin.toFile(), "git", "branch", "task-b", "master");
+    Long a = rows.queuedOn(repoId, "task-a", Instant.now().minusSeconds(10));
+    Long b = rows.queuedOn(repoId, "task-b", Instant.now());
+    runner = greeted("wr-restart");
+
+    // A takes the runner's one slot.
+    runner.send(new Reserve());
+    assertEquals(a.longValue(), ((Take) answer(runner)).rowId());
+
+    // B is dispatched while it waits, and its launch is held — in the table as well as in memory.
+    DispatchService.Dispatch held =
+        dispatches.dispatch(repoId, "task-b", false, null, WorkspaceSubject.none(), "work on B");
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, held.workspace().runtimeStatus());
+    assertTrue(DispatchRestarts.isHeld(dispatches, b));
+
+    DispatchRestarts.restart(dispatches);
+    assertTrue(DispatchRestarts.isHeld(dispatches, b), "the restart kept it");
+
+    // Stop A: the slot frees, the runner takes B, and B's launch arrives with no re-press.
+    CompletableFuture<Void> stopping =
+        CompletableFuture.runAsync(() -> workspaceService.stopContainer(a));
+    assertEquals(a.longValue(), runner.await(Stop.class).rowId());
+    runner.send(new Stopped(a));
+    stopping.get(10, TimeUnit.SECONDS);
+
+    runner.send(new Reserve());
+    assertEquals(b.longValue(), ((Take) answer(runner)).rowId());
+    daemon.comesUp(b);
+    assertEquals("work on B", daemon.awaitLaunch(b));
+    awaitNotHeld(b);
+  }
+
+  /** The wait deletes the launch just after the daemon answered; give it the moment. */
+  private void awaitNotHeld(Long rowId) throws InterruptedException {
+    long deadline = System.nanoTime() + LAUNCH_DEADLINE.toNanos();
+    while (DispatchRestarts.isHeld(dispatches, rowId) && System.nanoTime() < deadline) {
+      Thread.sleep(50);
+    }
+    assertFalse(DispatchRestarts.isHeld(dispatches, rowId), "a delivered launch is deleted");
   }
 
   private FakeWorkspacesRunner greeted(String clientId) throws Exception {

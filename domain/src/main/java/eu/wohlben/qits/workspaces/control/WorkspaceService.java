@@ -3942,6 +3942,9 @@ public class WorkspaceService {
 
       workspace.status = resolution;
       workspace.resolvedAt = Instant.now();
+      // STOPPED here and not from the runner's reply: RunnerClaims.write ignores a row that is no
+      // longer ACTIVE, so the Deleted that follows the release never reaches this column (qits-1064).
+      workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
       workspace.queuedAt = null;
       if (result != null && !result.isBlank()) {
         workspace.result = result;
