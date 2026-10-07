@@ -52,7 +52,8 @@ import org.jboss.logging.Logger;
  * qits:system} and {@code qits:agent} (agents keep every read). Create, patch, a registration token
  * rotation and delete take {@code {qits:admin, qits:system}}, because the cold bootstrap's own
  * service client creates and rotates a runner with nobody at a keyboard; greenlight and login check
- * are {@code qits:admin} alone. The health check is open to all three (qits-850): it reads and
+ * are {@code qits:admin} alone. Wherever {@code qits:admin} is admitted, {@code qits:admin-agent}
+ * (an admin workspace's agent) is admitted too (qits-628 follow-up). The health check is open to all three (qits-850): it reads and
  * self-tests, and moves a runner's standing only as its own result does. {@code qits:workspaces-runner-registration} — what
  * a registration token carries through the edge — opens exactly two routes: the register door, for
  * the runner the token was minted for only, and {@code GET /runners/install.sh}, which carries no
@@ -94,6 +95,12 @@ public class WorkspaceRunnerController {
   private static final Logger LOG = Logger.getLogger(WorkspaceRunnerController.class);
 
   static final String ADMIN_ROLE = "qits:admin";
+
+  /**
+   * An admin workspace's agent (qits-628 follow-up): admitted wherever {@link #ADMIN_ROLE} is, named
+   * beside it at every check so a door that must stay human-only can drop it on its own.
+   */
+  static final String ADMIN_AGENT_ROLE = "qits:admin-agent";
 
   /** The bootstrap's own service client: the four lifecycle writes take it beside the admin. */
   static final String SYSTEM_ROLE = "qits:system";
@@ -195,7 +202,7 @@ public class WorkspaceRunnerController {
 
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
-  @RolesAllowed({ADMIN_ROLE, SYSTEM_ROLE})
+  @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE})
   @Operation(summary = "Declare a workspace runner; answers its install line, once")
   @APIResponse(
       responseCode = "201",
@@ -256,7 +263,7 @@ public class WorkspaceRunnerController {
   }
 
   @GET
-  @RolesAllowed({ADMIN_ROLE, SYSTEM_ROLE, AGENT_ROLE})
+  @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE, AGENT_ROLE})
   @Operation(summary = "Every workspace runner, by name, with its connection, counts and login")
   @APIResponse(responseCode = "200", description = "Every runner, by name")
   public List<WorkspaceRunnerDto> list() {
@@ -271,7 +278,7 @@ public class WorkspaceRunnerController {
   @GET
   @Path("/install.sh")
   @Produces(MediaType.TEXT_PLAIN)
-  @RolesAllowed({REGISTRATION_ROLE, ADMIN_ROLE, SYSTEM_ROLE, AGENT_ROLE})
+  @RolesAllowed({REGISTRATION_ROLE, ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE, AGENT_ROLE})
   @Operation(summary = "The generic workspace runner install script the install line pipes to sh")
   @APIResponse(responseCode = "200", description = "A POSIX sh script, carrying no secret")
   @APIResponse(
@@ -284,7 +291,7 @@ public class WorkspaceRunnerController {
 
   @GET
   @Path("/{id}")
-  @RolesAllowed({ADMIN_ROLE, SYSTEM_ROLE, AGENT_ROLE})
+  @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE, AGENT_ROLE})
   @Operation(summary = "One workspace runner")
   @APIResponse(responseCode = "200", description = "The runner")
   @APIResponse(responseCode = "404", description = "No such runner")
@@ -295,7 +302,7 @@ public class WorkspaceRunnerController {
   @PATCH
   @Path("/{id}")
   @Consumes(MediaType.APPLICATION_JSON)
-  @RolesAllowed({ADMIN_ROLE, SYSTEM_ROLE})
+  @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE})
   @Operation(
       summary = "Change a workspace runner's slots, description or workspace memory limits")
   @APIResponse(responseCode = "200", description = "The runner as it now is")
@@ -331,7 +338,7 @@ public class WorkspaceRunnerController {
    */
   @POST
   @Path("/{id}/registration-token")
-  @RolesAllowed({ADMIN_ROLE, SYSTEM_ROLE})
+  @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE})
   @Operation(summary = "Replace a workspace runner's registration token; answers a new install line")
   @APIResponse(
       responseCode = "200",
@@ -374,7 +381,7 @@ public class WorkspaceRunnerController {
    */
   @DELETE
   @Path("/{id}")
-  @RolesAllowed({ADMIN_ROLE, SYSTEM_ROLE})
+  @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE})
   @Operation(summary = "Decommission a workspace runner and give its credentials back")
   @APIResponse(responseCode = "204", description = "Gone")
   @APIResponse(responseCode = "404", description = "No such runner")
@@ -404,7 +411,7 @@ public class WorkspaceRunnerController {
    */
   @POST
   @Path("/{id}/greenlight")
-  @RolesAllowed(ADMIN_ROLE)
+  @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE})
   @Operation(summary = "Lift a workspace runner's quarantine")
   @APIResponse(responseCode = "200", description = "The runner as it now is")
   @APIResponse(responseCode = "404", description = "No such runner")
@@ -430,7 +437,7 @@ public class WorkspaceRunnerController {
    */
   @POST
   @Path("/{id}/healthcheck")
-  @RolesAllowed({ADMIN_ROLE, SYSTEM_ROLE, AGENT_ROLE})
+  @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE, AGENT_ROLE})
   @Operation(summary = "Ask a connected workspace runner for a health check")
   @APIResponse(
       responseCode = "202",
@@ -453,7 +460,7 @@ public class WorkspaceRunnerController {
    */
   @GET
   @Path("/{id}/health")
-  @RolesAllowed({ADMIN_ROLE, SYSTEM_ROLE, AGENT_ROLE})
+  @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE, AGENT_ROLE})
   @Operation(summary = "A workspace runner's newest health check, every check's data included")
   @APIResponse(
       responseCode = "200",
@@ -469,7 +476,7 @@ public class WorkspaceRunnerController {
   /** Ask a connected runner to probe its node's agent login now; {@code loginState} records it. */
   @POST
   @Path("/{id}/login-check")
-  @RolesAllowed(ADMIN_ROLE)
+  @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE})
   @Operation(summary = "Ask a connected workspace runner to re-check its node's agent login")
   @APIResponse(responseCode = "202", description = "Sent")
   @APIResponse(responseCode = "404", description = "No such runner")
@@ -600,10 +607,13 @@ public class WorkspaceRunnerController {
   /**
    * The machine arm of the four lifecycle writes, as qits-ci judges its own: a {@code qits:system}
    * caller presenting a machine token must present one addressed to this platform. A {@code
-   * qits:admin} caller — a forwarded session carries no token at all — is judged by its role.
+   * qits:admin} caller — a forwarded session carries no token at all — is judged by its role, and
+   * so is a {@code qits:admin-agent} one (qits-628 follow-up: admitted wherever qits:admin is).
    */
   private void requireMachineAudience() {
-    if (MachineIdentity.isMachine(identity) && !identity.hasRole(ADMIN_ROLE)) {
+    if (MachineIdentity.isMachine(identity)
+        && !identity.hasRole(ADMIN_ROLE)
+        && !identity.hasRole(ADMIN_AGENT_ROLE)) {
       machineAuth.require();
     }
   }

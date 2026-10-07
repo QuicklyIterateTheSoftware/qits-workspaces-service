@@ -40,7 +40,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 @Path("/workspaces/{id}/prompt-draft")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed("qits:admin")
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
 public class WorkspacePromptDraftController {
 
   @Inject WorkspacePromptDraftService promptDrafts;
@@ -58,7 +58,7 @@ public class WorkspacePromptDraftController {
    * to dedup against that no save ever produced.
    */
   // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   @APIResponse(responseCode = "200", description = "The saved draft.")
   @APIResponse(

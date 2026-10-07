@@ -93,6 +93,28 @@ public class CommissionReconcilerTest {
   }
 
   @Test
+  public void anAdminWorkspacesCredentialIsSparedWhileClaimedAndReapedWhenOrphaned()
+      throws Exception {
+    // qits-628 follow-up: an admin row's credential is of kind workspace-admin. The reconcile judges
+    // it by the workspace rule exactly as a regular one: never reaped while an ACTIVE row claims it,
+    // reaped as soon as nothing does.
+    String repoId = liveWorkspace("admin");
+    Long rowId = workspaceIds.of(repoId, "admin");
+    assertEquals(CredentialCommissioner.ADMIN_CONTEXT_KIND, commissioner.contextKindFor(rowId));
+    String claimed = credentials.forWorkspace(rowId).orElseThrow().clientId();
+    commissioner.plant("ws-998-admin-stray", CredentialCommissioner.ADMIN_CONTEXT_KIND, "998");
+    commissioner.plant("ws-997-stray", CredentialCommissioner.CONTEXT_KIND, "997");
+
+    assertEquals(2, reconciler.reconcile(), "both orphans, one of each kind, are given back");
+    assertTrue(commissioner.decommissioned().contains("ws-998-admin-stray"));
+    assertTrue(commissioner.decommissioned().contains("ws-997-stray"));
+    assertEquals(
+        List.of(claimed), commissioner.liveClientIds(), "the claimed admin credential is kept");
+    assertEquals(0, reconciler.reconcile(), "and a second pass still keeps it");
+    assertEquals(List.of(claimed), commissioner.liveClientIds());
+  }
+
+  @Test
   public void aSecondPassOverALiveWorkspaceReapsNothing() throws Exception {
     String repoId = liveWorkspace("feat");
     String claimed =
@@ -188,14 +210,17 @@ public class CommissionReconcilerTest {
     commissioner.plantToken(
         "tok-superseded", CredentialCommissioner.CONTEXT_KIND, row.toString(), old);
     commissioner.plantToken("tok-orphan", CredentialCommissioner.CONTEXT_KIND, "999999", old);
+    // An admin-kind token nothing names is the workspace rule's too (qits-628 follow-up).
+    commissioner.plantToken(
+        "tok-admin-orphan", CredentialCommissioner.ADMIN_CONTEXT_KIND, "999997", old);
     commissioner.plantToken(
         "tok-young", CredentialCommissioner.CONTEXT_KIND, "999998", Instant.now());
     commissioner.plantToken("tok-registration", "workspaces-runner-registration", "r", old);
     try {
-      assertEquals(2, reconciler.reapWorkspaceTokens(Instant.now()));
+      assertEquals(3, reconciler.reapWorkspaceTokens(Instant.now()));
 
       assertEquals(
-          java.util.Set.of("tok-superseded", "tok-orphan"),
+          java.util.Set.of("tok-superseded", "tok-orphan", "tok-admin-orphan"),
           java.util.Set.copyOf(commissioner.tokensDeleted()));
       assertEquals(
           java.util.Set.of("tok-live", "tok-young", "tok-registration"),

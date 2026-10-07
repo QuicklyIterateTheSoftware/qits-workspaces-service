@@ -41,6 +41,36 @@ public interface CredentialCommissioner {
   String CONTEXT_KIND = "workspace";
 
   /**
+   * The context kind of an ADMIN workspace's credential (qits-628 follow-up). qits-idp issues this
+   * kind {@code qits:agent} and {@code qits:admin-agent}, the role every door that admits {@code
+   * qits:admin} also admits by name: an admin workspace's container holds the host's docker socket,
+   * so its agent is trusted as far as an admin is. Every other workspace row — a regular one, the
+   * editor — stays {@link #CONTEXT_KIND}.
+   *
+   * <p><b>Release qits-idp first.</b> A qits-idp that does not know this kind gives it no role at
+   * all (its D12 rule: an unknown kind is harmless, not refused), so an admin workspace's agent
+   * would lose even {@code qits:agent} until it does.
+   */
+  String ADMIN_CONTEXT_KIND = "workspace-admin";
+
+  /**
+   * The kind of the commission for a workspace row: {@link #ADMIN_CONTEXT_KIND} for an admin row,
+   * {@link #CONTEXT_KIND} for every other.
+   */
+  static String contextKindFor(boolean admin) {
+    return admin ? ADMIN_CONTEXT_KIND : CONTEXT_KIND;
+  }
+
+  /**
+   * Whether a listed commission's kind is one of this service's WORKSPACE credentials, either kind.
+   * The reconcile judges both by the same rule — an admin credential is reaped when orphaned and
+   * never while an ACTIVE row claims it, exactly as a regular one.
+   */
+  static boolean isWorkspaceKind(String contextKind) {
+    return CONTEXT_KIND.equals(contextKind) || ADMIN_CONTEXT_KIND.equals(contextKind);
+  }
+
+  /**
    * The claim name the issuer scopes a credential by. Spelled here rather than inline for the reason
    * {@code QitsClaims} spells it on the enforcement side: a typo in a claim name reads as "no
    * claim", which is a credential that quietly keeps the wider grant.
@@ -84,6 +114,12 @@ public interface CredentialCommissioner {
     return commission(rowId, projectId, null);
   }
 
+  /** The commission of a regular (non-admin) workspace row: kind {@link #CONTEXT_KIND}. */
+  default Optional<WorkspaceCredential> commission(
+      Long rowId, String projectId, List<String> gitRefs) {
+    return commission(rowId, projectId, gitRefs, false);
+  }
+
   /**
    * The same commission, also stating the Git refs the credential may push ({@code gitRefs}, contract
    * C2). The issuer stamps the list onto every token as {@code git_refs}, and the git host enforces
@@ -97,8 +133,14 @@ public interface CredentialCommissioner {
    * with an empty list (may push nothing), logs an ERROR naming the workspace and the issuer's
    * reason, and returns that credential. It never commissions again without the list: that would
    * let the credential push every ref.
+   *
+   * <p><b>{@code admin} picks the kind</b> ({@link #contextKindFor}): an ADMIN row's credential is
+   * {@link #ADMIN_CONTEXT_KIND}, every other row's {@link #CONTEXT_KIND}. It is the only thing the
+   * flag changes — the context id, the claims and the Git refs are the same either way — and it
+   * never reaches the container's spec: the kind is the issuer's, not the container's environment.
    */
-  Optional<WorkspaceCredential> commission(Long rowId, String projectId, List<String> gitRefs);
+  Optional<WorkspaceCredential> commission(
+      Long rowId, String projectId, List<String> gitRefs, boolean admin);
 
   /**
    * Replace the Git refs a live commission states — the narrowing (contract C5), sent as {@code PUT

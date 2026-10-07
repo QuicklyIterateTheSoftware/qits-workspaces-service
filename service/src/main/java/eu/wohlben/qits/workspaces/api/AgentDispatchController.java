@@ -59,7 +59,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 // qits:system beside the admin role, like GcController and BranchResolutionController: the caller is
 // qits-projects dispatching a ticket, a machine. Every method on this class is meant for both, so
 // the class list and the bodies agree by construction and no method widens what the class states.
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:system"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system"})
 public class AgentDispatchController {
 
   @Inject DispatchService dispatches;
@@ -438,7 +438,7 @@ public class AgentDispatchController {
    */
   // A read, so an agent may make it too (phase 4: agents keep every read, lose writes). It
   // replaces the class's list, so the class's two roles are stated again.
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:system", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system", "qits:agent"})
   @GET
   @Path("/references")
   public ListSubjectRefsRequest.Response references(

@@ -60,7 +60,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
       CaptureResource.CaptureResponse.WorkspaceRef.class
     })
 @Path("capture")
-@jakarta.annotation.security.RolesAllowed("qits:admin")
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
 public class CaptureResource {
 
   /**

@@ -1283,6 +1283,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
   /workspaces/api/agent-dispatches/blocked:
     post:
@@ -1319,6 +1320,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
   /workspaces/api/agent-dispatches/delivery:
     post:
@@ -1363,6 +1365,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
   /workspaces/api/agent-dispatches/entity:
     post:
@@ -1399,6 +1402,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
   /workspaces/api/agent-dispatches/references:
     get:
@@ -1438,6 +1442,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
         - qits:agent
   /workspaces/api/branches/cleanup:
@@ -1483,6 +1488,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/branches/merge:
     post:
       parameters:
@@ -1533,6 +1539,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/branches/resolution:
     post:
       parameters:
@@ -1578,6 +1585,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
   /workspaces/api/editor/ensure:
     post:
@@ -1600,6 +1608,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/gc/branches:
     post:
       requestBody:
@@ -1627,6 +1636,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
   /workspaces/api/history:
     get:
@@ -1652,6 +1662,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:agent
   /workspaces/api/history/{id}:
     patch:
@@ -1685,6 +1696,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
     get:
       parameters:
       - name: id
@@ -1710,6 +1722,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:agent
   /workspaces/api/history/{id}/agent-sessions:
     get:
@@ -1737,6 +1750,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:agent
   /workspaces/api/history/{id}/agent-sessions/{sessionId}/transcript:
     get:
@@ -1769,6 +1783,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:agent
   /workspaces/api/pins:
     get:
@@ -1789,6 +1804,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
         - qits:agent
   /workspaces/api/runners:
@@ -1812,6 +1828,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
         - qits:agent
     post:
@@ -1853,6 +1870,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
   /workspaces/api/runners/install.sh:
     get:
@@ -1877,6 +1895,7 @@ paths:
       - SecurityScheme:
         - qits:workspaces-runner-registration
         - qits:admin
+        - qits:admin-agent
         - qits:system
         - qits:agent
   /workspaces/api/runners/{id}:
@@ -1916,6 +1935,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
     get:
       summary: One workspace runner
@@ -1943,6 +1963,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
         - qits:agent
     delete:
@@ -1974,6 +1995,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
   /workspaces/api/runners/{id}/greenlight:
     post:
@@ -2002,6 +2024,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/runners/{id}/health:
     get:
       summary: "A workspace runner's newest health check, every check's data included"
@@ -2031,6 +2054,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
         - qits:agent
   /workspaces/api/runners/{id}/healthcheck:
@@ -2066,6 +2090,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
         - qits:agent
   /workspaces/api/runners/{id}/login-check:
@@ -2097,6 +2122,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/runners/{id}/register:
     post:
       summary: Register a workspace runner with its registration token; answers its
@@ -2174,6 +2200,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
   /workspaces/api/service-events:
     get:
@@ -2230,6 +2257,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:agent
   /workspaces/api/work/workspaces:
     get:
@@ -2251,6 +2279,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
         - qits:agent
   /workspaces/api/work/{workRef}/workspaces:
@@ -2279,6 +2308,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:system
         - qits:agent
   /workspaces/api/workspaces:
@@ -2305,6 +2335,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:agent
     post:
       operationId: createWorkspace
@@ -2333,6 +2364,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/workspaces/{id}:
     get:
       parameters:
@@ -2365,6 +2397,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:agent
   /workspaces/api/workspaces/{id}/active-process:
     get:
@@ -2392,6 +2425,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:agent
   /workspaces/api/workspaces/{id}/bootstrap-runs:
     get:
@@ -2425,6 +2459,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:agent
   /workspaces/api/workspaces/{id}/delete-container:
     post:
@@ -2452,6 +2487,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/workspaces/{id}/discard:
     post:
       parameters:
@@ -2491,6 +2527,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/workspaces/{id}/ensure-container:
     post:
       parameters:
@@ -2517,6 +2554,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/workspaces/{id}/integrate:
     post:
       parameters:
@@ -2570,6 +2608,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/workspaces/{id}/merge:
     post:
       operationId: mergeWorkspace
@@ -2618,6 +2657,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/workspaces/{id}/prompt-attachments:
     get:
       parameters:
@@ -2650,6 +2690,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:agent
     post:
       parameters:
@@ -2700,6 +2741,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/workspaces/{id}/prompt-attachments/{attachmentId}:
     put:
       parameters:
@@ -2751,6 +2793,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
     delete:
       parameters:
       - name: attachmentId
@@ -2783,6 +2826,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/workspaces/{id}/prompt-attachments/{attachmentId}/content:
     get:
       parameters:
@@ -2822,6 +2866,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:agent
   /workspaces/api/workspaces/{id}/prompt-draft:
     put:
@@ -2873,6 +2918,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
     get:
       parameters:
       - name: id
@@ -2904,6 +2950,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
         - qits:agent
     delete:
       parameters:
@@ -2932,6 +2979,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/workspaces/{id}/recreate-container:
     post:
       parameters:
@@ -2958,6 +3006,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
   /workspaces/api/workspaces/{id}/stop-container:
     post:
       parameters:
@@ -2984,6 +3033,7 @@ paths:
       security:
       - SecurityScheme:
         - qits:admin
+        - qits:admin-agent
 info:
   title: qits-workspaces API
   version: 2026.1005.203201

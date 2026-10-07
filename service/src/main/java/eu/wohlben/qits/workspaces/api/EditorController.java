@@ -37,7 +37,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 @Path("/editor")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed("qits:admin")
+@RolesAllowed({"qits:admin", "qits:admin-agent"})
 // The door answers through a bare JAX-RS Response (fresh() decides 201 vs 200), so nothing tells
 // the native-image build the record is serialized — CaptureResource's measured failure, one door
 // over: the JVM suite green, the binary 500ing every ensure with "No serializer found".

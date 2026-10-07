@@ -36,7 +36,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 @Path("/workspaces/{id}/bootstrap-runs")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed("qits:admin")
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
 public class WorkspaceBootstrapRunController {
 
   @Inject BootstrapRunService bootstrapRuns;
@@ -50,7 +50,7 @@ public class WorkspaceBootstrapRunController {
    * rows yet, and that is a state the Actions panel renders, not an error.
    */
   // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   @APIResponse(responseCode = "200", description = "The last run of each bootstrap step.")
   @APIResponse(

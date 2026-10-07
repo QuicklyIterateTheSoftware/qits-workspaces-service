@@ -54,7 +54,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  */
 @Path("/pins")
 @Produces(MediaType.APPLICATION_JSON)
-@RolesAllowed({"qits:admin", "qits:system"})
+@RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system"})
 public class PinsController {
 
   @Inject WorkspaceContainerFactory containerFactory;
@@ -75,7 +75,7 @@ public class PinsController {
   public record LaunchPins(Instant generatedAt, List<LaunchPin> pins) {}
 
   // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
-  @RolesAllowed({"qits:admin", "qits:system", "qits:agent"})
+  @RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system", "qits:agent"})
   @GET
   @Operation(summary = "The container images a launch by this service would pull right now")
   @APIResponse(responseCode = "200", description = "The effective launch pins, image order")

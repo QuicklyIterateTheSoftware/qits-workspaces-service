@@ -39,6 +39,9 @@ import org.jboss.logging.Logger;
  * <p><b>It only ever deletes what the issuer just listed.</b> A listing that could not be read comes
  * back empty, so a qits-idp blip reaps nothing rather than everything; and the kind filter means a
  * credential this service one day commissions for something else is not swept by the workspace rule.
+ * The workspace rule covers BOTH workspace kinds, {@code workspace} and an admin row's {@code
+ * workspace-admin} (qits-628 follow-up): an admin credential is reaped when orphaned and kept while
+ * claimed, exactly as a regular one.
  *
  * <p><b>Two more arms on the same pass, for the workspace runners</b> (qits-847), judged by the runner
  * table the way qits-ci's reconciler judges its own. A {@code workspaces-runner} client belongs to
@@ -122,7 +125,7 @@ public class CommissionReconciler {
     try {
       List<CredentialCommissioner.TokenCommission> held =
           commissioner.get().listTokens().stream()
-              .filter(t -> CredentialCommissioner.CONTEXT_KIND.equals(t.contextKind()))
+              .filter(t -> CredentialCommissioner.isWorkspaceKind(t.contextKind()))
               .toList();
       if (held.isEmpty()) {
         return 0;
@@ -168,7 +171,8 @@ public class CommissionReconciler {
           reaped += reapRunnerClient(commission, runnerRows);
           continue;
         }
-        if (!CredentialCommissioner.CONTEXT_KIND.equals(commission.contextKind())) {
+        // Both workspace kinds, regular and admin (qits-628 follow-up), by the one rule.
+        if (!CredentialCommissioner.isWorkspaceKind(commission.contextKind())) {
           continue;
         }
         if (commission.clientId() == null || claimed.contains(commission.clientId())) {

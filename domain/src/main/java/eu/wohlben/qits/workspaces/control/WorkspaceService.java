@@ -411,6 +411,14 @@ public class WorkspaceService {
     boolean editor =
         QuarkusTransaction.requiringNew()
             .call(() -> workspaceRepository.findActiveById(rowId).map(wt -> wt.editor).orElse(false));
+    // AN ADMIN ROW COMMISSIONS ITS OWN KIND (qits-628 follow-up): workspace-admin, which qits-idp
+    // issues qits:agent and qits:admin-agent — the container holds the host's docker socket, so its
+    // agent is admitted wherever qits:admin is. Every other row, the editor included, stays
+    // `workspace`. The kind is the issuer's record and never the container's environment, so the
+    // spec is unchanged by it.
+    boolean admin =
+        QuarkusTransaction.requiringNew()
+            .call(() -> workspaceRepository.findActiveById(rowId).map(wt -> wt.admin).orElse(false));
     RepositoryLookup.RepositoryView repository = editor ? null : repositoryOf(repoId);
     // The default branch, read the way a create reads it. An agent never pushes it, so it leaves
     // every list below. A registry that did not answer drops nothing: like the project scope, it
@@ -433,7 +441,8 @@ public class WorkspaceService {
             .commission(
                 rowId,
                 projectOf(repository),
-                statedRefs == null ? null : GitRefs.read(statedRefs));
+                statedRefs == null ? null : GitRefs.read(statedRefs),
+                admin);
     if (issued.isEmpty()) {
       // No issuer wired. Supported, and the same as no implementation at all.
       return;

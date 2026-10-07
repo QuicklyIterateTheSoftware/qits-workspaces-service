@@ -55,17 +55,20 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 // INTERNAL calls too, because ArC's subclass overrides them — so an endpoint that widens the
 // class's roles must call only private members. With every door here person-only, the class list
 // and the method bodies agree by construction; the body-level refusal stays as the belt that
-// survives any future widening.
-@jakarta.annotation.security.RolesAllowed("qits:admin")
+// survives any future widening. `qits:admin-agent` is admitted too (qits-628 follow-up); remove it
+// here if this door must stay human-only.
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
 public class BranchController {
 
   /**
    * The person-only refusal, programmatic on purpose — see the class annotation's comment. A
    * machine's token carries {@code qits:system} and never {@code qits:admin}; a person (or a
-   * commissioned context acting as one) carries {@code qits:admin}.
+   * commissioned context acting as one) carries {@code qits:admin}. {@code qits:admin-agent} is
+   * admitted too (qits-628 follow-up); remove it here if this door must stay human-only.
    */
   private void requireAdmin(String door) {
-    if (!identity.getRoles().contains("qits:admin")) {
+    if (!identity.getRoles().contains("qits:admin")
+        && !identity.getRoles().contains("qits:admin-agent")) {
       throw new jakarta.ws.rs.ForbiddenException(
           door + " is a person's door: it wants qits:admin, and this token carries only machine"
               + " roles");

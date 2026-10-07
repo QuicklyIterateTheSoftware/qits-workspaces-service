@@ -51,6 +51,7 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     commissionedFor.clear();
     decommissioned.clear();
     gitRefs.clear();
+    kinds.clear();
     gitRefUpdates.clear();
     failGitRefUpdates = false;
     tokensWired = true;
@@ -229,6 +230,16 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     return gitRefs.get(rowId);
   }
 
+  private final Map<Long, String> kinds = new java.util.concurrent.ConcurrentHashMap<>();
+
+  /**
+   * The context kind the last commission for {@code rowId} asked for ({@code workspace} or, for an
+   * admin row, {@code workspace-admin}), or null when none was asked.
+   */
+  public String contextKindFor(Long rowId) {
+    return kinds.get(rowId);
+  }
+
   /** Every Git ref update that reached this issuer, in order — the failed ones included. */
   public List<GitRefUpdate> gitRefUpdates() {
     return List.copyOf(gitRefUpdates);
@@ -254,8 +265,10 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
 
   @Override
   public Optional<WorkspaceCredential> commission(
-      Long rowId, String projectId, List<String> statedGitRefs) {
+      Long rowId, String projectId, List<String> statedGitRefs, boolean admin) {
     commissionedFor.add(rowId);
+    // The kind each commission asked for, recorded before the wiring arm like the scope below.
+    kinds.put(rowId, CredentialCommissioner.contextKindFor(admin));
     if (statedGitRefs != null) {
       gitRefs.put(rowId, List.copyOf(statedGitRefs));
     } else {
@@ -278,7 +291,7 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     WorkspaceCredential credential = new WorkspaceCredential(clientId, "secret-" + clientId);
     synchronized (live) {
       live.put(clientId, credential);
-      contexts.put(clientId, CONTEXT_KIND + ":" + rowId);
+      contexts.put(clientId, CredentialCommissioner.contextKindFor(admin) + ":" + rowId);
     }
     return Optional.of(credential);
   }

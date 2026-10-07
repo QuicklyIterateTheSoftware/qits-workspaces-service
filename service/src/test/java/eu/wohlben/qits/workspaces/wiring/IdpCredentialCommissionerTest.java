@@ -122,6 +122,31 @@ public class IdpCredentialCommissionerTest {
   }
 
   @Test
+  public void anAdminRowsCommissionNamesTheAdminKindAndARegularOneTheWorkspaceKind()
+      throws Exception {
+    // qits-628 follow-up: an ADMIN row is commissioned as workspace-admin, which qits-idp issues
+    // qits:agent and qits:admin-agent; every other row stays workspace. Nothing else in the body
+    // moves with the flag.
+    String url =
+        serve(
+            List.of(
+                new Answer(201, "{\"clientId\":\"ws-7-a\",\"secret\":\"s3cr3t\"}"),
+                new Answer(201, "{\"clientId\":\"ws-8-a\",\"secret\":\"s3cr3t\"}")));
+    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
+
+    commissioner.commission(7L, A_PROJECT, List.of("refs/heads/ticket/t"), true);
+    commissioner.commission(8L, A_PROJECT, List.of("refs/heads/ticket/t"), false);
+
+    assertTrue(bodies.get(0).contains("\"contextKind\":\"workspace-admin\""), bodies.get(0));
+    assertTrue(bodies.get(0).contains("\"contextId\":\"7\""), bodies.get(0));
+    assertTrue(bodies.get(1).contains("\"contextKind\":\"workspace\""), bodies.get(1));
+    assertEquals(
+        bodies.get(0).replace("workspace-admin", "workspace").replace("\"7\"", "\"8\""),
+        bodies.get(1),
+        "the kind is the only thing the admin flag changes");
+  }
+
+  @Test
   public void anUnresolvedProjectCostsTheScopeAndNotTheLaunch() throws Exception {
     // The registry could not name the project. That is a moment, not a verdict, and a workspace that
     // does not start is a worse answer than a credential scoped as every one of them was before.
