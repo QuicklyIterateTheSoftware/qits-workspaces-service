@@ -8,6 +8,8 @@ import eu.wohlben.qits.workspaces.error.RunnerRefusals;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
+import io.quarkus.runtime.ShutdownEvent;
+import io.quarkus.runtime.StartupEvent;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -25,6 +27,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -54,19 +58,28 @@ import org.jboss.logging.Logger;
  *       on a thread of this service's own, long after the response went out.
  * </ol>
  *
- * <h2>The scheduled launch is in memory, and a restart drops it</h2>
+ * <h2>A launch waiting for a runner is stored; any other launch is in memory</h2>
  *
- * <p>There is no launch queue, no row and no outbox. A process restart between the dispatch and the
- * daemon coming up loses the pending launch, and the workspace is simply left sitting there with
- * its goal and no agent in it. That is acceptable <em>because</em> the door is idempotent: a
- * re-press finds the workspace, finds no agent running, and launches — so recovery is the same call
- * the caller already knows how to make, and the caller (qits-projects, driving a ticket) is the one
- * holding the intent worth persisting. Durable scheduling here would be a second copy of that
- * intent, and two copies of an intent is how a ticket gets two agents.
+ * <p>A launch scheduled for a workspace that is not queued — a daemon that answers, or a container
+ * coming up — waits on a thread here and nowhere else, and a restart in those seconds to minutes
+ * loses it. A launch <em>held for a workspace QUEUED for a runner</em> is different, and since
+ * qits-1064 it is a row ({@link HeldAgentLaunches}, {@code pending_agent_launch}): see "A queued
+ * workspace holds its launch, in the table" below.
  *
- * <p><b>The instruction is not stored.</b> It rides into the launch and nowhere else — not a column,
- * not an event, not the workspace. An instruction is the first turn of one conversation; keeping it
- * would make it look like the statement of the work.
+ * <p>The reason is that the old premise for keeping it in memory did not hold. The door is
+ * idempotent, so "a re-press recovers it" was the stated recovery — but nobody is told to re-press.
+ * qits-projects presses once per phase, a queued row can wait for a slot for hours, and every deploy
+ * of this service restarts it, so a workspace was left with its goal and no agent and nothing
+ * anywhere said so. The fear that kept it out of the database — a second copy of the caller's intent
+ * is how a ticket gets two agents — is answered by the table's own key: <b>one row per workspace is
+ * the one-launch rule</b>, so a second hold is refused rather than stacked, and the claim below
+ * means exactly one process delivers it.
+ *
+ * <p><b>The instruction is stored only while it is held, and never on the workspace.</b> It rides
+ * into the launch; for a queued row it sits in {@code pending_agent_launch} until the daemon took it
+ * and is deleted then. It is never a column of the workspace or an event — an instruction is the
+ * first turn of one conversation, and keeping it beside the goal would make it look like the
+ * statement of the work.
  *
  * <h2>What a dispatched workspace says it is for</h2>
  *
@@ -122,14 +135,56 @@ import org.jboss.logging.Logger;
  *       daemon dialling home, which is exactly what the window was sized for.
  *   <li><b>Any other way out of the queue</b> — {@link WorkspaceUnqueued}: stopped while queued,
  *       the container deleted, the workspace resolved or abandoned. No runner is going to take the
- *       row, so the launch is dropped with an INFO naming why, and the {@code pending} claim goes
- *       with it.
+ *       row, so the launch is dropped with an INFO naming why — from the map and from the table —
+ *       and the {@code pending} claim goes with it.
  * </ul>
  *
- * <p><b>Parking is still in memory, for the reason the launch always was</b>: the caller holds the
- * intent. A restart drops what is parked; a re-press finds the row still QUEUED and parks again —
- * once, because the {@code pending} claim it re-takes is the same one-per-workspace slot. Nothing
- * is persisted and no second ensure is made: a QUEUED row's start is already the one it waits on.
+ * <h2>A queued workspace holds its launch, in the table</h2>
+ *
+ * <p>What is parked is also <b>stored</b> ({@link HeldAgentLaunches#hold}), before it is parked; the
+ * map is this process's cache of it. The row stays until the wait that delivers it ends — the
+ * daemon took the launch, or the window closed — so a restart <em>while the daemon is waited
+ * for</em> recovers too. It is deleted when the row leaves the queue other than by a take ({@link
+ * #onUnqueued}) and when the workspace resolves ({@link #onResolved}, in the resolving transaction).
+ *
+ * <p><b>Who delivers it is decided by a claim on the row</b>, not by the map: {@link #onTaken}, the
+ * second read after parking and the drain each {@link HeldAgentLaunches#claim} it, a conditional
+ * update only one contender can win, and only the winner submits. So a take observed by a process
+ * that never parked it — the one that started after the press — still launches it, by reading the
+ * table, and two processes that both see it launch it once.
+ *
+ * <p><b>The claim and its lease.</b> A claim names this process ({@link #owner}, one random id per
+ * boot) and when it was taken. A deploy here is start-first, so for a few seconds the old process and
+ * the new one both run, and the new one's boot drain must neither steal a launch the old one is in
+ * the middle of delivering nor lose one the old one gave up when it stopped. Two rules make both
+ * true:
+ *
+ * <ul>
+ *   <li><b>A process that shuts down gives its claims back</b> ({@link #shutdown}), after
+ *       interrupting its waits — an interrupted wait leaves its launch stored and claimed, never
+ *       deleted. The launch is then unclaimed and the next drain takes it.
+ *   <li><b>A drain takes only an unclaimed launch, or one whose claim is older than {@link #lease}</b>
+ *       — twice the launch window, which no live wait outlasts, since the wait for the daemon and the
+ *       wait for a turn boundary share one window. A claim that old is a process that died without
+ *       its shutdown.
+ * </ul>
+ *
+ * <p>The drain runs at boot ({@link #drainAtBoot}) and again on a schedule ({@code
+ * HeldAgentLaunchSweep} in {@code service}), because what the boot drain could not take — a claim
+ * the old process was still holding, a row whose runner had not reconnected yet — becomes takeable a
+ * few seconds later, and nothing else would come back for it: the take it was waiting for has
+ * already happened. For every stored launch it finds, the row decides: still QUEUED → parked here
+ * again, and kept stored; taken by a runner → claimed and submitted; UNAVAILABLE → left for a later
+ * pass; resolved, stopped or failed → deleted.
+ *
+ * <p><b>The double launch is guarded where it always was</b>: {@link #awaitAndLaunch} asks the
+ * daemon whether an agent is RUNNING immediately before it launches, and the daemon's own {@code
+ * POST /agents} does not refuse a second one. A launch delivered by a process that died before it
+ * could delete the row is therefore launched again only into a workspace whose agent has already
+ * ended.
+ *
+ * <p>No second ensure is made for a stored launch: a QUEUED row's start is already the one it waits
+ * on.
  *
  * <p><b>The race is closed by re-reading after parking.</b> A runner can take the row between the
  * read that said QUEUED and the put, and its event then finds nothing to release. So the row is read
@@ -314,9 +369,32 @@ public class DispatchService {
   /**
    * A launch or a delivery held for a row QUEUED for a runner, by row id: what to say, and since
    * when. Every key is also in {@link #pending} — the claim stays taken while parked, so a re-press
-   * cannot park a second one. See the class javadoc, "A queued workspace parks its launch".
+   * cannot park a second one. A cache of {@link #heldLaunches}: everything parked is stored first.
+   * See the class javadoc, "A queued workspace parks its launch".
    */
   private final Map<Long, ParkedLaunch> parked = new ConcurrentHashMap<>();
+
+  /**
+   * Stored launches this process claimed and is delivering — submitted, and not yet finished. Only
+   * for the count the shutdown logs; the claim itself is on the row.
+   */
+  private final Set<Long> delivering = ConcurrentHashMap.newKeySet();
+
+  /**
+   * Where a held launch is stored, so a restart does not lose it. See the class javadoc, "A queued
+   * workspace holds its launch, in the table".
+   */
+  @Inject HeldAgentLaunches heldLaunches;
+
+  /**
+   * This process, as a claim on {@code pending_agent_launch} names it: one random id per boot, so a
+   * restarted process never mistakes the old one's claims for its own. Not final, so a test can
+   * stand in for a restart.
+   */
+  volatile String owner = UUID.randomUUID().toString();
+
+  /** Whether {@link #shutdown} ran — it is reached by the shutdown event and by {@code @PreDestroy}. */
+  private final AtomicBoolean shutDown = new AtomicBoolean();
 
   /**
    * What a parked wait will do once released.
@@ -330,6 +408,10 @@ public class DispatchService {
 
     String what() {
       return delivery ? "delivery" : "agent launch";
+    }
+
+    static ParkedLaunch of(HeldAgentLaunches.Held held) {
+      return new ParkedLaunch(held.text(), held.delivery(), held.compactFirst(), held.parkedAt());
     }
   }
 
@@ -363,15 +445,61 @@ public class DispatchService {
     }
   }
 
+  /**
+   * Stops the waits and gives this process's claims back, keeping every stored launch for the next
+   * process: the parked ones were never claimed, and an interrupted wait leaves its launch stored
+   * (see {@link #settle}). On the shutdown event, while the datasource is still there, and on
+   * {@code @PreDestroy} for a container that never fired one; the second call does nothing.
+   */
+  void onShutdown(@Observes ShutdownEvent event) {
+    shutdown();
+  }
+
   @PreDestroy
   void shutdown() {
-    int dropped = parked.size();
+    if (!shutDown.compareAndSet(false, true)) {
+      return;
+    }
+    int heldHere = parked.size();
+    int inFlight = delivering.size();
     parked.clear();
-    LOG.infof(
-        "shutting down with %d agent launch(es) parked for queued workspaces; dropped — a re-press"
-            + " recovers each",
-        Integer.valueOf(dropped));
     launchExecutor.shutdownNow();
+    try {
+      // A wait inside its daemon call finishes it and deletes what it delivered; one asleep between
+      // probes is interrupted and leaves its launch for the release below.
+      launchExecutor.awaitTermination(SHUTDOWN_GRACE.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (InterruptedException stopping) {
+      Thread.currentThread().interrupt();
+    }
+    try {
+      heldLaunches.releaseAll(owner);
+    } catch (RuntimeException e) {
+      LOG.warnf(
+          e,
+          "could not give back this process's claims on held agent launches; each becomes takeable"
+              + " again once its claim is older than %s",
+          lease());
+    }
+    LOG.infof(
+        "shutting down with %d agent launch(es) parked for queued workspaces and %d not yet"
+            + " delivered; kept — the next process resumes each",
+        Integer.valueOf(heldHere),
+        Integer.valueOf(inFlight));
+  }
+
+  /** How long the shutdown lets a wait that is mid-call finish before giving its claims back. */
+  private static final Duration SHUTDOWN_GRACE = Duration.ofSeconds(2);
+
+  /**
+   * How old a claim has to be before another process may take the launch: twice the launch window,
+   * which no live wait outlasts. See the class javadoc, "The claim and its lease".
+   */
+  Duration lease() {
+    return Duration.ofMillis(2 * launchWindowMs);
+  }
+
+  private Instant staleBefore() {
+    return Instant.now().minus(lease());
   }
 
   /**
@@ -950,15 +1078,14 @@ public class DispatchService {
   }
 
   /**
-   * The step after a {@code pending} claim was taken: park the wait when the row is QUEUED for a
-   * runner, else submit it. The claim is kept while parked and released by whoever ends the wait.
+   * The step after a {@code pending} claim was taken: hold and park the wait when the row is QUEUED
+   * for a runner, else submit it. The claim is kept while parked and released by whoever ends the
+   * wait.
    *
-   * <p><b>The second read is what closes the race.</b> A runner may take the row between the first
-   * read and the put, and {@link #onTaken} then finds nothing to release. So the row is read again
-   * once the entry is in the map: still QUEUED, and whatever moves it later fires its event after
-   * this put and finds the entry; not QUEUED, and this method and the observer race to remove the
-   * one entry — the map's remove is atomic, so exactly one of them owns it. Owning it here, a row a
-   * runner took is submitted, and a row that left the queue any other way is dropped.
+   * <p>The launch is stored ({@link HeldAgentLaunches#hold}) before it is parked. A workspace that
+   * already holds one — stored by a process that is gone, or by the one beside this during a deploy
+   * — keeps that one and this press adds nothing: one held launch per workspace is the one-launch
+   * rule, and the stored one is delivered when the row is taken.
    *
    * @return whether a wait was parked or submitted; false only when the executor refused it
    */
@@ -966,11 +1093,34 @@ public class DispatchService {
     if (!runnerSide(rowId).queued()) {
       return submit(rowId, wait);
     }
+    if (!heldLaunches.hold(rowId, wait.text(), wait.delivery(), wait.compactFirst(), wait.parkedAt())) {
+      pending.remove(rowId);
+      LOG.infof(
+          "workspace %s already holds an agent launch for when a runner takes it; this %s adds"
+              + " nothing",
+          rowId, wait.what());
+      return true;
+    }
+    return park(rowId, wait);
+  }
+
+  /**
+   * Park a stored wait under the {@code pending} claim the caller took, then read the row again.
+   *
+   * <p><b>The second read is what closes the race.</b> A runner may take the row between the first
+   * read and the put, and {@link #onTaken} then finds nothing to release. So the row is read again
+   * once the entry is in the map: still QUEUED, and whatever moves it later fires its event after
+   * this put and finds the entry; not QUEUED, and this method and the observer race to remove the
+   * one entry — the map's remove is atomic, so exactly one of them goes on to claim it. Going on
+   * here, a row a runner took is claimed and submitted, one whose runner is offline is left stored
+   * for a later drain, and a row that left the queue any other way is dropped.
+   */
+  private boolean park(Long rowId, ParkedLaunch wait) {
     parked.put(rowId, wait);
     RunnerSide now = runnerSide(rowId);
     if (now.queued()) {
       LOG.infof(
-          "workspace %s is queued for a workspace runner; its %s is parked until a runner takes it",
+          "workspace %s is queued for a workspace runner; its %s is held until a runner takes it",
           rowId, wait.what());
       return true;
     }
@@ -979,14 +1129,43 @@ public class DispatchService {
       return true;
     }
     if (now.taken()) {
-      return submit(rowId, wait);
+      return claimAndSubmit(rowId);
     }
     pending.remove(rowId);
+    if (now.unavailable()) {
+      LOG.infof(
+          "workspace %s's runner is offline; its %s stays held for when the runner is back",
+          rowId, wait.what());
+      return true;
+    }
+    heldLaunches.dropUnclaimed(rowId, staleBefore());
     LOG.infof(
-        "workspace %s left the queue (now %s) before its %s could be parked; dropped — a re-press"
-            + " recovers it",
+        "workspace %s left the queue (now %s) before its %s could be parked; dropped",
         rowId, now.status(), wait.what());
     return true;
+  }
+
+  /**
+   * Claim the row's stored launch and submit it, under the {@code pending} claim the caller took. A
+   * launch somebody else claimed, or none at all, releases that claim and submits nothing.
+   */
+  private boolean claimAndSubmit(Long rowId) {
+    Optional<HeldAgentLaunches.Held> claimed =
+        heldLaunches.claim(rowId, owner, Instant.now(), staleBefore());
+    if (claimed.isEmpty()) {
+      pending.remove(rowId);
+      LOG.debugf("workspace %s's held launch is gone or another process delivers it", rowId);
+      return true;
+    }
+    HeldAgentLaunches.Held held = claimed.get();
+    ParkedLaunch wait = ParkedLaunch.of(held);
+    LOG.infof(
+        "workspace %s was taken by a runner %s s after its %s was held; it waits for the daemon"
+            + " from now",
+        rowId, Long.valueOf(Duration.between(held.parkedAt(), Instant.now()).toSeconds()),
+        wait.what());
+    delivering.add(rowId);
+    return submit(rowId, wait, true);
   }
 
   /**
@@ -994,6 +1173,15 @@ public class DispatchService {
    * is released when it ends, or at once when the executor refuses it.
    */
   private boolean submit(Long rowId, ParkedLaunch wait) {
+    return submit(rowId, wait, false);
+  }
+
+  /**
+   * {@link #submit(Long, ParkedLaunch)}, for a wait that is also a stored launch this process
+   * claimed when {@code held}: it is settled when the wait ends, and its claim given back when the
+   * executor refuses it.
+   */
+  private boolean submit(Long rowId, ParkedLaunch wait, boolean held) {
     try {
       execute(
           () -> {
@@ -1004,14 +1192,50 @@ public class DispatchService {
                 awaitAndLaunch(rowId, wait.text());
               }
             } finally {
+              if (held) {
+                settle(rowId);
+              }
               pending.remove(rowId);
             }
           });
       return true;
     } catch (RejectedExecutionException shuttingDown) {
       pending.remove(rowId);
+      if (held) {
+        delivering.remove(rowId);
+        releaseQuietly(rowId);
+      }
       LOG.warnf("could not schedule a %s for workspace %s: shutting down", wait.what(), rowId);
       return false;
+    }
+  }
+
+  /**
+   * The end of a stored launch's wait. Ended — launched, delivered, refused, or given up when the
+   * window closed — it is deleted. <b>Interrupted, it is kept</b>: that is the shutdown stopping the
+   * wait, which gives the claim back so the next process delivers it.
+   */
+  private void settle(Long rowId) {
+    delivering.remove(rowId);
+    if (Thread.currentThread().isInterrupted()) {
+      return;
+    }
+    try {
+      heldLaunches.finish(rowId, owner);
+    } catch (RuntimeException e) {
+      LOG.warnf(
+          e,
+          "could not delete workspace %s's delivered agent launch; a later drain finds an agent"
+              + " running and launches nothing",
+          rowId);
+    }
+  }
+
+  private void releaseQuietly(Long rowId) {
+    try {
+      heldLaunches.release(rowId, owner);
+    } catch (RuntimeException e) {
+      LOG.debugf(e, "could not give back the claim on workspace %s's held launch", rowId);
     }
   }
 
@@ -1021,38 +1245,118 @@ public class DispatchService {
   }
 
   /**
-   * A runner took the row (after its claim committed): a wait parked on it is submitted now, and its
-   * window starts now — the time in the queue is not part of it.
+   * A runner took the row (after its claim committed): the launch held for it is claimed and
+   * submitted now, and its window starts now — the time in the queue is not part of it.
+   *
+   * <p>The table is the record, not the map. A launch this process parked is taken out of the map
+   * first; one it never parked — held before this process started, or by the process beside it — is
+   * claimed straight off the table, unless a wait of this process already holds the workspace.
    */
   void onTaken(@Observes(during = TransactionPhase.AFTER_SUCCESS) WorkspaceTaken taken) {
-    ParkedLaunch wait = parked.remove(taken.rowId());
-    if (wait == null) {
+    Long rowId = taken.rowId();
+    ParkedLaunch wait = parked.remove(rowId);
+    if (wait == null && !pending.add(rowId)) {
       return;
     }
-    LOG.infof(
-        "workspace %s was taken by runner %s after %s s in the queue; its %s waits for the daemon"
-            + " from now",
-        taken.rowId(),
-        taken.runnerId(),
-        Long.valueOf(Duration.between(wait.parkedAt(), Instant.now()).toSeconds()),
-        wait.what());
-    submit(taken.rowId(), wait);
+    claimAndSubmit(rowId);
   }
 
   /**
-   * The row left the queue other than by a claim: no runner will take it, so a wait parked on it is
-   * dropped and its {@code pending} claim released. A re-press is the recovery, as for a restart.
+   * The row left the queue other than by a claim: no runner will take it, so the launch held for it
+   * is dropped — from the map and from the table — and its {@code pending} claim released. A stored
+   * launch that is already being delivered is that delivery's to end.
    */
   void onUnqueued(@Observes(during = TransactionPhase.AFTER_SUCCESS) WorkspaceUnqueued unqueued) {
-    ParkedLaunch wait = parked.remove(unqueued.rowId());
-    if (wait == null) {
+    Long rowId = unqueued.rowId();
+    ParkedLaunch wait = parked.remove(rowId);
+    if (wait != null) {
+      pending.remove(rowId);
+    }
+    boolean dropped = heldLaunches.dropUnclaimed(rowId, staleBefore());
+    if (wait == null && !dropped) {
       return;
     }
-    pending.remove(unqueued.rowId());
     LOG.infof(
-        "workspace %s left the queue before a runner took it (%s); its parked %s is dropped — a"
-            + " re-press recovers it",
-        unqueued.rowId(), unqueued.reason(), wait.what());
+        "workspace %s left the queue before a runner took it (%s); its held %s is dropped",
+        rowId, unqueued.reason(), wait == null ? "launch" : wait.what());
+  }
+
+  /**
+   * The workspace resolved: whatever launch it still holds goes, claimed or not, in the resolving
+   * transaction — the row is soft-deleted, so the table's cascade never fires.
+   */
+  void onResolved(@Observes WorkspaceResolved resolved) {
+    heldLaunches.discard(resolved.workspaceRowId());
+  }
+
+  /** The boot's drain; a failure is logged and the scheduled drain tries again. */
+  void drainAtBoot(@Observes StartupEvent startup) {
+    try {
+      drainHeldLaunches();
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "could not resume the agent launches held before this start; the next drain will");
+    }
+  }
+
+  /**
+   * Resume every stored launch nobody is delivering: still QUEUED → parked here again and kept
+   * stored; taken by a runner → claimed and submitted; UNAVAILABLE → left for a later pass;
+   * resolved, stopped or failed → deleted. A launch this process already parks or delivers, and one
+   * another process claimed within {@link #lease}, is left alone. See the class javadoc, "The claim
+   * and its lease".
+   *
+   * @return how many launches it parked or submitted
+   */
+  public int drainHeldLaunches() {
+    Instant staleBefore = staleBefore();
+    int resumed = 0;
+    for (HeldAgentLaunches.Held held : heldLaunches.all()) {
+      Long rowId = held.workspaceId();
+      if (!held.claimable(staleBefore) || pending.contains(rowId)) {
+        continue;
+      }
+      RunnerSide side = runnerSide(rowId);
+      if (side.unavailable()) {
+        continue;
+      }
+      if (side.queued() || side.taken()) {
+        if (!pending.add(rowId)) {
+          continue;
+        }
+        if (side.queued()) {
+          park(rowId, ParkedLaunch.of(held));
+        } else {
+          claimAndSubmit(rowId);
+        }
+        resumed++;
+        continue;
+      }
+      if (heldLaunches.dropUnclaimed(rowId, staleBefore)) {
+        LOG.infof(
+            "workspace %s no longer waits for a runner (%s); the %s held for it is dropped",
+            rowId,
+            side.placement() == WorkspacePlacement.RUNNER ? side.status() : "resolved",
+            held.delivery() ? "delivery" : "agent launch");
+      }
+    }
+    return resumed;
+  }
+
+  /**
+   * Forget everything this process holds in memory and take a new {@link #owner}, as a restart
+   * would; the table is untouched. For the tests, which may not call {@link #shutdown} on a shared
+   * bean.
+   */
+  void forgetInMemory() {
+    parked.clear();
+    pending.clear();
+    delivering.clear();
+    owner = UUID.randomUUID().toString();
+  }
+
+  /** Whether a launch is stored for {@code rowId}; for the tests. */
+  boolean isHeld(Long rowId) {
+    return heldLaunches.all().stream().anyMatch(held -> held.workspaceId().equals(rowId));
   }
 
   /** Whether a wait is parked for {@code rowId}; for the tests. */

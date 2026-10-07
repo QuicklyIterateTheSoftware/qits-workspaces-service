@@ -2,18 +2,24 @@ package eu.wohlben.qits.workspaces.control;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
+import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.RunnerRefusals;
 import jakarta.enterprise.inject.Vetoed;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
@@ -30,6 +36,11 @@ import org.junit.jupiter.api.Test;
  * a window that starts then; {@link WorkspaceUnqueued} drops it and releases the claim; a second
  * press while parked parks nothing more; the race between the read and the park cannot strand it;
  * UNAVAILABLE is a 409 naming the runner; and a DIRECT row is submitted at once, as before.
+ *
+ * <p>And the held launch's table (qits-1064), through {@link FakeHeldLaunches} shared between two
+ * instances — a process and the one that replaced it: what is parked is stored and outlives the
+ * process, a take or a drain in the new one delivers it, a delivered launch is deleted and an
+ * interrupted one is kept, and two instances that both see it submit it once.
  */
 class DispatchServiceQueuedTest {
 
@@ -42,16 +53,25 @@ class DispatchServiceQueuedTest {
 
   private Testable service;
   private ScriptedLauncher launcher;
+  private FakeHeldLaunches store;
 
   @BeforeEach
   void setUp() {
     launcher = new ScriptedLauncher();
-    service = new Testable();
-    service.agents = StubInstance.of(launcher);
-    service.processes = StubInstance.empty();
-    service.agentActivity = StubInstance.empty();
-    service.launchWindowMs = 200;
-    service.pollIntervalMs = 10;
+    store = new FakeHeldLaunches();
+    service = process();
+  }
+
+  /** A {@link DispatchService} over the shared launcher and table: one process. */
+  private Testable process() {
+    Testable process = new Testable();
+    process.agents = StubInstance.of(launcher);
+    process.processes = StubInstance.empty();
+    process.agentActivity = StubInstance.empty();
+    process.heldLaunches = store;
+    process.launchWindowMs = 200;
+    process.pollIntervalMs = 10;
+    return process;
   }
 
   @Test
@@ -64,6 +84,8 @@ class DispatchServiceQueuedTest {
     assertTrue(service.isPending(ROW), "the claim is kept while parked");
     assertEquals(0, service.submitted.size(), "no thread, so no window is running");
     assertEquals(List.of(), launcher.probes, "nothing asks the daemon while parked");
+    assertTrue(store.holds(ROW), "and it is stored, unclaimed");
+    assertNull(store.get(ROW).claimedBy());
   }
 
   /**
@@ -88,6 +110,7 @@ class DispatchServiceQueuedTest {
 
     assertEquals(List.of(ROW + ":go"), launcher.launches);
     assertFalse(service.isPending(ROW), "the claim is released when the wait ends");
+    assertFalse(store.holds(ROW), "a delivered launch is deleted");
   }
 
   /** From the take on it is the ordinary window: a daemon that never answers is given up on. */
@@ -103,6 +126,7 @@ class DispatchServiceQueuedTest {
     assertTrue(System.currentTimeMillis() - started >= service.launchWindowMs);
     assertEquals(List.of(), launcher.launches);
     assertFalse(service.isPending(ROW));
+    assertFalse(store.holds(ROW), "a launch given up on is deleted too, or every drain retries it");
   }
 
   @Test
@@ -132,8 +156,10 @@ class DispatchServiceQueuedTest {
 
     assertFalse(service.isParked(ROW));
     assertFalse(service.isPending(ROW));
+    assertFalse(store.holds(ROW), "and it is deleted from the table");
     service.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
     assertEquals(0, service.submitted.size(), "a dropped launch is not released by a later take");
+    assertFalse(service.isPending(ROW));
   }
 
   @Test
@@ -197,6 +223,7 @@ class DispatchServiceQueuedTest {
     assertFalse(service.isParked(ROW));
     assertFalse(service.isPending(ROW));
     assertEquals(0, service.submitted.size());
+    assertFalse(store.holds(ROW));
   }
 
   @Test
@@ -230,13 +257,202 @@ class DispatchServiceQueuedTest {
   }
 
   @Test
-  void aShutdownDropsWhatIsParked() {
+  void aShutdownKeepsWhatIsParked() {
     service.sides(QUEUED, QUEUED);
     service.schedule(ROW, "go");
 
     service.shutdown();
 
     assertFalse(service.isParked(ROW));
+    assertTrue(store.holds(ROW), "the next process resumes it");
+  }
+
+  // --- the held launch's table (qits-1064) ---------------------------------------------------------
+
+  /** The launch parked before a restart is launched by the new process's take, with no re-press. */
+  @Test
+  void aTakeAfterARestartLaunchesWhatTheOldProcessHeld() {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+
+    Testable restarted = process();
+    restarted.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+
+    assertEquals(1, restarted.submitted.size());
+    assertEquals(restarted.owner, store.get(ROW).claimedBy(), "claimed while it is delivered");
+    launcher.answers(WorkspaceAgentLauncher.AgentState.IDLE);
+    restarted.submitted.get(0).run();
+    assertEquals(List.of(ROW + ":go"), launcher.launches);
+    assertFalse(store.holds(ROW), "deleted once the daemon took it");
+    assertFalse(restarted.isPending(ROW));
+  }
+
+  /** The new process's drain claims and submits a launch whose row a runner already took. */
+  @Test
+  void aDrainSubmitsALaunchWhoseRowWasTakenMeanwhile() {
+    service.sides(QUEUED, QUEUED);
+    service.scheduleDelivery(ROW, "next phase", false);
+
+    Testable restarted = process();
+    restarted.sides(PROVISIONING);
+    assertEquals(1, restarted.drainHeldLaunches());
+
+    assertEquals(1, restarted.submitted.size());
+    launcher.answers(WorkspaceAgentLauncher.AgentState.IDLE);
+    restarted.submitted.get(0).run();
+    assertEquals(List.of(ROW + ":next phase"), launcher.launches, "a delivery stays a delivery");
+    assertFalse(store.holds(ROW));
+  }
+
+  /** Still queued at the drain: parked again and kept stored, and the take then launches it. */
+  @Test
+  void aDrainParksALaunchWhoseRowIsStillQueued() {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+
+    Testable restarted = process();
+    restarted.sides(QUEUED, QUEUED);
+    restarted.drainHeldLaunches();
+
+    assertTrue(restarted.isParked(ROW));
+    assertTrue(store.holds(ROW));
+    assertEquals(0, restarted.submitted.size());
+    restarted.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+    assertEquals(1, restarted.submitted.size());
+  }
+
+  /** A drain deletes a launch whose row resolved, stopped or failed — nothing will take it. */
+  @Test
+  void aDrainDropsALaunchWhoseRowLeftTheQueue() {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+
+    Testable restarted = process();
+    restarted.sides(DispatchService.RunnerSide.DIRECT);
+    assertEquals(0, restarted.drainHeldLaunches());
+
+    assertFalse(store.holds(ROW));
+    assertEquals(0, restarted.submitted.size());
+    assertFalse(restarted.isPending(ROW));
+  }
+
+  /** A row whose runner is offline is left for a later pass, stored and unclaimed. */
+  @Test
+  void aDrainLeavesALaunchWhoseRunnerIsOffline() {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+
+    Testable restarted = process();
+    restarted.sides(
+        new DispatchService.RunnerSide(
+            WorkspacePlacement.RUNNER, WorkspaceRuntimeStatus.UNAVAILABLE, "r-night-shift"));
+    assertEquals(0, restarted.drainHeldLaunches());
+
+    assertTrue(store.holds(ROW));
+    assertNull(store.get(ROW).claimedBy());
+    assertFalse(restarted.isPending(ROW));
+  }
+
+  /** Both processes park it (a deploy's overlap) and both see a take: it is submitted once. */
+  @Test
+  void twoProcessesThatBothSeeItSubmitItOnce() {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+    Testable beside = process();
+    beside.sides(QUEUED, QUEUED);
+    beside.drainHeldLaunches();
+    assertTrue(beside.isParked(ROW));
+
+    service.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+    beside.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+
+    assertEquals(1, service.submitted.size() + beside.submitted.size());
+    assertFalse(beside.isPending(ROW), "the loser releases its own claim");
+  }
+
+  /**
+   * A launch the old process is still delivering is not taken by the new one's drain; once the old
+   * one shuts down and gives its claim back, the next drain takes it.
+   */
+  @Test
+  void aDrainLeavesALiveClaimAndTakesItOnceItIsGivenBack() {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+    service.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+    assertEquals(service.owner, store.get(ROW).claimedBy());
+
+    Testable next = process();
+    assertEquals(0, next.drainHeldLaunches(), "the old process is delivering it");
+    assertEquals(0, next.submitted.size());
+
+    service.shutdown();
+    assertTrue(store.holds(ROW));
+    assertNull(store.get(ROW).claimedBy(), "the shutdown gave the claim back");
+
+    next.sides(PROVISIONING);
+    assertEquals(1, next.drainHeldLaunches());
+    assertEquals(1, next.submitted.size());
+  }
+
+  /** A claim older than the lease is a process that died without its shutdown: taken again. */
+  @Test
+  void aClaimOlderThanTheLeaseIsTakenAgain() throws Exception {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+    service.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+
+    Testable next = process();
+    Thread.sleep(next.lease().toMillis() + 50);
+    next.sides(PROVISIONING);
+    assertEquals(1, next.drainHeldLaunches());
+    assertEquals(next.owner, store.get(ROW).claimedBy());
+  }
+
+  /** A wait interrupted by a shutdown leaves its launch stored for the next process. */
+  @Test
+  void anInterruptedWaitKeepsTheLaunch() {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+    service.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+
+    Thread.currentThread().interrupt();
+    try {
+      service.submitted.get(0).run();
+    } finally {
+      Thread.interrupted();
+    }
+
+    assertEquals(List.of(), launcher.launches);
+    assertTrue(store.holds(ROW), "kept for the next process");
+    assertFalse(service.isPending(ROW));
+  }
+
+  /** A press onto a workspace that already holds a launch — another process's — adds nothing. */
+  @Test
+  void aPressOntoAWorkspaceThatHoldsALaunchAddsNothing() {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+
+    Testable restarted = process();
+    restarted.sides(QUEUED);
+    restarted.schedule(ROW, "again");
+
+    assertFalse(restarted.isParked(ROW));
+    assertFalse(restarted.isPending(ROW));
+    assertEquals("go", store.get(ROW).text(), "one held launch per workspace");
+  }
+
+  /** A resolution deletes the held launch, claimed or not. */
+  @Test
+  void aResolutionDiscardsTheLaunch() {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+    service.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+
+    service.onResolved(
+        new WorkspaceResolved("repo", "ws", ROW, WorkspaceStatus.ABANDONED));
+
+    assertFalse(store.holds(ROW));
   }
 
   // --- fakes --------------------------------------------------------------------------------------
@@ -279,6 +495,99 @@ class DispatchServiceQueuedTest {
     @Override
     void execute(Runnable wait) {
       submitted.add(wait);
+    }
+  }
+
+  /** {@code pending_agent_launch}, in memory and shared between the instances of one test. */
+  private static final class FakeHeldLaunches implements HeldAgentLaunches {
+
+    private final Map<Long, Held> rows = new HashMap<>();
+
+    synchronized boolean holds(Long workspaceId) {
+      return rows.containsKey(workspaceId);
+    }
+
+    synchronized Held get(Long workspaceId) {
+      return rows.get(workspaceId);
+    }
+
+    @Override
+    public synchronized boolean hold(
+        Long workspaceId, String text, boolean delivery, boolean compactFirst, Instant parkedAt) {
+      return rows.putIfAbsent(
+              workspaceId,
+              new Held(workspaceId, text, delivery, compactFirst, parkedAt, null, null))
+          == null;
+    }
+
+    @Override
+    public synchronized List<Held> all() {
+      return List.copyOf(rows.values());
+    }
+
+    @Override
+    public synchronized Optional<Held> claim(
+        Long workspaceId, String owner, Instant now, Instant staleBefore) {
+      Held held = rows.get(workspaceId);
+      if (held == null || !held.claimable(staleBefore)) {
+        return Optional.empty();
+      }
+      Held claimed = withClaim(held, owner, now);
+      rows.put(workspaceId, claimed);
+      return Optional.of(claimed);
+    }
+
+    @Override
+    public synchronized void release(Long workspaceId, String owner) {
+      Held held = rows.get(workspaceId);
+      if (held != null && owner.equals(held.claimedBy())) {
+        rows.put(workspaceId, withClaim(held, null, null));
+      }
+    }
+
+    @Override
+    public synchronized int releaseAll(String owner) {
+      List<Long> mine =
+          rows.values().stream()
+              .filter(held -> owner.equals(held.claimedBy()))
+              .map(Held::workspaceId)
+              .toList();
+      mine.forEach(id -> rows.put(id, withClaim(rows.get(id), null, null)));
+      return mine.size();
+    }
+
+    @Override
+    public synchronized void finish(Long workspaceId, String owner) {
+      Held held = rows.get(workspaceId);
+      if (held != null && owner.equals(held.claimedBy())) {
+        rows.remove(workspaceId);
+      }
+    }
+
+    @Override
+    public synchronized boolean dropUnclaimed(Long workspaceId, Instant staleBefore) {
+      Held held = rows.get(workspaceId);
+      if (held == null || !held.claimable(staleBefore)) {
+        return false;
+      }
+      rows.remove(workspaceId);
+      return true;
+    }
+
+    @Override
+    public synchronized void discard(Long workspaceId) {
+      rows.remove(workspaceId);
+    }
+
+    private static Held withClaim(Held held, String owner, Instant at) {
+      return new Held(
+          held.workspaceId(),
+          held.text(),
+          held.delivery(),
+          held.compactFirst(),
+          held.parkedAt(),
+          owner,
+          at);
     }
   }
 
