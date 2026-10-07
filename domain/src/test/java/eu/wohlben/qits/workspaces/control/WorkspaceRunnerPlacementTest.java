@@ -707,6 +707,10 @@ public class WorkspaceRunnerPlacementTest {
     workspaceService.discardWorkspace(created.id, null, true);
 
     assertEquals(WorkspaceStatus.ABANDONED, read(created.id).status);
+    assertEquals(
+        WorkspaceRuntimeStatus.STOPPED,
+        read(created.id).runtimeStatus,
+        "a resolved row reads STOPPED; the runner's Deleted never reaches a resolved row");
     assertTrue(placement.calls().contains("released:" + created.id));
     assertFalse(placement.calls().stream().anyMatch(c -> c.startsWith("delete:")), "no wait");
     assertEquals(List.of(), containers.teardownCalls(), "qits-containers was not asked");
