@@ -23,7 +23,7 @@ import java.util.List;
 @Path("/history")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed("qits:admin")
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
 public class WorkspaceHistoryController {
 
   @Inject WorkspaceHistoryService workspaceHistoryService;
@@ -36,7 +36,7 @@ public class WorkspaceHistoryController {
 
   /** The repository is a real filter here — the collection is "what flowed through this repo". */
   // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   public ListHistoryRequest.Response list(@QueryParam("repositoryId") String repositoryId) {
     var entries =
@@ -54,7 +54,7 @@ public class WorkspaceHistoryController {
    * A history row was always addressed by the surrogate id; the repository segment was decoration on
    * the item routes and only ever a filter on the collection above.
    */
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   @Path("/{id}")
   public GetHistoryRequest.Response get(@PathParam("id") Long id) {
@@ -75,7 +75,7 @@ public class WorkspaceHistoryController {
    * before the volume was mounted here, both legitimately have no sessions; neither is an error to
    * report and neither is distinguishable from the other.
    */
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   @Path("/{id}/agent-sessions")
   public ListAgentSessionsRequest.Response agentSessions(@PathParam("id") Long id) {
@@ -94,7 +94,7 @@ public class WorkspaceHistoryController {
    * <p>A session id that does not attribute to this workspace answers 404, exactly as one that
    * never existed does — the id is matched against the listing above and never reaches a path.
    */
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   @Path("/{id}/agent-sessions/{sessionId}/transcript")
   public GetAgentTranscriptRequest.Response agentTranscript(

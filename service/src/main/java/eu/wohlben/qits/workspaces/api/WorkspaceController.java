@@ -44,7 +44,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 @Path("/workspaces")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed("qits:admin")
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
 public class WorkspaceController {
 
   @Inject WorkspaceService workspaceService;
@@ -67,7 +67,7 @@ public class WorkspaceController {
   /** The repository is a filter on the collection, not a parent segment. */
   // The three reads here also take qits:agent (phase 4: agents keep every read, lose writes). A
   // method-level list replaces the class's, so each read states the admin role again.
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   public ListWorkspacesRequest.Response list(@QueryParam("repositoryId") String repositoryId) {
     var entries =
@@ -107,7 +107,7 @@ public class WorkspaceController {
    * because there is nothing for an editor to be ahead OF, and a client reads them the way it reads
    * every other unknown on this shape.
    */
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   @Path("/{id}")
   @APIResponse(responseCode = "200", description = "The workspace.")
@@ -142,7 +142,8 @@ public class WorkspaceController {
    * <p>Who may ask is answered by this class's own {@code @RolesAllowed("qits:admin")}: creating any
    * workspace already requires the platform admin role, and the socket is granted per workspace
    * rather than per caller. A second role invented here would be a vocabulary the platform's idp
-   * does not issue and a gate nothing could pass.
+   * does not issue and a gate nothing could pass. {@code qits:admin-agent} is admitted too
+   * (qits-628 follow-up); remove it here if this door must stay human-only.
    *
    * <p>{@code placement} is where the container runs (epic qits-624): {@code DIRECT} on the platform
    * host, or {@code RUNNER} on a workspace runner's node. It is not a choice (qits-774): a regular
@@ -290,7 +291,7 @@ public class WorkspaceController {
    * workspace's payload-free SSE channel as a {@code process} hint, so clients re-fetch this
    * instead of polling.
    */
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   @Path("/{id}/active-process")
   public ActiveProcessRequest.Response activeProcess(

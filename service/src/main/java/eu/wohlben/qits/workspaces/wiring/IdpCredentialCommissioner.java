@@ -108,14 +108,14 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
    */
   @Override
   public Optional<WorkspaceCredential> commission(
-      Long rowId, String projectId, List<String> gitRefs) {
+      Long rowId, String projectId, List<String> gitRefs, boolean admin) {
     String authorization = authorization();
     if (authorization == null || rowId == null) {
       return Optional.empty();
     }
     IdpClients.CommissionRequest[] request = {
       new IdpClients.CommissionRequest(
-          CONTEXT_KIND,
+          CredentialCommissioner.contextKindFor(admin),
           Long.toString(rowId),
           claims(projectId),
           gitRefs == null ? null : List.copyOf(gitRefs))

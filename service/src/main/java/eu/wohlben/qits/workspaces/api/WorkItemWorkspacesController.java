@@ -23,7 +23,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
  */
 @Path("/work")
 @Produces(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:system", "qits:agent"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system", "qits:agent"})
 public class WorkItemWorkspacesController {
 
   @Inject WorkspaceService workspaces;

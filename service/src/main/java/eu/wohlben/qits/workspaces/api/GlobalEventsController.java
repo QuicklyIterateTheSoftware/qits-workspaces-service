@@ -25,13 +25,13 @@ import org.jboss.resteasy.reactive.RestStreamElementType;
  * WorkspaceDaemonRegistry#onAgentActivity}). Same heartbeat/reconnect story as the siblings.
  */
 @Path("/events")
-@jakarta.annotation.security.RolesAllowed("qits:admin")
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
 public class GlobalEventsController {
 
   @Inject WorkspaceEventBroadcaster broadcaster;
 
   // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   @Produces(MediaType.SERVER_SENT_EVENTS)
   @RestStreamElementType(MediaType.TEXT_PLAIN)

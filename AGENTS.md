@@ -864,6 +864,14 @@ each read METHOD — every `GET`, the three event streams — and never on a cla
 a class later does not inherit the agent role. A method-level list replaces the class's, so each one
 repeats the class's roles beside `qits:agent`. `AgentReadAccessTest` has one test per class. The
 raw Vert.x proxy routes carry no role list here and are not part of this rule.
+**`qits:admin-agent` is admitted wherever `qits:admin` is** (qits-628 follow-up, owner's request
+2026-10-07). It is the role qits-idp issues, beside `qits:agent`, to an ADMIN workspace's container
+credential (context kind `workspace-admin`), whose agent holds the host's docker socket. It is named
+explicitly right after `qits:admin` at every check — every `@RolesAllowed` list,
+`WorkspaceRunnerController.ADMIN_AGENT_ROLE` beside `ADMIN_ROLE`, `BranchController.requireAdmin` —
+and never implied by code, so a door that must stay human-only can drop it on its own. A new door
+that admits `qits:admin` lists it too. `AdminAgentAccessTest` pins it, door by door, against
+`qits:agent` alone.
 **`X-Qits-*` is the gateway's reserved namespace, stripped from every inbound request
 unconditionally**, so a client cannot forge one. That strip rule is the entire reason the header can
 be trusted here — and it is why `ForwardAuthTest` sets the real header rather than reaching for
@@ -1495,6 +1503,14 @@ safe**: hourly and at boot it asks qits-idp what it holds for this service and g
 crashed teardown's leftover are both orphans the moment they stop being claimed. It only ever deletes
 what that listing just returned, and an unreadable listing comes back empty, so a blip reaps nothing
 rather than everything.
+
+**An ADMIN row commissions kind `workspace-admin`, every other row `workspace`** (qits-628
+follow-up). `commissionFor` reads `wt.admin` beside `wt.editor` and passes it to
+`CredentialCommissioner.commission(rowId, projectId, gitRefs, admin)`; `contextKindFor(admin)` picks
+the kind, which qits-idp issues `qits:agent` + `qits:admin-agent`. The flag changes nothing else in
+the request and never reaches the spec. The reconcile matches both kinds through
+`CredentialCommissioner.isWorkspaceKind`. A live admin container keeps its old `workspace` pair until
+it is recreated or deleted. A RUNNER row is never admin, so the token arm keeps `workspace`.
 
 **A RUNNER row holds a workspace token instead of the pair** (qits-625, qits-802): one opaque
 `qits_tok_` of the `workspace` kind (`CredentialCommissioner.commissionToken`, `POST

@@ -310,6 +310,18 @@ evaluated, so a workspace agent reaches its own project's pipelines and nobody e
 the credential is scoped to and the one the container is told about
 (`QITS_WORKSPACE_DAEMON_PROJECT_ID`) are the same fact from the same registry.
 
+**An admin workspace's credential is of its own kind** (qits-628 follow-up). An ADMIN row is
+commissioned with `contextKind: "workspace-admin"`, which qits-idp issues `qits:agent` **and**
+`qits:admin-agent` — the role every door here (and on the platform) that admits `qits:admin` also
+admits by name, because that container already holds the host's docker socket. Every other row, the
+editor included, stays `contextKind: "workspace"` and `qits:agent` alone. The kind is the issuer's
+record and is not in the container's environment, so the spec — and with it `Recreate.ifChanged` — is
+unchanged by it. **An admin container that already exists keeps the `workspace` credential it was
+launched with** until it is next recreated or deleted (a stop and start keeps the pair, by design);
+only then is a `workspace-admin` one commissioned. `CommissionReconciler` reaps and spares both kinds
+by the one rule. **qits-idp must be released first**: an idp that does not know the kind gives it no
+role at all, not even `qits:agent`.
+
 A project the registry cannot name **costs the scope, not the launch**: the commission states no
 claim and the credential is issued as every workspace credential was before scoping existed. A
 blinking registry must not be able to stop a workspace from starting, and it is never sent as `"*"` —

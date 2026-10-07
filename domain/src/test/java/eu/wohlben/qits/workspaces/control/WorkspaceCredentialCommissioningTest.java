@@ -98,6 +98,30 @@ public class WorkspaceCredentialCommissioningTest {
         FakeRepositoryLookup.PROJECT_ID,
         commissioner.scopeFor(workspaceIds.of(repoId, "feat")),
         "the commission says which project this credential is for");
+
+    // AND IT IS AN ADMIN ROW, SO IT COMMISSIONS THE ADMIN KIND (qits-628 follow-up): qits-idp issues
+    // workspace-admin qits:agent and qits:admin-agent, because this container holds the host's
+    // docker socket.
+    assertEquals(
+        CredentialCommissioner.ADMIN_CONTEXT_KIND,
+        commissioner.contextKindFor(workspaceIds.of(repoId, "feat")),
+        "an admin row's credential is of kind workspace-admin");
+  }
+
+  @Test
+  public void theEditorCommissionsTheWorkspaceKind() {
+    // The editor is the one DIRECT row that is not admin (V15 admits no other): its one container
+    // holds an ordinary qits:agent credential, and qits-628's admin kind does not reach it. A
+    // RUNNER row holds a token instead, always of kind `workspace`.
+    Long rowId = workspaceService.createEditorWorkspace().id;
+    // The editor is a singleton: an earlier test in the suite may have left it with a running
+    // container, which an ensure would leave alone without commissioning anything. Remove it so this
+    // ensure provisions, and so commissions, afresh.
+    workspaceService.deleteContainer(rowId);
+
+    workspaceService.ensureContainer(rowId);
+
+    assertEquals(CredentialCommissioner.CONTEXT_KIND, commissioner.contextKindFor(rowId));
   }
 
   @Test

@@ -34,7 +34,7 @@ import java.util.Set;
 @Path("/gc")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:system"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system"})
 public class GcController {
 
   @Inject WorkspaceService workspaceService;

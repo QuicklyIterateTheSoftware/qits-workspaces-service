@@ -53,7 +53,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 // qits:system beside the admin role, like GcController: the caller is qits-projects' release
 // executor, a machine. Every method on this class is meant for both, so the class list and the
 // bodies agree by construction and no method widens what the class states.
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:system"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system"})
 public class BranchResolutionController {
 
   @Inject WorkspaceService workspaceService;
