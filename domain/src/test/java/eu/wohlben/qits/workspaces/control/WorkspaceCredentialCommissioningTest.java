@@ -114,6 +114,10 @@ public class WorkspaceCredentialCommissioningTest {
     // holds an ordinary qits:agent credential, and qits-628's admin kind does not reach it. A
     // RUNNER row holds a token instead, always of kind `workspace`.
     Long rowId = workspaceService.createEditorWorkspace().id;
+    // The editor is a singleton: an earlier test in the suite may have left it with a running
+    // container, which an ensure would leave alone without commissioning anything. Remove it so this
+    // ensure provisions, and so commissions, afresh.
+    workspaceService.deleteContainer(rowId);
 
     workspaceService.ensureContainer(rowId);
 
