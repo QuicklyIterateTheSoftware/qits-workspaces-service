@@ -110,7 +110,7 @@
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1008.23609</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1008.124939</qits.projects-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
              and ConsumerPactVerificationTest verifies consumers' pacts against this service.
