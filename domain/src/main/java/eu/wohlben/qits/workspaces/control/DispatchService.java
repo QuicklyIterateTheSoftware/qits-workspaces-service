@@ -18,6 +18,8 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -176,6 +178,23 @@ import org.jboss.logging.Logger;
  * already happened. For every stored launch it finds, the row decides: still QUEUED → parked here
  * again, and kept stored; taken by a runner → claimed and submitted; UNAVAILABLE → left for a later
  * pass; resolved, stopped or failed → deleted.
+ *
+ * <p><b>Reconciling what is parked.</b> Each pass first settles what <em>this</em> process parked
+ * ({@link #reconcileParked}), and the overlap is why. {@link WorkspaceTaken} and {@link
+ * WorkspaceUnqueued} are in-process events, fired only by the process whose runner socket or
+ * request moved the row. So the new process's boot drain can park a launch, and the runner then take
+ * the row on the <em>old</em> one: the old one claims it and either delivers it (deleting the row)
+ * or shuts down mid-wait and gives the claim back — and the new one hears neither. Its parked entry
+ * would then hold the {@code pending} claim for good, so the drain skipped the workspace forever, a
+ * runner reconnecting later fires no take for a row that is no longer QUEUED, and every later
+ * dispatch or delivery for it was refused until the next restart. The reconcile reads each parked
+ * entry against the table and the row: a launch no longer stored is forgotten and its {@code
+ * pending} released; a row a runner took is claimed and submitted here, the conditional claim
+ * deciding against the other process (a claim lost to a live one there releases {@code pending}
+ * too); a row that left the queue any other way is dropped; QUEUED and UNAVAILABLE stay parked. The
+ * removal is the map's atomic {@code remove(rowId, wait)}, so the pass and an observer never both
+ * own an entry, and a launch this process claimed is never parked, so its in-flight wait is never
+ * touched.
  *
  * <p><b>The double launch is guarded where it always was</b>: {@link #awaitAndLaunch} asks the
  * daemon whether an agent is RUNNING immediately before it launches, and the daemon's own {@code
@@ -363,6 +382,13 @@ public class DispatchService {
    * cannot cover the window between a launch being scheduled and the agent's first session
    * appearing, so the in-process fact has to. {@link #scheduleDelivery} says why a delivery claims
    * the same slot rather than one of its own.
+   *
+   * <p><b>Nothing holds an entry here but a parked wait or a submitted one.</b> Every path that
+   * adds one either parks ({@link #park}), or submits a wait whose {@code finally} releases it (or
+   * releases it at once when the executor refuses), or releases it itself — a refused hold, a lost
+   * claim, a row that left the queue. So the only entry that could outlive what it waited for is a
+   * parked one whose take or unqueue happened in another process, and {@link #reconcileParked} is
+   * what settles those.
    */
   private final Set<Long> pending = ConcurrentHashMap.newKeySet();
 
@@ -1150,12 +1176,23 @@ public class DispatchService {
    * launch somebody else claimed, or none at all, releases that claim and submits nothing.
    */
   private boolean claimAndSubmit(Long rowId) {
+    Boolean submitted = claimAndSubmitIfWon(rowId);
+    return submitted == null || submitted.booleanValue();
+  }
+
+  /**
+   * {@link #claimAndSubmit}, telling a lost claim apart.
+   *
+   * @return null when the claim was lost (and {@code pending} released); else whether the executor
+   *     took the wait
+   */
+  private Boolean claimAndSubmitIfWon(Long rowId) {
     Optional<HeldAgentLaunches.Held> claimed =
         heldLaunches.claim(rowId, owner, Instant.now(), staleBefore());
     if (claimed.isEmpty()) {
       pending.remove(rowId);
       LOG.debugf("workspace %s's held launch is gone or another process delivers it", rowId);
-      return true;
+      return null;
     }
     HeldAgentLaunches.Held held = claimed.get();
     ParkedLaunch wait = ParkedLaunch.of(held);
@@ -1165,7 +1202,7 @@ public class DispatchService {
         rowId, Long.valueOf(Duration.between(held.parkedAt(), Instant.now()).toSeconds()),
         wait.what());
     delivering.add(rowId);
-    return submit(rowId, wait, true);
+    return Boolean.valueOf(submit(rowId, wait, true));
   }
 
   /**
@@ -1299,20 +1336,28 @@ public class DispatchService {
   }
 
   /**
-   * Resume every stored launch nobody is delivering: still QUEUED → parked here again and kept
-   * stored; taken by a runner → claimed and submitted; UNAVAILABLE → left for a later pass;
-   * resolved, stopped or failed → deleted. A launch this process already parks or delivers, and one
-   * another process claimed within {@link #lease}, is left alone. See the class javadoc, "The claim
-   * and its lease".
+   * Reconcile what this process parked against the table and the row, then resume every stored
+   * launch nobody is delivering: still QUEUED → parked here again and kept stored; taken by a runner
+   * → claimed and submitted; UNAVAILABLE → left for a later pass; resolved, stopped or failed →
+   * deleted. A launch this process is delivering, and one another process claimed within {@link
+   * #lease}, is left alone. See the class javadoc, "The claim and its lease" and "Reconciling what
+   * is parked".
    *
    * @return how many launches it parked or submitted
    */
   public int drainHeldLaunches() {
+    // The parked entries are read BEFORE the table: everything parked was stored first, so an entry
+    // seen here whose launch the table no longer holds was deleted, not yet to be written.
+    Map<Long, ParkedLaunch> parkedNow = Map.copyOf(parked);
     Instant staleBefore = staleBefore();
-    int resumed = 0;
-    for (HeldAgentLaunches.Held held : heldLaunches.all()) {
+    List<HeldAgentLaunches.Held> stored = heldLaunches.all();
+    Set<Long> reconciled = new HashSet<>();
+    int resumed = reconcileParked(parkedNow, stored, staleBefore, reconciled);
+    for (HeldAgentLaunches.Held held : stored) {
       Long rowId = held.workspaceId();
-      if (!held.claimable(staleBefore) || pending.contains(rowId)) {
+      if (reconciled.contains(rowId)
+          || !held.claimable(staleBefore)
+          || pending.contains(rowId)) {
         continue;
       }
       RunnerSide side = runnerSide(rowId);
@@ -1338,6 +1383,84 @@ public class DispatchService {
             side.placement() == WorkspacePlacement.RUNNER ? side.status() : "resolved",
             held.delivery() ? "delivery" : "agent launch");
       }
+    }
+    return resumed;
+  }
+
+  /**
+   * Settle every wait this process holds PARKED — in memory, never claimed — whose take, unqueue or
+   * delivery happened in another process. {@link WorkspaceTaken} and {@link WorkspaceUnqueued} are
+   * fired only in the process that moved the row, so during a deploy's overlap a parked entry here
+   * can outlive what it waited for and, holding its {@code pending} claim, refuse every later press
+   * for the workspace. Each entry is decided by the table and the row:
+   *
+   * <ul>
+   *   <li>no stored launch any more — delivered, dropped or resolved elsewhere → forgotten, and its
+   *       {@code pending} claim released;
+   *   <li>still QUEUED, or its runner UNAVAILABLE → left parked;
+   *   <li>taken by a runner → claimed and submitted here, the conditional claim deciding against any
+   *       other process; a claim lost to a live one elsewhere releases {@code pending} and leaves the
+   *       launch to that process, or to a later pass once it is given back;
+   *   <li>out of the queue any other way → forgotten, released, and the launch deleted unless claimed.
+   * </ul>
+   *
+   * <p>Each removal is {@code parked.remove(rowId, wait)}, as {@link #park} does, so exactly one of
+   * this pass and an observer that fires meanwhile owns the entry. A launch this process claimed is
+   * never parked, so an in-flight wait is not touched.
+   *
+   * @param reconciled collects every workspace this pass decided, for the drain to skip
+   * @return how many it claimed and submitted
+   */
+  private int reconcileParked(
+      Map<Long, ParkedLaunch> parkedNow,
+      List<HeldAgentLaunches.Held> stored,
+      Instant staleBefore,
+      Set<Long> reconciled) {
+    Map<Long, HeldAgentLaunches.Held> byRow = new HashMap<>();
+    stored.forEach(held -> byRow.put(held.workspaceId(), held));
+    int resumed = 0;
+    for (Map.Entry<Long, ParkedLaunch> entry : parkedNow.entrySet()) {
+      Long rowId = entry.getKey();
+      ParkedLaunch wait = entry.getValue();
+      reconciled.add(rowId);
+      HeldAgentLaunches.Held held = byRow.get(rowId);
+      if (held == null) {
+        if (parked.remove(rowId, wait)) {
+          pending.remove(rowId);
+          LOG.infof(
+              "workspace %s's held %s was delivered or dropped by another process; forgotten here",
+              rowId, wait.what());
+        }
+        continue;
+      }
+      if (owner.equals(held.claimedBy())) {
+        continue;
+      }
+      RunnerSide side = runnerSide(rowId);
+      if (side.queued() || side.unavailable()) {
+        continue;
+      }
+      if (!parked.remove(rowId, wait)) {
+        // An observer released or dropped it since the snapshot.
+        continue;
+      }
+      if (side.taken()) {
+        LOG.infof(
+            "workspace %s was taken by a runner while another process served it; claiming its"
+                + " parked %s here",
+            rowId, wait.what());
+        if (Boolean.TRUE.equals(claimAndSubmitIfWon(rowId))) {
+          resumed++;
+        }
+        continue;
+      }
+      pending.remove(rowId);
+      heldLaunches.dropUnclaimed(rowId, staleBefore);
+      LOG.infof(
+          "workspace %s left the queue (%s) while its %s was parked here; dropped",
+          rowId,
+          side.placement() == WorkspacePlacement.RUNNER ? side.status() : "resolved",
+          wait.what());
     }
     return resumed;
   }

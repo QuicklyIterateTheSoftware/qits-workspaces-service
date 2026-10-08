@@ -455,6 +455,162 @@ class DispatchServiceQueuedTest {
     assertFalse(store.holds(ROW));
   }
 
+  // --- the sweep reconciles what this process parked (qits-1064, the deploy overlap) ---------------
+
+  /**
+   * The new process (B) parks at its boot drain, the runner takes the row on the old one (A), A
+   * claims and then shuts down mid-wait. B heard no take — the event is A's — so its sweep has to
+   * claim and submit the launch, once.
+   */
+  @Test
+  void aTakeOnTheOldProcessThatShutDownIsDeliveredByTheSweep() {
+    Testable a = service;
+    a.sides(QUEUED, QUEUED);
+    a.schedule(ROW, "go");
+    Testable b = process();
+    b.sides(QUEUED, QUEUED);
+    b.drainHeldLaunches();
+    assertTrue(b.isParked(ROW));
+
+    a.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+    a.shutdown();
+    assertNull(store.get(ROW).claimedBy(), "the old process gave its claim back");
+
+    b.sides(PROVISIONING);
+    assertEquals(1, b.drainHeldLaunches());
+
+    assertFalse(b.isParked(ROW));
+    assertEquals(1, b.submitted.size());
+    assertEquals(b.owner, store.get(ROW).claimedBy());
+    launcher.answers(WorkspaceAgentLauncher.AgentState.IDLE);
+    b.submitted.get(0).run();
+    assertEquals(List.of(ROW + ":go"), launcher.launches, "launched exactly once");
+    assertFalse(store.holds(ROW));
+    assertFalse(b.isPending(ROW));
+
+    assertEquals(0, b.drainHeldLaunches(), "and the next pass finds nothing to do");
+    assertEquals(1, b.submitted.size());
+  }
+
+  /**
+   * The old process took and delivered it, deleting the stored launch. B's parked entry is stale;
+   * the sweep forgets it, so a later press for the workspace on B is accepted rather than refused.
+   */
+  @Test
+  void aLaunchDeliveredByTheOldProcessIsForgottenByTheSweep() {
+    Testable a = service;
+    a.sides(QUEUED, QUEUED);
+    a.schedule(ROW, "go");
+    Testable b = process();
+    b.sides(QUEUED, QUEUED);
+    b.drainHeldLaunches();
+
+    a.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+    launcher.answers(WorkspaceAgentLauncher.AgentState.IDLE);
+    a.submitted.get(0).run();
+    assertFalse(store.holds(ROW), "delivered and deleted by the old process");
+
+    assertEquals(0, b.drainHeldLaunches());
+
+    assertFalse(b.isParked(ROW));
+    assertFalse(b.isPending(ROW), "the claim is released");
+    assertEquals(0, b.submitted.size());
+    b.sides(runner(WorkspaceRuntimeStatus.RUNNING));
+    assertTrue(b.scheduleDelivery(ROW, "next phase", false), "a later press is accepted");
+    assertEquals(1, b.submitted.size());
+  }
+
+  /** The old process handled the unqueue and dropped the stored launch: B forgets its entry. */
+  @Test
+  void aLaunchUnqueuedOnTheOldProcessIsForgottenByTheSweep() {
+    Testable a = service;
+    a.sides(QUEUED, QUEUED);
+    a.schedule(ROW, "go");
+    Testable b = process();
+    b.sides(QUEUED, QUEUED);
+    b.drainHeldLaunches();
+
+    a.onUnqueued(new WorkspaceUnqueued(ROW, "Stopped before a runner took it."));
+    assertFalse(store.holds(ROW));
+
+    assertEquals(0, b.drainHeldLaunches());
+
+    assertFalse(b.isParked(ROW));
+    assertFalse(b.isPending(ROW));
+    assertEquals(0, b.submitted.size());
+  }
+
+  /** The row left the queue and the stored launch is still there: B drops both, and releases. */
+  @Test
+  void aParkedLaunchWhoseRowLeftTheQueueIsDroppedByTheSweep() {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+
+    service.sides(STOPPED);
+    assertEquals(0, service.drainHeldLaunches());
+
+    assertFalse(service.isParked(ROW));
+    assertFalse(service.isPending(ROW));
+    assertFalse(store.holds(ROW), "nothing will take it, so it is deleted");
+    assertEquals(0, service.submitted.size());
+  }
+
+  /**
+   * The old process holds a live claim (within the lease) and the row reads taken: B submits
+   * nothing, leaves the launch to the claim's holder, and releases its own {@code pending}.
+   */
+  @Test
+  void aLiveClaimElsewhereIsLeftAloneAndReleasesPending() {
+    Testable a = service;
+    a.sides(QUEUED, QUEUED);
+    a.schedule(ROW, "go");
+    Testable b = process();
+    b.sides(QUEUED, QUEUED);
+    b.drainHeldLaunches();
+    a.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+
+    b.sides(PROVISIONING);
+    assertEquals(0, b.drainHeldLaunches());
+
+    assertEquals(0, b.submitted.size(), "the old process is delivering it");
+    assertFalse(b.isParked(ROW));
+    assertFalse(b.isPending(ROW), "and B no longer refuses presses for it");
+    assertEquals(a.owner, store.get(ROW).claimedBy(), "the claim is untouched");
+    assertEquals(1, a.submitted.size());
+  }
+
+  /** A parked launch whose row is still QUEUED is untouched by the sweep. */
+  @Test
+  void aStillQueuedParkedLaunchIsUntouchedByTheSweep() {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+
+    service.sides(QUEUED);
+    assertEquals(0, service.drainHeldLaunches());
+
+    assertTrue(service.isParked(ROW));
+    assertTrue(service.isPending(ROW));
+    assertTrue(store.holds(ROW));
+    assertNull(store.get(ROW).claimedBy());
+    assertEquals(0, service.submitted.size());
+    service.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+    assertEquals(1, service.submitted.size(), "the take still releases it");
+  }
+
+  /** A wait this process claimed and is delivering is not read, claimed or released by a sweep. */
+  @Test
+  void anInFlightWaitOfThisProcessIsUntouchedByTheSweep() {
+    service.sides(QUEUED, QUEUED);
+    service.schedule(ROW, "go");
+    service.onTaken(new WorkspaceTaken(ROW, UUID.randomUUID()));
+
+    assertEquals(0, service.drainHeldLaunches(), "no read is scripted, so none may happen");
+
+    assertTrue(service.isPending(ROW));
+    assertEquals(service.owner, store.get(ROW).claimedBy());
+    assertEquals(1, service.submitted.size());
+  }
+
   // --- fakes --------------------------------------------------------------------------------------
 
   private static DispatchService.RunnerSide runner(WorkspaceRuntimeStatus status) {
