@@ -270,9 +270,24 @@ public class WorkspaceController {
    * clone, submodule wiring, service auto-start — streams over the process's SSE endpoint, where
    * failures surface too (alongside the workspace's {@code runtimeError}). 404 only when the
    * workspace itself is unknown.
+   *
+   * <p>A start already under way is joined (qits-853), but only one that can still bring the
+   * container up (qits-1076): 409 {@code WORKSPACE_STOPPED_DURING_START} when the workspace was
+   * stopped while a start was open and that start's process has not ended yet. The message names
+   * the process; retrying once it has ended starts the workspace afresh.
    */
   @POST
   @Path("/{id}/ensure-container")
+  @APIResponse(
+      responseCode = "200",
+      description = "The start this call made, or the start under way that it joined.")
+  @APIResponse(
+      responseCode = "409",
+      description =
+          "The workspace was stopped while it was starting and that start's process is still"
+              + " open. `code` is WORKSPACE_STOPPED_DURING_START and the message names the process;"
+              + " retry once it has ended.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public EnsureContainerRequest.Response ensureContainer(
       @PathParam("id") Long id) {
     String technicalProcessId = workspaceService.beginEnsureContainer(id);

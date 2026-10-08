@@ -2539,11 +2539,19 @@ paths:
           format: int64
       responses:
         "200":
-          description: OK
+          description: "The start this call made, or the start under way that it joined."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Response10"
+        "409":
+          description: The workspace was stopped while it was starting and that start's
+            process is still open. `code` is WORKSPACE_STOPPED_DURING_START and the
+            message names the process; retry once it has ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
         "403":

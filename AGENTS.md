@@ -1734,7 +1734,15 @@ workspace in SQL rather than through the door.
   container is started in the same request and the answer carries its `technicalProcessId`, so no
   client makes a second call. Dispatch, the editor and capture create through `createWorkspace` and
   start (or do not) on their own, which is why the start is not in `createWorkspace` itself. An
-  ensure-container right after a create joins the start still running instead of provisioning twice.
+  ensure-container right after a create joins the start still running instead of provisioning twice
+  — **but never a start a stop overtook** (qits-1076). A DIRECT stop or container delete counts
+  itself on an in-memory per-row stop marker before it touches anything, and once it commits it
+  releases the start's provision await (`WorkspaceDaemonProvisioner.abandonProvision`) and ends its
+  process (`WorkspaceProcessTracker.end`). The start checks the marker under a per-row guard before
+  every runtime write and before tearing a failed provision down, and on a stop it yields: no `rm`,
+  no FAILED, never RUNNING over STOPPED. An ensure that still finds such a start open answers 409
+  `WORKSPACE_STOPPED_DURING_START` naming the process. `WorkspaceEnsureContainerProcessTest` holds
+  the clone window open with `FakeWorkspaceDaemonProvisioner.holdDirectRows()`.
   Stop and delete are routed to the owning runner through the `RunnerPlacement` port; resolution
   never waits on one.
 - **RUNNER rows skip the qits-containers listing**: their persisted status is the runner's word, with

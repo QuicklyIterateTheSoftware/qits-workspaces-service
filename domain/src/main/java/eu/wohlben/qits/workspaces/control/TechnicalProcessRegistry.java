@@ -219,8 +219,27 @@ public class TechnicalProcessRegistry implements WorkspaceProcessTracker {
   }
 
   /** The in-memory lookup behind {@link #activeFor(Long)}, keyed as the index itself is. */
+  @Override
   public Optional<String> activeFor(String repoId, String workspaceId) {
     return Optional.ofNullable(activeByWorkspace.get(workspaceKey(repoId, workspaceId)));
+  }
+
+  /**
+   * Fail the process outright: {@link TechnicalProcess#failProvision} settles whatever is open with
+   * {@code message} in it, and {@link TechnicalProcess#forceFinish} then ends a process that was past
+   * its provision phase — where {@code failProvision} alone settles the segments but leaves the
+   * process waiting on a service phase that will never come. Its {@code done} clears the active
+   * mapping like any other.
+   */
+  @Override
+  public boolean end(String processId, String message) {
+    TechnicalProcess process = processId == null ? null : byId.get(processId);
+    if (process == null || process.isTerminal()) {
+      return false;
+    }
+    process.failProvision(message);
+    process.forceFinish();
+    return true;
   }
 
   /**

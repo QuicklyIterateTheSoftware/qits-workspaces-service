@@ -31,6 +31,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import jakarta.transaction.Status;
+import jakarta.transaction.Synchronization;
+import jakarta.transaction.TransactionSynchronizationRegistry;
 import jakarta.transaction.Transactional;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -48,9 +51,11 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -204,6 +209,242 @@ public class WorkspaceService {
   }
 
   /**
+   * How a stop learns that a transaction it joined has committed: the ending of an overtaken start
+   * waits for it (see {@link #afterCommit}).
+   */
+  @Inject TransactionSynchronizationRegistry transactions;
+
+  /**
+   * THE STOP MARKER (qits-1076): per DIRECT row, how many stops and container deletes this process
+   * has seen. A start reads it before it registers ({@link DirectStart#epoch}) and asks again at
+   * every point it would write the row or touch the container; a different count means a stop
+   * landed while it ran, and the start yields — it removes nothing, marks nothing FAILED and never
+   * turns the row RUNNING over a stop.
+   *
+   * <p>In memory, and deliberately not the row's own status. The stop sets it first, before its
+   * transaction writes STOPPED, so the provision thread knows of the stop whether or not that
+   * write has committed yet; a re-read of {@code runtimeStatus} could still see PROVISIONING and
+   * tear the container down the person just paused. It is the same single-process assumption the
+   * {@link TechnicalProcessRegistry} already makes: a start and the stop that overtakes it run in
+   * the one service process that registered the start.
+   */
+  private final ConcurrentHashMap<Long, Long> stopEpochs = new ConcurrentHashMap<>();
+
+  /**
+   * The latest DIRECT start registered per row, with the stop count it began under. It answers the
+   * two questions the stop marker alone cannot: whether the process an ensure would join is a start
+   * that is still good (begun since the last stop), and whether a newer start already owns the
+   * container an overtaken one would otherwise stop again.
+   */
+  private final ConcurrentHashMap<Long, DirectStart> directStarts = new ConcurrentHashMap<>();
+
+  /**
+   * Per-row monitors. A stop counts itself under its row's, and a start holds it across every
+   * check-then-act against a stop: the runtime writes, the teardown of a failed provision and the
+   * re-stop of an overtaken one. So a stop either lands before the check (and the start sees it) or
+   * after the act (and its own STOPPED write is the last word). Per row, not global, because the
+   * acts include qits-containers and IdP calls, which must not hold up every other workspace.
+   */
+  private final ConcurrentHashMap<Long, Object> rowGuards = new ConcurrentHashMap<>();
+
+  /** What the stream of a start a stop overtook ends on, and what a 409 below says happened. */
+  static final String STOPPED_DURING_START = "Workspace was stopped while it was starting.";
+
+  /**
+   * One DIRECT start: the process narrating it ({@code null} when unnarrated, as {@link
+   * #ensureContainer(Long)} is) and the stop count it began under.
+   */
+  private record DirectStart(String processId, long epoch) {}
+
+  /**
+   * Thrown out of the ensure ladder when a stop overtook the start: not a failure of the start, so
+   * nothing of it is recorded on the row. Its message is the line the process ends on.
+   */
+  static final class StoppedDuringStart extends RuntimeException {
+    StoppedDuringStart(String workspaceId) {
+      super(
+          STOPPED_DURING_START
+              + " The start of '"
+              + workspaceId
+              + "' was abandoned; its container is left stopped, not removed.");
+    }
+  }
+
+  private Object guard(Long rowId) {
+    return rowGuards.computeIfAbsent(rowId, id -> new Object());
+  }
+
+  private long stopEpoch(Long rowId) {
+    return stopEpochs.getOrDefault(rowId, 0L);
+  }
+
+  private boolean stoppedSince(Long rowId, DirectStart start) {
+    return stopEpoch(rowId) != start.epoch();
+  }
+
+  /**
+   * Register a DIRECT start. The count is read <em>before</em> the process is begun, so a stop racing
+   * the registration makes the start stale rather than the stop blind: the start then yields at its
+   * first check, and the stop ends its process.
+   */
+  private DirectStart registerStart(Long rowId, Supplier<String> beginProcess) {
+    long epoch;
+    synchronized (guard(rowId)) {
+      epoch = stopEpoch(rowId);
+    }
+    String processId = beginProcess.get();
+    DirectStart start = new DirectStart(processId, epoch);
+    synchronized (guard(rowId)) {
+      directStarts.put(rowId, start);
+    }
+    return start;
+  }
+
+  /** Whether {@code processId} is the row's latest start and no stop has landed since it began. */
+  private boolean isLiveStart(Long rowId, String processId) {
+    DirectStart latest = directStarts.get(rowId);
+    return latest != null
+        && processId != null
+        && processId.equals(latest.processId())
+        && latest.epoch() == stopEpoch(rowId);
+  }
+
+  /** Whether the row has a start begun since its last stop — one that owns the container now. */
+  private boolean hasStartSinceLastStop(Long rowId) {
+    DirectStart latest = directStarts.get(rowId);
+    return latest != null && latest.epoch() == stopEpoch(rowId);
+  }
+
+  /**
+   * {@link #markRuntime}, unless a stop overtook {@code start}: the check and the write share the
+   * row's guard, so a stop counted after the check commits its STOPPED after this write.
+   *
+   * @return false, having written nothing, when the start was overtaken
+   */
+  private boolean markRuntimeUnlessStopped(
+      String repoId,
+      String workspaceId,
+      Long rowId,
+      DirectStart start,
+      WorkspaceRuntimeStatus status,
+      String error) {
+    synchronized (guard(rowId)) {
+      if (stoppedSince(rowId, start)) {
+        return false;
+      }
+      QuarkusTransaction.requiringNew().run(() -> markRuntime(repoId, workspaceId, status, error));
+      return true;
+    }
+  }
+
+  /**
+   * The start yields to the stop that overtook it, and lands where that stop would have left it:
+   * the container stopped in place (never removed — it holds the person's {@code /workspace}) and
+   * the row STOPPED with no runtime error. The re-stop covers a stop that landed before the start
+   * ran or restarted the container, which therefore found nothing to stop; the STOPPED write
+   * covers a stop whose transaction has not committed yet, and is the same value it will write.
+   *
+   * <p>Neither happens once a newer start was registered after the stop: that start owns the
+   * container and the row now, and stopping either would undo the very start the person asked for
+   * next.
+   */
+  private StoppedDuringStart yieldToStop(String repoId, String workspaceId, Long rowId) {
+    synchronized (guard(rowId)) {
+      if (!hasStartSinceLastStop(rowId)) {
+        stopBeforeRemove(containers.containerName(workspaceId, repoId));
+        QuarkusTransaction.requiringNew()
+            .run(
+                () ->
+                    markRuntime(repoId, workspaceId, WorkspaceRuntimeStatus.STOPPED, null));
+      }
+    }
+    LOG.infof(
+        "Workspace %s/%s was stopped while it was starting; the start yielded and removed nothing",
+        repoId, workspaceId);
+    return new StoppedDuringStart(workspaceId);
+  }
+
+  /**
+   * A stop or a container delete of a DIRECT row ends the start it overtakes (qits-1076). Before
+   * this, neither touched the start's process: it stayed {@code activeFor} the row — through the
+   * clone window, and through the bootstrap window that follows with the row already RUNNING — so
+   * the next ensure-container joined a start that would never bring the container up, and answered
+   * 200 STOPPED with nothing starting. Worse, a clone-window start then timed out ten minutes later
+   * and removed the container the person had paused.
+   *
+   * <p>Counted first, ended after. The count is taken now, before the stop touches anything, so the
+   * provision thread knows of the stop whatever it sees next. The ending waits for the stop's
+   * transaction to commit — stop and delete run joined to whatever transaction is open — so that
+   * once the process is gone, STOPPED is what an ensure reads: the process is not ended under a row
+   * that still says PROVISIONING. Ending it is two things: the pending provision await is released
+   * with a stopped outcome, so the provision thread returns now rather than at its timeout, and the
+   * process is ended as failed with the reason in its stream.
+   *
+   * <p>A start registered after the stop is spared both. It began under the new count, and it is
+   * what the person asked for next.
+   */
+  private void interruptStart(String repoId, String workspaceId, Long rowId) {
+    synchronized (guard(rowId)) {
+      stopEpochs.merge(rowId, 1L, Long::sum);
+    }
+    afterCommit(
+        () -> {
+          synchronized (guard(rowId)) {
+            if (daemonProvisioner.isResolvable() && !hasStartSinceLastStop(rowId)) {
+              daemonProvisioner.get().abandonProvision(rowId, STOPPED_DURING_START);
+            }
+            if (processes.isResolvable()) {
+              WorkspaceProcessTracker tracker = processes.get();
+              tracker
+                  .activeFor(repoId, workspaceId)
+                  .filter(processId -> !isLiveStart(rowId, processId))
+                  .ifPresent(
+                      processId ->
+                          tracker.end(
+                              processId,
+                              STOPPED_DURING_START
+                                  + " The start was abandoned; start the workspace again to"
+                                  + " bring its container up."));
+            }
+          }
+        });
+  }
+
+  /**
+   * {@code work} once the caller's transaction has committed, or now when there is none — {@code
+   * RunnerPlacementDriver}'s idiom. A rolled-back stop ends nothing; the start it would have ended
+   * then finds the count moved, yields, and stops the container itself.
+   */
+  private void afterCommit(Runnable work) {
+    int status;
+    try {
+      status = transactions.getTransactionStatus();
+    } catch (RuntimeException noContext) {
+      status = Status.STATUS_NO_TRANSACTION;
+    }
+    if (status != Status.STATUS_ACTIVE) {
+      work.run();
+      return;
+    }
+    transactions.registerInterposedSynchronization(
+        new Synchronization() {
+          @Override
+          public void beforeCompletion() {}
+
+          @Override
+          public void afterCompletion(int outcome) {
+            if (outcome == Status.STATUS_COMMITTED) {
+              try {
+                work.run();
+              } catch (RuntimeException e) {
+                LOG.warnf(e, "Ending the start a stop overtook failed");
+              }
+            }
+          }
+        });
+  }
+
+  /**
    * The git substrate: a mirror per repository, the worktrees a merge runs in, and the pushes that
    * are now the only way a ref of a served repository moves.
    *
@@ -288,6 +529,15 @@ public class WorkspaceService {
    * daemon sources the walk from the checkout's own {@code .gitmodules} (it has no DB), skipping
    * any submodule it can't resolve — so there is no import-scoping (an accepted trade-off; see
    * {@code Provisioner.materializeSubmodules}).
+   *
+   * <p><b>A stop is not a failed provision</b> (qits-1076). When {@code start} was overtaken by a
+   * stop or a container delete, whatever the await answers — the stop's own release, a late
+   * outcome from the daemon, the timeout — the container is <em>not</em> removed and its credential
+   * not given back: the person paused this workspace, and the container holds its {@code
+   * /workspace}. The check and the teardown share the row's guard, so a stop either lands before the
+   * check and is seen, or after the teardown and finds a container already gone. The same check
+   * runs before the container is run at all, so a stop that landed during the commission does not
+   * cost a launch.
    */
   private void provisionContainer(
       String repoId,
@@ -296,12 +546,16 @@ public class WorkspaceService {
       String branch,
       String parentBranch,
       String entityId,
-      WorkspaceProcessTracker.Handle process) {
+      WorkspaceProcessTracker.Handle process,
+      DirectStart start) {
     // A fresh container gets a fresh credential, and it is minted BEFORE anything is started: a
     // commissioning failure must cost a launch that has not happened yet, never leave a container
     // running with no identity. This is also the one place a recreate is covered — recreate rm's the
     // container and comes back through here — so no second seam has to remember.
     commissionFor(repoId, workspaceId, rowId);
+    if (stoppedSince(rowId, start)) {
+      throw yieldToStop(repoId, workspaceId, rowId);
+    }
     if (process != null) {
       process.openSegment("container");
     }
@@ -325,12 +579,19 @@ public class WorkspaceService {
     // pre-daemon
     // image) therefore cannot be provisioned: it fails loudly (rm + FAILED), recoverable by
     // rebuilding the image so the daemon is present.
-    ProvisionResult outcome = awaitDaemonProvision(repoId, workspaceId, rowId, cloneLines);
+    ProvisionResult outcome = awaitDaemonProvision(rowId, cloneLines, start);
     if (!outcome.ok()) {
-      containers.rm(container);
-      // The container this credential was minted for is gone again, so it goes back — the same rule
-      // every teardown seam follows, applied to the teardown a failed provision is.
-      decommissionFor(rowId);
+      synchronized (guard(rowId)) {
+        if (stoppedSince(rowId, start)) {
+          // Overtaken: the outcome is the stop's release or arrived after it. Either way it says
+          // nothing about the container a person deliberately paused, so nothing is torn down.
+          throw yieldToStop(repoId, workspaceId, rowId);
+        }
+        containers.rm(container);
+        // The container this credential was minted for is gone again, so it goes back — the same
+        // rule every teardown seam follows, applied to the teardown a failed provision is.
+        decommissionFor(rowId);
+      }
       throw new InternalServerErrorException(
           "workspace-daemon self-provision failed: " + outcome.message());
     }
@@ -348,17 +609,20 @@ public class WorkspaceService {
    * clones the checkout through the {@code ContainerRuntime}.
    */
   private ProvisionResult awaitDaemonProvision(
-      String repoId, String workspaceId, Long rowId, Consumer<String> onLine) {
+      Long rowId, Consumer<String> onLine, DirectStart start) {
     if (!daemonProvisioner.isResolvable()) {
       return ProvisionResult.failed("no workspace-daemon provisioner is available");
     }
+    // The await can be cut short by a stop (qits-1076): the stop releases it, and the question
+    // passed here covers the stop that landed before the await's slot existed.
     return daemonProvisioner
         .get()
         .awaitProvision(
             rowId,
             Duration.ofMillis(provisionConnectTimeoutMs),
             Duration.ofMillis(provisionTimeoutMs),
-            onLine)
+            onLine,
+            () -> stoppedSince(rowId, start))
         .orElseGet(
             () ->
                 ProvisionResult.failed(
@@ -2335,7 +2599,7 @@ public class WorkspaceService {
       }
       return;
     }
-    ensureContainer(row.repositoryId, row.workspaceId, id, null);
+    ensureContainer(row.repositoryId, row.workspaceId, id, null, registerStart(id, () -> null));
   }
 
   /**
@@ -2346,6 +2610,10 @@ public class WorkspaceService {
    * phase — over the process's SSE stream; failures surface there (and in {@code
    * workspace.runtimeError}), not as an HTTP error. Throws 404 in-request when the workspace
    * doesn't exist, so a bad id still fails fast.
+   *
+   * <p><b>It joins a start only while that start can still bring the container up</b> (qits-853,
+   * qits-1076) — see {@link #joinableStart}. A stop ends the start it overtakes, so the usual case
+   * after a stop is no process at all and a fresh start here; the 409 is for the instant in between.
    */
   public String beginEnsureContainer(Long id) {
     Workspace resolved = QuarkusTransaction.requiringNew().call(() -> requireActive(id));
@@ -2353,25 +2621,26 @@ public class WorkspaceService {
       return beginRunnerStart(resolved);
     }
     WorkspacePlacements.requireDirectAllowed(resolved);
-    // A start already under way is joined, not doubled. Creating a workspace starts it (qits-853),
-    // so a client that still presses ensure-container straight after the create lands here while
-    // that start is cloning — before its container exists, when the ladder below would provision a
-    // second one beside it. A FAILED row is the exception: its process is the one that failed.
-    if (resolved.runtimeStatus != WorkspaceRuntimeStatus.FAILED) {
-      Optional<String> running =
-          processes.isResolvable() ? processes.get().activeFor(resolved.id) : Optional.empty();
-      if (running.isPresent()) {
-        return running.get();
-      }
+    Optional<String> joined = joinableStart(resolved);
+    if (joined.isPresent()) {
+      return joined.get();
     }
     String repoId = resolved.repositoryId;
     String workspaceId = resolved.workspaceId;
     Long rowId = resolved.id;
-    WorkspaceProcessTracker.Handle process = tracker(repoId, workspaceId, rowId);
+    WorkspaceProcessTracker.Handle[] begun = new WorkspaceProcessTracker.Handle[1];
+    DirectStart start =
+        registerStart(
+            rowId,
+            () -> {
+              begun[0] = tracker(repoId, workspaceId, rowId);
+              return begun[0] == null ? null : begun[0].id();
+            });
+    WorkspaceProcessTracker.Handle process = begun[0];
     processExecutor.submit(
         () -> {
           try {
-            ensureContainer(repoId, workspaceId, rowId, process);
+            ensureContainer(repoId, workspaceId, rowId, process, start);
           } catch (RuntimeException e) {
             // Surface the failure in the stream: settle the open segment failed (appending the
             // message) and emit done. Idempotent — a no-op if the process already ended.
@@ -2383,6 +2652,60 @@ public class WorkspaceService {
           }
         });
     return process == null ? null : process.id();
+  }
+
+  /**
+   * The start an ensure-container joins instead of making a second one, or empty to start afresh.
+   *
+   * <p><b>Why it joins at all</b> (qits-853): creating a workspace starts it, so a client that still
+   * presses ensure-container straight after the create lands here while that start is cloning —
+   * before its container exists, when the ladder would provision a second one beside it.
+   *
+   * <p><b>Why it must not join just anything</b> (qits-1076): the workspace's active process used to
+   * be joined whatever the row said, so after a stop overtook a start — in its clone window, or in
+   * the bootstrap window with the row already RUNNING — the next ensure handed back that dead start
+   * and answered 200 STOPPED with nothing starting. The rule is now:
+   *
+   * <ul>
+   *   <li>A FAILED row starts afresh: its process is the one that failed.
+   *   <li>A start this service registered is joined exactly while no stop has landed since it
+   *       began — whatever the row says, because the create's start reads STOPPED until its
+   *       thread writes PROVISIONING, and that is the very ensure qits-853 joins.
+   *   <li>Any other process is joined only while the row is PROVISIONING or RUNNING, the states in
+   *       which a start is actually bringing the container up.
+   *   <li>Anything else is a start a stop overtook whose ending has not landed yet — the stop ends
+   *       it once its own transaction commits. That is a 409 naming the process, never a 200 with
+   *       a process that will not start the container.
+   * </ul>
+   */
+  private Optional<String> joinableStart(Workspace row) {
+    if (row.runtimeStatus == WorkspaceRuntimeStatus.FAILED || !processes.isResolvable()) {
+      return Optional.empty();
+    }
+    Optional<String> active = processes.get().activeFor(row.id);
+    if (active.isEmpty()) {
+      return Optional.empty();
+    }
+    String processId = active.get();
+    DirectStart latest = directStarts.get(row.id);
+    boolean registeredHere = latest != null && processId.equals(latest.processId());
+    boolean joinable =
+        registeredHere
+            ? isLiveStart(row.id, processId)
+            : row.runtimeStatus == WorkspaceRuntimeStatus.PROVISIONING
+                || row.runtimeStatus == WorkspaceRuntimeStatus.RUNNING;
+    if (joinable) {
+      return active;
+    }
+    throw new ConflictException(
+        "WORKSPACE_STOPPED_DURING_START",
+        "Workspace '"
+            + row.workspaceId
+            + "' was stopped while it was starting, and that start's technical process "
+            + processId
+            + " is still open. It will not bring the container up; retry once process "
+            + processId
+            + " has ended.");
   }
 
   /**
@@ -2422,7 +2745,18 @@ public class WorkspaceService {
     String workspaceId = resolved.workspaceId;
     Long rowId = resolved.id;
     requireCleanForRecreate(workspaceId, rowId);
-    WorkspaceProcessTracker.Handle process = tracker(repoId, workspaceId, rowId);
+    // Registered as a start like any other, so a stop during the recreate overtakes it the same
+    // way (qits-1076) — and so a recreate after a stop is simply the newest start, owing the stop
+    // nothing.
+    WorkspaceProcessTracker.Handle[] begun = new WorkspaceProcessTracker.Handle[1];
+    DirectStart start =
+        registerStart(
+            rowId,
+            () -> {
+              begun[0] = tracker(repoId, workspaceId, rowId);
+              return begun[0] == null ? null : begun[0].id();
+            });
+    WorkspaceProcessTracker.Handle process = begun[0];
     processExecutor.submit(
         () -> {
           try {
@@ -2437,7 +2771,7 @@ public class WorkspaceService {
             containers.rm(containers.containerName(workspaceId, repoId));
             // Container now absent → ensureContainer's provision path re-clones on the current
             // image.
-            ensureContainer(repoId, workspaceId, rowId, process);
+            ensureContainer(repoId, workspaceId, rowId, process, start);
           } catch (RuntimeException e) {
             if (process != null) {
               process.failProvision(e.getMessage());
@@ -2478,10 +2812,27 @@ public class WorkspaceService {
    * successful start hands the process id to the async bootstrap-then-service phase via {@link
    * WorkspaceContainerEventPublisher#fireStarted(String, String, String, boolean)} — the process
    * then reaches {@code done} only once the bootstrap chain and the auto-started services settle.
+   *
+   * <p><b>A stop overtakes it</b> (qits-1076). {@code start} carries the stop count the start began
+   * under, and every runtime write below — PROVISIONING, RUNNING, FAILED — is made only while that
+   * count still holds ({@link #markRuntimeUnlessStopped}). Once a stop or a container delete has
+   * landed, the start {@link #yieldToStop yields}: it removes nothing, marks nothing FAILED, never
+   * turns the row RUNNING and fires no {@code started}, and throws {@link StoppedDuringStart}, whose
+   * message is the line its process ends on. That holds on all three rungs: the already-running
+   * short-circuit, the {@code exists → start} resume (whose {@code start} may have restarted a
+   * container the stop had just paused, which is why yielding stops it again) and the provision.
    */
   private void ensureContainer(
-      String repoId, String workspaceId, Long rowId, WorkspaceProcessTracker.Handle process) {
+      String repoId,
+      String workspaceId,
+      Long rowId,
+      WorkspaceProcessTracker.Handle process,
+      DirectStart start) {
     String container = containers.containerName(workspaceId, repoId);
+    if (stoppedSince(rowId, start)) {
+      // Stopped between the request and this worker picking the start up.
+      throw yieldToStop(repoId, workspaceId, rowId);
+    }
 
     // Load branch/parent and short-circuit a live container, in its own transaction.
     BranchParent snapshot =
@@ -2499,13 +2850,17 @@ public class WorkspaceService {
                   // ensureContainer(Long), which does not branch on placement.
                   WorkspacePlacements.requireDirectAllowed(wt);
                   if (containers.isRunning(container)) {
-                    wt.runtimeStatus = WorkspaceRuntimeStatus.RUNNING;
-                    wt.runtimeError = null;
                     return null; // already running — nothing to provision
                   }
                   return new BranchParent(wt.branch, wt.parent, wt.editor, wt.entityId);
                 });
     if (snapshot == null) {
+      // The RUNNING stamp is written here rather than in the snapshot, so it is checked against a
+      // stop like every other write of this ladder.
+      if (!markRuntimeUnlessStopped(
+          repoId, workspaceId, rowId, start, WorkspaceRuntimeStatus.RUNNING, null)) {
+        throw yieldToStop(repoId, workspaceId, rowId);
+      }
       observeClientLiveness(repoId, workspaceId, rowId);
       if (process != null) {
         process.completeNoOp("container-start", "Container is already running — nothing to do.");
@@ -2524,14 +2879,22 @@ public class WorkspaceService {
     // where branch and parent come from: the orchestrator has no start verb, so a stopped place is
     // started by asking for it again with its spec. See ContainerRuntime.start.
     if (containers.exists(container)) {
-      QuarkusTransaction.requiringNew()
-          .run(() -> markRuntime(repoId, workspaceId, WorkspaceRuntimeStatus.PROVISIONING, null));
+      if (!markRuntimeUnlessStopped(
+          repoId, workspaceId, rowId, start, WorkspaceRuntimeStatus.PROVISIONING, null)) {
+        throw yieldToStop(repoId, workspaceId, rowId);
+      }
       try {
         if (process != null) {
           process.openSegment("container-start");
         }
         containers.start(
             repoId, workspaceId, rowId, snapshot.branch(), snapshot.parent(), snapshot.entityId());
+        // RUNNING is written before the provision phase reports, so a stop that landed during the
+        // start is found while the process can still fail with it.
+        if (!markRuntimeUnlessStopped(
+            repoId, workspaceId, rowId, start, WorkspaceRuntimeStatus.RUNNING, null)) {
+          throw yieldToStop(repoId, workspaceId, rowId);
+        }
         if (process != null) {
           process.appendLine(
               "container-start",
@@ -2539,23 +2902,25 @@ public class WorkspaceService {
           process.settleSegment("container-start", true);
           process.finishProvision(true);
         }
-        QuarkusTransaction.requiringNew()
-            .run(() -> markRuntime(repoId, workspaceId, WorkspaceRuntimeStatus.RUNNING, null));
         // Cold -> RUNNING, but not a fresh provision: the clone (and its bootstrap state) survived,
         // so the bootstrap runner passes straight through to service auto-start (async).
         containerEvents.fireStarted(
             repoId, workspaceId, rowId, process == null ? null : process.id(), false);
         observeClientLiveness(repoId, workspaceId, rowId);
         return;
+      } catch (StoppedDuringStart e) {
+        throw e;
       } catch (RuntimeException e) {
-        QuarkusTransaction.requiringNew()
-            .run(
-                () ->
-                    markRuntime(
-                        repoId,
-                        workspaceId,
-                        WorkspaceRuntimeStatus.FAILED,
-                        truncate(e.getMessage())));
+        // A start that failed under a stop is the stop's outcome, not a FAILED row.
+        if (!markRuntimeUnlessStopped(
+            repoId,
+            workspaceId,
+            rowId,
+            start,
+            WorkspaceRuntimeStatus.FAILED,
+            truncate(e.getMessage()))) {
+          throw yieldToStop(repoId, workspaceId, rowId);
+        }
         throw e;
       }
     }
@@ -2602,8 +2967,10 @@ public class WorkspaceService {
           "Workspace '" + workspaceId + "' has no branch to recreate from; abandoned");
     }
 
-    QuarkusTransaction.requiringNew()
-        .run(() -> markRuntime(repoId, workspaceId, WorkspaceRuntimeStatus.PROVISIONING, null));
+    if (!markRuntimeUnlessStopped(
+        repoId, workspaceId, rowId, start, WorkspaceRuntimeStatus.PROVISIONING, null)) {
+      throw yieldToStop(repoId, workspaceId, rowId);
+    }
     try {
       provisionContainer(
           repoId,
@@ -2612,26 +2979,35 @@ public class WorkspaceService {
           snapshot.branch(),
           snapshot.parent(),
           snapshot.entityId(),
-          process);
+          process,
+          start);
+      // A clone that succeeded under a stop leaves the row STOPPED: RUNNING is written only while
+      // no stop has landed, and before the provision phase reports, so the process still ends on
+      // the stop rather than going on into a bootstrap chain for a container that is paused.
+      if (!markRuntimeUnlessStopped(
+          repoId, workspaceId, rowId, start, WorkspaceRuntimeStatus.RUNNING, null)) {
+        throw yieldToStop(repoId, workspaceId, rowId);
+      }
       if (process != null) {
         process.finishProvision(true);
       }
-      QuarkusTransaction.requiringNew()
-          .run(() -> markRuntime(repoId, workspaceId, WorkspaceRuntimeStatus.RUNNING, null));
       // Cold -> RUNNING off a fresh provision (bare clone): run the bootstrap chain, then service
       // auto-start (async; the runner passes straight through when the chain is empty).
       containerEvents.fireStarted(
           repoId, workspaceId, rowId, process == null ? null : process.id(), true);
       observeClientLiveness(repoId, workspaceId, rowId);
+    } catch (StoppedDuringStart e) {
+      throw e;
     } catch (RuntimeException e) {
-      QuarkusTransaction.requiringNew()
-          .run(
-              () ->
-                  markRuntime(
-                      repoId,
-                      workspaceId,
-                      WorkspaceRuntimeStatus.FAILED,
-                      truncate(e.getMessage())));
+      if (!markRuntimeUnlessStopped(
+          repoId,
+          workspaceId,
+          rowId,
+          start,
+          WorkspaceRuntimeStatus.FAILED,
+          truncate(e.getMessage()))) {
+        throw yieldToStop(repoId, workspaceId, rowId);
+      }
       throw e;
     }
   }
@@ -2705,6 +3081,12 @@ public class WorkspaceService {
    * containers.start} (its {@code exists()} → {@code start()} branch), so the working tree survives
    * intact: uncommitted/untracked files and unpushed commits alike. This is a true pause, not a
    * teardown — the lossy {@link #rm} is reserved for discard (which deletes the branch afterward).
+   *
+   * <p><b>A stop ends the start it overtakes</b> (qits-1076): a DIRECT start still open — cloning,
+   * or past its clone and running the bootstrap chain — is ended as failed once the stop has
+   * committed, its provision await released, and the start yields rather than tearing down the
+   * container or marking the row FAILED. See {@link #interruptStart}. The next ensure-container
+   * then starts the paused container again instead of joining a start that never would.
    */
   public void stopContainer(Long id) {
     // Not @Transactional any more, and only so the RUNNER branch can wait for its runner outside a
@@ -2723,6 +3105,9 @@ public class WorkspaceService {
     Workspace workspace = requireActive(id);
     String repoId = workspace.repositoryId;
     String workspaceId = workspace.workspaceId;
+    // Counted before anything is touched, so a start still running sees the stop whatever it reads
+    // next; its process is ended once this transaction commits (qits-1076).
+    interruptStart(repoId, workspaceId, workspace.id);
     // No durability push before the stop: the daemon pushes committed work as it lands, so origin
     // is current by the time we get here. A stop is a pause anyway — the container and its
     // /workspace clone survive it, so uncommitted work is not at risk either.
@@ -2791,11 +3176,16 @@ public class WorkspaceService {
     containers.removeWorkspaceVolume(workspaceId);
   }
 
-  /** {@link #deleteContainer} for a DIRECT row: the method body as it was before placement. */
+  /**
+   * {@link #deleteContainer} for a DIRECT row: the method body as it was before placement, behind
+   * the stop's {@link #interruptStart} — a start the delete overtakes is ended the same way, and
+   * yields rather than marking FAILED a row the delete leaves STOPPED (qits-1076).
+   */
   private void deleteDirectContainer(Long id) {
     Workspace workspace = requireActive(id);
     String repoId = workspace.repositoryId;
     String workspaceId = workspace.workspaceId;
+    interruptStart(repoId, workspaceId, workspace.id);
     tearDownDirect(repoId, workspaceId, workspace.id);
     // The row stays ACTIVE and fires no WorkspaceResolved, but the CONTAINER is gone — and the
     // credential's lifetime is the container's, not the row's. So it goes back here too, and the

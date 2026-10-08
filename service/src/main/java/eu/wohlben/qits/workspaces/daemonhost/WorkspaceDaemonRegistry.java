@@ -73,6 +73,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -1084,7 +1085,8 @@ public class WorkspaceDaemonRegistry
       Long workspaceId,
       Duration connectTimeout,
       Duration provisionTimeout,
-      Consumer<String> onLine) {
+      Consumer<String> onLine,
+      BooleanSupplier abandoned) {
     // A new provision cycle: drop any stale bootstrap slot from a previous cycle (e.g. a
     // kill-switch
     // run whose retained terminal was never awaited), so this cycle's boot awaiter can't pick it
@@ -1097,14 +1099,23 @@ public class WorkspaceDaemonRegistry
         provisions.computeIfAbsent(workspaceId, id -> new PendingProvision());
     pending.onLine = onLine;
     try {
+      // A stop that landed before this slot existed released nothing (abandonProvision never
+      // creates a slot), so ask now that it does exist (qits-1076). The caller set its stop marker
+      // before sending the release, so between this question and the release one of them sees it.
+      if (abandoned.getAsBoolean()) {
+        return Optional.of(ProvisionResult.failed(STOPPED_WHILE_PROVISIONING));
+      }
       // If the terminal event somehow already arrived, take it without waiting on liveness. Else
-      // wait
-      // for a daemon to dial home; if none does within the window, this is a stale image /
-      // no-backend
-      // case — return empty so the caller falls back to the host-driven clone (degradation
-      // contract).
-      if (!pending.future.isDone() && !awaitLive(workspaceId, connectTimeout)) {
+      // wait for a daemon to dial home; if none does within the window, this is a stale image /
+      // no-backend case — return empty and the caller fails the provision. A release
+      // (abandonProvision) or the abandoned question ends the connect wait too, rather than leaving
+      // a stopped start polling for a daemon in a container that is no longer running.
+      if (!pending.future.isDone()
+          && !awaitLive(workspaceId, connectTimeout, pending.future, abandoned)) {
         return Optional.empty();
+      }
+      if (!pending.future.isDone() && abandoned.getAsBoolean()) {
+        return Optional.of(ProvisionResult.failed(STOPPED_WHILE_PROVISIONING));
       }
       return Optional.of(pending.future.get(provisionTimeout.toMillis(), TimeUnit.MILLISECONDS));
     } catch (TimeoutException e) {
@@ -1123,6 +1134,23 @@ public class WorkspaceDaemonRegistry
     } finally {
       provisions.remove(workspaceId, pending);
     }
+  }
+
+  /** What an await a stop cut short answers, when the stop's own reason did not reach it. */
+  private static final String STOPPED_WHILE_PROVISIONING =
+      "the workspace was stopped while it was provisioning";
+
+  /**
+   * Complete the pending await, if there is one, with the stop's failed outcome. Unlike {@link
+   * #completeProvision} this is the host speaking, not the daemon, and like it, it never creates a
+   * slot: a retained outcome would be taken by the next provision cycle as its own.
+   */
+  @Override
+  public boolean abandonProvision(Long workspaceId, String reason) {
+    PendingProvision pending = provisions.get(workspaceId);
+    return pending != null
+        && pending.future.complete(
+            ProvisionResult.failed(reason == null ? STOPPED_WHILE_PROVISIONING : reason));
   }
 
   /**
@@ -1227,11 +1255,27 @@ public class WorkspaceDaemonRegistry
         codec.encode(new SignalService(correlationId, serviceName, signal)));
   }
 
-  /** Poll for a live daemon up to {@code timeout}; true once one is connected. */
+  /** {@link #awaitLive(Long, Duration, CompletableFuture, BooleanSupplier)} with no early exit. */
   private boolean awaitLive(Long workspaceId, Duration timeout) {
+    return awaitLive(workspaceId, timeout, null, () -> false);
+  }
+
+  /**
+   * Poll for a live daemon up to {@code timeout}; true once one is connected — or once {@code
+   * settled} is done or {@code abandoned} answers true, so the caller goes on to read the outcome
+   * that is already there instead of polling out the window (qits-1076: a stop releases the
+   * provision await, and the await may still be in this phase).
+   */
+  private boolean awaitLive(
+      Long workspaceId,
+      Duration timeout,
+      CompletableFuture<?> settled,
+      BooleanSupplier abandoned) {
     long deadline = System.nanoTime() + timeout.toNanos();
     while (System.nanoTime() < deadline) {
-      if (isDaemonLive(workspaceId)) {
+      if (isDaemonLive(workspaceId)
+          || (settled != null && settled.isDone())
+          || abandoned.getAsBoolean()) {
         return true;
       }
       try {

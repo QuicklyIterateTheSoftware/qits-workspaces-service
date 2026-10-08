@@ -12,6 +12,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -58,9 +64,57 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
     runnerAnswer = answer;
   }
 
-  /** Back to answering RUNNER rows at once. */
+  /**
+   * Whether a DIRECT row's clone is held open (qits-1076): with it on, {@link #awaitProvision}
+   * parks every DIRECT, non-editor row in a slot before cloning — the clone window, during which the
+   * row reads PROVISIONING — until {@link #complete} or {@link #abandonProvision} settles the slot.
+   * An ok outcome then clones as usual; a failed one is answered as the daemon's word.
+   */
+  private volatile boolean holdDirect;
+
+  /**
+   * Whether {@link #abandonProvision} is ignored while holding: plays an outcome that was already on
+   * its way when the stop landed, which the test then delivers itself through {@link #complete}.
+   */
+  private volatile boolean deafToAbandon;
+
+  private final Map<Long, CompletableFuture<ProvisionResult>> held = new ConcurrentHashMap<>();
+
+  /** Hold every following DIRECT row's clone until it is completed or abandoned. */
+  public void holdDirectRows() {
+    holdDirect = true;
+  }
+
+  /** Let {@link #abandonProvision} release nothing — see {@link #deafToAbandon}. */
+  public void ignoreAbandon() {
+    deafToAbandon = true;
+  }
+
+  /** Whether {@code rowId}'s await is parked in the clone window right now. */
+  public boolean isHolding(Long rowId) {
+    return held.containsKey(rowId);
+  }
+
+  /** Settle a held await with {@code outcome}; an ok one goes on to clone. */
+  public void complete(Long rowId, ProvisionResult outcome) {
+    CompletableFuture<ProvisionResult> slot = held.get(rowId);
+    if (slot != null) {
+      slot.complete(outcome);
+    }
+  }
+
+  /** Back to answering RUNNER rows at once, and to cloning DIRECT rows without a hold. */
   public void reset() {
     runnerAnswer = DAEMON_REPORTS;
+    holdDirect = false;
+    deafToAbandon = false;
+    held.values().forEach(slot -> slot.complete(ProvisionResult.failed("fake provisioner reset")));
+  }
+
+  @Override
+  public boolean abandonProvision(Long workspaceId, String reason) {
+    CompletableFuture<ProvisionResult> slot = held.get(workspaceId);
+    return slot != null && !deafToAbandon && slot.complete(ProvisionResult.failed(reason));
   }
 
   @Override
@@ -68,7 +122,8 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
       Long workspaceId,
       Duration connectTimeout,
       Duration provisionTimeout,
-      Consumer<String> onLine) {
+      Consumer<String> onLine,
+      BooleanSupplier abandoned) {
     // The workspace id is the key outright — it needs no repository beside it, which is what the
     // old (repoId, label) pair was compensating for.
     Target target =
@@ -108,6 +163,30 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
     }
     if (target == null) {
       return Optional.of(ProvisionResult.ok("")); // the editor: nothing to clone, nothing to report
+    }
+    if (holdDirect) {
+      // The real registry's slot, minus the socket: registered first, then the abandoned question,
+      // then the wait — the order that lets a stop which raced the registration still be seen.
+      CompletableFuture<ProvisionResult> slot = new CompletableFuture<>();
+      held.put(workspaceId, slot);
+      try {
+        if (abandoned.getAsBoolean() && !deafToAbandon) {
+          return Optional.of(ProvisionResult.failed("stopped before the await registered"));
+        }
+        ProvisionResult outcome = slot.get(provisionTimeout.toMillis(), TimeUnit.MILLISECONDS);
+        if (!outcome.ok()) {
+          return Optional.of(outcome);
+        }
+      } catch (TimeoutException e) {
+        return Optional.of(ProvisionResult.failed("fake hold timed out"));
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return Optional.of(ProvisionResult.failed("interrupted while held"));
+      } catch (ExecutionException e) {
+        return Optional.of(ProvisionResult.failed(String.valueOf(e.getCause())));
+      } finally {
+        held.remove(workspaceId, slot);
+      }
     }
     String container = containers.containerName(target.label(), target.repoId());
     // Idempotent reconnect: the real workspace-daemon skips its self-clone when /workspace/.git

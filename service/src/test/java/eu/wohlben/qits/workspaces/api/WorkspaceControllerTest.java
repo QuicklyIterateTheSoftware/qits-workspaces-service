@@ -29,6 +29,9 @@ public class WorkspaceControllerTest {
   @jakarta.inject.Inject eu.wohlben.qits.workspaces.control.WorkspaceRunners runners;
 
   @jakarta.inject.Inject
+  eu.wohlben.qits.workspaces.control.TechnicalProcessRegistry technicalProcesses;
+
+  @jakarta.inject.Inject
   eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository runnerRepository;
 
   @jakarta.inject.Inject
@@ -299,6 +302,35 @@ public class WorkspaceControllerTest {
         .then()
         .statusCode(200)
         .body("workspace.runtimeStatus", equalTo("RUNNING"));
+  }
+
+  /**
+   * An ensure-container never answers 200 with a start that will not bring the container up
+   * (qits-1076): a DIRECT row that is STOPPED while a start's process is still open — the instant
+   * between a stop and its ending of that start, played by a process registered straight on the
+   * registry — is a 409 that names itself and names the process to wait for.
+   */
+  @Test
+  public void testEnsureOnAStoppedWorkspaceWithAStartStillOpenIsAConflict() {
+    String repoId = createProjectAndRepository();
+    workspaceService.createWorkspace(
+        repoId, "stopped-open", "master", "stopped-open", null, false, false, true);
+    Long id = workspaceIds.of(repoId, "stopped-open");
+    eu.wohlben.qits.workspaces.control.TechnicalProcess open =
+        technicalProcesses.begin(repoId, "stopped-open", id);
+    try {
+      given()
+          .contentType(ContentType.JSON)
+          .when()
+          .post("/workspaces/api/workspaces/" + id + "/ensure-container")
+          .then()
+          .statusCode(Response.Status.CONFLICT.getStatusCode())
+          .body("code", equalTo("WORKSPACE_STOPPED_DURING_START"))
+          .body("message", containsString(open.id()))
+          .body("message", containsString("stopped while it was starting"));
+    } finally {
+      technicalProcesses.end(open.id(), "test over");
+    }
   }
 
   /**
