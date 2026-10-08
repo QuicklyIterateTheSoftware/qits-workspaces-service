@@ -378,8 +378,18 @@ public class WorkspaceService {
    * wiring/IdpCredentialCommissioner} — so what reaches this point is an issuer that stayed
    * unreachable, not a redeploy window.
    *
-   * <p>Any credential already on the row is given back first. That is the recreate case: the
-   * container it belonged to has just been removed, and a row can only carry one.
+   * <p><b>Which credential: a workspace token whenever there is an edge, else the pair</b>
+   * (qits-1084). Only admin and editor rows provision here, and they stay DIRECT for good; given an
+   * edge plane ({@link WorkspaceAddressPlanes#plane} resolves) the container is minted the same
+   * non-expiring {@code qits_tok_} a RUNNER row holds — kind {@code workspace-admin} for an admin row,
+   * {@code workspace} for the editor — stored on the row's token columns, and the factory addresses
+   * it through the edge. With no public {@code QITS_DOMAIN} it is commissioned the client pair as
+   * before, and that is logged at WARN rather than failing the provision.
+   *
+   * <p>Any credential already on the row — pair or token — is given back first. That is the
+   * recreate case: the container it belonged to has just been removed, and a row can only carry
+   * one. It is also what keeps the state unambiguous: a row switched to a token holds no pair, and a
+   * row that fell back to the pair holds no token.
    *
    * <p>Its own transaction, and not the caller's: {@link #provisionContainer} runs outside one (each
    * status transition commits separately), and the pair must be committed before {@code
@@ -435,6 +445,33 @@ public class WorkspaceService {
                         .findActiveById(rowId)
                         .map(wt -> GitRefs.write(GitRefs.effective(wt, defaultBranch)))
                         .orElse(null));
+    // THE WORKSPACE TOKEN, WHENEVER THERE IS AN EDGE (qits-1084). An admin or editor row stays
+    // DIRECT for good, but its container no longer needs an hourly-minting client pair: given an
+    // edge plane it holds the same non-expiring qits_tok_ a RUNNER row does — `workspace-admin` for
+    // an admin row, `workspace` for the editor (unscoped: it names no repository, so no project) —
+    // with the same Git refs the pair would have stated, and the factory addresses it through the
+    // edge (a token only works there). No plane — no public QITS_DOMAIN — is the one case the pair
+    // is still for: WARN and fall through to it, never fail the provision over it. A mint that
+    // fails throws out of here and fails the provision, as a failed commission does.
+    WorkspaceAddressPlane plane = edgePlaneOrNull(rowId);
+    if (plane != null) {
+      Optional<WorkspaceToken> minted = mintToken(rowId, repository, statedRefs, admin);
+      if (minted.isEmpty()) {
+        // No issuer wired. Supported, and the same as no implementation at all.
+        return;
+      }
+      WorkspaceToken token = minted.get();
+      if (!storeToken(rowId, token, defaultBranch, statedRefs)) {
+        // A second provision stored its token first, or the row resolved meanwhile: this one is
+        // nobody's.
+        deleteToken(token.tokenId());
+        return;
+      }
+      LOG.debugf(
+          "Minted %s workspace token %s for DIRECT workspace %s/%s",
+          CredentialCommissioner.contextKindFor(admin), token.tokenId(), repoId, workspaceId);
+      return;
+    }
     Optional<WorkspaceCredential> issued =
         commissioner
             .get()
@@ -482,6 +519,84 @@ public class WorkspaceService {
     }
     LOG.debugf(
         "Commissioned %s for workspace %s/%s", credential.clientId(), repoId, workspaceId);
+  }
+
+  /**
+   * The edge plane a DIRECT row's token would be addressed through, or null — logged at WARN — when
+   * this deployment has none (no public {@code QITS_DOMAIN}): the one case a DIRECT row still holds
+   * the client pair (qits-1084).
+   */
+  private WorkspaceAddressPlane edgePlaneOrNull(Long rowId) {
+    try {
+      return addressPlanes.plane();
+    } catch (EdgePlaneUnconfigured noEdge) {
+      LOG.warnf(
+          "Workspace %s is commissioned a client pair rather than a workspace token: %s. A token"
+              + " only works through the public edge, so a DIRECT container on no edge plane keeps"
+              + " the pair.",
+          rowId, noEdge.getMessage());
+      return null;
+    }
+  }
+
+  /**
+   * The mint both token paths make — a RUNNER start ({@link #ensureRunnerToken}) and a DIRECT
+   * provision on an edge plane ({@link #commissionFor}): the row's project claim, the Git refs the
+   * caller read as {@code statedRefs}, and the kind {@code admin} picks.
+   */
+  private Optional<WorkspaceToken> mintToken(
+      Long rowId,
+      RepositoryLookup.RepositoryView repository,
+      String statedRefs,
+      boolean admin) {
+    return commissioner
+        .get()
+        .commissionToken(
+            rowId,
+            projectOf(repository),
+            statedRefs == null ? null : GitRefs.read(statedRefs),
+            admin);
+  }
+
+  /**
+   * Store a freshly minted {@code token} on the row's three token columns ({@code V13}), unless the
+   * row already holds one or is no longer ACTIVE — answering whether it stored it, so the caller
+   * deletes a token nobody holds. Shared by both token paths.
+   *
+   * <p>{@link #commissionFor}'s two Git ref rules, for the same reasons: a stored list never names
+   * the default branch, and a narrowing that landed while the mint was in flight ({@code
+   * statedRefs} is what the mint stated) is still to be sent — and is sent from here.
+   */
+  private boolean storeToken(
+      Long rowId, WorkspaceToken token, String defaultBranch, String statedRefs) {
+    // [stored, narrowedMeanwhile]
+    boolean[] outcome =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () ->
+                    workspaceRepository
+                        .findActiveById(rowId)
+                        .map(
+                            wt -> {
+                              if (wt.holdsToken()) {
+                                return new boolean[] {false, false};
+                              }
+                              wt.commissionedTokenId = token.tokenId();
+                              wt.commissionedTokenSubject = token.subject();
+                              wt.commissionedToken = token.token();
+                              List<String> allowed = GitRefs.effective(wt, defaultBranch);
+                              if (wt.gitRefs != null
+                                  && !GitRefs.read(wt.gitRefs).equals(allowed)) {
+                                wt.gitRefs = GitRefs.write(allowed);
+                              }
+                              wt.gitRefsPending = !GitRefs.write(allowed).equals(statedRefs);
+                              return new boolean[] {true, wt.gitRefsPending};
+                            })
+                        .orElse(new boolean[] {false, false}));
+    if (outcome[1]) {
+      gitRefScopes.push(rowId);
+    }
+    return outcome[0];
   }
 
   /**
@@ -540,7 +655,8 @@ public class WorkspaceService {
     if (!commissioner.isResolvable() || rowId == null) {
       return;
     }
-    // [clientId, tokenId]: a DIRECT row holds the first, a RUNNER row the second (qits-625).
+    // [clientId, tokenId]: a row holds one or the other — the token on a RUNNER row (qits-625) and on
+    // a DIRECT row on an edge plane (qits-1084), the pair on a DIRECT row on none.
     String[] held =
         QuarkusTransaction.requiringNew()
             .call(
@@ -2689,6 +2805,9 @@ public class WorkspaceService {
     String commissioned = workspace.commissionedClientId;
     workspace.commissionedClientId = null;
     decommission(commissioned);
+    // An admin or editor row on an edge plane holds a workspace token instead (qits-1084), and it
+    // goes with the container too — discardOnRunner's line, for the same reason.
+    deleteToken(clearToken(workspace));
     workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
     workspace.runtimeError = null;
   }
@@ -3391,6 +3510,9 @@ public class WorkspaceService {
       String commissioned = workspace.commissionedClientId;
       workspace.commissionedClientId = null;
       decommission(commissioned);
+      // The workspace token an admin or editor row on an edge plane holds instead (qits-1084),
+      // beside the pair and for the same reason.
+      deleteToken(clearToken(workspace));
 
       if (deletesBranch && branch != null && !branch.isBlank()) {
         try {
@@ -3668,13 +3790,8 @@ public class WorkspaceService {
                         .orElse(null));
     Optional<WorkspaceToken> issued;
     try {
-      issued =
-          commissioner
-              .get()
-              .commissionToken(
-                  rowId,
-                  projectOf(repository),
-                  statedRefs == null ? null : GitRefs.read(statedRefs));
+      // A RUNNER row is never admin (ck_workspace_runner_posture), so its token is `workspace`.
+      issued = mintToken(rowId, repository, statedRefs, false);
     } catch (RuntimeException failed) {
       return TOKEN_UNAVAILABLE + ": " + failed.getMessage();
     }
@@ -3682,34 +3799,7 @@ public class WorkspaceService {
       return TOKEN_UNAVAILABLE + ": no issuer is configured to mint the workspace token";
     }
     WorkspaceToken token = issued.get();
-    // [stored, narrowedMeanwhile]
-    boolean[] outcome =
-        QuarkusTransaction.requiringNew()
-            .call(
-                () ->
-                    workspaceRepository
-                        .findActiveById(rowId)
-                        .map(
-                            wt -> {
-                              if (wt.commissionedTokenId != null) {
-                                return new boolean[] {false, false};
-                              }
-                              wt.commissionedTokenId = token.tokenId();
-                              wt.commissionedTokenSubject = token.subject();
-                              wt.commissionedToken = token.token();
-                              // commissionFor's two rules, for the same reasons: a stored list
-                              // never names the default branch, and a narrowing that landed while
-                              // the mint was made is still to be sent.
-                              List<String> allowed = GitRefs.effective(wt, defaultBranch);
-                              if (wt.gitRefs != null
-                                  && !GitRefs.read(wt.gitRefs).equals(allowed)) {
-                                wt.gitRefs = GitRefs.write(allowed);
-                              }
-                              wt.gitRefsPending = !GitRefs.write(allowed).equals(statedRefs);
-                              return new boolean[] {true, wt.gitRefsPending};
-                            })
-                        .orElse(new boolean[] {false, false}));
-    if (!outcome[0]) {
+    if (!storeToken(rowId, token, defaultBranch, statedRefs)) {
       // Another start stored a token first, or the row resolved meanwhile: this one is nobody's.
       deleteToken(token.tokenId());
       boolean nowHeld =
@@ -3718,12 +3808,9 @@ public class WorkspaceService {
                   () ->
                       workspaceRepository
                           .findActiveById(rowId)
-                          .map(wt -> wt.commissionedTokenId != null)
+                          .map(wt -> wt.holdsToken())
                           .orElse(false));
       return nowHeld ? null : TOKEN_UNAVAILABLE + ": the workspace is no longer active";
-    }
-    if (outcome[1]) {
-      gitRefScopes.push(rowId);
     }
     LOG.debugf(
         "Minted workspace token %s for workspace %s/%s",

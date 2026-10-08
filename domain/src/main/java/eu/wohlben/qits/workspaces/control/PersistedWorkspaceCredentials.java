@@ -7,8 +7,8 @@ import jakarta.transaction.Transactional;
 import java.util.Optional;
 
 /**
- * The shipped {@link WorkspaceCredentials}: the pair lives on the workspace row, so it is read back
- * from there.
+ * The shipped {@link WorkspaceCredentials}: the pair — or, for a row on an edge plane, the workspace
+ * token (qits-1084) — lives on the workspace row, so it is read back from there.
  *
  * <p><b>The secret is stored, and that is the design rather than an oversight.</b> The container's
  * spec has to be reproducible at every ensure — see {@link WorkspaceCredentials} for what a spec
@@ -36,6 +36,29 @@ public class PersistedWorkspaceCredentials implements WorkspaceCredentials {
         .findActiveById(rowId)
         .filter(w -> present(w.commissionedClientId) && present(w.commissionedClientSecret))
         .map(w -> new WorkspaceCredential(w.commissionedClientId, w.commissionedClientSecret));
+  }
+
+  /**
+   * The row's workspace token, when it holds one with a value and a subject (qits-1084). Through
+   * the ACTIVE finder for {@link #forWorkspace}'s reason: a resolved row's token is already deleted.
+   */
+  @Override
+  @Transactional
+  public Optional<WorkspaceToken> tokenFor(Long rowId) {
+    if (rowId == null) {
+      return Optional.empty();
+    }
+    return workspaces
+        .findActiveById(rowId)
+        .filter(
+            w ->
+                w.holdsToken()
+                    && present(w.commissionedToken)
+                    && present(w.commissionedTokenSubject))
+        .map(
+            w ->
+                new WorkspaceToken(
+                    w.commissionedTokenId, w.commissionedToken, w.commissionedTokenSubject));
   }
 
   private static boolean present(String value) {

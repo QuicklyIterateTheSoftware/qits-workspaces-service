@@ -46,7 +46,9 @@ import org.junit.jupiter.api.Test;
  * The tunnel's dial-back for a RUNNER row (qits-812): the nonce is the second factor, and the
  * bearer is the first — a validated token whose {@code sub} is the row's token subject. No bearer
  * and a wrong subject both get the bare 404 an unknown nonce gets; the right subject pipes. A DIRECT
- * row's dial-back still pipes on the nonce alone.
+ * row's dial-back still pipes on the nonce alone — while it holds the pair; a DIRECT row holding a
+ * workspace token (qits-1084) dials back through the edge and is held to its token subject exactly as
+ * a RUNNER row is.
  *
  * <p>The cases {@link DaemonStreamRouteTest} would hold, here because they need bearers this
  * service validates: the gate-on profile of {@link DaemonControlSocketMachineAuthTest}, with real
@@ -143,7 +145,53 @@ class DaemonStreamRouteRunnerTest {
     assertEquals(101, dialBackStatus.get(10, TimeUnit.SECONDS));
   }
 
+  // --- a DIRECT row holding a token dials back through the edge too (qits-1084) ------------------
+
+  @Test
+  void aDirectTokenRowsDialBackWithNoBearerIsA404() throws Exception {
+    Long id = directTokenWorkspace("tok-workspace-admin-d");
+    dialBackAuthorization = null;
+
+    assertStreamRefused(id);
+  }
+
+  @Test
+  void aDirectTokenRowsDialBackWithAnotherSubjectIsA404() throws Exception {
+    Long id = directTokenWorkspace("tok-workspace-admin-e");
+    dialBackAuthorization = bearer("tok-workspace-admin-somebody-else");
+
+    assertStreamRefused(id);
+  }
+
+  @Test
+  void aDirectTokenRowsDialBackWithItsTokenSubjectPipes() throws Exception {
+    Long id = directTokenWorkspace("tok-workspace-admin-f");
+    dialBackAuthorization = bearer("tok-workspace-admin-f");
+
+    assertEquals("daemon:/files", get(id, "/files"));
+    assertEquals(101, dialBackStatus.get(10, TimeUnit.SECONDS));
+  }
+
   // --- helpers ------------------------------------------------------------------------------------
+
+  /**
+   * A DIRECT admin row holding a workspace token with {@code subject} and no pair — the row an edge
+   * plane gives an admin workspace (qits-1084) — its fake daemon connected.
+   */
+  private Long directTokenWorkspace(String subject) throws Exception {
+    Long id = workspace("direct-tok");
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              var row = workspaceRepository.findActiveById(id).orElseThrow();
+              row.commissionedClientId = null;
+              row.commissionedTokenId = "tok-id-" + id;
+              row.commissionedTokenSubject = subject;
+              row.commissionedToken = "qits_tok_" + id;
+            });
+    connectFakeDaemon(id);
+    return id;
+  }
 
   private static String bearer(String subject) {
     return "Bearer "

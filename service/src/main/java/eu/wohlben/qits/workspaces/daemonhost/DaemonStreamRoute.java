@@ -108,7 +108,7 @@ public class DaemonStreamRoute {
    * when {@code identity} is a validated token whose {@code sub} is the row's bound subject.
    */
   static boolean admits(WorkspaceTunnels.DialBack dialBack, SecurityIdentity identity) {
-    if (dialBack == null || !dialBack.runner()) {
+    if (dialBack == null || !dialBack.tokenBound()) {
       return true;
     }
     if (dialBack.boundSubject() == null

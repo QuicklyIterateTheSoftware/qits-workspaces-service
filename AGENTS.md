@@ -170,9 +170,14 @@ inline `runtime_status` check is replaced by `ck_workspace_runtime_status`, whic
 `UNAVAILABLE` is computed on read and the column refuses it.
 
 **`V13__workspace_token.sql` adds `commissioned_token_id`, `_subject` and `commissioned_token`**
-(qits-625, qits-802): a RUNNER row's workspace `qits_tok_`, the RUNNER counterpart of `V3`'s pair
-and never set beside it. Columns on a `CausedRow` again; see "The credential a workspace container
-holds".
+(qits-625, qits-802): a workspace `qits_tok_`, the counterpart of `V3`'s pair and never set beside
+it. Columns on a `CausedRow` again; see "The credential a workspace container holds". **Its header
+says "a DIRECT row is never minted a token", and since qits-1084 that sentence is wrong**: a DIRECT
+admin or editor row on an edge plane holds one too. It is a SQL comment and not a constraint — no
+check in any migration (`ck_workspace_runner_posture`, `ck_workspace_runner_placement`,
+`ck_workspace_direct_only_admin_editor`) mentions the token columns — so nothing forbids it, no
+migration was added, and the applied file is left as Flyway checksums it. Read this paragraph, not
+that header.
 
 **`V14__runner_workspace_memory_limits.sql` adds `workspace_memory_limit` and
 `workspace_memory_swap_limit` to `workspace_runner`** (qits-951), qits-ci's `step_memory_limit`
@@ -366,11 +371,15 @@ the sixth raw route and carries no path at all — see below):
   presents it on every upgrade; the endpoint requires `qits:system` or `qits:agent`. A caller with
   `qits:agent` and not `qits:system` may open only its own workspace's socket: `DaemonAgentBindingCheck`
   (an `HttpUpgradeCheck`, so the refusal is a real 403 before the upgrade) compares the token's `sub`
-  with the row's `commissioned_client_id` — and,
-  on a RUNNER row, with its `commissioned_token_subject` instead (qits-812; a client id never
-  matches there). `DaemonSocketBearerLifetime` drops the bearer's expiry on this path for a `tok-`
-  subject only, so a RUNNER daemon's socket outlives the edge's 300 s JWT and a DIRECT one keeps its
-  lifetime.
+  with the row's `commissioned_client_id` — or,
+  on a row that holds a workspace token, with its `commissioned_token_subject` instead (qits-812;
+  a client id never matches there). Which one is decided by what the row HOLDS
+  (`Workspace.holdsToken`/`boundSubject`), never by its placement: every RUNNER row holds a token,
+  and so does a DIRECT admin or editor row on an edge plane (qits-1084), whose daemon then dials
+  `wss://workspaces.qits.<domain>/workspaces/daemon/<id>` through the edge rather than the
+  `ws://` qits-net address. `DaemonSocketBearerLifetime` drops the bearer's expiry on this path for a
+  `tok-` subject only, so a token daemon's socket outlives the edge's 300 s JWT and a pair daemon
+  keeps its lifetime.
   `qits:system` is not bound until agents switch to their own role (phase 4 of the superproject's
   `principal-bound-git-refs-plan.md`). The local/no-IdP topology
   stays anonymous only while the machine-auth rollout gate is off. Do not make this path public to
@@ -405,10 +414,11 @@ the sixth raw route and carries no path at all — see below):
   collide (`{id}` matches one segment, so no daemon can be named `stream`), and it is a **raw** route
   rather than websockets-next for a hard reason: `io.quarkus.websockets.next.Connection` exposes
   `sendBinary` and no `writeQueueFull`/`drainHandler`, and a byte tunnel with no backpressure signal
-  is an unbounded heap buffer. `request.toWebSocket()` gives a real `WriteStream`. A RUNNER row's
-  dial-back comes through the edge and must also carry a validated bearer whose `sub` is the row's
-  token subject (`WorkspaceTunnels.DialBack`, captured when the tunnel opens); otherwise the same
-  bare 404 an unknown nonce gets. A DIRECT dial-back is the nonce alone, as before.
+  is an unbounded heap buffer. `request.toWebSocket()` gives a real `WriteStream`. A token row's
+  dial-back — every RUNNER row, and a DIRECT admin or editor row on an edge plane (qits-1084) —
+  comes through the edge and must also carry a validated bearer whose `sub` is the row's token
+  subject (`WorkspaceTunnels.DialBack.tokenBound`, captured when the tunnel opens); otherwise the
+  same bare 404 an unknown nonce gets. A pair row's dial-back is the nonce alone, as before.
 - `CaptureCorsRoute` — derives its path from the REST prefix instead of repeating it, because a
   preflight on a different path from the POST it clears is worth nothing, and the client reads a 404
   there as "hide the button" rather than as an error. It reads **`qits.rest.path`**, not
@@ -1468,9 +1478,13 @@ over it would lose the phase prompt entirely.
 
 ## The credential a workspace container holds
 
-A workspace container gets an **idp client of its own** — commissioned at provision, injected as
-`QITS_COMMISSIONED_CLIENT_ID`/`QITS_COMMISSIONED_CLIENT_SECRET`, handed back at teardown. README has
-the operator's half; here is what the code decides and why.
+A workspace container gets a **credential of its own** — commissioned at provision, handed back at
+teardown. On a deployment with an edge plane that is a workspace token (`QITS_TOKEN`), for RUNNER
+rows always and for the DIRECT admin and editor rows since qits-1084; on a DIRECT row with no edge
+plane it is an **idp client pair**, injected as `QITS_COMMISSIONED_CLIENT_ID`/`_SECRET`. Most of what
+follows was written about the pair and holds for the token by the same reasoning; the two token
+paragraphs below say where they differ. README has the operator's half; here is what the code
+decides and why.
 
 **The lifetime is the CONTAINER's, and that is the one thing to keep straight.** Not the row's:
 `deleteContainer` leaves an ACTIVE workspace with no credential, and the next ensure commissions a
@@ -1525,7 +1539,9 @@ follow-up). `commissionFor` reads `wt.admin` beside `wt.editor` and passes it to
 the kind, which qits-idp issues `qits:agent` + `qits:admin-agent`. The flag changes nothing else in
 the request and never reaches the spec. The reconcile matches both kinds through
 `CredentialCommissioner.isWorkspaceKind`. A live admin container keeps its old `workspace` pair until
-it is recreated or deleted. A RUNNER row is never admin, so the token arm keeps `workspace`.
+it is recreated or deleted. The token takes the same flag (`commissionToken(rowId, projectId,
+gitRefs, admin)`, qits-1084): a RUNNER row is never admin and passes false, a DIRECT admin row
+true.
 
 **A RUNNER row holds a workspace token instead of the pair** (qits-625, qits-802): one opaque
 `qits_tok_` of the `workspace` kind (`CredentialCommissioner.commissionToken`, `POST
@@ -1537,6 +1553,38 @@ every `workspace` token no ACTIVE row names (sparing one younger than `TOKEN_GRA
 supported here**: a RUNNER container has no other credential, so a start that cannot mint fails the
 row with `WORKSPACE_TOKEN_UNAVAILABLE` and queues nothing. The test double mints tokens by default for
 that reason (`unwireTokens()` is the no-issuer case); its pair half still starts unwired.
+
+**A DIRECT admin or editor row holds a workspace token too, whenever there is an edge** (qits-1084).
+Both stay DIRECT for good, but the hourly-minting pair is no longer their credential on a deployment
+with a public domain. `commissionFor` asks `WorkspaceAddressPlanes.plane()` first: when it resolves,
+the container is minted the RUNNER row's `qits_tok_` instead — `workspace-admin` for an admin row,
+`workspace` for the editor, unscoped because the editor names no repository, stating the same Git
+refs the pair would have — through the same `mintToken`/`storeToken` helpers `ensureRunnerToken`
+uses, onto the same three `V13` columns. When it does not (no public `QITS_DOMAIN`), the pair is
+commissioned exactly as before and a WARN says why; the provision is never failed over a missing
+plane. A failed mint fails the provision, as a failed commission does. `decommissionFor` runs first
+either way and clears both pair and token, so a row holds one or the other and never both — and a
+row switches arm at its next container, never under a running one.
+
+- **The spec follows what the row holds.** `WorkspaceContainerFactory` asks
+  `WorkspaceCredentials.tokenFor` first; a token row gets `QITS_TOKEN`, `QITS_TOKEN_SUBJECT`,
+  `GIT_CONFIG_GLOBAL` and `QITS_GIT_AUTH_HOST` on the plane's githost (`tokenEnv`), and its daemon
+  URL, three MCP URLs and git base from the plane (`addressEnv`) — both shared with
+  `RunnerWorkspaceSpecs` — and none of the pair block: no `QITS_COMMISSIONED_CLIENT_*`, no token url,
+  no audience. A token only works through the edge (which exchanges it for a JWT), which is why the
+  addresses move with it. Everything else DIRECT stays: qits-net, the extra host, the docker socket,
+  the editor's port and projects, the host-to-daemon tunnel. A pair row's spec is byte for byte what
+  it was; `WorkspaceContainerFactoryGoldenSpecTest` pins both. A token row whose plane has since gone
+  fails its start with `EDGE_PLANE_UNCONFIGURED` rather than launch on addresses it cannot spend.
+- **Every check reads what the row holds, not its placement**: the socket binding, the tunnel's
+  dial-back and a dispatch's `agentIdentity` all go through `Workspace.boundSubject`.
+- **Teardown** is the RUNNER row's: `deleteDirectContainer` and the DIRECT arm of `doDiscard`
+  delete the token beside the pair (`deleteToken(clearToken(…))`); recreate, abandon and a failed
+  provision go through `decommissionFor`, which always did both. The reconcile already reaps both
+  token kinds by `isWorkspaceKind`.
+- **A live container keeps what it was launched with** until it is recreated or deleted — a stop and
+  start re-presents the same spec — so an admin or editor container commissioned before this change
+  keeps its pair until then.
 
 **Absent is a supported configuration in two spellings and they behave identically**: no
 implementation of `CredentialCommissioner`, or one wired against no issuer. The switch is
@@ -1693,7 +1741,8 @@ workspace in SQL rather than through the door.
   `UNAVAILABLE` laid over it on read when the row's runner is not present. It is never stored.
 - **The runner spec shares the DIRECT spec's environment code**: `WorkspaceContainerFactory.identityEnv`
   and `homeEnv`, written in place in `forWorkspace`. `WorkspaceContainerFactoryGoldenSpecTest` pins the
-  whole DIRECT spec (ordinary, editor and admin rows), order included; `RunnerWorkspaceSpecs`
+  whole DIRECT spec (ordinary, editor and admin rows; the editor and admin each holding the pair and
+  holding a token, qits-1084), order included; `RunnerWorkspaceSpecs`
   composes the runner's from the same methods, and every address in it from a
   `WorkspaceAddressPlane` — public `<app>.qits.<domain>` names off `QITS_DOMAIN` alone, the image
   moved to `registry.qits.<domain>`, no network, no extra host (qits-799). A RUNNER start builds the
@@ -1912,7 +1961,10 @@ before a second pact lands.
   default would put credential environment into every container the suite launches and quietly
   change what dozens of unrelated tests are about. `wire()` turns it on, `reset()` turns it off, and
   a test class that wires it resets in `@AfterEach` — a class that forgets leaks its issuer into
-  whatever runs next.
+  whatever runs next. Its TOKEN half is wired by default instead (a RUNNER start cannot queue without
+  one); that changes no DIRECT container because the suites pin `qits.workspace.domain` empty, so an
+  admin or editor row only mints a token where a test installs a `WorkspaceAddressPlanes` mock
+  (`DirectWorkspaceTokenTest`, `WorkspaceRunnerPlacementTest`).
 - Integration tests needing real docker, a built `qits/workspace` image and the daemon binary **are**
   in this repo — `Daemon*IT`, tagged `extended`, `DaemonApiGateIT` the largest of them. They
   self-skip (`assumeTrue`) when docker or the image is absent, and `skipITs=true` is the default

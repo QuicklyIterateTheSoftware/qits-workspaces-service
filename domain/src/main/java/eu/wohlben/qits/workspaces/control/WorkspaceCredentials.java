@@ -25,6 +25,19 @@ import java.util.Optional;
 @FunctionalInterface
 public interface WorkspaceCredentials {
 
-  /** The credential commissioned for this workspace's current container, or empty. */
+  /** The client pair commissioned for this workspace's current container, or empty. */
   Optional<WorkspaceCredential> forWorkspace(Long rowId);
+
+  /**
+   * The workspace token minted for this DIRECT workspace's current container (qits-1084), or empty
+   * — the credential an admin or editor row holds instead of the pair whenever the deployment has an
+   * edge plane. A row holds one or the other, never both; {@link WorkspaceContainerFactory} composes
+   * the token's spec when this answers and the pair's otherwise.
+   *
+   * <p>Empty by default, so a lookup that knows only pairs — every hand-built test double — answers
+   * as a row holding no token, which is the pair's spec unchanged.
+   */
+  default Optional<WorkspaceToken> tokenFor(Long rowId) {
+    return Optional.empty();
+  }
 }

@@ -211,7 +211,8 @@ public class GitRefScopes {
     String tokenId = update.get().tokenId();
     String stored = update.get().storedRefs();
     try {
-      // A client row through the clients door; a RUNNER row's token through the token door.
+      // A client row through the clients door; a token row (RUNNER, or DIRECT on an edge plane —
+      // qits-1084) through the token door.
       if (clientId != null) {
         commissioner.get().updateGitRefs(clientId, GitRefs.read(stored));
       } else {

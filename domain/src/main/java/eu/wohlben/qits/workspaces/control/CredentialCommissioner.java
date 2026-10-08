@@ -169,17 +169,30 @@ public interface CredentialCommissioner {
    */
   List<Commission> list();
 
-  // --- the workspace token: a RUNNER row's credential (qits-625, qits-802) ----------------------
+  // --- the workspace token (qits-625, qits-802, qits-1084) ---------------------------------------
 
   /**
-   * Mint the {@code qits_tok_} of kind {@link #CONTEXT_KIND} for the RUNNER row {@code rowId}, or
-   * empty when this deployment has no issuer to ask. The {@link #commission} of a RUNNER row: the
-   * same context, the same {@code project} claim (null is unscoped) and the same Git refs (null
-   * states nothing), and the same fail-closed answer to a refused list. The value is answered once.
+   * Mint the {@code qits_tok_} for the workspace row {@code rowId}, or empty when this deployment has
+   * no issuer to ask. The {@link #commission} of a row that reaches the platform through the edge:
+   * every RUNNER row, and — whenever an edge plane resolves (qits-1084) — a DIRECT admin or editor
+   * row too. The same context, the same {@code project} claim (null is unscoped), the same Git refs
+   * (null states nothing) and the same fail-closed answer to a refused list. The value is answered
+   * once.
+   *
+   * <p><b>{@code admin} picks the kind</b> exactly as it does for {@link #commission(Long, String,
+   * List, boolean)}: {@link #ADMIN_CONTEXT_KIND} for an admin row, {@link #CONTEXT_KIND} for every
+   * other. A RUNNER row is never admin, so a RUNNER mint always passes false.
    *
    * @throws RuntimeException when an issuer is configured and the call did not succeed
    */
-  Optional<WorkspaceToken> commissionToken(long rowId, String projectId, List<String> gitRefs);
+  Optional<WorkspaceToken> commissionToken(
+      long rowId, String projectId, List<String> gitRefs, boolean admin);
+
+  /** The token of a non-admin workspace row: kind {@link #CONTEXT_KIND}. */
+  default Optional<WorkspaceToken> commissionToken(
+      long rowId, String projectId, List<String> gitRefs) {
+    return commissionToken(rowId, projectId, gitRefs, false);
+  }
 
   /**
    * Delete a workspace token: the container it belonged to is gone. Best-effort by contract, as

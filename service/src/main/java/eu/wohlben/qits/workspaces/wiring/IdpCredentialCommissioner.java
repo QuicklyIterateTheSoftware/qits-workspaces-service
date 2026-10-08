@@ -89,7 +89,10 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
 
   @Inject @RestClient IdpClients clients;
 
-  /** The token half (qits-625): a RUNNER row's workspace token, minted, scoped, listed, deleted. */
+  /**
+   * The token half (qits-625, qits-1084): the workspace token of a RUNNER row, and of a DIRECT admin
+   * or editor row on an edge plane — minted, scoped, listed, deleted.
+   */
   @Inject @RestClient IdpTokens tokens;
 
   /** The most of the idp's answer an ERROR line carries. */
@@ -295,18 +298,20 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
    *
    * <p>{@code POST /idp/api/tokens} through {@link #patiently}, exactly as {@link #commission}: the
    * same window, the same claims rule, and the same fail-closed retry with {@code gitRefs: []} when
-   * qits-idp refuses a stated list.
+   * qits-idp refuses a stated list. The kind is {@link CredentialCommissioner#contextKindFor}'s,
+   * as for the pair: {@code workspace-admin} for an admin row, {@code workspace} for every other
+   * (qits-1084).
    */
   @Override
   public Optional<WorkspaceToken> commissionToken(
-      long rowId, String projectId, List<String> gitRefs) {
+      long rowId, String projectId, List<String> gitRefs, boolean admin) {
     String authorization = authorization();
     if (authorization == null) {
       return Optional.empty();
     }
     IdpTokens.TokenRequest[] request = {
       new IdpTokens.TokenRequest(
-          CONTEXT_KIND,
+          CredentialCommissioner.contextKindFor(admin),
           Long.toString(rowId),
           claims(projectId),
           gitRefs == null ? null : List.copyOf(gitRefs))

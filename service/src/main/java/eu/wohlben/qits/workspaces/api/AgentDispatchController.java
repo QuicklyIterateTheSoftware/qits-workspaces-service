@@ -132,8 +132,9 @@ public class AgentDispatchController {
    * {@code /workspaces/api/technical-processes/{id}/events}; null when no start was needed because
    * the daemon was already up.
    *
-   * <p>{@code agentIdentity} names the principal the dispatched agent's own calls carry: the idp
-   * client commissioned for a DIRECT workspace's container, or a RUNNER workspace's token subject —
+   * <p>{@code agentIdentity} names the principal the dispatched agent's own calls carry: the
+   * workspace token's subject when the container holds a token (every RUNNER workspace, and an
+   * admin or editor one on an edge plane — qits-1084), else the idp client commissioned for it —
    * {@code DispatchService.Dispatch}'s javadoc has the full reasoning. Null until the container is
    * commissioned, which can be well after this call returns.
    *
@@ -150,8 +151,9 @@ public class AgentDispatchController {
       description =
           "Dispatched. `fresh:false` means the branch already had a workspace and it was answered"
               + " instead — the ordinary case on a re-press, and not an error. `agentIdentity` is"
-              + " the principal the dispatched agent's own calls carry (the commissioned client id"
-              + " on a DIRECT workspace, the workspace token's subject on a RUNNER one); null until"
+              + " the principal the dispatched agent's own calls carry (the workspace token's"
+              + " subject when its container holds a token, the commissioned client id otherwise);"
+              + " null until"
               + " the container is commissioned, never a secret. A workspace on a"
               + " workspace runner may answer `workspace.runtimeStatus: QUEUED` with"
               + " `agentLaunch: SCHEDULED`: it is waiting for a runner slot, `technicalProcessId` is"

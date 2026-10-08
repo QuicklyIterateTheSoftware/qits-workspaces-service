@@ -1,6 +1,5 @@
 package eu.wohlben.qits.workspaces.daemonhost;
 
-import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -93,9 +92,11 @@ public class DaemonAgentBindingCheck implements HttpUpgradeCheck {
   }
 
   /**
-   * The subject an agent must present for the workspace the path names: its token subject on a
-   * RUNNER row, its commissioned client on a DIRECT one. Null — no such ACTIVE workspace, no
-   * credential, or a segment that is not an id — never matches a caller.
+   * The subject an agent must present for the workspace the path names ({@code
+   * Workspace.boundSubject}): its token subject when the row holds a workspace token — every RUNNER
+   * row, and a DIRECT admin or editor row on an edge plane (qits-1084) — else its commissioned
+   * client. Decided by what the row holds, never by its placement. Null — no such ACTIVE workspace,
+   * no credential, or a segment that is not an id — never matches a caller.
    */
   String boundSubjectOf(String segment) {
     if (segment == null || segment.isBlank()) {
@@ -110,14 +111,7 @@ public class DaemonAgentBindingCheck implements HttpUpgradeCheck {
               } catch (NumberFormatException notAnId) {
                 return null;
               }
-              return workspaces
-                  .findActiveById(id)
-                  .map(
-                      w ->
-                          w.placement == WorkspacePlacement.RUNNER
-                              ? w.commissionedTokenSubject
-                              : w.commissionedClientId)
-                  .orElse(null);
+              return workspaces.findActiveById(id).map(w -> w.boundSubject()).orElse(null);
             });
   }
 }

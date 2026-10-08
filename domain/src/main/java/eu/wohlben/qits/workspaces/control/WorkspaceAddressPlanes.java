@@ -42,7 +42,8 @@ public class WorkspaceAddressPlanes {
   Optional<String> editorImageRepo;
 
   /**
-   * The plane a RUNNER workspace is composed from.
+   * The plane a RUNNER workspace is composed from, and a DIRECT admin or editor row that holds a
+   * workspace token is addressed through (qits-1084).
    *
    * @throws EdgePlaneUnconfigured when the domain is no public domain
    */
