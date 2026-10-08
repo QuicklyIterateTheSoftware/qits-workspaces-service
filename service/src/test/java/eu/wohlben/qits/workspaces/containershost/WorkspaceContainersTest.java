@@ -446,6 +446,35 @@ class WorkspaceContainersTest {
     assertEquals("s3cr3t", commissioned.env().get("QITS_COMMISSIONED_CLIENT_SECRET"));
   }
 
+  /**
+   * An admin row holding a workspace token (qits-1084): the token and the edge's addresses ride the
+   * spec the orchestrator stores, none of the pair does, and the DIRECT placement fields — the
+   * network, the extra host, the docker socket — are where they always were.
+   */
+  @Test
+  void aWorkspaceTokenRidesTheSpecWithTheEdgesAddressesAndTheDirectFieldsStay() {
+    Spec spec =
+        adapter(
+                TestWorkspaceContainerFactory.tokenHolding(
+                    "example.test", "qits_tok_1", "tok-workspace-admin-1"))
+            .ensureRequest(REPO, "work", 1L, "main", null)
+            .spec();
+
+    assertEquals("qits_tok_1", spec.env().get("QITS_TOKEN"));
+    assertEquals("tok-workspace-admin-1", spec.env().get("QITS_TOKEN_SUBJECT"));
+    assertEquals("githost.qits.example.test", spec.env().get("QITS_GIT_AUTH_HOST"));
+    assertEquals(
+        "wss://workspaces.qits.example.test/workspaces/daemon/1",
+        spec.env().get("QITS_WORKSPACE_DAEMON_URL"));
+    assertEquals(
+        "https://mcp.qits.example.test/mcp", spec.env().get("QITS_PLATFORM_MCP_URL"));
+    assertFalse(spec.env().containsKey("QITS_COMMISSIONED_CLIENT_ID"), spec.env().toString());
+    assertFalse(spec.env().containsKey("QITS_GIT_AUTH_TOKEN_URL"), spec.env().toString());
+    assertEquals("qits-net", spec.network(), "still on qits-net");
+    assertEquals(List.of("host.docker.internal:host-gateway"), spec.addHosts());
+    assertTrue(spec.hostDockerSocket(), "an admin token row keeps the socket");
+  }
+
   @Test
   void theKillSwitchTakesTheClaimedVolumeAndNothingElse() {
     Spec spec =

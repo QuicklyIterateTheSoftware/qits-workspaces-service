@@ -88,6 +88,32 @@ public final class TestWorkspaceContainerFactory {
     return f;
   }
 
+  /**
+   * A factory whose workspaces hold a workspace token on an edge plane under {@code domain} — the
+   * shape an admin or editor row has on a deployment with a public {@code QITS_DOMAIN} (qits-1084).
+   * The admin posture, because a DIRECT token row is an admin or editor row.
+   */
+  public static WorkspaceContainerFactory tokenHolding(
+      String domain, String token, String subject) {
+    WorkspaceContainerFactory f = build(true);
+    f.domain = Optional.of(domain);
+    f.postures = StubInstance.of(rowId -> true);
+    f.credentials =
+        StubInstance.of(
+            new WorkspaceCredentials() {
+              @Override
+              public Optional<WorkspaceCredential> forWorkspace(Long rowId) {
+                return Optional.empty();
+              }
+
+              @Override
+              public Optional<WorkspaceToken> tokenFor(Long rowId) {
+                return Optional.of(new WorkspaceToken("tok-id-" + rowId, token, subject));
+              }
+            });
+    return f;
+  }
+
   private static WorkspaceContainerFactory build(boolean persistWorkspace) {
     WorkspaceContainerFactory f = new WorkspaceContainerFactory();
     f.imageRepo = IMAGE_REPO;

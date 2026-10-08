@@ -431,6 +431,34 @@ public class IdpCredentialCommissionerTest {
     assertFalse(issued.orElseThrow().toString().contains("qits_tok_abc"), "never logged");
   }
 
+  /**
+   * An admin row's token is of the admin kind (qits-1084), picked by {@code contextKindFor} exactly
+   * as the pair's is; an unscoped one (the editor) states no claims at all.
+   */
+  @Test
+  public void anAdminRowsTokenIsMintedOfTheAdminKindAndTheEditorsUnscoped() throws Exception {
+    String url =
+        serve(
+            List.of(
+                new Answer(
+                    201,
+                    "{\"tokenId\":\"t-2\",\"token\":\"qits_tok_adm\","
+                        + "\"subject\":\"tok-workspace-admin-t-2\"}"),
+                new Answer(
+                    201,
+                    "{\"tokenId\":\"t-3\",\"token\":\"qits_tok_ed\","
+                        + "\"subject\":\"tok-workspace-t-3\"}")));
+    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
+
+    commissioner.commissionToken(8L, A_PROJECT, List.of("refs/heads/admin/a"), true);
+    commissioner.commissionToken(9L, null, List.of(), false);
+
+    assertTrue(bodies.get(0).contains("\"contextKind\":\"workspace-admin\""), bodies.get(0));
+    assertTrue(bodies.get(0).contains("\"contextId\":\"8\""), bodies.get(0));
+    assertTrue(bodies.get(1).contains("\"contextKind\":\"workspace\""), bodies.get(1));
+    assertFalse(bodies.get(1).contains("\"claims\""), bodies.get(1));
+  }
+
   @Test
   public void aRefusedGitRefListMintsTheTokenAgainPushingNothing() throws Exception {
     String url =

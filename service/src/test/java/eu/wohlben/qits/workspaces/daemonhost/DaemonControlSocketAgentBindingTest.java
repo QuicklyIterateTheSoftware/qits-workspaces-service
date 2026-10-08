@@ -172,6 +172,63 @@ class DaemonControlSocketAgentBindingTest {
     assertEquals(403, connect("/workspaces/daemon/" + rowA, token));
   }
 
+  // --- a DIRECT row holding a token binds its token subject too (qits-1084) -----------------------
+
+  /**
+   * Row A as it is on an edge plane: still a DIRECT admin row, holding a workspace token in place of
+   * the pair — which every commission clears, so the client column is empty.
+   */
+  private void directWithToken(Long rowId, String subject) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              var row = workspaceRepository.findActiveById(rowId).orElseThrow();
+              row.commissionedClientId = null;
+              row.commissionedTokenId = "tok-id-" + rowId;
+              row.commissionedTokenSubject = subject;
+              row.commissionedToken = "qits_tok_" + rowId;
+            });
+  }
+
+  @Test
+  public void aDirectRowHoldingATokenAdmitsItsTokenSubject() throws Exception {
+    String subject = "tok-workspace-admin-" + rowA;
+    directWithToken(rowA, subject);
+    String token = DaemonMachineTokens.tokenWithRoles(subject, AGENT, PLATFORM_AUDIENCE);
+
+    assertEquals(101, connect("/workspaces/daemon/" + rowA, token));
+  }
+
+  @Test
+  public void aDirectRowHoldingATokenRefusesItsFormerClientAndAnotherSubject() throws Exception {
+    directWithToken(rowA, "tok-workspace-admin-" + rowA);
+
+    assertEquals(
+        403,
+        connect(
+            "/workspaces/daemon/" + rowA,
+            DaemonMachineTokens.tokenWithRoles(clientA, AGENT, PLATFORM_AUDIENCE)));
+    assertEquals(
+        403,
+        connect(
+            "/workspaces/daemon/" + rowA,
+            DaemonMachineTokens.tokenWithRoles(
+                "tok-workspace-admin-somebody-else", AGENT, PLATFORM_AUDIENCE)));
+  }
+
+  @Test
+  public void aDirectRowHoldingThePairStillBindsItsClient() throws Exception {
+    // The fallback's row (no edge plane): the client pair, no token, bound exactly as before.
+    String token = DaemonMachineTokens.tokenWithRoles(clientB, AGENT, PLATFORM_AUDIENCE);
+
+    assertEquals(101, connect("/workspaces/daemon/" + rowB, token));
+    assertEquals(
+        403,
+        connect(
+            "/workspaces/daemon/" + rowB,
+            DaemonMachineTokens.tokenWithRoles("tok-workspace-" + rowB, AGENT, PLATFORM_AUDIENCE)));
+  }
+
   /** 101 when the socket opened, else the status the upgrade was refused with. */
   private int connect(String path, String token) throws Exception {
     WebSocketClient client = vertx.createWebSocketClient();

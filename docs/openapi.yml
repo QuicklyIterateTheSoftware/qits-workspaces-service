@@ -1238,13 +1238,13 @@ paths:
           description: "Dispatched. `fresh:false` means the branch already had a workspace\
             \ and it was answered instead — the ordinary case on a re-press, and not\
             \ an error. `agentIdentity` is the principal the dispatched agent's own\
-            \ calls carry (the commissioned client id on a DIRECT workspace, the workspace\
-            \ token's subject on a RUNNER one); null until the container is commissioned,\
-            \ never a secret. A workspace on a workspace runner may answer `workspace.runtimeStatus:\
-            \ QUEUED` with `agentLaunch: SCHEDULED`: it is waiting for a runner slot,\
-            \ `technicalProcessId` is the start that queued it, and the agent is launched\
-            \ once a runner takes it and its daemon answers. A re-press while it is\
-            \ queued schedules nothing more."
+            \ calls carry (the workspace token's subject when its container holds\
+            \ a token, the commissioned client id otherwise); null until the container\
+            \ is commissioned, never a secret. A workspace on a workspace runner may\
+            \ answer `workspace.runtimeStatus: QUEUED` with `agentLaunch: SCHEDULED`:\
+            \ it is waiting for a runner slot, `technicalProcessId` is the start that\
+            \ queued it, and the agent is launched once a runner takes it and its\
+            \ daemon answers. A re-press while it is queued schedules nothing more."
           content:
             application/json:
               schema:

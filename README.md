@@ -276,7 +276,9 @@ none of it is a leftover of regular DIRECT rows:
   and limits for admin and editor containers (the two limits are also the defaults a runner row's
   own lay over).
 - `commissionFor`, `CommissionReconciler` and the `V3` columns — the commissioned client pair is the
-  admin and editor container's credential (a RUNNER row holds a workspace token instead).
+  admin and editor container's credential on a deployment with **no** edge plane. With a public
+  `QITS_DOMAIN` an admin or editor container holds a workspace token instead, as every RUNNER row
+  does (qits-1084) — see "The credential a workspace container holds".
 
 ### The credential a workspace container holds
 
@@ -290,6 +292,26 @@ the superproject's `authenticated-reads-plan.md`.
     QITS_COMMISSIONED_CLIENT_SECRET   its secret
     QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL  its token endpoint
     QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE   the platform audience, qits-platform (C4)
+
+**On a deployment with a public `QITS_DOMAIN` an admin or editor container holds a workspace token
+instead of that pair** (qits-1084) — the same non-expiring `qits_tok_` every RUNNER container holds,
+minted at `POST /idp/api/tokens` and stored on the row. An admin row's is of kind `workspace-admin`
+(so `qits:agent` and `qits:admin-agent`), the editor's of kind `workspace` and unscoped. The
+container carries
+
+    QITS_TOKEN                        the token
+    QITS_TOKEN_SUBJECT                its subject, tok-…: what the daemon socket binds the agent to
+    GIT_CONFIG_GLOBAL                 /etc/qits-gitconfig, the image's git credential helper
+    QITS_GIT_AUTH_HOST                githost.qits.<domain>, the one host that helper answers for
+
+and none of the pair block above. Because the edge is the only thing that accepts a `qits_tok_`
+(it exchanges it for a JWT), such a container's daemon socket, MCP servers and git base are the
+public `<app>.qits.<domain>` names rather than the internal ones; it is otherwise the same DIRECT
+container — on qits-net, the admin one with the docker socket, the editor with its port and project
+list. With **no** public domain the pair is commissioned as before and a WARN says so; that is the
+only case the pair is still for. A container keeps whichever credential it was launched with until it
+is recreated or deleted, and teardown, the hourly reconcile and the git-ref narrowing treat the token
+exactly as they treat the pair.
 
 The client pair and its control-socket token coordinates are injected together or not at all; a
 partial set cannot authenticate and is never a valid container specification. They sit beside

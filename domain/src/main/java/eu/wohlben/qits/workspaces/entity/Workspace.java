@@ -157,9 +157,11 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public String commissionedClientSecret;
 
   /**
-   * The workspace token minted for a RUNNER row's <em>current container</em> (qits-625, {@code
-   * V13}): qits-idp's id for it, the {@code sub} the edge stamps on its JWT, and the value. All
-   * three null on every DIRECT row, and on a RUNNER row with no container holding a token.
+   * The workspace token minted for this row's <em>current container</em> (qits-625, {@code V13}):
+   * qits-idp's id for it, the {@code sub} the edge stamps on its JWT, and the value. A RUNNER row's
+   * container always holds one; a DIRECT (admin or editor) row's holds one in place of the pair
+   * above whenever the deployment has an edge plane (qits-1084). All three null on a row whose
+   * container holds no token, and never set beside the pair: every commission clears both first.
    *
    * <p>The value is stored for {@link #commissionedClientSecret}'s reason: the spec has to be
    * reproducible at every start, and qits-idp answers a value once. <b>Cleared with the deletion,
@@ -173,6 +175,26 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
 
   @Column(name = "commissioned_token", columnDefinition = "text")
   public String commissionedToken;
+
+  /**
+   * Whether this row's container holds a workspace token (qits-1084) — the one test every reader
+   * that has to choose between the token and the client pair makes, on either placement. A row that
+   * holds a token reaches the platform through the edge with it, and is bound by its subject; a row
+   * that does not is bound by its commissioned client, if any. Placement no longer decides it.
+   */
+  public boolean holdsToken() {
+    return commissionedTokenId != null && !commissionedTokenId.isBlank();
+  }
+
+  /**
+   * The principal this row's own container presents to the platform: its token's subject ({@code
+   * tok-…}) when it {@link #holdsToken holds a token}, else its commissioned client id, else null.
+   * What the daemon socket's agent binding, the tunnel's dial-back and a dispatch's {@code
+   * agentIdentity} all compare a caller with.
+   */
+  public String boundSubject() {
+    return holdsToken() ? commissionedTokenSubject : commissionedClientId;
+  }
 
   /**
    * Whether this workspace runs in <b>admin mode</b>: its container is started with the host's

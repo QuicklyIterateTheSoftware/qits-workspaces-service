@@ -246,9 +246,10 @@ public class DispatchService {
    * @param agentIdentity the principal the dispatched agent's own calls are stamped with —
    *     {@code DaemonAgentBindingCheck}'s own reading of the row, read here because that class is
    *     a {@code service}-module concern this one may not depend on: the workspace token's subject
-   *     on a RUNNER row ({@code commissioned_token_subject}, the {@code sub} the edge puts on the
-   *     JWT it mints for the token), the idp client commissioned for it on a DIRECT row
-   *     ({@code commissioned_client_id}) otherwise. Null before either is commissioned — before the
+   *     when the row holds a token ({@code commissioned_token_subject}, the {@code sub} the edge
+   *     puts on the JWT it mints for the token — every RUNNER row, and a DIRECT admin or editor row
+   *     on an edge plane), the idp client commissioned for it ({@code commissioned_client_id})
+   *     otherwise. Null before either is commissioned — before the
    *     first provision, after a teardown, and in a deployment with no issuer wired. Never a secret:
    *     both are names, not credentials
    */
@@ -707,23 +708,18 @@ public class DispatchService {
   /**
    * {@link Dispatch#agentIdentity}: the principal the row's own container is bound to, read the
    * same way {@code DaemonAgentBindingCheck.boundSubjectOf} reads it — this module may not depend
-   * on that class, which is in {@code service}, so the rule is restated here rather than shared. A RUNNER row carries no commissioned client at all ({@link
-   * WorkspaceCredential} is the DIRECT pair's own type), so its workspace token's subject is the
-   * one name that matches what the container actually presents; a DIRECT row has no token, so its
-   * commissioned client id is. Read in a transaction of its own for {@link #view}'s reason.
+   * on that class, which is in {@code service}, so both read the one rule on the entity, {@code
+   * Workspace.boundSubject}. A row that holds a workspace token — every RUNNER row, and a DIRECT
+   * admin or editor row on an edge plane (qits-1084) — is bound by the token's subject, the one name
+   * that matches what its container presents; a row holding the client pair is bound by the client
+   * id. Decided by what the row holds, not by its placement. Read in a transaction of its own for
+   * {@link #view}'s reason.
    */
   private String agentIdentity(Long rowId) {
     return QuarkusTransaction.requiringNew()
         .call(
             () ->
-                workspaceRepository
-                    .findActiveById(rowId)
-                    .map(
-                        w ->
-                            w.placement == WorkspacePlacement.RUNNER
-                                ? w.commissionedTokenSubject
-                                : w.commissionedClientId)
-                    .orElse(null));
+                workspaceRepository.findActiveById(rowId).map(w -> w.boundSubject()).orElse(null));
   }
 
   /**

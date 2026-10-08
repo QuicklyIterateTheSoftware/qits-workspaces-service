@@ -235,6 +235,57 @@ public class CommissionReconcilerTest {
     }
   }
 
+  /**
+   * A DIRECT admin row's {@code workspace-admin} token (qits-1084) is judged by the same rule: kept
+   * while the row names it, reaped once it is superseded. The row is written straight to the store,
+   * which is also the schema saying a DIRECT row may hold a token.
+   */
+  @Test
+  public void aDirectAdminRowsTokenIsKeptWhileClaimedAndASupersededOneIsReaped() {
+    Long row = directAdminRowHolding("tok-admin-live");
+    Instant old = Instant.now().minus(Duration.ofHours(1));
+    commissioner.plantToken(
+        "tok-admin-live", CredentialCommissioner.ADMIN_CONTEXT_KIND, row.toString(), old);
+    commissioner.plantToken(
+        "tok-admin-superseded", CredentialCommissioner.ADMIN_CONTEXT_KIND, row.toString(), old);
+    try {
+      assertEquals(1, reconciler.reapWorkspaceTokens(Instant.now()));
+
+      assertEquals(List.of("tok-admin-superseded"), commissioner.tokensDeleted());
+      assertEquals(List.of("tok-admin-live"), commissioner.liveTokenIds());
+    } finally {
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  workspaceRepository
+                      .findByIdOptional(row)
+                      .ifPresent(w -> w.status = WorkspaceStatus.ABANDONED));
+    }
+  }
+
+  /** An ACTIVE DIRECT admin row holding the workspace token {@code tokenId}, and no pair. */
+  private Long directAdminRowHolding(String tokenId) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              Workspace w = new Workspace();
+              String label = "a" + UUID.randomUUID().toString().substring(0, 8);
+              w.workspaceId = label;
+              w.repositoryId = "repo-" + label;
+              w.branch = label;
+              w.status = WorkspaceStatus.ACTIVE;
+              w.admin = true;
+              w.placement = WorkspacePlacement.DIRECT;
+              w.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+              w.commissionedTokenId = tokenId;
+              w.commissionedTokenSubject = "tok-workspace-admin-" + label;
+              w.commissionedToken = "qits_tok_" + label;
+              workspaceRepository.persist(w);
+              workspaceRepository.flush();
+              return w.id;
+            });
+  }
+
   /** An ACTIVE RUNNER row holding the workspace token {@code tokenId}, written directly. */
   private Long runnerRowHolding(String tokenId) {
     return QuarkusTransaction.requiringNew()

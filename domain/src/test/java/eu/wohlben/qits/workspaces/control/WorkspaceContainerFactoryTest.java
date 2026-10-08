@@ -456,6 +456,83 @@ class WorkspaceContainerFactoryTest {
     }
   }
 
+  /**
+   * A row holding a workspace token (qits-1084) is addressed through the WIRED address planes — the
+   * bean the commission decided on — rather than this factory's own domain key, and carries the
+   * token and none of the pair block, even when a pair lookup would also answer.
+   */
+  @Test
+  void aTokenHoldingRowTakesTheWiredPlaneAndCarriesNoPair() {
+    WorkspaceContainerFactory f = factory();
+    f.addressPlanes =
+        StubInstance.of(
+            new WorkspaceAddressPlanes() {
+              @Override
+              public WorkspaceAddressPlane plane() {
+                return WorkspaceAddressPlane.of("wired.example", List.of());
+              }
+            });
+    f.credentials =
+        StubInstance.of(
+            new WorkspaceCredentials() {
+              @Override
+              public Optional<WorkspaceCredential> forWorkspace(Long rowId) {
+                return Optional.of(new WorkspaceCredential("ws-1-a", "s3cr3t"));
+              }
+
+              @Override
+              public Optional<WorkspaceToken> tokenFor(Long rowId) {
+                return Optional.of(new WorkspaceToken("tok-id-1", "qits_tok_1", "tok-workspace-1"));
+              }
+            });
+
+    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
+
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_URL", "wss://workspaces.qits.wired.example/workspaces/daemon/1");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_GIT_BASE_URL", "https://githost.qits.wired.example/git");
+    assertEnv(c, "QITS_TOKEN", "qits_tok_1");
+    assertEnv(c, "QITS_TOKEN_SUBJECT", "tok-workspace-1");
+    assertEnv(c, "QITS_GIT_AUTH_HOST", "githost.qits.wired.example");
+    for (String pairKey :
+        List.of(
+            "QITS_COMMISSIONED_CLIENT_ID",
+            "QITS_COMMISSIONED_CLIENT_SECRET",
+            "QITS_GIT_AUTH_TOKEN_URL",
+            "QITS_GIT_AUTH_AUDIENCE",
+            "QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL",
+            "QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE")) {
+      assertFalse(c.env().containsKey(pairKey), pairKey + " in " + c.env());
+    }
+    // Everything DIRECT stays: the network and the extra host.
+    assertEquals("qits-net", c.network());
+    assertEquals(List.of("host.docker.internal:host-gateway"), c.addHosts());
+  }
+
+  /** A token with a blank value or subject is no token: the pair's spec, unchanged. */
+  @Test
+  void aBlankTokenIsNoTokenAndThePairStands() {
+    WorkspaceContainerFactory f = factory();
+    f.credentials =
+        StubInstance.of(
+            new WorkspaceCredentials() {
+              @Override
+              public Optional<WorkspaceCredential> forWorkspace(Long rowId) {
+                return Optional.of(new WorkspaceCredential("ws-1-a", "s3cr3t"));
+              }
+
+              @Override
+              public Optional<WorkspaceToken> tokenFor(Long rowId) {
+                return Optional.of(new WorkspaceToken("tok-id-1", " ", "tok-workspace-1"));
+              }
+            });
+
+    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
+
+    assertFalse(c.env().containsKey("QITS_TOKEN"), c.env().toString());
+    assertEnv(c, "QITS_COMMISSIONED_CLIENT_ID", "ws-1-a");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_URL", "ws://qits:8080/workspaces/daemon/1");
+  }
+
   /** Assert the container carries {@code key} with exactly {@code value} in its environment. */
   private static void assertEnv(WorkspaceContainer container, String key, String value) {
     assertTrue(container.env().containsKey(key), () -> "no " + key + " in " + container.env());

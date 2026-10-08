@@ -337,6 +337,17 @@ public class WorkspaceContainerFactory {
   @Inject Instance<WorkspaceCredentials> credentials;
 
   /**
+   * The edge plane a DIRECT row that holds a workspace token is addressed through (qits-1084): a
+   * {@code qits_tok_} only works through the public edge, which exchanges it for a JWT, so such a
+   * container's dial-home, MCP and git addresses are the plane's public names — exactly as a RUNNER
+   * spec's are ({@link RunnerWorkspaceSpecs}). Asked only when the row holds a token, so a
+   * pair-holding row never reads it. An {@code Instance<>} for every port's reason here: the
+   * hand-built unit-test factory leaves it unresolvable, and then the plane is composed from this
+   * factory's own {@code qits.workspace.domain} — the same key {@link WorkspaceAddressPlanes} reads.
+   */
+  @Inject Instance<WorkspaceAddressPlanes> addressPlanes;
+
+  /**
    * Whether this workspace is the admin kind — the one input that changes what the container is
    * allowed. A lookup rather than an argument, for the reason {@link WorkspacePostures} spells out,
    * and optional for the reason above it: absent means no admin workspace exists, which is the
@@ -483,6 +494,42 @@ public class WorkspaceContainerFactory {
           rowId);
       return Optional.empty();
     }
+  }
+
+  /**
+   * The row's workspace token, or none (qits-1084). A lookup failure costs the token and falls to
+   * the pair's reading, for {@link #workspaceCredential}'s reason; a token with a blank value or
+   * subject is no token.
+   */
+  private Optional<WorkspaceToken> workspaceToken(Long rowId) {
+    if (rowId == null || credentials == null || !credentials.isResolvable()) {
+      return Optional.empty();
+    }
+    try {
+      return credentials
+          .get()
+          .tokenFor(rowId)
+          .filter(token -> present(token.token()) && present(token.subject()));
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "could not read the workspace token of workspace %s", rowId);
+      return Optional.empty();
+    }
+  }
+
+  /**
+   * The edge plane a token-holding DIRECT row is addressed through: {@link WorkspaceAddressPlanes}'
+   * when it is wired, else one composed from this factory's {@code qits.workspace.domain}.
+   *
+   * @throws EdgePlaneUnconfigured when the domain is no public one. A row holds a token only when a
+   *     plane resolved at its commission, so this is a deployment whose domain went away under a
+   *     stopped container — and a token spec on the internal addresses would dial nothing, so the
+   *     start fails saying why rather than launching a container that cannot reach home.
+   */
+  private WorkspaceAddressPlane edgePlane() {
+    if (addressPlanes != null && addressPlanes.isResolvable()) {
+      return addressPlanes.get().plane();
+    }
+    return WorkspaceAddressPlane.of(set(domain).orElse(""), java.util.List.of());
   }
 
   private Optional<WorkspaceCredential> workspaceCredential(Long rowId) {
@@ -804,31 +851,44 @@ public class WorkspaceContainerFactory {
     // (the
     // binary
     // never exits on a failed dial), so this is behaviour-neutral (docs/epics/qits-workspace-daemon/).
-    container.env(
-        "QITS_WORKSPACE_DAEMON_URL",
-        "ws://"
-            + qitsHostResolver.qitsHost()
-            + ":"
-            + qitsPort
-            + "/workspaces/daemon/"
-            + rowId);
-    // MCP servers are owned by sibling services, not by the control-socket authority above.
-    // Tell the daemon each address outright so a direct qits-workspaces control socket is never
-    // mistaken for a gateway. The daemon adds the project/repository/workspace query scope later.
-    // QITS_PLATFORM_MCP_URL is the central qits CLI MCP server (epic qits-630) and carries no such
-    // scope — it is the one address every workspace container gets regardless of repository.
-    container.env("QITS_REPOSITORY_MCP_URL", serviceBase(projectsUrl) + "/projects/mcp");
-    container.env(
-        "QITS_OBSERVABILITY_MCP_URL", serviceBase(observabilityUrl) + "/observability/mcp");
-    container.env("QITS_PLATFORM_MCP_URL", serviceBase(platformMcpUrl) + "/mcp");
-    // The git base the daemon self-clones from, told outright — never derived. The daemon's
-    // fallback derives the pre-split address (/artifacts/git off the dial-home authority) and
-    // 404s on a platform whose git host is qits-githost: the first real workspace on the
-    // 2026-08-15 bare-server platform failed exactly there. /git is the githost's root-level
-    // prefix, verbatim through the gateway, so the one authority above routes it too.
-    container.env(
-        "QITS_WORKSPACE_DAEMON_GIT_BASE_URL",
-        gitBase(containerGitUrl));
+    // A ROW THAT HOLDS A WORKSPACE TOKEN IS ADDRESSED THROUGH THE EDGE (qits-1084). A qits_tok_ is
+    // only spent by the public edge, which exchanges it for a JWT; presented on qits-net straight to
+    // a service it is an unknown bearer. So an admin or editor row holding one takes every address
+    // it dials — the daemon socket, the three MCP servers and the git base — from the plane, exactly
+    // as a RUNNER spec does, through the same method (addressEnv). Everything else DIRECT stays:
+    // qits-net, the extra host, the docker socket, the editor block, the host-to-daemon tunnel. A
+    // row holding the pair (or nothing) keeps the internal addresses below, byte for byte.
+    Optional<WorkspaceToken> token = workspaceToken(rowId);
+    WorkspaceAddressPlane edge = token.isPresent() ? edgePlane() : null;
+    if (edge != null) {
+      addressEnv(edge, rowId, container::env);
+    } else {
+      container.env(
+          "QITS_WORKSPACE_DAEMON_URL",
+          "ws://"
+              + qitsHostResolver.qitsHost()
+              + ":"
+              + qitsPort
+              + "/workspaces/daemon/"
+              + rowId);
+      // MCP servers are owned by sibling services, not by the control-socket authority above.
+      // Tell the daemon each address outright so a direct qits-workspaces control socket is never
+      // mistaken for a gateway. The daemon adds the project/repository/workspace query scope later.
+      // QITS_PLATFORM_MCP_URL is the central qits CLI MCP server (epic qits-630) and carries no such
+      // scope — it is the one address every workspace container gets regardless of repository.
+      container.env("QITS_REPOSITORY_MCP_URL", serviceBase(projectsUrl) + "/projects/mcp");
+      container.env(
+          "QITS_OBSERVABILITY_MCP_URL", serviceBase(observabilityUrl) + "/observability/mcp");
+      container.env("QITS_PLATFORM_MCP_URL", serviceBase(platformMcpUrl) + "/mcp");
+      // The git base the daemon self-clones from, told outright — never derived. The daemon's
+      // fallback derives the pre-split address (/artifacts/git off the dial-home authority) and
+      // 404s on a platform whose git host is qits-githost: the first real workspace on the
+      // 2026-08-15 bare-server platform failed exactly there. /git is the githost's root-level
+      // prefix, verbatim through the gateway, so the one authority above routes it too.
+      container.env(
+          "QITS_WORKSPACE_DAEMON_GIT_BASE_URL",
+          gitBase(containerGitUrl));
+    }
     // The path ContainerProxyRoute addresses this container at. The proxy forwards a caller's path
     // untouched, so the daemon has to be told which leading part of it is its own address rather
     // than a route it serves — the same arrangement a spawned dev server has with QITS_PUBLIC_BASE,
@@ -865,26 +925,34 @@ public class WorkspaceContainerFactory {
     // Both vars or neither: half a pair is a credential that cannot be presented, and a container
     // launched with one would look configured and fail at the first pull. Absent is the shipped
     // posture and today's behaviour — no issuer wired, no credential on the row, no env here.
-    workspaceCredential(rowId)
-        .ifPresent(
-            credential -> {
-              container.env("QITS_COMMISSIONED_CLIENT_ID", credential.clientId());
-              container.env("QITS_COMMISSIONED_CLIENT_SECRET", credential.secret());
-              // The image's credential helper mints a fresh bearer for each Git authentication.
-              // It compares Git's requested authority with this value before it ever exchanges the
-              // client secret, so an absolute submodule or an ad-hoc external remote cannot obtain
-              // a platform token.
-              container.env("GIT_CONFIG_GLOBAL", GIT_CONFIG_GLOBAL);
-              container.env("QITS_GIT_AUTH_HOST", gitAuthority(containerGitUrl));
-              container.env("QITS_GIT_AUTH_TOKEN_URL", tokenUrl(idpUrl));
-              container.env("QITS_GIT_AUTH_AUDIENCE", CONTAINER_TOKEN_AUDIENCE);
-              // The same short-lived credential authenticates the daemon's dial-home socket, and —
-              // since C4 — asks for the same one platform audience the Git helper above does. Keep
-              // the token endpoint and target explicit: deriving either from the Git endpoint would
-              // silently put a workspace's control plane behind a different service's policy.
-              container.env("QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL", tokenUrl(idpUrl));
-              container.env("QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE", CONTAINER_TOKEN_AUDIENCE);
-            });
+    //
+    // A row that holds a workspace token instead (qits-1084) carries that and none of the pair
+    // block: QITS_TOKEN, its subject, and the git helper told the plane's githost — tokenEnv, the
+    // RUNNER spec's own lines. No token url and no audience: nothing in the container mints.
+    if (edge != null) {
+      tokenEnv(token.get().token(), token.get().subject(), edge, container::env);
+    } else {
+      workspaceCredential(rowId)
+          .ifPresent(
+              credential -> {
+                container.env("QITS_COMMISSIONED_CLIENT_ID", credential.clientId());
+                container.env("QITS_COMMISSIONED_CLIENT_SECRET", credential.secret());
+                // The image's credential helper mints a fresh bearer for each Git authentication.
+                // It compares Git's requested authority with this value before it ever exchanges the
+                // client secret, so an absolute submodule or an ad-hoc external remote cannot obtain
+                // a platform token.
+                container.env("GIT_CONFIG_GLOBAL", GIT_CONFIG_GLOBAL);
+                container.env("QITS_GIT_AUTH_HOST", gitAuthority(containerGitUrl));
+                container.env("QITS_GIT_AUTH_TOKEN_URL", tokenUrl(idpUrl));
+                container.env("QITS_GIT_AUTH_AUDIENCE", CONTAINER_TOKEN_AUDIENCE);
+                // The same short-lived credential authenticates the daemon's dial-home socket, and —
+                // since C4 — asks for the same one platform audience the Git helper above does. Keep
+                // the token endpoint and target explicit: deriving either from the Git endpoint would
+                // silently put a workspace's control plane behind a different service's policy.
+                container.env("QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL", tokenUrl(idpUrl));
+                container.env("QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE", CONTAINER_TOKEN_AUDIENCE);
+              });
+    }
     // THE WEB EDITOR, and only for the one row that IS it. The daemon supervises
     // openvscode-server when it is told to; every other workspace is told nothing and behaves
     // exactly as it did before an editor existed — which is also the daemon's own shipped default,
@@ -1015,6 +1083,37 @@ public class WorkspaceContainerFactory {
     // answered before it exists rather than by a flag inside it, which is why the editor is a second
     // image at all.
     return container.editor(editor).image(editor ? editorImage() : image());
+  }
+
+  /**
+   * The five addresses a container that reaches the platform through the edge is told, every one a
+   * public name off {@code plane}, in the DIRECT spec's order: the daemon's dial-home socket ({@code
+   * wss} on the workspaces vhost), the three MCP servers and the git base it self-clones from.
+   * Shared by the RUNNER spec ({@link RunnerWorkspaceSpecs}) and a DIRECT row that holds a workspace
+   * token (qits-1084), so the two cannot drift.
+   */
+  static void addressEnv(WorkspaceAddressPlane plane, long rowId, BiConsumer<String, String> env) {
+    env.accept("QITS_WORKSPACE_DAEMON_URL", plane.daemonUrl(rowId));
+    env.accept("QITS_REPOSITORY_MCP_URL", plane.repositoryMcpUrl());
+    env.accept("QITS_OBSERVABILITY_MCP_URL", plane.observabilityMcpUrl());
+    env.accept("QITS_PLATFORM_MCP_URL", plane.platformMcpUrl());
+    env.accept("QITS_WORKSPACE_DAEMON_GIT_BASE_URL", plane.gitBaseUrl());
+  }
+
+  /**
+   * The workspace token's environment (qits-802, qits-1084): {@code QITS_TOKEN}, {@code
+   * QITS_TOKEN_SUBJECT}, and the image's git credential helper ({@code GIT_CONFIG_GLOBAL}) told the
+   * one host it may answer for, the plane's githost ({@code QITS_GIT_AUTH_HOST}). Every consumer in
+   * the container prefers {@code QITS_TOKEN} — the git helper, the CLI, the daemon's dial-home and
+   * the MCP config — so nothing else is needed: no client pair, no token url, no audience. Shared by
+   * the RUNNER spec and a token-holding DIRECT row.
+   */
+  static void tokenEnv(
+      String token, String subject, WorkspaceAddressPlane plane, BiConsumer<String, String> env) {
+    env.accept("QITS_TOKEN", token);
+    env.accept("QITS_TOKEN_SUBJECT", subject);
+    env.accept("GIT_CONFIG_GLOBAL", GIT_CONFIG_GLOBAL);
+    env.accept("QITS_GIT_AUTH_HOST", plane.gitAuthHost());
   }
 
   /**

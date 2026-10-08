@@ -5,16 +5,19 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * <b>Every address a RUNNER-placed workspace container is told</b>, as one value, composed from the
+ * <b>Every address a workspace container that reaches the platform through the edge is told</b> —
+ * every RUNNER-placed one, and a DIRECT one holding a workspace token (qits-1084) — as one value, composed from the
  * platform's public domain and nothing else (qits-625, qits-799). qits-ci's {@code StepAddressPlane}
  * is the shape.
  *
  * <p><b>One plane, the edge.</b> A runner's node has no qits-net and no internal DNS, so every
  * address is the PUBLIC name of the service that answers it, {@code <host>.qits.<domain>}, reached
  * through the platform edge. There is no docker network to join and no extra host to add, and no
- * idp token url is composed: nothing in a RUNNER container mints. A DIRECT container is not composed
- * from this record at all — {@link WorkspaceContainerFactory#forWorkspace} is the DIRECT composer and
- * stays as it is.
+ * idp token url is composed: nothing in a token-holding container mints. A DIRECT container that
+ * holds the client pair is not composed from this record at all; one that holds a workspace token
+ * (an admin or editor row on an edge plane, qits-1084) takes its five addresses from it through
+ * {@link WorkspaceContainerFactory#addressEnv}, because the token only works through the edge, and
+ * keeps everything else DIRECT — qits-net, the extra host, the docker socket, the editor block.
  *
  * <p><b>The paths are the services' own routes, spelled here as constants</b>, each naming the route
  * that serves it; the platform project carries no environment label, so the host is {@code

@@ -23,14 +23,19 @@ import java.util.Map;
  * dial-home socket, the git base and the three MCP servers are public edge names, {@code
  * <app>.qits.<domain>}, and {@code QITS_DOMAIN} is the plane's. A runner's node has no qits-net and
  * no internal DNS, so a RUNNER spec has no network and no extra host — the record has no field for
- * either — and none of the DIRECT spec's wire aliases.
+ * either — and none of the DIRECT spec's wire aliases. The five addresses are written by {@link
+ * WorkspaceContainerFactory#addressEnv}, the same method a DIRECT admin or editor row that holds a
+ * workspace token is addressed with (qits-1084).
  *
  * <p><b>The credential is the row's workspace token</b> (qits-625, qits-802): {@code QITS_TOKEN} and
  * {@code QITS_TOKEN_SUBJECT}, with the image's git credential helper ({@code GIT_CONFIG_GLOBAL})
- * answering for the plane's githost only ({@code QITS_GIT_AUTH_HOST}). It is read off the row, so a
- * start re-presents the same spec. None of the DIRECT pair block is written — no {@code
- * QITS_COMMISSIONED_CLIENT_*}, no token url and no audience — because nothing in a RUNNER container
- * mints: the edge spends the token on every hop.
+ * answering for the plane's githost only ({@code QITS_GIT_AUTH_HOST}) — {@link
+ * WorkspaceContainerFactory#tokenEnv}. It is read off the row, so a start re-presents the same spec.
+ * None of the pair block is written — no {@code QITS_COMMISSIONED_CLIENT_*}, no token url and no
+ * audience — because nothing in a token-holding container mints: the edge spends the token on every
+ * hop. The token is not a RUNNER privilege: a DIRECT admin or editor row on an edge plane is minted
+ * one too (qits-1084), and its DIRECT spec carries it through the same two methods; only a DIRECT
+ * row on no edge plane still holds the client pair.
  *
  * <p><b>The daemon API handshake and its two path bases are the DIRECT spec's</b>, value for value:
  * {@code QITS_WORKSPACE_DAEMON_API_TOKEN} (without it the daemon's API never binds, and the
@@ -90,12 +95,9 @@ public class RunnerWorkspaceSpecs {
     labels.put("qits.branch", row.branch == null ? "" : row.branch);
     labels.put("qits.parent", row.parent == null ? "" : row.parent);
     env.put("TZ", factory.containerTimezone());
-    // The addresses, in the DIRECT spec's order, every one a public edge name off the plane.
-    env.put("QITS_WORKSPACE_DAEMON_URL", plane.daemonUrl(row.id));
-    env.put("QITS_REPOSITORY_MCP_URL", plane.repositoryMcpUrl());
-    env.put("QITS_OBSERVABILITY_MCP_URL", plane.observabilityMcpUrl());
-    env.put("QITS_PLATFORM_MCP_URL", plane.platformMcpUrl());
-    env.put("QITS_WORKSPACE_DAEMON_GIT_BASE_URL", plane.gitBaseUrl());
+    // The addresses, in the DIRECT spec's order, every one a public edge name off the plane — the
+    // method a token-holding DIRECT row's spec writes them with too (qits-1084).
+    WorkspaceContainerFactory.addressEnv(plane, row.id, env::put);
     // The two path bases the DIRECT spec writes here, the same values: the daemon is told which
     // leading part of a proxied path is its own address, and what each dev server's public base is.
     env.put("QITS_WORKSPACE_DAEMON_API_BASE_PATH", ContainerProxyPath.base(row.id));
@@ -117,10 +119,8 @@ public class RunnerWorkspaceSpecs {
     // (qits-802), and the git helper told the one host it may answer for. Both or neither — a row
     // with no token is never queued, so a spec is only ever composed with one.
     if (row.commissionedToken != null && !row.commissionedToken.isBlank()) {
-      env.put("QITS_TOKEN", row.commissionedToken);
-      env.put("QITS_TOKEN_SUBJECT", row.commissionedTokenSubject);
-      env.put("GIT_CONFIG_GLOBAL", WorkspaceContainerFactory.GIT_CONFIG_GLOBAL);
-      env.put("QITS_GIT_AUTH_HOST", plane.gitAuthHost());
+      WorkspaceContainerFactory.tokenEnv(
+          row.commissionedToken, row.commissionedTokenSubject, plane, env::put);
     }
     env.putAll(factory.gitIdentityEnv());
     // A runner mounts all four on its node, whatever this deployment's shared volumes are: the

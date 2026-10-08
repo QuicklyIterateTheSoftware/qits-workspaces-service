@@ -71,17 +71,24 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
 
   // --- the workspace token (qits-625) ------------------------------------------------------------
   //
-  // WIRED BY DEFAULT, unlike the pair above, and for the opposite reason: only a RUNNER row is ever
-  // minted a token, and a RUNNER start refuses to queue a row without one. A double that minted
-  // nothing by default would fail every RUNNER start in the suite, while minting changes nothing
-  // about any DIRECT container. unwireTokens() is the shipped posture with no issuer.
+  // WIRED BY DEFAULT, unlike the pair above, and for the opposite reason: a RUNNER start refuses to
+  // queue a row without a token, so a double that minted nothing by default would fail every RUNNER
+  // start in the suite. A DIRECT (admin or editor) row is minted one only when an edge plane
+  // resolves (qits-1084), and the suites pin no public domain, so minting changes nothing about a
+  // DIRECT container unless a test installs a plane. unwireTokens() is the shipped posture with no
+  // issuer.
 
   private volatile boolean tokensWired = true;
   private volatile RuntimeException tokenFailure;
   private final AtomicInteger tokenSerial = new AtomicInteger();
 
   /** One token this fake minted: the row it was for and what the mint stated. */
-  public record MintedToken(long rowId, WorkspaceToken token, String projectId, List<String> gitRefs) {}
+  public record MintedToken(
+      long rowId,
+      WorkspaceToken token,
+      String projectId,
+      List<String> gitRefs,
+      String contextKind) {}
 
   private final List<MintedToken> tokensMinted = new CopyOnWriteArrayList<>();
   private final List<String> tokensDeleted = new CopyOnWriteArrayList<>();
@@ -131,7 +138,7 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
 
   @Override
   public Optional<WorkspaceToken> commissionToken(
-      long rowId, String projectId, List<String> statedGitRefs) {
+      long rowId, String projectId, List<String> statedGitRefs, boolean admin) {
     if (!tokensWired) {
       return Optional.empty();
     }
@@ -146,11 +153,19 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
             "tok-workspace-" + rowId + "-" + serial);
     tokensMinted.add(
         new MintedToken(
-            rowId, token, projectId, statedGitRefs == null ? null : List.copyOf(statedGitRefs)));
+            rowId,
+            token,
+            projectId,
+            statedGitRefs == null ? null : List.copyOf(statedGitRefs),
+            CredentialCommissioner.contextKindFor(admin)));
     synchronized (liveTokens) {
       liveTokens.put(
           token.tokenId(),
-          new TokenCommission(token.tokenId(), CONTEXT_KIND, Long.toString(rowId), Instant.now()));
+          new TokenCommission(
+              token.tokenId(),
+              CredentialCommissioner.contextKindFor(admin),
+              Long.toString(rowId),
+              Instant.now()));
     }
     return Optional.of(token);
   }
