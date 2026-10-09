@@ -66,13 +66,38 @@ public interface WorkspaceAgentLauncher {
   }
 
   /**
+   * What a launch came back with: whether the daemon took it, and the command it started.
+   *
+   * <p>A record and not the boolean it used to be, because the answer now has a second reader
+   * (qits-895): the command id is what tells the dispatched agent apart from a person's other
+   * sessions in the same workspace, so {@link DispatchService} keeps it on the row ({@code
+   * Workspace.dispatchCommandId}). An accepted launch whose answer named no command is still
+   * accepted — an agent is running either way, and refusing to count it would turn an unreadable
+   * body into a second launch.
+   *
+   * @param accepted whether the daemon accepted the launch
+   * @param commandId the daemon command the launch started, or null when the daemon refused it or
+   *     its answer did not name one
+   */
+  record Launch(boolean accepted, String commandId) {
+
+    /** A launch the daemon did not take, or nobody could ask. */
+    public static final Launch REFUSED = new Launch(false, null);
+
+    /** A launch the daemon took, starting {@code commandId} (null when its answer named none). */
+    public static Launch accepted(String commandId) {
+      return new Launch(true, commandId == null || commandId.isBlank() ? null : commandId);
+    }
+  }
+
+  /**
    * Start a chat-mode agent seeded with {@code instruction}.
    *
-   * @return whether the daemon accepted the launch. False rather than an exception: the caller runs
-   *     off the request thread and has already answered, so a refusal is something to log, not
-   *     something to unwind.
+   * @return whether the daemon accepted the launch, and the command it started. {@link
+   *     Launch#REFUSED} rather than an exception: the caller runs off the request thread and has
+   *     already answered, so a refusal is something to log, not something to unwind.
    */
-  boolean launch(Long workspaceRowId, String instruction);
+  Launch launch(Long workspaceRowId, String instruction);
 
   /**
    * Say {@code text} to the agent running in {@code workspaceRowId} — the same thing a person types

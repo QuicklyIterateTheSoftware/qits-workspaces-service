@@ -499,6 +499,33 @@ public class AgentDispatchControllerTest {
   }
 
   /**
+   * qits-895: the command a launch started is kept on the row, replacing whatever an earlier launch
+   * left — it is what tells the dispatched agent apart from a person's other sessions when the
+   * daemon reports one waiting. The stub answers {@code {"command":{"id":"cmd-1",…}}}, the daemon's
+   * own launch answer.
+   */
+  @Test
+  public void anAcceptedLaunchKeepsItsCommandOnTheRow() throws Exception {
+    String repoId = seedRepository();
+    Long rowId =
+        workspaceService.createWorkspace(
+            repoId, "ticket-command", "master", "ticket/command", null, false, false, true)
+            .id;
+    QuarkusTransaction.requiringNew()
+        .run(() -> workspaceRepository.recordDispatchCommand(rowId, "cmd-earlier"));
+
+    dispatch(body(repoId, "ticket/command", null, "go"), 200);
+    awaitLaunch(rowId);
+
+    long deadline = System.currentTimeMillis() + 10_000;
+    while (!"cmd-1".equals(storedRow(rowId).dispatchCommandId)
+        && System.currentTimeMillis() < deadline) {
+      Thread.sleep(20);
+    }
+    assertThat(storedRow(rowId).dispatchCommandId, is("cmd-1"));
+  }
+
+  /**
    * The dispatch qits-projects makes today: a reference and no prose. The id is carried onto the
    * row and back out of the listing — this service resolves nothing with it, so being able to read
    * it back is the whole of the contract.

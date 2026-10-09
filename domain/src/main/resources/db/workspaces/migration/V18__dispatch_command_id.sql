@@ -1,0 +1,18 @@
+-- The daemon command the last agent launch this service made on the row started (qits-895).
+--
+-- What it is FOR: telling the dispatched agent apart from every other agent session in the same
+-- workspace. A workspace-daemon at capability 8 reports, per agent command, whether the agent is
+-- waiting for its user (AgentActivity.awaitingInput), and qits-projects derives a work item's
+-- BLOCKED from it. Only the agent the dispatch launched is working the item: a person can open a
+-- second chat in the same workspace, and that session going idle says nothing about the ticket. The
+-- frame names its command; this column is what it is compared against.
+--
+-- REPLACED on every launch this service makes — a dispatch's, and a delivery's fallback launch,
+-- which is the same POST /agents. A turn delivered later through POST /agents/turn goes to the
+-- command already running and writes nothing here. Never cleared: a finished command's id names
+-- nothing live, and no frame will ever carry it again.
+--
+-- Nullable, no backfill, part of no constraint: an ad-hoc workspace has no dispatched agent, and a
+-- row that predates this file had its agent launched by a host that did not keep the id. text,
+-- because the id is the daemon's to shape.
+alter table workspace add column dispatch_command_id text;
