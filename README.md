@@ -1,8 +1,8 @@
 # qits-workspaces-service
 
 The **host side** of qits workspaces: the workspace entity and its lifecycle, container
-orchestration, host-side git through a mirror of each repository, the workspace-daemon registry, dev-server
-supervision, the bootstrap-chain runner, the technical-process framework, prompt composition,
+orchestration, host-side git through a mirror of each repository, the workspace-daemon registry, the
+bootstrap-chain runner, the technical-process framework, prompt composition,
 feature capture, and the routes over all of it — the machine surface at `/workspaces`, its segment,
 and the client at the root of `workspaces.<env>.<domain>`.
 
@@ -79,18 +79,10 @@ the consuming application implements:
 | `RepositoryAddressResolver` | no | `RepositoryLookup` supplies the ordinary project-scoped git address |
 | `WorkspaceCommandHistory` | no | a workspace's history shows no commands |
 | `AgentSessionReporter` | no | `SessionStart` lineage is not forwarded |
-| `WorkspaceTerminalSessions` | no | the interactive service terminal refuses the upgrade; the live log is unaffected |
-| `WorkspaceChatInbox` | no | service events are spooled instead of delivered — the same path as "no chat is running" |
 | `WorkspaceProcessTracker` | *implemented here* | `TechnicalProcessRegistry` is the default; the port stays so an application can substitute its own |
 | `WorkspaceAgentLauncher` | *implemented here* | `DaemonAgentClient` is the default; absent means the agent-dispatch door creates the workspace and starts the container but never launches an agent, and the delivery door says nothing to anybody |
 | `CredentialCommissioner` | no | no container is given a platform credential — today's behaviour |
 | `ContainerRuntime` | *implemented here* | `WorkspaceContainers`, over qits-containers — **admin and editor workspaces only**; every regular workspace runs on a workspace runner (`RunnerPlacement`) and never reaches it (qits-780) |
-
-One port points the **other way**: `LogLineClassifier` (with `LogSeverity`) is *implemented* here
-and consumed by the command context's log persister, so a workspace's `?severity=` filter and the
-LOG_LEVEL observer agree on what an error is. An application running both registers this
-implementation there. `CommandOutputSink` is the same idea in miniature — a shape handed out, not a
-service called.
 
 In the other direction this context publishes `WorkspaceResolved` when a workspace is integrated or
 abandoned. Because the delete is **soft**, no FK cascade ever fires for rows other contexts hang off
@@ -240,8 +232,8 @@ Three things hold the rule, from the schema in:
   `V15` first abandoned the leftover main workspaces of the retired per-project editor (no parent;
   in SQL, so their default branch stayed on the git host).
 - **The router's refusal**: every DIRECT branch of every verb — start, recreate, stop,
-  delete-container, discard, the listing, the editor's read, the clean/pushed probes, the daemon
-  proxy's lookup and the dev-server origin — calls `WorkspacePlacements.requireDirectAllowed` before
+  delete-container, discard, the listing, the editor's read, the clean/pushed probes and the daemon
+  proxy's lookup — calls `WorkspacePlacements.requireDirectAllowed` before
   it reaches `ContainerRuntime`, and a regular row there is an ERROR `direct placement refused for
   regular workspace <id>` and an `IllegalStateException`, never a container on the platform host.
 
@@ -409,10 +401,9 @@ edge or on `qits-net`.
 
 | Prefix | What | Set by |
 |---|---|---|
-| `/workspaces/api/…` | the JSON API — `workspaces`, `branches`, `history`, `events`, `service-events`, `technical-processes`, `capture`, `editor`, `agent-dispatches`, `gc`, `pins` | `qits.rest.path`, which `quarkus.rest.path` is derived from |
+| `/workspaces/api/…` | the JSON API — `workspaces`, `branches`, `history`, `events`, `technical-processes`, `capture`, `editor`, `agent-dispatches`, `gc`, `pins` | `qits.rest.path`, which `quarkus.rest.path` is derived from |
 | `/workspaces/q/…` | `openapi`, `swagger-ui` — what the framework serves, not application code | `quarkus.http.non-application-root-path` |
 | `/workspaces/daemon/{id}` | the daemon's dial-home control socket | `DaemonControlSocket`, literal |
-| `/workspaces/service/{id}/{serviceId}/*` | the dev-server reverse proxy | `ServiceProxyPath.PREFIX`, literal |
 | `/workspaces/container/{id}/*` | the workspace-daemon reverse proxy | `ContainerProxyPath.PREFIX`, literal |
 | `/workspaces/daemon/stream/{nonce}` | where a daemon's tunnel dial-back lands | `WorkspaceTunnels.STREAM_PATH_PREFIX`, literal |
 | `/` | the SPA, and every client-side route under it — its own paths and the scoped `/<project>/<category>/<repo>/…` | `quarkus.quinoa.ui-root-path` + `enable-spa-routing` |
@@ -460,7 +451,7 @@ it creates, and qits-workspace-daemon dials exactly that. The pre-segment label 
 dialled it in a week.
 
 `/workspaces/container/{id}/*` is **the only way anything reaches a workspace-daemon.** Its HTTP API
-— the file browser, commands, coding agents, services, bootstrap and the two interactive websockets
+— the file browser, commands, coding agents, bootstrap and the two interactive websockets
 — had no address at all before it: no gateway route, and no `QITS_WORKSPACE_DAEMON_API_TOKEN`
 injected, so the daemon's server did not even bind. This service injects that token and proxies
 through the daemon's reverse tunnel, found from the workspace row id and from nothing in the
@@ -512,9 +503,6 @@ collections filter by `?repositoryId=` and a workspace is `{id}` alone. `AGENTS.
 - bootstrap chain *execution* — the daemon's `BootstrapRunner`. The host's awaiter and the run record
   are here (`WorkspaceBootstrapRunner`, `workspace_bootstrap_run`); the **surface over it is not, any
   more** (below)
-- dev-server *execution* — the daemon's `ServiceSupervisor`. The host's projection of it, the event
-  feed and the proxy are here (`ServiceSupervisor`, `service_event`, `ServiceProxyRoute`); the
-  start/stop surface is not, any more (below)
 - `.config/qits/repository.yml` parsing — the daemon's `ConfigParser`. This context holds the shape
   (`QitsConfig`) and reads it back over the socket (`WorkspaceConfigReader`), never the file
 - periodic checkpoint push — deleted rather than relocated; the daemon's `OriginSync` pushes per
@@ -523,21 +511,26 @@ collections filter by `?repositoryId=` and a workspace is `{id}` alone. `AGENTS.
 Staying with their own contexts: repositories, projects, commits and conflict resolution, commands,
 agents, telemetry and feature flows.
 
-**No longer addressable from the host at all**: `/services`, `/services/{id}/start|stop`,
-`/bootstrap-commands`, `/bootstrap-commands/run` and `/bootstrap-commands/{stepId}/run`. Both ran
-inside the container and the host only forwarded, which is the same defect twice and the last two
-capabilities still shaped that way — everything else took its addressing into the daemon's own HTTP
-API when its execution moved. `WorkspaceServiceController` and `WorkspaceBootstrapController` are
-deleted; the daemon's `WorkspaceApi` is where the endpoints belong, and it has them — reached
-through `ContainerProxyRoute`, which is the only address a daemon has and deliberately not a gateway
-route (one process per container has none to configure).
+**Workspace services — dev servers declared under `services:` — are not here, and not anywhere
+(qits-947).** The concept was taken out of scope and removed end to end: the host projection
+(`ServiceSupervisor`), its event feed (`service_event`, `/workspaces/api/service-events`), the
+dev-server proxy (`/workspaces/service/{id}/{serviceId}/*`) and the auto-start coupling are deleted,
+and nothing replaces them. A container is still told `QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false`,
+because a daemon built before the removal defaults it to true; that line goes once the workspace
+image carries the services-free daemon. `AGENTS.md` lists the other two compatibility remnants.
+
+**No longer addressable from the host at all**: `/bootstrap-commands`, `/bootstrap-commands/run` and
+`/bootstrap-commands/{stepId}/run`. They ran inside the container and the host only forwarded —
+everything else took its addressing into the daemon's own HTTP API when its execution moved.
+`WorkspaceBootstrapController` is deleted; the daemon's `WorkspaceApi` is where the endpoints
+belong, and it has them — reached through `ContainerProxyRoute`, which is the only address a daemon
+has and deliberately not a gateway route (one process per container has none to configure).
 
 **What was removed is the externally addressable surface, not the capability.** The
-provision → bootstrap → services sequence is host-orchestrated and untouched: `WorkspaceBootstrapRunner`
-still runs the chain on `WorkspaceContainerStarted` and fires `ReadyForServices`, `ServiceLifecycleCoupler`
-still auto-starts services on it, and `ServiceProxyRoute` still reads `ServiceSupervisor` state to
-resolve a port. Both host projections stay too — `service_event` with its SSE feed, and
-`workspace_bootstrap_run`, which spent a release with **no reader** and now has one:
+provision → bootstrap sequence is host-orchestrated and untouched: `WorkspaceBootstrapRunner` still
+awaits the chain on `WorkspaceContainerStarted` and ends the start's technical process when it is
+over. Its host projection stays too — `workspace_bootstrap_run`, which spent a release with **no
+reader** and now has one:
 `GET /workspaces/api/workspaces/{id}/bootstrap-runs`. That is a read of a host table, not the
 forwarding controller returning — the run verbs stay on the daemon, and a client joins the two on
 `bootstrapCommandId`.
@@ -548,8 +541,7 @@ the container. Migrating them needs new wire messages on both sides, so it was k
 extraction rather than smuggled into it.
 
 Not asserted anywhere any more, dropped when their setup could not come along: the
-`CommandRegistry` PTY attach path (`ServiceAttachTerminalTest`), the delivery half of the agent sink
-(now `WorkspaceChatInbox`'s contract), the repository-delete cascade onto `workspace_bootstrap_run`
+`CommandRegistry` PTY attach path (`ServiceAttachTerminalTest`), the delivery half of the agent sink, the repository-delete cascade onto `workspace_bootstrap_run`
 (it starts in another database), and the depth-2 submodule closure
 (`WorkspaceSubmoduleProvisionTest` — its fixtures belong to qits-projects-service).
 

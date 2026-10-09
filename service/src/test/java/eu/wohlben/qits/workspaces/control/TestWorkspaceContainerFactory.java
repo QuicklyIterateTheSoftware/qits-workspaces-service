@@ -154,11 +154,6 @@ public final class TestWorkspaceContainerFactory {
     f.daemonApiToken = "qits-workspace-daemon";
     f.bootstrapAutorunEnabled = true;
     f.autoPushEnabled = true;
-    f.servicesAutostartEnabled = true;
-    f.serviceReadyGraceMs = 10000;
-    f.serviceBackoffInitialMs = 1000;
-    f.serviceBackoffMaxMs = 30000;
-    f.serviceStopGraceMs = 5000;
     f.nameResolver =
         StubInstance.of(
             repoId ->

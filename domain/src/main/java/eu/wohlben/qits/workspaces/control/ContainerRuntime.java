@@ -6,7 +6,7 @@ import java.util.Map;
 /**
  * The per-workspace container runtime. A workspace is a branch (host-side, in the mirror and on the
  * git host) plus a container that owns a clone of it under {@code /workspace}; every action script,
- * dependency install, dev server, service and coding-agent command runs inside that container, so
+ * dependency install and coding-agent command runs inside that container, so
  * nothing untrusted ever touches the host home dir or its credentials.
  *
  * <p><b>This host holds no docker socket and spawns no process for any of it.</b> The sole
@@ -54,20 +54,10 @@ public interface ContainerRuntime {
    * labels. Returns the container name. Throws on failure.
    *
    * <p>The container publishes <em>no</em> host ports: qits and every workspace container share one
-   * network, so the service web-view proxy reaches a container port by its container name over that
-   * network (see {@link #resolveTarget}). That removes the create-time port-publishing constraint
-   * entirely — a service can gain a web-view port after its container exists and still be reachable
-   * without a recreation.
+   * network, so the host reaches the in-container daemon and editor through the daemon's tunnel
+   * rather than through a published port.
    */
   String run(String repoId, String workspaceId, Long rowId, String branch, String parent);
-
-  /**
-   * Where the qits process connects to reach {@code containerPort} inside {@code container} — the
-   * service web-view proxy's origin. On the shared network this is the container's DNS name and the
-   * real container port; the test fake maps it to {@code 127.0.0.1}. Null only when the target
-   * cannot be resolved at all (e.g. the container is gone), in which case the proxy 502s.
-   */
-  ProxyOrigin resolveTarget(String container, int containerPort);
 
   /**
    * Runs a one-shot command inside the container and captures its output.
@@ -259,13 +249,4 @@ public interface ContainerRuntime {
    * dangling-volume reconcile this fed was a host-wide sweep of the kind the cutover removed.
    */
   List<VolumeInfo> listWorkspaceVolumes();
-
-  // --- Service sessions ------------------------------------------------------------------------
-  //
-  // Deliberately absent. Services (dev servers) are spawned, supervised, restarted and stopped by
-  // the in-container workspace-daemon, which owns the process and pushes every lifecycle transition
-  // home over the control socket; ServiceSupervisor is only the host-side projection of that, and
-  // WorkspaceServiceDriver the outbound half. There is no host-execution fallback: a workspace with
-  // no live daemon cannot run a service, and that is the honest state.
-
 }

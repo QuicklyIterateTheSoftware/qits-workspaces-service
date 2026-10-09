@@ -2606,8 +2606,8 @@ public class WorkspaceService {
    * The streaming Start: registers a {@link WorkspaceProcessTracker.Handle} for the workspace <em>before</em> any
    * work runs (so the very first {@code docker run} line is captured), spawns {@link
    * #ensureContainer(String, String, WorkspaceProcessTracker.Handle)} on a worker thread, and returns the process
-   * id immediately. The browser watches the work — including the asynchronous service auto-start
-   * phase — over the process's SSE stream; failures surface there (and in {@code
+   * id immediately. The browser watches the work — including the asynchronous bootstrap phase —
+   * over the process's SSE stream; failures surface there (and in {@code
    * workspace.runtimeError}), not as an HTTP error. Throws 404 in-request when the workspace
    * doesn't exist, so a bad id still fails fast.
    *
@@ -2809,9 +2809,9 @@ public class WorkspaceService {
    * {@link #ensureContainer(String, String)} with an optional {@link WorkspaceProcessTracker.Handle} receiving
    * the work as streamed segments. With a process attached, every outcome also ends the process:
    * the already-running short-circuit completes it as a no-op, a provision failure fails it, and a
-   * successful start hands the process id to the async bootstrap-then-service phase via {@link
+   * successful start hands the process id to the async bootstrap phase via {@link
    * WorkspaceContainerEventPublisher#fireStarted(String, String, String, boolean)} — the process
-   * then reaches {@code done} only once the bootstrap chain and the auto-started services settle.
+   * then reaches {@code done} once {@code WorkspaceBootstrapRunner} reports that phase over.
    *
    * <p><b>A stop overtakes it</b> (qits-1076). {@code start} carries the stop count the start began
    * under, and every runtime write below — PROVISIONING, RUNNING, FAILED — is made only while that
@@ -2903,7 +2903,7 @@ public class WorkspaceService {
           process.finishProvision(true);
         }
         // Cold -> RUNNING, but not a fresh provision: the clone (and its bootstrap state) survived,
-        // so the bootstrap runner passes straight through to service auto-start (async).
+        // so the bootstrap runner passes straight through and ends the process (async).
         containerEvents.fireStarted(
             repoId, workspaceId, rowId, process == null ? null : process.id(), false);
         observeClientLiveness(repoId, workspaceId, rowId);
@@ -2991,8 +2991,8 @@ public class WorkspaceService {
       if (process != null) {
         process.finishProvision(true);
       }
-      // Cold -> RUNNING off a fresh provision (bare clone): run the bootstrap chain, then service
-      // auto-start (async; the runner passes straight through when the chain is empty).
+      // Cold -> RUNNING off a fresh provision (bare clone): await the bootstrap chain, which ends the
+      // process (async; the runner passes straight through when the chain is empty).
       containerEvents.fireStarted(
           repoId, workspaceId, rowId, process == null ? null : process.id(), true);
       observeClientLiveness(repoId, workspaceId, rowId);

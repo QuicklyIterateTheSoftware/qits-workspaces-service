@@ -24,7 +24,7 @@ import org.jboss.logging.Logger;
  * backpressure signal is an unbounded heap buffer, so the framework's own socket abstraction is the
  * one thing this cannot be built on. {@code request.toWebSocket()} yields a {@link ServerWebSocket},
  * which is a proper {@code WriteStream} and makes both ends of the pipe the same types.
- * {@code ServiceProxyRoute} and {@code CaptureCorsRoute} are the precedent for a raw route here.
+ * {@code ContainerProxyRoute} and {@code CaptureCorsRoute} are the precedent for a raw route here.
  *
  * <p>It shares a prefix with {@code DaemonControlSocket}'s {@code /workspaces/daemon/{id}} and does
  * not collide: {@code {id}} matches exactly one segment, so no daemon can be named {@code stream}.

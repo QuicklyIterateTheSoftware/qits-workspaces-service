@@ -8,10 +8,10 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Test double for {@link WorkspaceConfigReader}: the config-sourced definitions (services, actions,
- * bootstrap steps) the Part-5 single-source-of-truth runtime reads. Tests stage a workspace's
+ * Test double for {@link WorkspaceConfigReader}: the config-sourced definitions (actions, bootstrap
+ * steps) the Part-5 single-source-of-truth runtime reads. Tests stage a workspace's
  * config with {@link #setConfig} instead of creating DB rows (the DB config store is gone), and the
- * supervised surfaces (supervisor, coupler, bootstrap runner) resolve from it. An unset workspace
+ * bootstrap runner resolves from it. An unset workspace
  * reads empty — the no-live-daemon case.
  *
  * <p>An enabled alternative so it wins the {@code Instance<WorkspaceConfigReader>} injection even

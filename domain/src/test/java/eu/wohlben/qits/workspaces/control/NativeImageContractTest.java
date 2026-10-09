@@ -115,11 +115,11 @@ public class NativeImageContractTest {
   /**
    * The enums the record tree binds are targets too. Jackson resolves an enum's constants
    * reflectively, so an unregistered enum makes the binary's {@code QitsConfig} read throw — caught
-   * and degraded to the EMPTY config, which auto-started nothing for any workspace whose services
-   * declared {@code restart-policy:} or a health-check {@code kind:}. Measured live (D1); the JVM
-   * suite could not see it, which is why the registration is pinned here. Found by walking the
-   * record components rather than naming the two enums, so the next enum-typed field joins the
-   * assertion by existing.
+   * and degraded to the EMPTY config. Measured live (D1) with the two enums the workspace services'
+   * declarations bound, before qits-947 removed them; the JVM suite could not see it, which is why
+   * the registration is pinned here. No enum is bound today, so this passes vacuously; it walks the
+   * record components rather than naming enums, so the next enum-typed field joins the assertion by
+   * existing.
    */
   @Test
   public void everyEnumBoundByTheQitsConfigTreeIsRegisteredForReflection() {

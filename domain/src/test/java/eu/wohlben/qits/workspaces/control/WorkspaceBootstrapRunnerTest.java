@@ -2,19 +2,21 @@ package eu.wohlben.qits.workspaces.control;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.dto.BootstrapRunDto;
+import eu.wohlben.qits.workspaces.dto.TechnicalProcessFrame;
 import eu.wohlben.qits.workspaces.entity.BootstrapOutcome;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
-import eu.wohlben.qits.workspaces.dto.ServiceInstanceDto;
-import eu.wohlben.qits.workspaces.entity.ServiceStatus;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -25,37 +27,31 @@ import org.junit.jupiter.api.Test;
  * The host bootstrap <b>wiring</b> against the {@code FakeWorkspaceBootstrapDriver} (which plays
  * the daemon: it parses the fake checkout's committed {@code .qits-config.yml} and runs each step
  * through {@code FakeContainerRuntime} — real host processes, no docker): a fresh provision awaits
- * the daemon's chain and records outcomes strictly in order before service auto-start; the check
- * script skips; a failure aborts the rest AND withholds {@code WorkspaceReadyForServices}
- * (auto-start services stay down); a restart-shaped event passes straight through without
- * re-running; and the manual chain re-run is the recovery path that releases auto-start on success.
- * The chain <b>semantics</b> (order, check-skip, fail-fast, timeout-terminate) are the daemon
- * module's {@code BootstrapRunnerTest}; bootstrap steps run in the container now, so they no longer
- * leave host {@code Command} audit rows (their live output is the {@code bootstrap:<name>} process
- * segment). Kill-switch coverage is {@link WorkspaceBootstrapKillSwitchTest}.
+ * the daemon's chain and records outcomes strictly in order; the check script skips; a failure
+ * aborts the rest; a restart-shaped start passes straight through without re-running; and the
+ * manual chain re-run is the recovery path. The chain <b>semantics</b> (order, check-skip,
+ * fail-fast, timeout-terminate) are the daemon module's {@code BootstrapRunnerTest}; bootstrap steps
+ * run in the container now, so they no longer leave host {@code Command} audit rows (their live
+ * output is the {@code bootstrap:<name>} process segment). Kill-switch coverage is {@link
+ * WorkspaceBootstrapKillSwitchTest}.
+ *
+ * <p><b>Every streamed start must reach {@code done}.</b> The bootstrap phase is the last phase of a
+ * start's technical process, and the runner is what ends it ({@link TechnicalProcess#finishBootstrap})
+ * — on success, on failure and on the restart pass-through alike. A path that forgets leaves the
+ * start open until the registry's idle reaper, a quarter of an hour later, with nothing failing
+ * meanwhile; so each provisioning test here starts through {@code beginEnsureContainer} and awaits
+ * the process's terminal frame, and asserts its verdict.
  *
  * <p>Staging: the chain is committed as {@code .qits-config.yml} on {@code master} before the
  * workspace is forked (so the provision-triggered — asynchronous — chain sees it deterministically;
- * a file written into the checkout afterwards would race the async observer). Auto-start services
- * are config-declared too, staged into the {@link FakeWorkspaceConfigReader}. {@code BootstrapRun}
+ * a file written into the checkout afterwards would race the async observer). {@code BootstrapRun}
  * rows are keyed by the config-declared step {@code id:} (which defaults to the name) — most tests
  * here declare no {@code id:}, so {@code bootstrapCommandId} equals the step name for them; the
  * declared-id test stages a config where the two differ.
- *
- * <p>Two cross-test hygiene rules this class follows because the app (and the fakes) are shared
- * across its methods: (1) every staged service id is unique per test — {@code FakeContainerRuntime}
- * keys service sessions by id host-wide, so a leaked {@code sleep 300} session from one test would
- * be <em>adopted</em> by the next test's {@code effectiveServices} probe under a reused id; (2)
- * every test whose pipeline fires {@code WorkspaceReadyForServices} drains the async coupler pass
- * (by awaiting its own auto-start service's STARTING — the projection host's observable that the
- * coupler ran) before returning — otherwise the late pass reads the <em>next</em> test's staged
- * config (the reader is keyed by workspace slug, not repo) and starts a service for the wrong repo.
  */
 @QuarkusTest
-// Service auto-start is left at its shipped default of ON — this class asserts that the chain
-// RELEASES it, so it needs the coupling live. It used to state `true` here, which is the same value
-// and cost a Quarkus restart of its own; the chain-await bound it actually needs now lives in the
-// shared profile alongside another class's scenery (see SharedTestOverridesProfile).
+// The chain-await bound this class needs lives in the shared profile alongside another class's
+// scenery (see SharedTestOverridesProfile).
 @TestProfile(SharedTestOverridesProfile.class)
 public class WorkspaceBootstrapRunnerTest {
 
@@ -68,10 +64,8 @@ public class WorkspaceBootstrapRunnerTest {
   @Inject BootstrapRunService bootstrapRunService;
   @Inject WorkspaceBootstrapRunner runner;
   @Inject FakeWorkspaceConfigReader configReader;
-  @Inject ServiceSupervisor supervisor;
-  @Inject WorkspaceContainerEventPublisher containerEvents;
-  @Inject WorkspaceReadyForServicesRecorder readyRecorder;
   @Inject FakeWorkspaceBootstrapDriver bootstrapDriver;
+  @Inject TechnicalProcessRegistry processes;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -80,7 +74,6 @@ public class WorkspaceBootstrapRunnerTest {
 
   @BeforeEach
   void setUp() throws Exception {
-    readyRecorder.clear();
     configReader.clear(); // the fake is a shared singleton across this class's test methods
     scratch = Files.createTempDirectory("qits-bootstrap-runner-scratch");
   }
@@ -126,30 +119,56 @@ public class WorkspaceBootstrapRunnerTest {
     return yaml.toString();
   }
 
-  /** Stage the workspace's auto-start dev server in the fake config reader; returns its id. */
-  private String autoStartService(String repoId, String id) {
-    configReader.setConfig(
-        workspaceIds.of(repoId, "work"),
-        new QitsConfig(
-            null,
-            null,
-            null,
-            List.of(
-                new QitsConfig.ServiceDecl(
-                    id,
-                    id,
-                    null,
-                    "sleep 300",
-                    null,
-                    true,
-                    RestartPolicy.NEVER,
-                    0,
-                    "TERM",
-                    null,
-                    null,
-                    null)),
-            null));
-    return id;
+  /** Records a process's full replay; attaching to a terminal process replays it and its done. */
+  private static final class Replay implements TechnicalProcess.Listener {
+    final List<TechnicalProcessFrame> frames = new ArrayList<>();
+
+    @Override
+    public void onFrame(TechnicalProcessFrame frame) {
+      frames.add(frame);
+    }
+
+    @Override
+    public void onDone() {}
+
+    @Override
+    public boolean isOpen() {
+      return true;
+    }
+  }
+
+  /** Start the workspace's container as the UI does — streamed — and return the process id. */
+  private String start(String repoId) {
+    String processId = workspaceService.beginEnsureContainer(workspaceIds.of(repoId, "work"));
+    assertNotNull(processId, "a streamed start registers a technical process");
+    return processId;
+  }
+
+  /**
+   * Await the start's terminal {@code done} frame and return its verdict ({@code ok}/{@code
+   * failed}). A start the runner forgot to end would sit here until the timeout.
+   */
+  private String awaitDone(String processId) throws InterruptedException {
+    TechnicalProcess process = processes.find(processId).orElseThrow();
+    long deadline = System.currentTimeMillis() + AWAIT_MILLIS;
+    while (!process.isTerminal() && System.currentTimeMillis() < deadline) {
+      Thread.sleep(50);
+    }
+    assertTrue(process.isTerminal(), "the start's process never reached done");
+    Replay replay = new Replay();
+    process.attach(replay);
+    return replay.frames.stream()
+        .filter(f -> "done".equals(f.kind()))
+        .map(TechnicalProcessFrame::status)
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("a terminal process replayed no done frame"));
+  }
+
+  /** Wait until no manual run holds the workspace, so nothing async leaks into the next test. */
+  private void awaitNoChainRunning(String repoId) throws InterruptedException {
+    await(
+        () -> runner.isChainRunning(workspaceIds.of(repoId, "work")) ? null : Boolean.TRUE,
+        "the manual run to release the workspace");
   }
 
   private BootstrapRunDto lastRun(String repoId, String stepName) {
@@ -182,38 +201,20 @@ public class WorkspaceBootstrapRunnerTest {
         expected + " for " + stepName);
   }
 
-  private ServiceInstanceDto serviceInstance(String repoId, String serviceId) {
-    return supervisor.effectiveServices(workspaceIds.of(repoId, "work")).stream()
-        .filter(i -> i.definition().id().equals(serviceId))
-        .findFirst()
-        .orElse(null);
-  }
-
-  private ServiceInstanceDto awaitServiceStatus(
-      String repoId, String serviceId, ServiceStatus expected) throws InterruptedException {
-    return await(
-        () -> {
-          ServiceInstanceDto i = serviceInstance(repoId, serviceId);
-          return i != null && i.status() == expected ? i : null;
-        },
-        expected + " for service " + serviceId);
-  }
-
   @Test
-  public void freshProvisionRunsChainInOrderBeforeServiceAutoStart() throws Exception {
+  public void freshProvisionRunsChainInOrderAndEndsTheStartOk() throws Exception {
     Path orderLog = scratch.resolve("order.log");
     String repoId =
         repoWithWorkspace(
             "Bootstrap Fresh",
             chainYaml("first=echo first >> " + orderLog, "second=echo second >> " + orderLog));
-    String serviceId = autoStartService(repoId, "dev-fresh");
 
-    // First access provisions the container (fresh) and triggers the chain, then auto-start.
-    workspaceService.ensureContainer(workspaceIds.of(repoId, "work"));
+    // First access provisions the container (fresh) and triggers the chain.
+    String processId = start(repoId);
 
     BootstrapRunDto first = awaitOutcome(repoId, "first", BootstrapOutcome.SUCCEEDED);
     BootstrapRunDto second = awaitOutcome(repoId, "second", BootstrapOutcome.SUCCEEDED);
-    awaitServiceStatus(repoId, serviceId, ServiceStatus.STARTING);
+    assertEquals("ok", awaitDone(processId), "a successful chain ends the start ok");
 
     assertEquals(
         List.of("first", "second"),
@@ -222,7 +223,6 @@ public class WorkspaceBootstrapRunnerTest {
     assertEquals(0, first.exitCode());
     assertNull(first.commandId(), "bootstrap steps run in-container — no host Command audit row");
     assertEquals(0, second.exitCode());
-    assertEquals(1, readyRecorder.countFor(repoId, "work"), "chain success released auto-start");
   }
 
   @Test
@@ -235,63 +235,50 @@ public class WorkspaceBootstrapRunnerTest {
             chainYaml(
                 "skipped=echo skipped >> " + marker + "=exit 1",
                 "ran=echo ran >> " + marker + "=exit 0"));
-    String serviceId = autoStartService(repoId, "dev-skip");
 
-    workspaceService.ensureContainer(workspaceIds.of(repoId, "work"));
+    String processId = start(repoId);
 
     BootstrapRunDto skipped = awaitOutcome(repoId, "skipped", BootstrapOutcome.SKIPPED);
     awaitOutcome(repoId, "ran", BootstrapOutcome.SUCCEEDED);
     assertNull(skipped.commandId(), "a skip leaves no Command row");
     assertNull(skipped.exitCode());
     assertEquals(List.of("ran"), Files.readAllLines(marker), "only the checked-in command ran");
-    assertEquals(1, readyRecorder.countFor(repoId, "work"), "skips count as chain success");
-    // Drain the coupler's auto-start pass so no late event leaks into the next test.
-    awaitServiceStatus(repoId, serviceId, ServiceStatus.STARTING);
+    assertEquals("ok", awaitDone(processId), "skips count as chain success");
   }
 
   @Test
-  public void failureAbortsChainAndWithholdsServiceAutoStart() throws Exception {
+  public void failureAbortsChainAndEndsTheStartFailed() throws Exception {
     Path marker = scratch.resolve("never.log");
     String repoId =
         repoWithWorkspace(
             "Bootstrap Fail", chainYaml("failing=exit 7", "never=echo never >> " + marker));
-    String serviceId = autoStartService(repoId, "dev-fail");
 
-    workspaceService.ensureContainer(workspaceIds.of(repoId, "work"));
+    String processId = start(repoId);
 
     BootstrapRunDto failed = awaitOutcome(repoId, "failing", BootstrapOutcome.FAILED);
     assertEquals(7, failed.exitCode());
-
-    // The rest of the chain was aborted and auto-start withheld. Give the async pipeline a
-    // moment to prove the negative.
-    Thread.sleep(1_000);
+    // A failed chain still ENDS the start — failed, through its failed bootstrap segment — rather
+    // than leaving it open for the idle reaper.
+    assertEquals("failed", awaitDone(processId), "a failed chain ends the start failed");
     assertNull(lastRun(repoId, "never"), "commands after the failure never ran");
     assertFalse(Files.exists(marker));
-    assertEquals(0, readyRecorder.countFor(repoId, "work"), "a failed chain never fires ready");
-    ServiceInstanceDto service = serviceInstance(repoId, serviceId);
-    assertEquals(
-        ServiceStatus.STOPPED,
-        service.status(),
-        "auto-start service stays down — a withheld ready never registered a projection");
   }
 
   @Test
-  public void restartShapedEventPassesStraightThroughWithoutRunning() throws Exception {
+  public void restartShapedStartPassesStraightThroughWithoutRunning() throws Exception {
     Path marker = scratch.resolve("installs.log");
     String repoId =
         repoWithWorkspace("Bootstrap Restart", chainYaml("install=echo installed >> " + marker));
-    String serviceId = autoStartService(repoId, "dev-restart");
 
-    // A fresh provision runs the chain once (and auto-starts the daemon).
-    workspaceService.ensureContainer(workspaceIds.of(repoId, "work"));
+    // A fresh provision runs the chain once.
+    String fresh = start(repoId);
     awaitOutcome(repoId, "install", BootstrapOutcome.SUCCEEDED);
-    awaitServiceStatus(repoId, serviceId, ServiceStatus.STARTING);
+    assertEquals("ok", awaitDone(fresh));
 
-    // A restart of the Exited container (freshProvision=false): no chain re-run, straight to
-    // service auto-start.
+    // A restart of the Exited container (freshProvision=false): no chain re-run, and the runner's
+    // pass-through is what ends the restart's process.
     workspaceService.stopContainer(workspaceIds.of(repoId, "work"));
-    workspaceService.ensureContainer(workspaceIds.of(repoId, "work"));
-    awaitServiceStatus(repoId, serviceId, ServiceStatus.STARTING);
+    assertEquals("ok", awaitDone(start(repoId)), "the pass-through ends the restart ok");
 
     assertEquals(
         List.of("installed"),
@@ -304,21 +291,17 @@ public class WorkspaceBootstrapRunnerTest {
     Path flag = scratch.resolve("fixed.flag");
     // Fails until the flag file exists — the "broken then fixed" bootstrap step.
     String repoId = repoWithWorkspace("Bootstrap Recover", chainYaml("flaky=test -f " + flag));
-    String serviceId = autoStartService(repoId, "dev-recover");
 
-    workspaceService.ensureContainer(workspaceIds.of(repoId, "work"));
+    String processId = start(repoId);
     awaitOutcome(repoId, "flaky", BootstrapOutcome.FAILED);
-    assertEquals(0, readyRecorder.countFor(repoId, "work"));
+    assertEquals("failed", awaitDone(processId));
 
     // Fix the world, then re-run the whole chain from the workspace surface.
     Files.writeString(flag, "fixed");
     runner.runChainAsync(workspaceIds.of(repoId, "work"));
 
     awaitOutcome(repoId, "flaky", BootstrapOutcome.SUCCEEDED);
-    await(
-        () -> readyRecorder.countFor(repoId, "work") >= 1 ? Boolean.TRUE : null,
-        "recovery releases auto-start");
-    awaitServiceStatus(repoId, serviceId, ServiceStatus.STARTING);
+    awaitNoChainRunning(repoId);
   }
 
   @Test
@@ -331,12 +314,9 @@ public class WorkspaceBootstrapRunnerTest {
 
     // A single-step re-run touches only its own step — deliberately, even when its
     // ensureContainer fresh-provisions the container here: the run holds the in-flight guard, so
-    // the
-    // provision's container-started event yields to it and the rest of the chain does not run.
-    // (Full
-    // bootstrap + service auto-start is the fresh-provision/"Run all" job, not this trigger's.) The
-    // step id passes through as the name (no config is readable for the workspace yet — ids
-    // default to names).
+    // the provision's container-started event yields to it and the rest of the chain does not run.
+    // (The full chain is the fresh-provision/"Run all" job, not this trigger's.) The step id passes
+    // through as the name (no config is readable for the workspace yet — ids default to names).
     runner.runSingleAsync(workspaceIds.of(repoId, "work"), "target");
 
     awaitOutcome(repoId, "target", BootstrapOutcome.SUCCEEDED);
@@ -348,7 +328,6 @@ public class WorkspaceBootstrapRunnerTest {
   @Test
   public void concurrentManualRunsAreRejected() throws Exception {
     String repoId = repoWithWorkspace("Bootstrap Conflict", chainYaml("slow=sleep 3"));
-    String serviceId = autoStartService(repoId, "dev-conflict");
 
     runner.runChainAsync(workspaceIds.of(repoId, "work"));
     assertThrows(
@@ -356,9 +335,9 @@ public class WorkspaceBootstrapRunnerTest {
         () -> runner.runChainAsync(workspaceIds.of(repoId, "work")),
         "a second run while one is in flight is rejected");
 
-    // Drain: the first run's success fires ready and the coupler auto-starts the daemon — await
-    // it so the async pipeline is quiescent before the next test stages its own config.
-    awaitServiceStatus(repoId, serviceId, ServiceStatus.STARTING);
+    // Drain the first run so the async pipeline is quiescent before the next test.
+    awaitOutcome(repoId, "slow", BootstrapOutcome.SUCCEEDED);
+    awaitNoChainRunning(repoId);
   }
 
   @Test
@@ -389,7 +368,6 @@ public class WorkspaceBootstrapRunnerTest {
     configReader.setConfig(
         rowId,
         new QitsConfig(
-            null,
             null,
             null,
             null,

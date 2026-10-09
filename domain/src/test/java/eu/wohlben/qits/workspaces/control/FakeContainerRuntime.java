@@ -132,19 +132,6 @@ public class FakeContainerRuntime implements ContainerRuntime {
     }
   }
 
-  /**
-   * Fake containers run as host processes binding real host ports, so the proxy target is simply
-   * {@code 127.0.0.1} + the port the daemon bound — the host-clone analogue of reaching a container
-   * by its DNS name on the shared network. Any known container resolves (no create-time port set).
-   */
-  @Override
-  public ProxyOrigin resolveTarget(String container, int containerPort) {
-    if (!byName.containsKey(container)) {
-      return null;
-    }
-    return new ProxyOrigin("127.0.0.1", containerPort);
-  }
-
   @Override
   public ExecResult exec(
       String container, String workdir, Map<String, String> env, String... argv) {
@@ -408,21 +395,6 @@ public class FakeContainerRuntime implements ContainerRuntime {
               workspaceVolumeName(v.workspaceId()), "", v.repoId(), v.workspaceId(), v.branch()));
     }
     return infos;
-  }
-
-  // --- Service sessions: emulate the tmux model with a plain detached (setsid) host process
-  // --------
-  //
-  // No tmux on the test host: a service session is a setsid'd shell (new session => group-killable
-  // and
-  // detached, so it survives like the real tmux session) that runs the script with output
-  // redirected
-  // to a host logfile and its exit code recorded. State lives on disk (pidfile/exitfile), so a
-  // fresh
-  // supervisor can reconcile a still-alive daemon exactly like it reads back tmux has-session.
-
-  private Path serviceRunDir() {
-    return Path.of(dataDir, ".qits-services").toAbsolutePath();
   }
 
   private String rewriteWorkdir(String workdir, Path dir) {

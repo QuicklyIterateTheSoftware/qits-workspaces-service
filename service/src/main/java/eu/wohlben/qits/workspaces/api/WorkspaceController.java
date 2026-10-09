@@ -267,7 +267,7 @@ public class WorkspaceController {
    * Start (or recreate) the workspace's container on demand — the container is a recreatable cache
    * of the durable branch. Idempotent (a running container is left as-is). The provision runs
    * asynchronously: this returns a technical-process id immediately and the work — docker run,
-   * clone, submodule wiring, service auto-start — streams over the process's SSE endpoint, where
+   * clone, submodule wiring, the bootstrap chain — streams over the process's SSE endpoint, where
    * failures surface too (alongside the workspace's {@code runtimeError}). 404 only when the
    * workspace itself is unknown.
    *

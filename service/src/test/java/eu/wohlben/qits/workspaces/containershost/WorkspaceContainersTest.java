@@ -16,7 +16,6 @@ import eu.wohlben.qits.containers.client.ContainersWire.SharedMount;
 import eu.wohlben.qits.containers.client.ContainersWire.Spec;
 import eu.wohlben.qits.containers.client.ContainersWire.VolumeMount;
 import eu.wohlben.qits.workspaces.control.ContainerRuntime;
-import eu.wohlben.qits.workspaces.control.ProxyOrigin;
 import eu.wohlben.qits.workspaces.control.TestWorkspaceContainerFactory;
 import eu.wohlben.qits.workspaces.control.WorkspaceContainerFactory;
 import eu.wohlben.qits.workspaces.error.InternalServerErrorException;
@@ -709,16 +708,6 @@ class WorkspaceContainersTest {
     stub.fallback(503, "{\"code\":\"UNAVAILABLE\",\"message\":\"down\"}");
 
     assertEquals(List.of(), adapter().listWorkspaceContainers(REPO));
-  }
-
-  @Test
-  void theProxyTargetIsTheContainersOwnNameOnTheSharedNetwork() {
-    // Pure: no round trip, and no component of a request ever selects a host or a port. The
-    // bridge-ip mode that needed an inspect is gone with the key that selected it.
-    assertEquals(
-        new ProxyOrigin("qits-ws-work-repo1234", 13338),
-        adapter().resolveTarget("qits-ws-work-repo1234", 13338));
-    assertEquals(0, stub.received().size());
   }
 
   // --- what the orchestrator has no verb for -----------------------------------------------------

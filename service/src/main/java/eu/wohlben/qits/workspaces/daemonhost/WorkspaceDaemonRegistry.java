@@ -21,7 +21,6 @@ import eu.wohlben.qits.workspaces.control.WorkspaceEditorState;
 import eu.wohlben.qits.workspaces.control.WorkspaceGitStatus;
 import eu.wohlben.qits.workspaces.control.WorkspaceGitSync;
 import eu.wohlben.qits.workspaces.control.WorkspaceResolved;
-import eu.wohlben.qits.workspaces.control.WorkspaceServiceDriver;
 import eu.wohlben.qits.workspaces.control.WorkspaceChangeHint;
 import eu.wohlben.qits.workspaces.control.WorkspaceChangePublisher;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
@@ -48,9 +47,6 @@ import eu.wohlben.qits.workspacedaemon.protocol.OpenStream;
 import eu.wohlben.qits.workspacedaemon.protocol.PullBranch;
 import eu.wohlben.qits.workspacedaemon.protocol.RunBootstrap;
 import eu.wohlben.qits.workspacedaemon.protocol.RunCommand;
-import eu.wohlben.qits.workspacedaemon.protocol.ServiceTransition;
-import eu.wohlben.qits.workspacedaemon.protocol.SignalService;
-import eu.wohlben.qits.workspacedaemon.protocol.StartService;
 import eu.wohlben.qits.workspacedaemon.protocol.Stream;
 import eu.wohlben.qits.workspacedaemon.protocol.StreamTarget;
 import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceChanged;
@@ -108,7 +104,6 @@ public class WorkspaceDaemonRegistry
         WorkspaceDaemonProvisioner,
         WorkspaceConfigReader,
         WorkspaceBootstrapDriver,
-        WorkspaceServiceDriver,
         WorkspaceGitStatus,
         WorkspaceAgentActivity,
         WorkspaceEditorState,
@@ -310,15 +305,6 @@ public class WorkspaceDaemonRegistry
   private final ConcurrentHashMap<Long, PendingBootstrap> bootstraps = new ConcurrentHashMap<>();
 
   /**
-   * Host coordinators subscribed to service (dev-server) lifecycle events (Part 4). The daemon owns
-   * the process lifecycle and streams every transition; the host {@code ServiceSupervisor} projects
-   * them. Registered once at host startup, so it's a small, stable list — {@code
-   * CopyOnWriteArrayList} makes the iteration lock-free.
-   */
-  private final CopyOnWriteArrayList<WorkspaceServiceDriver.ServiceEventSink> serviceSinks =
-      new CopyOnWriteArrayList<>();
-
-  /**
    * Persistent bootstrap-outcome recorders ({@link WorkspaceBootstrapDriver#subscribe}), fed every
    * {@link BootstrapOutcome} frame — awaited or not. This is how a chain the daemon ran on its own
    * (its HTTP run verb, through the container proxy) still writes host rows.
@@ -327,12 +313,11 @@ public class WorkspaceDaemonRegistry
       new CopyOnWriteArrayList<>();
 
   /**
-   * One ordered thread for everything fanned out to subscribed sinks — service transitions, service
-   * output, bootstrap-outcome recording. <b>Never the socket thread.</b> websockets-next processes
-   * one inbound frame per connection at a time, so a sink that blocks (the supervisor monitor, a DB
-   * write) parks the whole pipeline — including the {@code ConfigView} reply a config read on
+   * One ordered thread for everything fanned out to subscribed sinks — today the bootstrap-outcome
+   * recording. <b>Never the socket thread.</b> websockets-next processes
+   * one inbound frame per connection at a time, so a sink that blocks (a DB write) parks the whole pipeline — including the {@code ConfigView} reply a config read on
    * another thread is awaiting, which starved those reads to timeout (measured, D1). Single-threaded
-   * so one workspace's transitions stay in arrival order.
+   * so one workspace's outcomes stay in arrival order.
    */
   private final java.util.concurrent.ExecutorService sinkDispatch =
       java.util.concurrent.Executors.newSingleThreadExecutor(
@@ -405,12 +390,9 @@ public class WorkspaceDaemonRegistry
    * <p>The target is a <b>name</b> and never a port: the host does not learn — and must not state —
    * an address inside the container, so it says <em>what</em> it wants and the daemon resolves that
    * against its own allow-list. {@link WorkspaceTunnels} is what keys the caller on a capability
-   * version high enough to understand the name it is about to be sent. A {@link
-   * StreamTarget#SERVICE} names its dev server by {@code serviceId} the same way — an id, never a
-   * port — and the id is null for every other target, which the codec then leaves off the wire.
+   * version high enough to understand the name it is about to be sent.
    */
-  void requestStream(
-      Long workspaceId, String nonce, String path, StreamTarget target, String serviceId) {
+  void requestStream(Long workspaceId, String nonce, String path, StreamTarget target) {
     DaemonConnection client = clients.get(workspaceId);
     if (client == null || !client.connection.isOpen()) {
       LOG.debugf("requestStream: no workspace-daemon live for %s", workspaceId);
@@ -418,7 +400,7 @@ public class WorkspaceDaemonRegistry
     }
     client
         .connection
-        .sendText(codec.encode(new OpenStream(nonce, path, target, serviceId)))
+        .sendText(codec.encode(new OpenStream(nonce, path, target)))
         .subscribe()
         .with(
             ignored -> {},
@@ -446,9 +428,8 @@ public class WorkspaceDaemonRegistry
             hello.capabilityVersion(),
             hello.daemonVersion(),
             hello.daemonBuildTime());
-        // Remember the repository the daemon serves: service (dev-server) events carry only the
-        // service NAME, and the host keys supervision state by (repoId, workspaceId, id) — so the
-        // ServiceEventSink needs repoId to resolve the name to a repository service definition. The
+        // Remember the repository the daemon serves: the change hints fanned out from its later
+        // frames (files, git status, agent activity, bootstrap outcomes) are keyed by it. The
         // daemon's announced build identity is retained for the workspace registry
         // (WorkspaceDaemonInfo).
         if (client != null) {
@@ -471,9 +452,6 @@ public class WorkspaceDaemonRegistry
         } else if (chunk.correlationId() != null
             && chunk.correlationId().startsWith(DaemonProtocol.BOOTSTRAP_CORRELATION_PREFIX)) {
           streamBootstrapOutput(workspaceId, chunk);
-        } else if (chunk.correlationId() != null
-            && chunk.correlationId().startsWith(DaemonProtocol.SERVICE_CORRELATION_PREFIX)) {
-          streamServiceOutput(workspaceId, client, chunk);
         } else if (client != null) {
           client.appendChunk(chunk);
         }
@@ -500,21 +478,16 @@ public class WorkspaceDaemonRegistry
       case BootstrapStep step -> routeBootstrapStep(workspaceId, step);
       case BootstrapOutcome outcome -> routeBootstrapOutcome(workspaceId, outcome);
       case Bootstrapped done -> completeBootstrap(workspaceId, done.ok());
-      case ServiceTransition event -> routeServiceState(workspaceId, client, event);
       case GitStatus status -> onGitStatus(workspaceId, client, status);
       case AgentActivity activity -> onAgentActivity(workspaceId, client, activity);
       case EditorState state -> onEditorState(workspaceId, state);
       case WorkspaceChanged changed -> onWorkspaceChanged(workspaceId, client, changed);
-      // qits -> workspace-daemon requests are never received here; ignore defensively.
-      case Ack ignored -> {}
-      case RunCommand ignored -> {}
-      case Describe ignored -> {}
-      case DescribeConfig ignored -> {}
-      case RunBootstrap ignored -> {}
-      case StartService ignored -> {}
-      case SignalService ignored -> {}
-      case PullBranch ignored -> {}
-      case OpenStream ignored -> {}
+      // Everything else is ignored: qits -> workspace-daemon requests are never received here, and
+      // a pre-qits-947 daemon's service frames (ServiceTransition, and its `service:` output
+      // chunks, which fall through to the command buffer above and match no command) have no host
+      // left to read them. A default arm rather than named cases, so this compiles against the
+      // protocol both before and after those records leave the sealed interface.
+      default -> {}
     }
   }
 
@@ -993,61 +966,6 @@ public class WorkspaceDaemonRegistry
   }
 
   /**
-   * Fan a service's lifecycle transition out to every subscribed host coordinator — on the {@link
-   * #sinkDispatch} thread, never the socket thread (see the field's javadoc for the deadlock this
-   * prevents). repoId/label are captured before the hop so a disconnect can't blank them mid-fan.
-   */
-  private void routeServiceState(
-      Long workspaceId, DaemonConnection client, ServiceTransition event) {
-    if (serviceSinks.isEmpty()) {
-      return;
-    }
-    String repoId = client != null ? client.repoId : null;
-    String label = labelOf(client);
-    sinkDispatch.execute(
-        () -> {
-          for (WorkspaceServiceDriver.ServiceEventSink sink : serviceSinks) {
-            try {
-              sink.onState(
-                  repoId, label, workspaceId, event.id(), event.state(), event.exitCode());
-            } catch (RuntimeException e) {
-              LOG.debugf("service transition sink failed (dropped): %s", e.getMessage());
-            }
-          }
-        });
-  }
-
-  /**
-   * Fan a running service's streamed output (correlation {@code service:<name>}) out to the sinks —
-   * off the socket thread, like {@link #routeServiceState}.
-   */
-  private void streamServiceOutput(
-      Long workspaceId, DaemonConnection client, CommandChunk chunk) {
-    if (serviceSinks.isEmpty()) {
-      return;
-    }
-    String repoId = client != null ? client.repoId : null;
-    String label = labelOf(client);
-    String name =
-        chunk.correlationId().substring(DaemonProtocol.SERVICE_CORRELATION_PREFIX.length());
-    sinkDispatch.execute(
-        () -> {
-          for (String line : chunk.text().split("\n", -1)) {
-            if (line.isEmpty()) {
-              continue;
-            }
-            for (WorkspaceServiceDriver.ServiceEventSink sink : serviceSinks) {
-              try {
-                sink.onLine(repoId, label, workspaceId, name, chunk.stream().name(), line);
-              } catch (RuntimeException e) {
-                LOG.debugf("service output sink failed (dropped): %s", e.getMessage());
-              }
-            }
-          }
-        });
-  }
-
-  /**
    * Feed a provision's streamed clone/submodule output to the awaiting host's {@code clone}
    * segment.
    */
@@ -1377,36 +1295,6 @@ public class WorkspaceDaemonRegistry
     } finally {
       bootstraps.remove(workspaceId, pending);
     }
-  }
-
-  @Override
-  public void subscribe(WorkspaceServiceDriver.ServiceEventSink sink) {
-    serviceSinks.add(sink);
-  }
-
-  @Override
-  public void startService(
-      Long workspaceId, String serviceName, String script, Map<String, String> env) {
-    DaemonConnection client = clients.get(workspaceId);
-    if (client == null || !client.connection.isOpen()) {
-      LOG.debugf("startService('%s'): no workspace-daemon live for %s", serviceName, workspaceId);
-      return; // daemon-backed mode requires a live daemon; the host falls back to tmux otherwise
-    }
-    String correlationId = UUID.randomUUID().toString();
-    client.connection.sendTextAndAwait(
-        codec.encode(new StartService(correlationId, serviceName, script, env)));
-  }
-
-  @Override
-  public void signalService(Long workspaceId, String serviceName, String signal) {
-    DaemonConnection client = clients.get(workspaceId);
-    if (client == null || !client.connection.isOpen()) {
-      LOG.debugf("signalService('%s'): no workspace-daemon live for %s", serviceName, workspaceId);
-      return;
-    }
-    String correlationId = UUID.randomUUID().toString();
-    client.connection.sendTextAndAwait(
-        codec.encode(new SignalService(correlationId, serviceName, signal)));
   }
 
   /** {@link #awaitLive(Long, Duration, CompletableFuture, BooleanSupplier)} with no early exit. */

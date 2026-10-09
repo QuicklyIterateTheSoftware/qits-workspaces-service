@@ -17,8 +17,7 @@ import java.util.Map;
  *
  * <p>What makes the union legitimate is that no override here is any other consumer's SUBJECT. A
  * class that asserts about a value cannot share a map with a class that needs it otherwise — that is
- * what {@link AutoStartOffProfile} and {@code ServiceSettleKillSwitchTest.TestProfile} are for, and
- * they carry the marker saying so. These three are all in the other register: each one is scenery
+ * what {@link BootstrapAutorunOffProfile} is for, and it carries the marker saying so. These three are all in the other register: each one is scenery
  * that some class needs held still, and holding it still costs its co-tenant nothing.
  *
  * <p>Note what is absent: {@code qits.test.origins-dir}. Every folded profile used to mint a

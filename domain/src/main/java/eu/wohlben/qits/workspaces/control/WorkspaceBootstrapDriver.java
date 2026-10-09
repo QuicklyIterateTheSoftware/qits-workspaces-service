@@ -5,8 +5,8 @@ import java.util.Optional;
 
 /**
  * Drives (and awaits) the in-container workspace-daemon's bootstrap chain — the
- * install/migrate/seed commands the daemon runs from its own {@code .qits-config.yml}, between the
- * self-clone and daemon start (docs/epics/qits-workspace-daemon/ Part 3). Framework-free so it
+ * install/migrate/seed commands the daemon runs from its own {@code .qits-config.yml}, right after the
+ * self-clone (docs/epics/qits-workspace-daemon/ Part 3). Framework-free so it
  * lives in {@code domain}; the real implementation is the backend {@code WorkspaceDaemonRegistry}
  * (service module), reached over the control socket. Apps without the backend impl (cli, tests with
  * no daemon) provide a test double or simply have no bean; the runner injects it as {@code
@@ -19,15 +19,15 @@ import java.util.Optional;
  * way.
  *
  * <p>Distinct from {@link WorkspaceDaemonProvisioner} (clone) and {@link WorkspaceConfigReader}
- * (read): this one runs the chain. The host records the streamed outcomes and gates service
- * auto-start on {@link Result#ok()} — a failed chain withholds {@code WorkspaceReadyForServices}.
+ * (read): this one runs the chain. The host records the streamed outcomes and settles the start's
+ * {@code bootstrap:} segments from them; {@link Result#ok()} is the chain's overall verdict.
  */
 public interface WorkspaceBootstrapDriver {
 
   /**
    * Await the daemon's autonomous boot-time bootstrap chain for {@code workspaceId}, feeding {@code
    * sink} as steps stream in. Returns {@link Optional#empty()} when no daemon becomes live within
-   * {@code connectTimeout} (the caller then withholds service auto-start — the chain never ran).
+   * {@code connectTimeout} (the chain never ran).
    *
    * @param chainTimeout how long, once a daemon is live, to wait for the terminal {@code
    *     Bootstrapped}; a timeout resolves to a failed {@link Result}
@@ -43,7 +43,7 @@ public interface WorkspaceBootstrapDriver {
   Optional<Result> runBootstrap(
       Long workspaceId, String name, StepSink sink, Duration chainTimeout);
 
-  /** The chain-complete outcome: {@code ok} false means a step failed and services stay off. */
+  /** The chain-complete outcome: {@code ok} false means a step failed (or the await timed out). */
   record Result(boolean ok) {}
 
   /**
@@ -52,8 +52,7 @@ public interface WorkspaceBootstrapDriver {
    * lets a chain the daemon ran on its own (its HTTP {@code POST /bootstrap-commands/run}, reached
    * through the container proxy) still land as host {@code workspace_bootstrap_run} rows: no host
    * awaiter exists for such a run, so a sink tied to an await never sees it (measured live as D1's
-   * missing-rows leg). The host recorder subscribes once at startup, the {@code
-   * WorkspaceServiceDriver#subscribe} precedent.
+   * missing-rows leg). The host recorder subscribes once at startup.
    */
   void subscribe(OutcomeSink sink);
 

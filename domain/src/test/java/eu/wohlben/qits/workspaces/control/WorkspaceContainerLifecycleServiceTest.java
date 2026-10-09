@@ -471,8 +471,8 @@ public class WorkspaceContainerLifecycleServiceTest {
     assertTrue(startedRecorder.awaitCount(repoId, "feat", 1, 5_000));
     startedRecorder.clear();
 
-    // The already-running short-circuit must NOT fire — this is what terminates the auto-start
-    // reentrancy loop.
+    // The already-running short-circuit must NOT fire — nothing changed, so there is nothing to
+    // bootstrap.
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
 
     Thread.sleep(500); // give any (erroneous) async fire time to land
@@ -496,8 +496,7 @@ public class WorkspaceContainerLifecycleServiceTest {
     assertTrue(seen.get(0).event().graceful(), "a graceful stop asks for a graceful settle");
     assertTrue(
         seen.get(0).containerExistedWhenObserved(),
-        "the stopping event fires before containers.stop — services settle while the container is"
-            + " still present");
+        "the stopping event fires before containers.stop, while the container is still present");
   }
 
   @Test

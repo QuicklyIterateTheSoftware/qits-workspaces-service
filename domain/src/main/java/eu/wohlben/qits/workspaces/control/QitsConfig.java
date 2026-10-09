@@ -9,8 +9,8 @@ import java.util.Map;
  * fallback). The file is <strong>authoritative</strong>: it is read in-container by the
  * workspace-daemon and surfaced to the host over the control socket as the Part-2 wire schema
  * ({@link WorkspaceConfigView} wraps it; {@code WorkspaceDaemonRegistry} Jackson-deserializes it).
- * There is no host-side DB config store and no reconciler — declared actions/services/bootstrap
- * steps live only in the file.
+ * There is no host-side DB config store and no reconciler — declared actions and bootstrap steps
+ * live only in the file.
  *
  * <p>Every declared entry carries an explicit, deterministic string {@code id:} (defaulting to its
  * {@code name} when absent) that identifies it across the wire; a duplicate id is a user error,
@@ -25,47 +25,38 @@ import java.util.Map;
  * WorkspaceMetadata} for the same defect caught the harder way.
  *
  * <p><b>The enums are targets too.</b> Jackson resolves an enum's constants reflectively, so an
- * unregistered {@link RestartPolicy}/{@link HealthCheckKind} makes the binary's deserialization
- * throw on any config whose services carry {@code restart-policy:} or a health check — caught, and
- * degraded to {@link #EMPTY}. Measured live as D1's first leg: every such workspace auto-started
- * nothing, silently, while the JVM suite stayed green.
+ * enum-typed field added to any record below must be registered as well, or the binary's
+ * deserialization throws — caught, and degraded to {@link #EMPTY}, while the JVM suite stays green.
+ * None is bound today; {@code NativeImageContractTest} walks the tree so the next one is caught.
+ *
+ * <p><b>Unknown properties are ignored, on purpose.</b> A daemon built before the workspace
+ * services concept was removed (qits-947) still sends the {@code services:} (and legacy {@code
+ * daemons:}) key in its config view. The record no longer has a component for it, and the
+ * annotation below — not whatever the injected mapper's defaults happen to be — is what keeps such
+ * a config from degrading to {@link #EMPTY} and losing its bootstrap chain with it.
  */
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
 @io.quarkus.runtime.annotations.RegisterForReflection(
     targets = {
       QitsConfig.class,
       QitsConfig.RepositorySection.class,
       QitsConfig.FrameworkDecl.class,
       QitsConfig.ActionDecl.class,
-      QitsConfig.ServiceDecl.class,
-      QitsConfig.BootstrapDecl.class,
-      QitsConfig.WebViewDecl.class,
-      QitsConfig.HealthCheckDecl.class,
-      RestartPolicy.class,
-      HealthCheckKind.class
+      QitsConfig.BootstrapDecl.class
     })
 public record QitsConfig(
     RepositorySection repository,
     List<FrameworkDecl> frameworks,
     List<ActionDecl> actions,
-    // TEMPORARY alias: the committed `.qits-config.yml` (incl. the test fixtures) still uses the
-    // old
-    // `daemons:` key; accept it so a stale file / stale daemon image (whose ConfigJson may still
-    // emit
-    // `daemons`) deserializes. Drop the alias once the fixtures' two-level submodule round-trip
-    // lands
-    // the `services:` key (docs/epics/qits-workspace-daemon/features/2026-07-24_*).
-    @com.fasterxml.jackson.annotation.JsonAlias("daemons") List<ServiceDecl> services,
     List<BootstrapDecl> bootstrap) {
 
   /** An absent/empty file — the no-op that keeps a config-free workspace on the old path. */
-  public static final QitsConfig EMPTY =
-      new QitsConfig(null, List.of(), List.of(), List.of(), List.of());
+  public static final QitsConfig EMPTY = new QitsConfig(null, List.of(), List.of(), List.of());
 
   /** Normalize the collections to non-null so callers never null-check. */
   public QitsConfig {
     frameworks = frameworks == null ? List.of() : List.copyOf(frameworks);
     actions = actions == null ? List.of() : List.copyOf(actions);
-    services = services == null ? List.of() : List.copyOf(services);
     bootstrap = bootstrap == null ? List.of() : List.copyOf(bootstrap);
   }
 
@@ -73,7 +64,6 @@ public record QitsConfig(
     return repository == null
         && frameworks.isEmpty()
         && actions.isEmpty()
-        && services.isEmpty()
         && bootstrap.isEmpty();
   }
 
@@ -106,26 +96,6 @@ public record QitsConfig(
     }
   }
 
-  /** One {@code services[]} entry — a config-declared workspace service (dev server). */
-  public record ServiceDecl(
-      String id,
-      String name,
-      String description,
-      String start,
-      String readyPattern,
-      Boolean autoStart,
-      RestartPolicy restartPolicy,
-      Integer maxRestarts,
-      String stopSignal,
-      Map<String, String> environment,
-      WebViewDecl webView,
-      List<HealthCheckDecl> healthChecks) {
-    /** {@code id} defaults to {@code name} when absent/blank. */
-    public ServiceDecl {
-      id = id == null || id.isBlank() ? name : id;
-    }
-  }
-
   /**
    * One {@code bootstrap[]} entry — a config-declared bootstrap step; list position is the
    * execution order.
@@ -142,21 +112,4 @@ public record QitsConfig(
       id = id == null || id.isBlank() ? name : id;
     }
   }
-
-  /** The {@code web-view:} block of a service. */
-  public record WebViewDecl(Integer port, String entryPath, String basePath) {}
-
-  /** One {@code health-checks[]} entry of a service. */
-  public record HealthCheckDecl(
-      String name,
-      HealthCheckKind kind,
-      Integer port,
-      String path,
-      String expectStatus,
-      String command,
-      Long intervalMs,
-      Long timeoutMs,
-      Integer healthyThreshold,
-      Integer unhealthyThreshold,
-      Long initialDelayMs) {}
 }

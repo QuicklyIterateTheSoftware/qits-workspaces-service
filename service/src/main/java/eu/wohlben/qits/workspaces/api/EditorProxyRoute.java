@@ -93,7 +93,7 @@ import org.jboss.logging.Logger;
  *
  * <h2>Five answers, because a waiting editor is not a broken one</h2>
  *
- * <p>The splash pattern is {@link ServiceProxyRoute}'s, gated on {@link WorkspaceEditorState}: a
+ * <p>The splash is gated on {@link WorkspaceEditorState}: a
  * container that is not up and an editor that has not finished starting are both <em>200 and a page
  * that refreshes itself</em>, an editor that has ended is a distinct 502 that stops the waiting, an
  * editor with no tunnel to it is a second distinct 502, and an editor nobody has opened yet is a
@@ -533,9 +533,8 @@ public class EditorProxyRoute {
   }
 
   /**
-   * A qits-branded page that refreshes itself until the editor answers — {@link ServiceProxyRoute}'s
-   * splash, and deliberately the same one: what a reader has in front of them while a container
-   * comes up should not depend on which of the two they opened.
+   * A qits-branded page that refreshes itself until the editor answers, so a reader has something
+   * in front of them while a container comes up.
    */
   private void splash(RoutingContext rc, String message) {
     page(rc, 200, message + "… this page refreshes automatically", "<meta http-equiv=\"refresh\""

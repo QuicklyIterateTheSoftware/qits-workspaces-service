@@ -12,16 +12,12 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@code qits.bootstrap.autorun-enabled=false} suppresses the provision-time chain — a fresh
- * provision passes straight through to service auto-start with no run recorded, even when the
- * checkout declares a chain. Manual runs stay available (not covered here; they don't consult the
- * switch by construction).
+ * provision passes straight through with no run recorded, even when the checkout declares a chain,
+ * and the pass-through still ends the start's technical process. Manual runs stay available (not
+ * covered here; they don't consult the switch by construction).
  */
 @QuarkusTest
-// The autorun switch this class is about lives in AutoStartOffProfile, which is where its own
-// profile folded to. Auto-start being off besides is immaterial here: the assertion is on
-// readyRecorder, and the runner fires that event itself on the pass-through path — whether the
-// coupler then launches anything is ServiceAutoStartKillSwitchTest's question, not this one's.
-@TestProfile(AutoStartOffProfile.class)
+@TestProfile(BootstrapAutorunOffProfile.class)
 public class WorkspaceBootstrapKillSwitchTest {
 
   private static final long AWAIT_MILLIS = 15_000;
@@ -31,7 +27,7 @@ public class WorkspaceBootstrapKillSwitchTest {
   @Inject WorkspaceIds workspaceIds;
   @Inject WorkspaceService workspaceService;
   @Inject BootstrapRunService bootstrapRunService;
-  @Inject WorkspaceReadyForServicesRecorder readyRecorder;
+  @Inject TechnicalProcessRegistry processes;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -55,17 +51,17 @@ public class WorkspaceBootstrapKillSwitchTest {
     TestGit.exec(worktree.toFile(), "git", "push", "origin", "HEAD:master");
     // An admin workspace: this provision is a DIRECT one, admin and editor only (qits-780).
     workspaceService.createWorkspace(repoId, "work", "master", "work", null, false, false, true);
-    readyRecorder.clear();
 
-    workspaceService.ensureContainer(workspaceIds.of(repoId, "work"));
+    String processId = workspaceService.beginEnsureContainer(workspaceIds.of(repoId, "work"));
+    TechnicalProcess process = processes.find(processId).orElseThrow();
 
     long deadline = System.currentTimeMillis() + AWAIT_MILLIS;
-    while (System.currentTimeMillis() < deadline && readyRecorder.countFor(repoId, "work") == 0) {
+    while (System.currentTimeMillis() < deadline && !process.isTerminal()) {
       Thread.sleep(50);
     }
     assertTrue(
-        readyRecorder.countFor(repoId, "work") >= 1,
-        "the switched-off runner still releases service auto-start");
+        process.isTerminal(),
+        "the switched-off runner's pass-through still ends the start's process");
     assertTrue(
         bootstrapRunService.listForWorkspace(workspaceIds.of(repoId, "work")).isEmpty(),
         "no bootstrap command ran");

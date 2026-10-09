@@ -232,11 +232,9 @@ public class DaemonApiGateIT {
       assertEquals(200, content.statusCode());
       assertTrue(content.body().contains("hello from the api gate"), content.body());
 
-      // --- the two surfaces that had no address until this change -------------------------------
-      HttpResponse<String> services = get(api + "/services", bearer());
-      assertEquals(200, services.statusCode());
-      assertTrue(services.body().contains("\"services\""), services.body());
-
+      // --- the surface that had no address until this change ------------------------------------
+      // (Its sibling, the daemon's /services, is not asserted: workspace services left the platform
+      // with qits-947, and a services-free daemon no longer answers it.)
       HttpResponse<String> bootstrap = get(api + "/bootstrap-commands", bearer());
       assertEquals(200, bootstrap.statusCode());
       assertTrue(bootstrap.body().contains("\"steps\""), bootstrap.body());
@@ -250,8 +248,6 @@ public class DaemonApiGateIT {
           actions.body().contains("\"hold\""),
           "the daemon did not read the checkout's declared actions: "
               + actions.body()
-              + "\n/services said: "
-              + get(api + "/services", bearer()).body()
               + "\n.qits-config.yml in the checkout: "
               + get(api + "/files/content?path=.qits-config.yml", bearer()).body());
 
@@ -371,8 +367,8 @@ public class DaemonApiGateIT {
 
   /**
    * A bare repo with one commit on {@link #BRANCH}, carrying a {@code .qits-config.yml} that
-   * declares an interactive action the terminal assertions attach to, plus a service and a bootstrap
-   * step so the two re-exposed surfaces have something to report.
+   * declares an interactive action the terminal assertions attach to, plus a bootstrap step so the
+   * re-exposed bootstrap surface has something to report.
    */
   private static Path prepareServedBareRepo(Path work) throws Exception {
     Path src = work.resolve("src");
@@ -393,11 +389,6 @@ public class DaemonApiGateIT {
             description: an interactive shell that stays up until terminated
             interactive: true
             execute: cat
-        services:
-          - name: idle
-            description: a service the gate only lists, never starts
-            start: sleep 3600
-            auto-start: false
         bootstrap:
           - name: noop
             description: a step the gate only lists

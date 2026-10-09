@@ -28,7 +28,7 @@ import org.jboss.logging.Logger;
  * the {@link WorkspaceEventsController} emits as an SSE {@code data:} frame.
  *
  * <p>Debounce is leading-edge + trailing: the first hint in a quiet window emits immediately (a
- * service status flip feels instant), further hints during the {@code qits.events.debounce-ms}
+ * bootstrap step settling feels instant), further hints during the {@code qits.events.debounce-ms}
  * window coalesce into at most one trailing emit, and a continuous burst (the SPA flushing OTLP
  * every 1s) converges to ≤1 emit/s per topic instead of being chattier than the poll it replaces. A
  * missed or dropped hint self-heals: the frontend re-fetches on the next hint or on reconnect, so
@@ -158,7 +158,7 @@ public class WorkspaceEventBroadcaster {
       return; // no subscribers for this workspace — nothing to notify, hint self-heals on connect
     }
     try {
-      // Wire name: SERVICE_EVENTS -> "service-events" (the frontend's topic contract).
+      // Wire name: PROMPT_ATTACHMENTS -> "prompt-attachments" (the frontend's topic contract).
       processor.onNext(topic.name().toLowerCase().replace('_', '-'));
     } catch (RuntimeException e) {
       LOG.debugf(e, "Dropped workspace hint %s for %s", topic, workspaceKey);

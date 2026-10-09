@@ -6,26 +6,25 @@ import jakarta.inject.Inject;
 
 /**
  * The one-liners {@link WorkspaceService} calls to announce a workspace container's lifecycle
- * edges, observed in the daemon area ({@code ServiceLifecycleCoupler}). {@code domain} stays
- * web-framework-free; the coupling is CDI events, inverting the forbidden direct dependency.
+ * edges: {@code started} is observed by {@link WorkspaceBootstrapRunner}; {@code stopping} has no
+ * production observer since the workspace services concept went (qits-947), and stays as the
+ * synchronous pre-removal edge the lifecycle tests pin. {@code domain} stays web-framework-free; the
+ * coupling is CDI events, inverting the forbidden direct dependency.
  *
  * <p>The two directions fire deliberately differently:
  *
  * <ul>
  *   <li><b>started</b> — {@link Event#fireAsync}, so firing never blocks or fails the transition
  *       that just committed RUNNING; {@code ensureContainer} (and every lazy caller on a request
- *       thread) keeps its latency and the auto-start work happens on the async observer thread.
- *   <li><b>stopping</b> — synchronous {@link Event#fire}, so the settle completes <em>before</em>
- *       the caller removes the container: the observer must see the container (and its sessions)
- *       alive.
+ *       thread) keeps its latency and the bootstrap await happens on the async observer thread.
+ *   <li><b>stopping</b> — synchronous {@link Event#fire}, so an observer completes <em>before</em>
+ *       the caller removes the container: it must see the container still alive.
  * </ul>
  */
 @ApplicationScoped
 public class WorkspaceContainerEventPublisher {
 
   @Inject Event<WorkspaceContainerStarted> started;
-
-  @Inject Event<WorkspaceReadyForServices> ready;
 
   @Inject Event<WorkspaceContainerStopping> stopping;
 
@@ -35,7 +34,7 @@ public class WorkspaceContainerEventPublisher {
   }
 
   /**
-   * {@code technicalProcessId} correlates the async bootstrap/service phases with the start's log
+   * {@code technicalProcessId} correlates the async bootstrap phase with the start's log
    * stream; {@code freshProvision} marks the container→clone transition that triggers bootstrap.
    */
   public void fireStarted(
@@ -49,18 +48,7 @@ public class WorkspaceContainerEventPublisher {
             repoId, workspaceId, workspaceRowId, technicalProcessId, freshProvision));
   }
 
-  /**
-   * Announce that bootstrap is out of the way (ran successfully, or nothing to run) — the trigger
-   * service auto-start couples to. Async like {@code started}: firing must never block the
-   * bootstrap runner's thread on service startup work.
-   */
-  public void fireReadyForServices(
-      String repoId, String workspaceId, Long workspaceRowId, String technicalProcessId) {
-    ready.fireAsync(
-        new WorkspaceReadyForServices(repoId, workspaceId, workspaceRowId, technicalProcessId));
-  }
-
-  /** Synchronous by design — settling must finish before the caller's {@code containers.rm}. */
+  /** Synchronous by design — observers must finish before the caller's {@code containers.rm}. */
   public void fireStopping(
       String repoId, String workspaceId, Long workspaceRowId, boolean graceful) {
     stopping.fire(new WorkspaceContainerStopping(repoId, workspaceId, workspaceRowId, graceful));
