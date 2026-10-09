@@ -484,10 +484,8 @@ under `services:` — run by the daemon's `ServiceSupervisor`, projected here by
 `ServiceSupervisor`, framed through `/workspaces/service/{row}/{svc}/**` and recorded in
 `service_event` — were taken out of scope and removed end to end, with nothing replacing them:
 `ServiceProxyRoute`, `/workspaces/api/service-events`, the `SERVICES`/`SERVICE_EVENTS` hint topics,
-the `qits.services.*` keys and the table (`V18`). Three remnants stay on purpose, all for daemons
-built before the removal, and each goes once the workspace image carries the services-free daemon:
-`WorkspaceContainerFactory.identityEnv` pins `QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false` (an
-old daemon defaults it to true) with no key behind it; `QitsConfig` ignores unknown properties, so
+the `qits.services.*` keys, every `SERVICE*` container env var and the table (`V19`). Two
+tolerances stay on purpose, for daemons built before the removal: `QitsConfig` ignores unknown properties, so
 an old daemon's `services:` key does not degrade its config view to empty; and the sealed-protocol
 switches (`WorkspaceDaemonRegistry.onMessage`, `WorkspaceTunnels.capabilityFor`) end in a `default`
 arm instead of naming the service records and the `SERVICE` stream target, so this compiles against

@@ -515,9 +515,8 @@ agents, telemetry and feature flows.
 (qits-947).** The concept was taken out of scope and removed end to end: the host projection
 (`ServiceSupervisor`), its event feed (`service_event`, `/workspaces/api/service-events`), the
 dev-server proxy (`/workspaces/service/{id}/{serviceId}/*`) and the auto-start coupling are deleted,
-and nothing replaces them. A container is still told `QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false`,
-because a daemon built before the removal defaults it to true; that line goes once the workspace
-image carries the services-free daemon. `AGENTS.md` lists the other two compatibility remnants.
+and nothing replaces them, nor does any `SERVICE*` env var reach a container. `AGENTS.md` lists
+the two tolerances kept for daemons built before the removal.
 
 **No longer addressable from the host at all**: `/bootstrap-commands`, `/bootstrap-commands/run` and
 `/bootstrap-commands/{stepId}/run`. They ran inside the container and the host only forwarded —
