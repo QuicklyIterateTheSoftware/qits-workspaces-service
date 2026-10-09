@@ -47,6 +47,7 @@ erDiagram
     string commissioned_token_id "length 64"
     string commissioned_token_subject "length 255"
     instant created_at
+    text dispatch_command_id
     boolean editor "not null"
     boolean entity_blocked
     text entity_id
