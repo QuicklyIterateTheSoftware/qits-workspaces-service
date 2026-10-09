@@ -65,7 +65,7 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1009.124251</qits.workspace-daemon-protocol.version>
+        <qits.workspace-daemon-protocol.version>2026.1009.131158</qits.workspace-daemon-protocol.version>
         <qits.workspace-editor-image.version>2026.1009.125522</qits.workspace-editor-image.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
@@ -79,7 +79,7 @@
              the qits/qits-workspaces-runner image every runner is told to upgrade to, so the frames
              this service speaks and the binary it hands out are one release. Moved by
              qits-maintenance on maintenance/dependencies, gated here; never by hand. -->
-        <qits.workspaces-runner-protocol.version>2026.1009.112415</qits.workspaces-runner-protocol.version>
+        <qits.workspaces-runner-protocol.version>2026.1009.130828</qits.workspaces-runner-protocol.version>
         <!-- qits-runner-javalib (qits-771): the lifecycle frames and their codec
              (qits-runner-protocol), and the install script template plus RunnerIdentity
              (qits-runner-toolkit). One release carries both, so one property pins both. -->
