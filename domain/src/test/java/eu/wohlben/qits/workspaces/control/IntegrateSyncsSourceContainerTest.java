@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 // NO @TestProfile: it overrode qits.test.origins-dir with a fresh temp directory and nothing else,
 // which is a Quarkus restart bought for an isolation TestOrigin already provides — every origin
 // goes under a UUID of its own, which is why thirty-odd classes share the shipped
-// target/workspaces-test-data without colliding. See AutoStartOffProfile; bug e6f0bdfa.
+// target/workspaces-test-data without colliding. See BootstrapAutorunOffProfile; bug e6f0bdfa.
 @QuarkusTest
 public class IntegrateSyncsSourceContainerTest {
 

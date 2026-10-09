@@ -3,9 +3,7 @@ package eu.wohlben.qits.workspaces.control;
 /**
  * The single source of truth for the workspace-daemon proxy's path shape: {@code
  * /workspaces/container/{workspaceId}/…}, forwarded verbatim to that workspace's in-container
- * {@code qits-workspace-daemon}. The sibling of {@link ServiceProxyPath}, and deliberately shaped
- * the same way — {@code /workspaces/service/{w}/{s}/*} for a dev server, {@code
- * /workspaces/container/{w}/*} for the daemon.
+ * {@code qits-workspace-daemon}.
  *
  * <p><b>Why the daemon is this service's resource and not a gateway route.</b> The gateway's route
  * table is static configuration mapping one path prefix to one {@code host:port}. A daemon is one

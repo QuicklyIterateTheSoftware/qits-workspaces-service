@@ -37,10 +37,10 @@ class WorkspaceEventBroadcasterTest {
             .subscribe()
             .withSubscriber(AssertSubscriber.create(Long.MAX_VALUE));
 
-    fire("repo-1", 1L, Topic.SERVICE_EVENTS);
+    fire("repo-1", 1L, Topic.PROMPT_ATTACHMENTS);
 
     sub.awaitItems(1, Duration.ofSeconds(2));
-    assertEquals("service-events", sub.getItems().get(0));
+    assertEquals("prompt-attachments", sub.getItems().get(0));
   }
 
   @Test
@@ -56,7 +56,7 @@ class WorkspaceEventBroadcasterTest {
             .subscribe()
             .withSubscriber(AssertSubscriber.create(Long.MAX_VALUE));
 
-    fire("repo-1", 101L, Topic.SERVICES);
+    fire("repo-1", 101L, Topic.FILES);
 
     a.awaitItems(1, Duration.ofSeconds(2));
     assertEquals(1, a.getItems().size());
@@ -124,11 +124,11 @@ class WorkspaceEventBroadcasterTest {
             .subscribe()
             .withSubscriber(AssertSubscriber.create(Long.MAX_VALUE));
 
-    fire("repo-1", 1L, Topic.SERVICES);
+    fire("repo-1", 1L, Topic.BOOTSTRAP);
     fire("repo-1", 1L, Topic.COMMANDS);
 
     sub.awaitItems(2, Duration.ofSeconds(2));
-    assertTrue(sub.getItems().contains("services"));
+    assertTrue(sub.getItems().contains("bootstrap"));
     assertTrue(sub.getItems().contains("commands"));
   }
 
@@ -139,7 +139,7 @@ class WorkspaceEventBroadcasterTest {
             .subscribe("repo-1", 1L)
             .subscribe()
             .withSubscriber(AssertSubscriber.create(Long.MAX_VALUE));
-    fire("repo-1", 1L, Topic.SERVICES);
+    fire("repo-1", 1L, Topic.FILES);
     sub.awaitItems(1, Duration.ofSeconds(2));
     assertEquals(1, broadcaster.openChannelCount());
 
@@ -151,7 +151,7 @@ class WorkspaceEventBroadcasterTest {
   @Test
   void hintsForAWorkspaceWithNoSubscribersAreSafelyDropped() {
     // No subscriber for wt-gone: firing must not throw and must open no channel.
-    fire("repo-1", 999L, Topic.SERVICES);
+    fire("repo-1", 999L, Topic.FILES);
     assertEquals(0, broadcaster.openChannelCount());
   }
 }

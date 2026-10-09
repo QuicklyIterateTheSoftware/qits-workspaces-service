@@ -2,8 +2,8 @@ package eu.wohlben.qits.workspaces.control;
 
 /**
  * A payload-free "something changed, re-read it" signal for one workspace's live channel. Fired at
- * the existing mutation choke-points (service status, service events, telemetry ingest, command
- * lifecycle) and delivered — via CDI async events — to the SSE boundary in the {@code service}
+ * the existing mutation choke-points (telemetry ingest, command lifecycle, bootstrap, the daemon's
+ * working-tree and agent reports) and delivered — via CDI async events — to the SSE boundary in the {@code service}
  * module, which pushes the {@link Topic} name to subscribed browsers. The hint carries no data: the
  * frontend reacts by re-fetching through the unchanged REST endpoints, so a dropped or missed hint
  * self-heals on the next hint or on reconnect.
@@ -12,10 +12,6 @@ public record WorkspaceChangeHint(String repoId, Long workspaceRowId, Topic topi
 
   /** The kind of change; maps 1:1 to a frontend query-invalidation. */
   public enum Topic {
-    /** A service instance's status flipped (start, ready, exit, crash, restart, degrade). */
-    SERVICES,
-    /** A service event row was persisted. */
-    SERVICE_EVENTS,
     /** The workspace's telemetry buffers got new data (debounced — highest churn). */
     TELEMETRY,
     /** A command's lifecycle changed (started, exited, terminated). */

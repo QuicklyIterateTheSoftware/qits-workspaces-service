@@ -10,7 +10,7 @@ package eu.wohlben.qits.workspaces.api;
  * <p>{@code quarkus.http.root-path} — Quarkus mounts the route router under it, so route
  * <em>patterns</em> stay relative but {@code rc.request().path()}/{@code normalizedPath()} return
  * the full path, and any handler that parses its own path must strip the prefix first ({@link
- * ServiceProxyRoute}). Only non-{@code /} when qits itself runs as a managed service (the
+ * ContainerProxyRoute}). Only non-{@code /} when qits itself runs as a managed service (the
  * qits-in-qits start script bridges {@code -Dquarkus.http.root-path}); the normal deployment's root
  * path is {@code /} and the prefix is empty.
  *

@@ -3,14 +3,11 @@ package eu.wohlben.qits.workspaces.control;
 import eu.wohlben.qits.workspaces.dto.TechnicalProcessFrame;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -23,9 +20,9 @@ import java.util.function.Consumer;
  * detach freely while the work keeps running.
  *
  * <p>Completion is a two-part predicate: the synchronous provision phase settles via {@link
- * #finishProvision}, and the asynchronous service phase (running on the CDI async observer thread)
- * is declared via {@link #expectServices} and settles one {@code service:<name>} segment per
- * auto-started service. The terminal {@code done} frame fires once both parts are in — or
+ * #finishProvision}, and the asynchronous bootstrap phase (running on the CDI async observer
+ * thread) reports via {@link #finishBootstrap} once the daemon's chain is over — passed through,
+ * succeeded or failed. The terminal {@code done} frame fires once both parts are in — or
  * immediately on a provision failure. All mutation happens under the process monitor, so a freshly
  * attached listener never interleaves replayed and live frames (same trade-off as {@code
  * CommandSession}: a stuck listener briefly stalls the producer; dead listeners are pruned on the
@@ -57,11 +54,6 @@ public final class TechnicalProcess implements WorkspaceProcessTracker.Handle {
   /** A runaway single line is truncated to this many characters. */
   private static final int MAX_LINE_CHARS = 16 * 1024;
 
-  /** The segment name prefix for per-service startup segments. */
-  public static String serviceSegment(String serviceName) {
-    return "service:" + serviceName;
-  }
-
   private static final class Segment {
     final String name;
     final List<String> head = new ArrayList<>();
@@ -90,7 +82,7 @@ public final class TechnicalProcess implements WorkspaceProcessTracker.Handle {
   private final AtomicLong seq = new AtomicLong();
 
   private Boolean provisionOk; // null while the synchronous provision phase is still running
-  private Set<String> expectedServiceSegments; // null until the service phase declared its set
+  private boolean bootstrapFinished; // false until the asynchronous bootstrap phase reported
   private boolean terminal;
   private boolean doneOk;
 
@@ -242,8 +234,8 @@ public final class TechnicalProcess implements WorkspaceProcessTracker.Handle {
   }
 
   /**
-   * The synchronous provision phase is over. On failure the process ends immediately (the service
-   * phase never happens); on success it ends once the service phase settles too.
+   * The synchronous provision phase is over. On failure the process ends immediately (the bootstrap
+   * phase never happens); on success it ends once {@link #finishBootstrap} reports too.
    */
   public synchronized void finishProvision(boolean ok) {
     if (terminal || provisionOk != null) {
@@ -302,27 +294,24 @@ public final class TechnicalProcess implements WorkspaceProcessTracker.Handle {
   }
 
   /**
-   * Declare the asynchronous service phase's full set of auto-started services (by service name;
-   * may be empty), opening one {@code service:<name>} segment per entry. Called exactly once,
-   * before the first service start, so {@code done} can never fire between two services'
-   * settlements. The first declaration wins.
+   * The asynchronous bootstrap phase is over — the chain passed through (a plain restart, the kill
+   * switch, no daemon control plane), succeeded, failed, or was handed to a manual run that owns
+   * it. The verdict rides the {@code bootstrap:<name>} segments, not this call: it only says no
+   * further phase is coming, so {@code done} fires as soon as the provision phase has reported too.
+   * Every path through {@code WorkspaceBootstrapRunner} must call it, or the process stays open
+   * until the registry's idle reaper. Idempotent.
    */
-  public synchronized void expectServices(Collection<String> serviceNames) {
-    if (terminal || expectedServiceSegments != null) {
+  public synchronized void finishBootstrap() {
+    if (terminal || bootstrapFinished) {
       return;
     }
-    expectedServiceSegments = new LinkedHashSet<>();
-    for (String name : serviceNames) {
-      String segment = serviceSegment(name);
-      expectedServiceSegments.add(segment);
-      openSegment(segment);
-    }
+    bootstrapFinished = true;
     maybeFinish();
   }
 
   /**
    * Complete a process whose work turned out to be a no-op (e.g. the container was already
-   * running): one informational segment, no service phase, immediate {@code done ok}.
+   * running): one informational segment, no bootstrap phase, immediate {@code done ok}.
    */
   public synchronized void completeNoOp(String segmentName, String note) {
     if (terminal) {
@@ -331,13 +320,13 @@ public final class TechnicalProcess implements WorkspaceProcessTracker.Handle {
     openSegment(segmentName);
     appendLine(segmentName, note);
     settleSegment(segmentName, true);
-    expectServices(List.of());
+    finishBootstrap();
     finishProvision(true);
   }
 
   /**
-   * Backstop for a process that never converges (e.g. a service stuck {@code STARTING} on a ready
-   * pattern that never matches): force the terminal {@code done failed} frame without settling the
+   * Backstop for a process that never converges (e.g. a daemon that never reports its bootstrap
+   * chain): force the terminal {@code done failed} frame without settling the
    * still-open segments. No-op once terminal.
    */
   public synchronized void forceFinish() {
@@ -349,14 +338,8 @@ public final class TechnicalProcess implements WorkspaceProcessTracker.Handle {
   }
 
   private void maybeFinish() {
-    if (terminal || provisionOk == null || !provisionOk || expectedServiceSegments == null) {
+    if (terminal || provisionOk == null || !provisionOk || !bootstrapFinished) {
       return;
-    }
-    for (String segmentName : expectedServiceSegments) {
-      Segment segment = segments.get(segmentName);
-      if (segment == null || segment.ok == null) {
-        return;
-      }
     }
     finish();
   }

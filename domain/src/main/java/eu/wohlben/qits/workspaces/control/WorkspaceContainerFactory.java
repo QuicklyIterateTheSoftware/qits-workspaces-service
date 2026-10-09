@@ -287,27 +287,6 @@ public class WorkspaceContainerFactory {
   @ConfigProperty(name = "qits.workspace.auto-push.enabled", defaultValue = "true")
   boolean autoPushEnabled;
 
-  /**
-   * Service (dev-server) supervision knobs, forwarded to the in-container daemon which supervises
-   * them itself (docs/epics/qits-workspace-daemon/ Part 4). Mirror the host-side {@code
-   * qits.services.*} so host projection and container supervision agree: the auto-start kill
-   * switch, the ready grace (no readyPattern), the restart backoff bounds, and the stop grace.
-   */
-  @ConfigProperty(name = "qits.services.autostart-enabled", defaultValue = "true")
-  boolean servicesAutostartEnabled;
-
-  @ConfigProperty(name = "qits.services.ready-grace-ms", defaultValue = "10000")
-  long serviceReadyGraceMs;
-
-  @ConfigProperty(name = "qits.services.restart-backoff-initial-ms", defaultValue = "1000")
-  long serviceBackoffInitialMs;
-
-  @ConfigProperty(name = "qits.services.restart-backoff-max-ms", defaultValue = "30000")
-  long serviceBackoffMaxMs;
-
-  @ConfigProperty(name = "qits.services.stop-grace-ms", defaultValue = "5000")
-  long serviceStopGraceMs;
-
   @Inject GitIdentity gitIdentity;
 
   /**
@@ -891,17 +870,9 @@ public class WorkspaceContainerFactory {
     }
     // The path ContainerProxyRoute addresses this container at. The proxy forwards a caller's path
     // untouched, so the daemon has to be told which leading part of it is its own address rather
-    // than a route it serves — the same arrangement a spawned dev server has with QITS_PUBLIC_BASE,
-    // and the reason neither hop has to rewrite anything. Injected from ContainerProxyPath so the
+    // than a route it serves, and the reason neither hop has to rewrite anything. Injected from ContainerProxyPath so the
     // literal is spelled once: the route and the container's idea of the route cannot drift.
     container.env("QITS_WORKSPACE_DAEMON_API_BASE_PATH", ContainerProxyPath.base(rowId));
-    // The per-workspace half of every web-viewable service's public base. The daemon spawns the
-    // dev servers, so it is the daemon that must bake QITS_PUBLIC_BASE (= this base + the declared
-    // service id + the declared web-view base-path) into each service's environment — on every
-    // spawn, crash-restart included (N3: nothing told the respawned dev server its base, and the
-    // verbatim service proxy 404'd the framed view). Same told-never-derived arrangement as the
-    // API base path above.
-    container.env("QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE", ServiceProxyPath.PREFIX + rowId);
     // The identity and behaviour half of the environment, shared with the runner spec
     // (RunnerWorkspaceSpecs) so the two cannot drift. Written in place, in this order: env order is
     // part of the spec, and WorkspaceContainerFactoryGoldenSpecTest pins it.
@@ -1161,8 +1132,8 @@ public class WorkspaceContainerFactory {
   /**
    * The identity and behaviour environment of a workspace container — who it is ({@code
    * QITS_WORKSPACE_DAEMON_WORKSPACE_ID}/{@code _REPOSITORY_ID}/{@code _BRANCH}/{@code _PARENT}/{@code
-   * _PROJECT_ID}/{@code _REPO_NAME}/{@code _ENTITY_*}) and how its daemon behaves (the bootstrap,
-   * auto-push and service knobs) — plus the {@code qits.project} label resolved on the way.
+   * _PROJECT_ID}/{@code _REPO_NAME}/{@code _ENTITY_*}) and how its daemon behaves (the bootstrap and
+   * auto-push knobs) — plus the {@code qits.project} label resolved on the way.
    *
    * <p><b>Shared by the DIRECT spec and the runner spec</b> ({@link RunnerWorkspaceSpecs}, qits-851),
    * so the two cannot drift: the runner spec is composed from the same row facts and must tell the
@@ -1275,20 +1246,11 @@ public class WorkspaceContainerFactory {
     // The auto-push kill switch the daemon honours when it pushes committed work on its own
     // (docs/epics/qits-workspace-daemon/ bidirectional auto-sync).
     env.accept("QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED", String.valueOf(autoPushEnabled));
-    // Service (dev-server) supervision, self-run by the daemon as the boot-sequence tail (Part 4):
-    // the auto-start kill switch + the knobs the in-container ServiceSupervisor honours.
-    env.accept(
-        "QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART", String.valueOf(servicesAutostartEnabled));
-    env.accept(
-        "QITS_WORKSPACE_DAEMON_SERVICE_READY_GRACE_MS", String.valueOf(serviceReadyGraceMs));
-    env.accept(
-        "QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_INITIAL_MS",
-        String.valueOf(serviceBackoffInitialMs));
-    env.accept(
-        "QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_MAX_MS",
-        String.valueOf(serviceBackoffMaxMs));
-    env.accept(
-        "QITS_WORKSPACE_DAEMON_SERVICE_STOP_GRACE_MS", String.valueOf(serviceStopGraceMs));
+    // Workspace services are gone (qits-947), but a daemon built before their removal defaults
+    // this to true and would still auto-start whatever a checkout declares under `services:`, with
+    // no host left to see it. Pinned off, with no config key behind it; the line goes once the
+    // workspace image carries the services-free daemon.
+    env.accept("QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART", "false");
   }
 
   private static String serviceBase(String configured) {

@@ -217,6 +217,8 @@ class DaemonControlSocketTest {
   void readConfigDeserializesTheDaemonsConfigViewIntoQitsConfig() throws Exception {
     // A QitsConfig-shaped JSON as the daemon's ConfigJson emits it (camelCase keys, empty
     // collections present) — readConfig must map it straight into a QitsConfig over the socket.
+    // It still carries a pre-qits-947 daemon's `daemons` (services) key, which the host no longer
+    // reads: it must be ignored, not degrade the whole view to an empty config with a warning.
     configJson =
         "{\"repository\":{\"mainBranch\":\"main\",\"archetype\":\"SERVICE\"},"
             + "\"frameworks\":[],"
@@ -240,8 +242,7 @@ class DaemonControlSocketTest {
       assertEquals(1, config.actions().size());
       assertEquals("build", config.actions().get(0).name());
       assertEquals(Map.of("CI", "true"), config.actions().get(0).environment());
-      assertEquals(1, config.services().size());
-      assertEquals(8080, config.services().get(0).webView().port());
+      assertTrue(config.bootstrap().isEmpty());
     }
   }
 
@@ -249,7 +250,7 @@ class DaemonControlSocketTest {
   void readConfigDeserializesExplicitIdsAndDefaultsMissingIdsToNames() throws Exception {
     // Part 5: every declared entry carries an id: — explicit when the file declares one, defaulting
     // to the entry's name when absent. The registry's Jackson deserialization into QitsConfig must
-    // honor both.
+    // honor both — and step over an old daemon's `services` entries without a warning.
     configJson =
         "{\"frameworks\":[],"
             + "\"actions\":["
@@ -271,8 +272,7 @@ class DaemonControlSocketTest {
       QitsConfig config = read.get().config();
       assertEquals("build-ci", config.actions().get(0).id());
       assertEquals("test", config.actions().get(1).id(), "id-less action defaults id to name");
-      assertEquals("dev-server", config.services().get(0).id());
-      assertEquals("logs", config.services().get(1).id(), "id-less service defaults id to name");
+      assertEquals(null, read.get().warning(), "an old daemon's services key is not an error");
       assertEquals("install-deps", config.bootstrap().get(0).id());
       assertEquals("seed", config.bootstrap().get(1).id(), "id-less step defaults id to name");
     }

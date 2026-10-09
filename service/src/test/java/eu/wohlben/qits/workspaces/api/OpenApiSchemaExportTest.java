@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>The test classpath is indexed too, so any {@code @Path} resource under {@code src/test} lands
  * in the committed document unless it is {@code @Operation(hidden = true)} — see {@code
- * IdentityEchoResource}. The raw Vert.x routes ({@code CaptureCorsRoute}, {@code ServiceProxyRoute})
+ * IdentityEchoResource}. The raw Vert.x routes ({@code CaptureCorsRoute}, {@code ContainerProxyRoute})
  * and the daemon control socket appear in no document at all; they are not JAX-RS.
  */
 @QuarkusTest

@@ -8,8 +8,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * Test helper: records every {@link WorkspaceContainerStarted} the async event bus delivers, so
  * tests can assert which {@code ensureContainer} paths fire it (cold transitions) and which don't
- * (the already-running short-circuit). Independent of {@code ServiceLifecycleCoupler} and its kill
- * switch.
+ * (the already-running short-circuit).
  */
 @ApplicationScoped
 public class WorkspaceContainerStartedRecorder {

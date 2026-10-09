@@ -33,12 +33,11 @@ import org.jboss.logging.Logger;
  * The workspace-daemon reverse proxy: {@code /workspaces/container/{workspaceId}/*} forwards
  * verbatim to that workspace's in-container {@code qits-workspace-daemon}, reached through the
  * reverse tunnel its daemon dialled back for — the only way to a daemon since qits-780 deleted the
- * direct {@code container:13338} fallback. The sibling of {@link
- * ServiceProxyRoute}, and modelled on it almost line for line — same path arithmetic, same
- * off-event-loop lookup, same "resolve the target from our own state, never from the request" rule.
+ * direct {@code container:13338} fallback. The target is looked up off the event loop and resolved
+ * from our own state, never from the request.
  *
  * <p><b>This is the only way to reach a daemon.</b> Its HTTP API is where the file browser, the
- * commands surface, the coding-agent surface, the service and bootstrap surfaces and the two
+ * commands surface, the coding-agent surface, the bootstrap surface and the two
  * interactive websockets all live, and until this route existed none of them had an address at all
  * (migration-plan.md §9 item 16). The daemon is deliberately not a gateway route: the gateway's
  * table is static configuration mapping one prefix to one {@code host:port}, and a daemon is one
@@ -49,9 +48,7 @@ import org.jboss.logging.Logger;
  * {@code /workspaces/container/{workspaceId}/files}, not {@code /files}, and is <em>configured</em>
  * to know that leading part is its own address —
  * {@code WorkspaceContainerFactory} injects {@link ContainerProxyPath#base} as
- * {@code QITS_WORKSPACE_DAEMON_API_BASE_PATH} at container creation. That is the same arrangement
- * {@link ServiceProxyRoute} has with a dev server's {@code QITS_PUBLIC_BASE}, and it is a
- * deliberate rule rather than an inherited shape: a hop that rewrites a path leaves the two ends
+ * {@code QITS_WORKSPACE_DAEMON_API_BASE_PATH} at container creation. That is a deliberate rule rather than an inherited shape: a hop that rewrites a path leaves the two ends
  * disagreeing about the destination's own address, and the disagreement shows up in redirects,
  * generated links and logs, a long way from the rewrite. Stripping here would also have to be done
  * twice — the upgrade path below takes the URI straight off the inbound request — so the rewrite
@@ -92,7 +89,20 @@ public class ContainerProxyRoute {
   @ConfigProperty(name = "qits.workspace.daemon-api-token", defaultValue = "qits-workspace-daemon")
   String daemonApiToken;
 
-  /** See {@link ServiceProxyRoute}'s field of the same name for why this key may be read here. */
+  /**
+   * Only relevant when qits itself runs under a path prefix (a qits-in-qits service bridges {@code
+   * -Dquarkus.http.root-path}): the route is registered on the root-path-mounted router, so it
+   * matches relative to the prefix — but {@code rc.request().path()} returns the FULL path, so the
+   * segment parse must strip the prefix first. {@code "/"} (the normal deployment) strips nothing.
+   *
+   * <p>This one may keep reading the {@code quarkus.*} key, unlike {@link CaptureCorsRoute}, and the
+   * difference is worth stating because the two look identical. Build-time config items are absent
+   * from a native image's runtime config, so such a lookup silently takes its {@code defaultValue}
+   * there — harmless only when the default is also the deployed value. It is: every normal
+   * deployment runs at root path {@code /}, and the one shape that does not bridges {@code
+   * -Dquarkus.http.root-path} as a <em>system property</em>, which does reach the runtime config of
+   * a binary. {@code quarkus.rest.path} had neither property, which is why it moved.
+   */
   @ConfigProperty(name = "quarkus.http.root-path", defaultValue = "/")
   String rootPath;
 
@@ -189,8 +199,7 @@ public class ContainerProxyRoute {
   /**
    * Answer differently for each way a daemon can be absent. A naive proxy reports "no such
    * workspace", "container not running" and "daemon never connected" as one indistinguishable 502,
-   * and then every daemon problem looks like the same problem — {@link ServiceProxyRoute} already
-   * distinguishes its states for that reason.
+   * and then every daemon problem looks like the same problem.
    */
   private void route(RoutingContext rc, Resolved resolved) {
     if (resolved.tunnel() != null) {
@@ -433,9 +442,8 @@ public class ContainerProxyRoute {
   }
 
   /**
-   * Errors here answer JSON, not the qits-branded HTML {@link ServiceProxyRoute} uses. That route's
-   * client is a browser rendering a framed dev server; this one's is code calling a JSON API, and
-   * the shape matches what the daemon itself answers a failure with ({@code {"message": …}}) so a
+   * Errors here answer JSON, not the qits-branded HTML {@link EditorProxyRoute} uses. That route's
+   * client is a browser rendering the editor; this one's is code calling a JSON API, and the shape matches what the daemon itself answers a failure with ({@code {"message": …}}) so a
    * client's error handling does not fork on which hop failed.
    */
   private void respond(RoutingContext rc, int status, String message) {

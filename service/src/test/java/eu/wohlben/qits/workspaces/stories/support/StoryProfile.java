@@ -71,18 +71,15 @@ import java.util.Map;
  *       fetches: more traffic, and the same traffic every run.
  * </ul>
  *
- * <h2>Two things are OFF, and both are stated coverage gaps</h2>
+ * <h2>One thing is OFF, and it is a stated coverage gap</h2>
  *
- * <p><b>{@code qits.bootstrap.autorun-enabled=false} and {@code qits.services.autostart-enabled=
- * false}.</b> When a container start succeeds the host fires {@code WorkspaceContainerStarted}, and
- * two asynchronous CDI observers follow it: one waits for the daemon's autonomous bootstrap chain,
- * the other asks the freshly connected daemon for its config over the control socket and starts the
- * dev servers it declares. Both run on a schedule the story does not control, so the config read
- * would draw an arrow in whichever diagram happened to be open — and the bootstrap await holds the
- * technical process open for its whole chain timeout, which is what the workspace story polls to
- * learn that the provision is over. <b>No story here covers the bootstrap chain or the dev-server
- * autostart</b>; both are covered by the {@code @QuarkusTest} suites and by the docker-backed
- * {@code Daemon*IT}, where a real daemon really runs them.
+ * <p><b>{@code qits.bootstrap.autorun-enabled=false}.</b> When a container start succeeds the host
+ * fires {@code WorkspaceContainerStarted}, and an asynchronous CDI observer follows it and waits for
+ * the daemon's autonomous bootstrap chain. It runs on a schedule the story does not control, and the
+ * bootstrap await holds the technical process open for its whole chain timeout, which is what the
+ * workspace story polls to learn that the provision is over. <b>No story here covers the bootstrap
+ * chain</b>; it is covered by the {@code @QuarkusTest} suites and by the docker-backed {@code
+ * Daemon*IT}, where a real daemon really runs it.
  *
  * <p><b>The scheduler is left ON</b> and that is deliberate rather than an oversight. This service's
  * two {@code @Scheduled} methods are the agent-activity sweep (in-memory, no network) and the
@@ -188,7 +185,6 @@ public class StoryProfile implements QuarkusTestProfile, NecessaryTestProfileDup
     config.put("qits.workspace.domain", "");
 
     // --- what does not start -------------------------------------------------------------------------
-    config.put("qits.services.autostart-enabled", "false");
     config.put("qits.bootstrap.autorun-enabled", "false");
 
     // --- dark outside a deployment, like %dev/%test ---------------------------------------------------

@@ -7,10 +7,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Test double for {@link WorkspaceDaemonLiveness}: a workspace is "daemon-live" only once a test
- * {@linkplain #markLive marks} it, so by default every {@code @QuarkusTest} sees no live daemon and
- * the host {@code ServiceSupervisor} keeps its tmux path (the degradation contract). A projection
- * test marks a workspace live to exercise the daemon-backed path. Keep the {@code domain}/{@code
- * service} copies in sync.
+ * {@linkplain #markLive marks} it, so by default every {@code @QuarkusTest} sees no live daemon. A test
+ * marks a workspace live to exercise the daemon-backed path.
  */
 @Mock
 @ApplicationScoped

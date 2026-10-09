@@ -147,11 +147,6 @@ class AgentReadAccessTest {
   }
 
   @Test
-  void theServiceEventsAreReadable() {
-    asAgent().get("/workspaces/api/service-events").then().statusCode(admitted());
-  }
-
-  @Test
   void thePinsAreReadable() {
     asAgent().get("/workspaces/api/pins").then().statusCode(admitted());
   }

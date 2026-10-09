@@ -15,7 +15,6 @@ import eu.wohlben.qits.containers.client.ContainersWire.Spec;
 import eu.wohlben.qits.containers.client.ContainersWire.VolumeEnvelope;
 import eu.wohlben.qits.containers.client.ContainersWire.VolumeMount;
 import eu.wohlben.qits.workspaces.control.ContainerRuntime;
-import eu.wohlben.qits.workspaces.control.ProxyOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceContainer;
 import eu.wohlben.qits.workspaces.control.WorkspaceContainerFactory;
 import eu.wohlben.qits.workspaces.error.InternalServerErrorException;
@@ -647,21 +646,6 @@ public class WorkspaceContainers implements ContainerRuntime {
       infos.add(new ContainerInfo(name, workspaceId, null, null, running));
     }
     return infos;
-  }
-
-  /**
-   * On the shared network qits reaches a container by its DNS name and the real container port — no
-   * host publish, no create-time port constraint, and no round trip to find out.
-   *
-   * <p><b>The {@code bridge-ip} mode is gone with the key that selected it.</b> It read the
-   * container's IP off a {@code docker inspect} for plain-Linux hosts where the bridge is
-   * host-routable; there is no inspect to make, and under the swarm overlay this platform runs on
-   * there is no host-routable bridge address either. What is left is the mode every deployment
-   * already used.
-   */
-  @Override
-  public ProxyOrigin resolveTarget(String container, int containerPort) {
-    return new ProxyOrigin(container, containerPort);
   }
 
   // --- Per-workspace /workspace volumes ---------------------------------------------------------

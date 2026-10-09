@@ -19,7 +19,6 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -62,13 +61,6 @@ import org.jboss.logging.Logger;
  * between the two would make the pooled connection behind a keep-alive an editor stream or an API
  * stream depending on which request opened it first, which is the ephemeral-port hazard above
  * pointed inward. Two listeners, two servers, two clients, closed independently.
- *
- * <p><b>And for the same reason the SERVICE id is part of it too</b> (qits-625, qits-815). A
- * {@link StreamTarget#SERVICE} stream names one supervised dev server by its id, and two dev
- * servers of one workspace are two listeners inside its container exactly as the API and the
- * editor are: a pooled connection behind one service's port must never be handed to a request for
- * the other's. So the key is {@code (workspace, target, serviceId)}, with the id null for every
- * target that is not a service.
  */
 @ApplicationScoped
 public class WorkspaceTunnels {
@@ -139,27 +131,16 @@ public class WorkspaceTunnels {
    */
   static final int EDITOR_CAPABILITY_VERSION = 5;
 
-  /**
-   * The first capability version whose daemon understands {@link StreamTarget#SERVICE} — a stream
-   * to one of its supervised dev servers, named by id and never by port (qits-625, qits-814). A
-   * constant here for {@link #EDITOR_CAPABILITY_VERSION}'s reason, and gated for the same one: an
-   * older daemon decodes the unknown target as absent, which means {@code API}, and would serve its
-   * own API to a browser asking for a dev server.
-   */
-  public static final int SERVICE_CAPABILITY_VERSION = 6;
-
   private final ConcurrentHashMap<TunnelKey, Tunnel> tunnels = new ConcurrentHashMap<>();
 
   /** Minted-but-unclaimed nonces, across every workspace. Single-use by construction. */
   private final ConcurrentHashMap<String, Parked> pending = new ConcurrentHashMap<>();
 
   /**
-   * What a tunnel is one of: a workspace and the listener inside its container — the target, and
-   * for a {@link StreamTarget#SERVICE} which service. Every part is needed: see the class note on
-   * why one listening port may not be shared between two listeners. {@code serviceId} is null for
-   * every other target.
+   * What a tunnel is one of: a workspace and the listener inside its container. Both parts are
+   * needed: see the class note on why one listening port may not be shared between two listeners.
    */
-  private record TunnelKey(Long workspaceId, StreamTarget target, String serviceId) {}
+  private record TunnelKey(Long workspaceId, StreamTarget target) {}
 
   /** One (workspace, target) tunnel: its listener, its client, and the sockets it has accepted. */
   private static final class Tunnel {
@@ -262,26 +243,11 @@ public class WorkspaceTunnels {
    * state gate can answer at once.
    */
   public Optional<TunnelOrigin> originFor(Long workspaceRowId, StreamTarget target) {
-    return originFor(workspaceRowId, target, null);
-  }
-
-  /**
-   * The same, for a {@link StreamTarget#SERVICE}: the dev server {@code serviceId} declares, which
-   * the daemon resolves to its own supervised web-view port (qits-625, qits-815). The id is part of
-   * the tunnel's key — two services, two listeners — and is ignored for every other target. A
-   * SERVICE request with no id names nothing and resolves to nothing.
-   */
-  public Optional<TunnelOrigin> originFor(
-      Long workspaceRowId, StreamTarget target, String serviceId) {
     if (!enabled || workspaceRowId == null) {
       return Optional.empty();
     }
     StreamTarget resolved = target == null ? StreamTarget.API : target;
-    String id = resolved == StreamTarget.SERVICE ? serviceId : null;
-    if (resolved == StreamTarget.SERVICE && (id == null || id.isBlank())) {
-      return Optional.empty();
-    }
-    TunnelKey key = new TunnelKey(workspaceRowId, resolved, id);
+    TunnelKey key = new TunnelKey(workspaceRowId, resolved);
     WorkspaceDaemonInfo.Info info = registry.lookup(workspaceRowId).orElse(null);
     if (info == null || info.capabilityVersion() < capabilityFor(key.target())) {
       // No daemon, or one too old for this target: for the API, one that still listens on qits-net
@@ -305,26 +271,16 @@ public class WorkspaceTunnels {
   }
 
   /**
-   * The capability version {@code workspaceRowId}'s connected daemon announced, or empty when none
-   * is connected. What lets a caller tell "no daemon" from "a daemon too old for this target" —
-   * {@link #originFor} answers both with an empty origin, and the two deserve different answers.
+   * The lowest capability version whose daemon can serve a stream to {@code target}. Any target
+   * this side does not open a tunnel to answers {@link Integer#MAX_VALUE}, so no daemon qualifies:
+   * the protocol jar may still carry the dev-server target qits-947 removed, and a default arm
+   * rather than a named case keeps this compiling against it and against the jar without it.
    */
-  public OptionalInt daemonCapability(Long workspaceRowId) {
-    if (workspaceRowId == null) {
-      return OptionalInt.empty();
-    }
-    return registry
-        .lookup(workspaceRowId)
-        .map(info -> OptionalInt.of(info.capabilityVersion()))
-        .orElse(OptionalInt.empty());
-  }
-
-  /** The lowest capability version whose daemon can serve a stream to {@code target}. */
   public static int capabilityFor(StreamTarget target) {
     return switch (target) {
       case API -> DaemonProtocol.TUNNEL_CAPABILITY_VERSION;
       case EDITOR -> EDITOR_CAPABILITY_VERSION;
-      case SERVICE -> SERVICE_CAPABILITY_VERSION;
+      default -> Integer.MAX_VALUE;
     };
   }
 
@@ -348,9 +304,8 @@ public class WorkspaceTunnels {
     Tunnel tunnel = new Tunnel(key, bound, client, connectedAt, dialBackFor(key.workspaceId()));
     tunnels.put(key, tunnel);
     LOG.debugf(
-        "daemon %s%s tunnel for workspace %s listening on 127.0.0.1:%s",
+        "daemon %s tunnel for workspace %s listening on 127.0.0.1:%s",
         key.target(),
-        key.serviceId() == null ? "" : " " + key.serviceId(),
         key.workspaceId(),
         Integer.valueOf(bound.actualPort()));
     return tunnel;
@@ -435,8 +390,7 @@ public class WorkspaceTunnels {
             });
     // The tunnel's dial-back rule rides the nonce, so the route checks it without a row read.
     pending.put(nonce, new Parked(workspaceId, socket, timerId, early, tunnel.dialBack));
-    registry.requestStream(
-        workspaceId, nonce, STREAM_PATH_PREFIX + nonce, key.target(), key.serviceId());
+    registry.requestStream(workspaceId, nonce, STREAM_PATH_PREFIX + nonce, key.target());
   }
 
   /**

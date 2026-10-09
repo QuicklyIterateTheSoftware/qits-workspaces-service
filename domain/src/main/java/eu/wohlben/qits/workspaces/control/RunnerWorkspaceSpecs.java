@@ -37,12 +37,11 @@ import java.util.Map;
  * one too (qits-1084), and its DIRECT spec carries it through the same two methods; only a DIRECT
  * row on no edge plane still holds the client pair.
  *
- * <p><b>The daemon API handshake and its two path bases are the DIRECT spec's</b>, value for value:
+ * <p><b>The daemon API handshake and its path base are the DIRECT spec's</b>, value for value:
  * {@code QITS_WORKSPACE_DAEMON_API_TOKEN} (without it the daemon's API never binds, and the
- * terminal and file editor that reach it over the tunnel have nothing to talk to), {@code
- * QITS_WORKSPACE_DAEMON_API_BASE_PATH} and {@code QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE}. All
- * three are host-to-daemon values — a constant and two paths of this service's own routes — and
- * name no address, so the plane has nothing to say about them.
+ * terminal and file editor that reach it over the tunnel have nothing to talk to) and {@code
+ * QITS_WORKSPACE_DAEMON_API_BASE_PATH}. Both are host-to-daemon values — a constant and a path of
+ * this service's own routes — and name no address, so the plane has nothing to say about them.
  *
  * <p><b>The memory limits are the taking runner's</b> (qits-951): its row's {@code
  * workspaceMemoryLimit}/{@code workspaceMemorySwapLimit} where set, the factory's configured
@@ -98,10 +97,9 @@ public class RunnerWorkspaceSpecs {
     // The addresses, in the DIRECT spec's order, every one a public edge name off the plane — the
     // method a token-holding DIRECT row's spec writes them with too (qits-1084).
     WorkspaceContainerFactory.addressEnv(plane, row.id, env::put);
-    // The two path bases the DIRECT spec writes here, the same values: the daemon is told which
-    // leading part of a proxied path is its own address, and what each dev server's public base is.
+    // The path base the DIRECT spec writes here, the same value: the daemon is told which leading
+    // part of a proxied path is its own address.
     env.put("QITS_WORKSPACE_DAEMON_API_BASE_PATH", ContainerProxyPath.base(row.id));
-    env.put("QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE", ServiceProxyPath.PREFIX + row.id);
     factory.identityEnv(
         row.repositoryId,
         row.workspaceId,

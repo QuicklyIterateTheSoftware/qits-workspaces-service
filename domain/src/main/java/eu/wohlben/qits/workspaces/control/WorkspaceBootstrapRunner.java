@@ -13,7 +13,6 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import java.time.Duration;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -24,33 +23,31 @@ import org.jboss.logging.Logger;
 
 /**
  * Surfaces the in-container workspace-daemon's bootstrap chain on the host: the daemon runs the
- * chain itself (from its own {@code .qits-config.yml}, between the self-clone and service start —
+ * chain itself (from its own {@code .qits-config.yml}, right after the self-clone —
  * docs/epics/qits-workspace-daemon/ Part 3); this runner <b>awaits</b> it over the control socket
- * ({@link WorkspaceBootstrapDriver}), records each step's outcome ({@link BootstrapRunService}),
- * settles the {@code bootstrap:<name>} process segments, and gates service auto-start on the
- * result. The chain execution that used to live here (host {@code docker exec} of each command)
- * moved into the daemon; the host no longer touches the container to run bootstrap.
+ * ({@link WorkspaceBootstrapDriver}), records each step's outcome ({@link BootstrapRunService}) and
+ * settles the {@code bootstrap:<name>} process segments. The chain execution that used to live here
+ * (host {@code docker exec} of each command) moved into the daemon; the host no longer touches the
+ * container to run bootstrap.
  *
  * <ul>
- *   <li><b>Fresh provision</b> — observes {@link WorkspaceContainerStarted} (async, the {@code
- *       ServiceLifecycleCoupler} precedent) and awaits the daemon's chain only for {@code
- *       freshProvision} transitions (a bare clone was just bootstrapped; a restarted container kept
- *       its state, and the daemon does not re-run). A plain restart, or the autorun kill switch,
- *       passes straight through to service auto-start.
+ *   <li><b>Fresh provision</b> — observes {@link WorkspaceContainerStarted} (async) and awaits the
+ *       daemon's chain only for {@code freshProvision} transitions (a bare clone was just
+ *       bootstrapped; a restarted container kept its state, and the daemon does not re-run). A
+ *       plain restart, or the autorun kill switch, passes straight through.
  *   <li><b>Manual re-run</b> — {@link #runChainAsync}/{@link #runSingleAsync} send the daemon a
  *       re-run request; the recovery path after a failed provision-time chain.
  * </ul>
  *
- * <p>Sequencing vs service auto-start is structural: this runner is the only firer of {@link
- * WorkspaceContainerEventPublisher#fireReadyForServices} — on pass-through immediately, and after a
- * successful chain (or manual full-chain run). A <b>failed chain never fires it</b>: service
- * auto-start is skipped — a dev server on an unbootstrapped checkout would only burn its restart
- * budget crash-looping (and qits' own dogfood build guard would fail the moment something listens
- * on the dev port). The failure surfaces on the workspace surface (BOOTSTRAP hints over SSE).
+ * <p>The bootstrap phase is the last phase of a streamed start, so this runner owns its end: every
+ * path through {@link #onContainerStarted} — pass-through, success, failure, an unexpected throw, or
+ * yielding to a manual run — calls {@link TechnicalProcess#finishBootstrap} on the start's process.
+ * Miss one and the start stays open until the registry's idle reaper. The failure itself surfaces
+ * on the workspace surface (BOOTSTRAP hints over SSE) and in the failed {@code bootstrap:} segment.
  *
  * <p>Reentrancy: a manual run's {@code ensureContainer} may itself fresh-provision and fire {@link
  * WorkspaceContainerStarted} — the per-workspace in-flight guard makes the event-triggered await
- * yield to the already-running manual one (which fires ready itself on success).
+ * yield to the already-running manual one.
  */
 @ApplicationScoped
 public class WorkspaceBootstrapRunner {
@@ -62,8 +59,6 @@ public class WorkspaceBootstrapRunner {
   @Inject WorkspaceService workspaceService;
 
   @Inject WorkspaceResolver workspaceResolver;
-
-  @Inject WorkspaceContainerEventPublisher containerEvents;
 
   @Inject WorkspaceChangePublisher changePublisher;
 
@@ -79,7 +74,7 @@ public class WorkspaceBootstrapRunner {
   /**
    * The socket-backed driver that awaits (and re-triggers) the daemon's chain. Optional — apps
    * without the backend (cli) have no bean; when it is absent there is no daemon to run bootstrap,
-   * so the workspace passes straight through to services (the checkout still exists).
+   * so the workspace passes straight through (the checkout still exists).
    */
   @Inject Instance<WorkspaceBootstrapDriver> driver;
 
@@ -173,40 +168,34 @@ public class WorkspaceBootstrapRunner {
   void onContainerStarted(@ObservesAsync WorkspaceContainerStarted evt) {
     TechnicalProcess process = processRegistry.find(evt.technicalProcessId()).orElse(null);
     if (!evt.freshProvision() || !autorunEnabled || driver.isUnsatisfied()) {
-      // Plain restart, kill switch, or no daemon control plane: nothing between the container and
-      // its services — the daemon didn't (re)run the chain, so go straight to auto-start.
-      containerEvents.fireReadyForServices(
-          evt.repoId(), evt.workspaceId(), evt.workspaceRowId(), evt.technicalProcessId());
+      // Plain restart, kill switch, or no daemon control plane: the daemon didn't (re)run the
+      // chain, so there is no bootstrap phase to wait for.
+      if (process != null) {
+        process.finishBootstrap();
+      }
       return;
     }
     if (inFlight.putIfAbsent(key(evt.repoId(), evt.workspaceId()), Boolean.TRUE) != null) {
-      // A manual run provisioned this container and owns the chain; it fires ready on success. This
-      // start's process can't observe that run (its ready event carries no process id), so close
-      // its
-      // stream cleanly rather than hang it. (Residual limitation: a green Start here does not vouch
-      // for the delegated chain — see
+      // A manual run provisioned this container and owns the chain. This start's process can't
+      // observe that run, so close its stream cleanly rather than hang it. (Residual limitation: a
+      // green Start here does not vouch for the delegated chain — see
       // docs/issues/2026-07-19_streamed-start-verdict-delegated-bootstrap.md.)
       if (process != null) {
         process.appendLine(
             "bootstrap",
             "A manually triggered bootstrap run is already in flight and owns this chain — its"
-                + " outcome and the service phase are tracked on the workspace Bootstrap tab.");
+                + " outcome is tracked on the workspace Bootstrap tab.");
         process.settleSegment("bootstrap", true);
-        process.expectServices(List.of());
+        process.finishBootstrap();
       }
       return;
     }
     try {
-      Optional<WorkspaceBootstrapDriver.Result> result =
-          awaitChain(evt.repoId(), evt.workspaceId(), evt.workspaceRowId(), process);
-      boolean ok = result.map(WorkspaceBootstrapDriver.Result::ok).orElse(false);
-      if (ok) {
-        containerEvents.fireReadyForServices(
-            evt.repoId(), evt.workspaceId(), evt.workspaceRowId(), evt.technicalProcessId());
-      } else if (process != null) {
-        // Failed chain (or no daemon answered): no service phase. Declaring the empty set ends the
-        // process now — its verdict is already `failed` via the failed bootstrap segment.
-        process.expectServices(List.of());
+      awaitChain(evt.repoId(), evt.workspaceId(), evt.workspaceRowId(), process);
+      // Success or failure (or no daemon answered), the bootstrap phase is over: end the process
+      // now. A failed chain's verdict is already `failed` via its failed bootstrap segment.
+      if (process != null) {
+        process.finishBootstrap();
       }
     } catch (RuntimeException e) {
       LOG.errorf(
@@ -217,7 +206,7 @@ public class WorkspaceBootstrapRunner {
       if (process != null) {
         process.appendLine("bootstrap", "Bootstrap failed unexpectedly: " + e.getMessage());
         process.settleSegment("bootstrap", false);
-        process.expectServices(List.of());
+        process.finishBootstrap();
       }
     } finally {
       inFlight.remove(key(evt.repoId(), evt.workspaceId()));
@@ -228,8 +217,8 @@ public class WorkspaceBootstrapRunner {
   }
 
   /**
-   * Re-run the whole chain on demand (async; progress arrives over BOOTSTRAP hints). On success,
-   * service auto-start proceeds — the recovery path after a failed provision-time run.
+   * Re-run the whole chain on demand (async; progress arrives over BOOTSTRAP hints) — the recovery
+   * path after a failed provision-time run.
    */
   public void runChainAsync(Long id) {
     Workspace workspace = workspaceResolver.resolveActive(id);
@@ -241,16 +230,12 @@ public class WorkspaceBootstrapRunner {
         id,
         () -> {
           workspaceService.ensureContainer(id);
-          Optional<WorkspaceBootstrapDriver.Result> result =
-              runDaemon(repoId, workspaceId, id, null, null);
-          if (result.map(WorkspaceBootstrapDriver.Result::ok).orElse(false)) {
-            containerEvents.fireReadyForServices(repoId, workspaceId, id, null);
-          }
+          runDaemon(repoId, workspaceId, id, null, null);
         });
   }
 
   /**
-   * Re-run one step on demand (async). Does not touch service auto-start. {@code stepId} is the
+   * Re-run one step on demand (async). {@code stepId} is the
    * config-declared {@code id:} (which defaults to the step name) — resolved against the
    * workspace's ConfigView to the step name the daemon understands.
    */

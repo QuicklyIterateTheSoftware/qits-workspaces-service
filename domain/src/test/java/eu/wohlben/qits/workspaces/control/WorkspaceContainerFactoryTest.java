@@ -96,13 +96,6 @@ class WorkspaceContainerFactoryTest {
     f.idpUrl = "http://qits-idp:8080/idp";
     // Mirrors the shipped default (qits.bootstrap.autorun-enabled): the daemon self-runs bootstrap.
     f.bootstrapAutorunEnabled = true;
-    // Mirrors the shipped qits.services.* defaults, forwarded to the daemon's in-container
-    // ServiceSupervisor (Part 4).
-    f.servicesAutostartEnabled = true;
-    f.serviceReadyGraceMs = 10000;
-    f.serviceBackoffInitialMs = 1000;
-    f.serviceBackoffMaxMs = 30000;
-    f.serviceStopGraceMs = 5000;
     // A live project scope, so the daemon self-clones name-addressed. Stubbed (the real resolver
     // needs a tx + DB); the no-scope fallback has its own test.
     f.nameResolver =
@@ -201,10 +194,6 @@ class WorkspaceContainerFactoryTest {
     // ContainerProxyPath.base: the daemon in the other repo matches this string, so a test that
     // computed it the same way the production code does would rename itself along with the bug.
     assertEnv(c, "QITS_WORKSPACE_DAEMON_API_BASE_PATH", "/workspaces/container/1/");
-    // The per-workspace half of QITS_PUBLIC_BASE, which the daemon completes with the declared
-    // service id (+ web-view base-path) at every spawn. Literal for the same cross-repo reason as
-    // above: ServiceProxyRoute's verbatim proxy answers under exactly this prefix.
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE", "/workspaces/service/1");
     assertEnv(c, "QITS_WORKSPACE_DAEMON_WORKSPACE_ID", "work");
     assertEnv(c, "QITS_WORKSPACE_DAEMON_REPOSITORY_ID", "repo12345678abc");
     assertEnv(c, "QITS_WORKSPACE_DAEMON_BRANCH", "main");
@@ -216,8 +205,9 @@ class WorkspaceContainerFactoryTest {
     assertEnv(c, "QITS_WORKSPACE_DAEMON_REPO_NAME", "my-repo");
     // The bootstrap kill switch the daemon honours when it self-runs the chain on boot (Part 3).
     assertEnv(c, "QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN", "true");
-    // Part 4: the service (dev-server) auto-start kill switch the daemon honours as its boot tail.
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART", "true");
+    // Workspace services are gone (qits-947): a pre-removal daemon defaults its auto-start to true,
+    // so the switch is pinned off, with no config key behind it to turn it back on.
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART", "false");
     // The shared network, so qits reaches the container's ports by DNS name with no host publish.
     assertEquals("qits-net", c.network());
     // The memory cap — without it a dev server's JVMs size against the whole host's RAM and can

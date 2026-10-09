@@ -13,8 +13,8 @@ import org.jboss.resteasy.reactive.RestStreamElementType;
 
 /**
  * The single Server-Sent-Events channel for one workspace's detail route. Emits payload-free
- * <em>invalidation hints</em> — a topic name per frame ({@code services}, {@code service-events},
- * {@code telemetry}, {@code commands}) — which the frontend maps to a TanStack Query invalidation,
+ * <em>invalidation hints</em> — a topic name per frame ({@code telemetry}, {@code commands},
+ * {@code bootstrap}, {@code files}, …) — which the frontend maps to a TanStack Query invalidation,
  * so data keeps flowing through the unchanged REST endpoints. Replaces eight free-running polls
  * with fetch-on-signal: an idle workspace produces zero traffic. A ~25s {@code ping} heartbeat
  * keeps idle connections alive through the dev proxies; {@code EventSource} reconnects

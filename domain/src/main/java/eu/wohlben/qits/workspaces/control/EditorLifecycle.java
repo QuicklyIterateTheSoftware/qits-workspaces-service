@@ -5,9 +5,9 @@ package eu.wohlben.qits.workspaces.control;
  * container's. A container can be RUNNING with nothing serving inside it yet, which is the whole
  * reason the editor page has a waiting state at all.
  *
- * <p>Three values and not five, because the editor is one process the daemon owns outright: there is
- * no policy outcome to report the way a checkout-declared dev server has {@code RESTARTING}/{@code
- * CRASHED}. A restart is the editor going back to {@link #STARTING}.
+ * <p>Three values, because the editor is one process the daemon owns outright: there is no restart
+ * policy whose outcome would need reporting. A restart is the editor going back to {@link
+ * #STARTING}.
  *
  * <p>The sibling of {@link AgentActivityState}, down to being an enum here while the wire carries a
  * plain String: the vendored protocol module stays free of this context's display types, and a value

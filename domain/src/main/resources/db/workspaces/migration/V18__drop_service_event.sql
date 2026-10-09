@@ -1,0 +1,12 @@
+-- THE WORKSPACE SERVICES CONCEPT IS GONE, AND ITS FEED WITH IT (qits-947).
+--
+-- service_event was the diagnostic history of the dev servers a workspace declared under
+-- `services:` in its qits config: status transitions and the errors the log observer classified,
+-- written by ServiceEventPersister and read through /workspaces/api/service-events. The supervisor
+-- that produced the rows, the persister that wrote them and the door that read them are all
+-- deleted, and nothing replaces them, so the table has no writer and no reader left.
+--
+-- Dropped rather than kept as dead history: no FK points at it (V1 gave it none, on purpose — the
+-- feed was diagnostic and outlived its workspace), it carried no cause (V2 left it @Uncaused), and
+-- nothing outside this service ever read it. The index V1 created goes with the table.
+drop table service_event;

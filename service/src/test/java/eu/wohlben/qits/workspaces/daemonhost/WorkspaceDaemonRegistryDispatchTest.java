@@ -4,9 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.WorkspaceBootstrapDriver;
-import eu.wohlben.qits.workspaces.control.WorkspaceServiceDriver;
 import eu.wohlben.qits.workspacedaemon.protocol.BootstrapOutcome;
-import eu.wohlben.qits.workspacedaemon.protocol.ServiceTransition;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import java.util.Map;
@@ -18,11 +16,11 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The registry's sink dispatch discipline (D1's deadlock leg). websockets-next processes one
- * inbound frame per connection at a time, so a subscribed sink that blocks — the supervisor
- * monitor, a DB write — must never run on the {@code onMessage} caller: it would park the whole
+ * inbound frame per connection at a time, so a subscribed sink that blocks — the bootstrap
+ * recorder's DB write — must never run on the {@code onMessage} caller: it would park the whole
  * pipeline, including the {@code ConfigView} reply a config read on another thread is awaiting.
- * Measured live, that starved every such read to timeout and auto-start died with "Service not
- * declared". These cases pin the decoupling at the registry seam, with no socket involved.
+ * Measured live (with the since-removed workspace services' sink), that starved every such read to
+ * timeout. These cases pin the decoupling at the registry seam, with no socket involved.
  */
 @QuarkusTest
 class WorkspaceDaemonRegistryDispatchTest {
@@ -37,45 +35,27 @@ class WorkspaceDaemonRegistryDispatchTest {
   }
 
   @Test
-  void aBlockedServiceSinkDoesNotBlockTheMessagePipeline() throws Exception {
+  void aBlockedOutcomeSinkDoesNotBlockTheMessagePipeline() throws Exception {
     CountDownLatch entered = new CountDownLatch(1);
     registry.subscribe(
-        new WorkspaceServiceDriver.ServiceEventSink() {
-          @Override
-          public void onState(
-              String repoId,
-              String workspaceId,
-              Long rowId,
-              String serviceName,
-              String state,
-              Integer exitCode) {
-            if ("dispatch-probe".equals(serviceName)) {
-              entered.countDown();
-              try {
-                release.await(10, TimeUnit.SECONDS);
-              } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+        (WorkspaceBootstrapDriver.OutcomeSink)
+            (repoId, workspaceId, rowId, stepName, outcome, exitCode) -> {
+              if ("dispatch-probe".equals(stepName)) {
+                entered.countDown();
+                try {
+                  release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                }
               }
-            }
-          }
+            });
 
-          @Override
-          public void onLine(
-              String repoId,
-              String workspaceId,
-              Long rowId,
-              String serviceName,
-              String stream,
-              String line) {}
-        });
-
-    // No client registered for this workspace id — routeServiceState tolerates that (repoId null).
-    registry.onMessage(
-        771000L, null, new ServiceTransition("w", "dispatch-probe", "STARTING", null));
+    // No client registered for this workspace id — the fan-out tolerates that (repoId null).
+    registry.onMessage(771000L, null, new BootstrapOutcome("w", "dispatch-probe", "SUCCEEDED", 0));
 
     // The dispatch hopped threads: the sink is (or will be) parked, yet onMessage came back —
     // reaching this line before `release` opens IS the assertion.
-    assertTrue(entered.await(10, TimeUnit.SECONDS), "the sink never received the transition");
+    assertTrue(entered.await(10, TimeUnit.SECONDS), "the sink never received the outcome");
     release.countDown();
   }
 

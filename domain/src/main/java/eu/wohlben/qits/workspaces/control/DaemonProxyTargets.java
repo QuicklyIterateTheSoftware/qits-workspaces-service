@@ -9,9 +9,8 @@ import jakarta.transaction.Transactional;
 import java.util.Optional;
 
 /**
- * Why a workspace's daemon cannot be reached, asked once its reverse tunnel was not there. The
- * sibling of {@link ServiceSupervisor#proxyTarget}, so {@code ContainerProxyRoute} reads like
- * {@code ServiceProxyRoute}.
+ * Why a workspace's daemon cannot be reached, asked once its reverse tunnel was not there, so
+ * {@code ContainerProxyRoute} can answer each absence with its own status.
  *
  * <p><b>The tunnel is the only way to a daemon</b> (qits-780). Every daemon at {@code
  * DaemonProtocol.TUNNEL_CAPABILITY_VERSION} or above binds its API to {@code 127.0.0.1} and is
@@ -64,8 +63,7 @@ public class DaemonProxyTargets {
    * Resolve why {@code workspaceRowId}'s daemon has no tunnel.
    *
    * <p>{@code @Transactional} because the row read needs a session and the caller is a raw Vert.x
-   * route with none — the route runs this on a worker thread for that reason, exactly as {@code
-   * ServiceProxyRoute} runs its supervisor lookup off the event loop.
+   * route with none — the route runs this on a worker thread for that reason, never on the event loop.
    */
   @Transactional
   public Reachability resolve(Long workspaceRowId) {

@@ -68,11 +68,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
     f.daemonApiToken = "qits-workspace-daemon";
     f.bootstrapAutorunEnabled = true;
     f.autoPushEnabled = true;
-    f.servicesAutostartEnabled = true;
-    f.serviceReadyGraceMs = 10000;
-    f.serviceBackoffInitialMs = 1000;
-    f.serviceBackoffMaxMs = 30000;
-    f.serviceStopGraceMs = 5000;
     f.nameResolver =
         StubInstance.of(
             repoId ->
@@ -118,7 +113,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_PLATFORM_MCP_URL=http://dev-qits-platform-access-mcp-service:8080/mcp
         env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=http://qits-platform-edge:8080/git
         env QITS_WORKSPACE_DAEMON_API_BASE_PATH=/workspaces/container/7/
-        env QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE=/workspaces/service/7
         env QITS_WORKSPACE_DAEMON_WORKSPACE_ID=work
         env QITS_WORKSPACE_DAEMON_REPOSITORY_ID=repo12345678abc
         env QITS_WORKSPACE_DAEMON_BRANCH=task/a
@@ -131,11 +125,7 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_WORKSPACE_DAEMON_REPO_NAME=my-repo
         env QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN=true
         env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
-        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=true
-        env QITS_WORKSPACE_DAEMON_SERVICE_READY_GRACE_MS=10000
-        env QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_INITIAL_MS=1000
-        env QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_MAX_MS=30000
-        env QITS_WORKSPACE_DAEMON_SERVICE_STOP_GRACE_MS=5000
+        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false
         env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
         env QITS_COMMISSIONED_CLIENT_ID=ws-7-a
         env QITS_COMMISSIONED_CLIENT_SECRET=s3cr3t
@@ -205,7 +195,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_PLATFORM_MCP_URL=http://dev-qits-platform-access-mcp-service:8080/mcp
         env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=http://qits-platform-edge:8080/git
         env QITS_WORKSPACE_DAEMON_API_BASE_PATH=/workspaces/container/9/
-        env QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE=/workspaces/service/9
         env QITS_WORKSPACE_DAEMON_WORKSPACE_ID=editor
         env QITS_WORKSPACE_DAEMON_REPOSITORY_ID=
         env QITS_WORKSPACE_DAEMON_BRANCH=
@@ -214,11 +203,7 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_WORKSPACE_DAEMON_REPO_NAME=
         env QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN=true
         env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
-        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=true
-        env QITS_WORKSPACE_DAEMON_SERVICE_READY_GRACE_MS=10000
-        env QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_INITIAL_MS=1000
-        env QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_MAX_MS=30000
-        env QITS_WORKSPACE_DAEMON_SERVICE_STOP_GRACE_MS=5000
+        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false
         env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
         env QITS_COMMISSIONED_CLIENT_ID=ws-7-a
         env QITS_COMMISSIONED_CLIENT_SECRET=s3cr3t
@@ -298,7 +283,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_PLATFORM_MCP_URL=http://dev-qits-platform-access-mcp-service:8080/mcp
         env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=http://qits-platform-edge:8080/git
         env QITS_WORKSPACE_DAEMON_API_BASE_PATH=/workspaces/container/8/
-        env QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE=/workspaces/service/8
         env QITS_WORKSPACE_DAEMON_WORKSPACE_ID=admin
         env QITS_WORKSPACE_DAEMON_REPOSITORY_ID=repo12345678abc
         env QITS_WORKSPACE_DAEMON_BRANCH=admin/recovery
@@ -310,11 +294,7 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_WORKSPACE_DAEMON_REPO_NAME=my-repo
         env QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN=true
         env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
-        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=true
-        env QITS_WORKSPACE_DAEMON_SERVICE_READY_GRACE_MS=10000
-        env QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_INITIAL_MS=1000
-        env QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_MAX_MS=30000
-        env QITS_WORKSPACE_DAEMON_SERVICE_STOP_GRACE_MS=5000
+        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false
         env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
         env QITS_COMMISSIONED_CLIENT_ID=ws-7-a
         env QITS_COMMISSIONED_CLIENT_SECRET=s3cr3t
@@ -412,7 +392,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_PLATFORM_MCP_URL=https://mcp.qits.example.eu/mcp
         env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=https://githost.qits.example.eu/git
         env QITS_WORKSPACE_DAEMON_API_BASE_PATH=/workspaces/container/8/
-        env QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE=/workspaces/service/8
         env QITS_WORKSPACE_DAEMON_WORKSPACE_ID=admin
         env QITS_WORKSPACE_DAEMON_REPOSITORY_ID=repo12345678abc
         env QITS_WORKSPACE_DAEMON_BRANCH=admin/recovery
@@ -424,11 +403,7 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_WORKSPACE_DAEMON_REPO_NAME=my-repo
         env QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN=true
         env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
-        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=true
-        env QITS_WORKSPACE_DAEMON_SERVICE_READY_GRACE_MS=10000
-        env QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_INITIAL_MS=1000
-        env QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_MAX_MS=30000
-        env QITS_WORKSPACE_DAEMON_SERVICE_STOP_GRACE_MS=5000
+        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false
         env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
         env QITS_TOKEN=qits_tok_admin8
         env QITS_TOKEN_SUBJECT=tok-workspace-admin-8
@@ -487,7 +462,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_PLATFORM_MCP_URL=https://mcp.qits.example.eu/mcp
         env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=https://githost.qits.example.eu/git
         env QITS_WORKSPACE_DAEMON_API_BASE_PATH=/workspaces/container/9/
-        env QITS_WORKSPACE_DAEMON_SERVICE_PROXY_BASE=/workspaces/service/9
         env QITS_WORKSPACE_DAEMON_WORKSPACE_ID=editor
         env QITS_WORKSPACE_DAEMON_REPOSITORY_ID=
         env QITS_WORKSPACE_DAEMON_BRANCH=
@@ -496,11 +470,7 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_WORKSPACE_DAEMON_REPO_NAME=
         env QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN=true
         env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
-        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=true
-        env QITS_WORKSPACE_DAEMON_SERVICE_READY_GRACE_MS=10000
-        env QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_INITIAL_MS=1000
-        env QITS_WORKSPACE_DAEMON_SERVICE_RESTART_BACKOFF_MAX_MS=30000
-        env QITS_WORKSPACE_DAEMON_SERVICE_STOP_GRACE_MS=5000
+        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false
         env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
         env QITS_TOKEN=qits_tok_editor9
         env QITS_TOKEN_SUBJECT=tok-workspace-editor-9

@@ -20,7 +20,7 @@ import java.util.function.LongPredicate;
  * points the tunnel there instead: {@link #originFor} answers the stub's port for a row {@code
  * connected} admits, exactly the shape {@code WorkspaceTunnels} answers for a row whose daemon dialled
  * back. Every caller then dials {@code 127.0.0.1:<port>} with this client, as it would a real
- * tunnel's. Only the API target is answered; the editor and service targets stay unreachable.
+ * tunnel's. Only the API target is answered; the editor target stays unreachable.
  *
  * <p>Install it per test ({@link QuarkusMock} mocks are reset after each), and {@link #close} it in
  * the matching {@code @AfterEach}. It is not a bean: nothing is injected into it, and only the
@@ -65,8 +65,7 @@ public class StubDaemonTunnels extends WorkspaceTunnels {
   }
 
   @Override
-  public Optional<TunnelOrigin> originFor(
-      Long workspaceRowId, StreamTarget target, String serviceId) {
+  public Optional<TunnelOrigin> originFor(Long workspaceRowId, StreamTarget target) {
     if (workspaceRowId == null
         || (target != null && target != StreamTarget.API)
         || !connected.test(workspaceRowId)) {

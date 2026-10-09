@@ -34,8 +34,7 @@ import org.junit.jupiter.api.Test;
  * it was given and the {@code Host} it saw — reached through {@link
  * eu.wohlben.qits.workspaces.daemonhost.StubDaemonTunnels}, a tunnel whose loopback port is the
  * stub's while the row's (fake) container runs. The tunnel is the only way to a daemon since
- * qits-780 deleted the direct {@code container:13338} fallback. No docker involved; the sibling of
- * {@link ServiceProxyRouteTest} and deliberately the same kind of test. The port is {@link
+ * qits-780 deleted the direct {@code container:13338} fallback. No docker involved. The port is {@link
  * AgentDispatchControllerTest#latchedPort()}, shared with the classes beside it.
  *
  * <p><b>It runs under {@link AgentDispatchControllerTest}'s profile rather than one of its own.</b>

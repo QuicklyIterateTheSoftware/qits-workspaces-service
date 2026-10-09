@@ -13,7 +13,7 @@ import java.util.Optional;
  *
  * <p>Distinct from {@link WorkspaceDaemonProvisioner} (which drives provisioning): this is an
  * on-demand read. It replaces the host-side, {@code mainBranch}-only DB config store as the source
- * of a workspace's actions/services/bootstrap list — the UI/read-path rewire lands with the config
+ * of a workspace's actions/bootstrap list — the UI/read-path rewire lands with the config
  * single-source-of-truth part.
  */
 public interface WorkspaceConfigReader {

@@ -761,8 +761,8 @@ public class WorkspaceControllerTest {
   }
 
   /**
-   * Polls until the workspace's technical process completed — i.e. the async provision (and any
-   * service auto-start) is fully done. Deliberately NOT a runtime-status poll: the workspace list
+   * Polls until the workspace's technical process completed — i.e. the async provision (and the
+   * bootstrap phase) is fully done. Deliberately NOT a runtime-status poll: the workspace list
    * computes RUNNING live from the container set, which reports the container as soon as {@code
    * docker run} happened — while the clone is still writing the working tree (and its final index
    * write would clobber a concurrent {@code git add} from the test).

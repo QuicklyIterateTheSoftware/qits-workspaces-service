@@ -97,7 +97,7 @@ class WorkspaceChangeHintBusTest {
 
     URL sseUrl = new URL(workspacesUrl, workspace.id + "/events");
     assertSseDataFrame(
-        sseUrl, () -> publisher.fire(repoId, workspace.id, Topic.SERVICES), "services");
+        sseUrl, () -> publisher.fire(repoId, workspace.id, Topic.FILES), "files");
   }
 
   @Test

@@ -10,10 +10,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * Test double for {@link WorkspaceAgentActivity}: the turn-boundary rollup a delivery waits on,
  * driven by a test instead of by a daemon's lifecycle hooks.
  *
- * <p><b>A profile-scoped {@link Alternative} and not a global {@code @Mock}</b>, exactly like {@link
- * FakeWorkspaceServiceDriver} beside it and for its reason: the real implementation here is {@code
- * WorkspaceDaemonRegistry}, which every other service test and the daemon ITs need answering for
- * themselves. A test opts in with {@code getEnabledAlternatives()}.
+ * <p><b>A profile-scoped {@link Alternative} and not a global {@code @Mock}</b>, because the real
+ * implementation here is {@code WorkspaceDaemonRegistry}, which every other service test and the
+ * daemon ITs need answering for themselves. A test opts in with {@code getEnabledAlternatives()}.
  *
  * <p>Unknown until a test {@linkplain #report reports} something, which is what a workspace whose
  * daemon has not said anything about its agent looks like — the {@code domain} copy ({@code

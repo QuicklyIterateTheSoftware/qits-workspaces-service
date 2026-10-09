@@ -54,7 +54,7 @@ Quarkus fixes at augmentation is absent from the binary's runtime config, so
 on the JVM fast-jar, where `application.properties` is just another runtime config source. If
 application code needs such a value, spell it as an application-owned key and derive the Quarkus one
 from it — `qits.rest.path` / `quarkus.rest.path=${qits.rest.path}` is the worked example. A system
-property still reaches a binary's runtime config, which is the only reason `ServiceProxyRoute` may
+property still reaches a binary's runtime config, which is the only reason `ContainerProxyRoute` may
 keep reading `quarkus.http.root-path`.
 
 ## Package and module conventions
@@ -117,7 +117,7 @@ an applied file's body — Flyway checksums it.
 backfill, part of no constraint and never a foreign key, because the event it names lives in
 qits-events' store. The decisions behind it are enforced by `ArchRulesTest` in `domain`: every
 `@Entity` here implements `CausedRow` or declares `@Uncaused` with its reason in the javadoc, and a
-new entity that skips the decision fails the build naming the class. Two in, four out:
+new entity that skips the decision fails the build naming the class. Two in, three out:
 
 - **`Workspace`** — in. Both creation paths (`createWorkspace`, and `CaptureService.capture` behind
   the capture ingest) run on the request thread, so the `CausationStamp` listener reads the REST
@@ -126,9 +126,6 @@ new entity that skips the decision fails the build naming the class. Two in, fou
   the unit of work exists; a MERGED/INTEGRATED entry answers to whatever asked for *that* landing.
   All six `recordEvent` sites are on the flow's own thread, including the ones a machine caller
   drives with a bearer of its own.
-- **`ServiceEvent`** — out. `ServiceEventPersister` writes on supervisor/scheduler threads with no
-  request context (that is what its `@ActivateRequestContext` is for), no scope stands there and no
-  cause is in reach as data. The column would be null forever.
 - **`BootstrapRun`** — out. An updatable singleton: one row per `(workspace, command)`, overwritten
   by every run. The stamp is insert-only, so it would pin the first run's cause while every column
   beside it moved on.
@@ -206,8 +203,7 @@ rule — see below.
 **`@Lob` is banned on this context's entities.** On H2 a `@Lob String` was a clob and the two agreed;
 on postgres `@Lob` means a LARGE OBJECT, so Hibernate binds an oid and the insert fails against the
 column the migration declares. Spell it `@Column(columnDefinition = "text")` — or `"bytea"` for
-bytes — as `Workspace.preamble`, `WorkspacePromptDraft.content`, `ServiceEvent.logExcerpt` and
-`WorkspacePromptAttachment.bytes` do.
+bytes — as `Workspace.preamble`, `WorkspacePromptDraft.content` and `WorkspacePromptAttachment.bytes` do.
 
 **Native SQL is postgres SQL.** `WorkspacePromptDraftRepository.upsert` is the only place this repo
 writes any, and it is `insert … on conflict (…) do update` — H2's `merge into … key (…)` until the
@@ -305,8 +301,7 @@ outside `WorkspaceService`'s `synchronized` methods, and never split a multi-op 
 - **The workflow verbs** — `createWorkspace`, `merge*`, `integrateWorkspace`, `cleanupBranch`,
   `discardWorkspace`. They orchestrate pushes and containers, so their bodies are not database-only
   and re-running one is not a re-run of a write.
-- **`ServiceEventService.publish`** and the other fail-soft diagnostics: dropping one is the
-  designed behaviour.
+- **The fail-soft diagnostics**: dropping one is the designed behaviour.
 - **`updateAttachment` / `deleteAttachment`** — verbs on an image already on screen and already in
   the database. A failed one is the same click again, which is worth less than a wider wrapped set
   costs to review.
@@ -361,8 +356,8 @@ edge or on `qits-net`. `README.md` has the table.
 
 The one thing to know before you add a route: **`quarkus.rest.path` moves the JAX-RS routes and
 nothing else.** A raw Vert.x route or a `@WebSocket` path registers straight onto the router with a
-literal and must carry `/workspaces` itself. Five do, each for its own reason (`EditorProxyRoute` is
-the sixth raw route and carries no path at all — see below):
+literal and must carry `/workspaces` itself. Four do, each for its own reason (`EditorProxyRoute` is
+the fifth raw route and carries no path at all — see below):
 
 - `DaemonControlSocket` — `/workspaces/daemon/{id}`, and a **cross-repo contract**:
   `WorkspaceContainerFactory` injects `ws://<host>:<port>/workspaces/daemon/<id>` as
@@ -384,8 +379,6 @@ the sixth raw route and carries no path at all — see below):
   `principal-bound-git-refs-plan.md`). The local/no-IdP topology
   stays anonymous only while the machine-auth rollout gate is off. Do not make this path public to
   repair a failed dial-home: a missing bearer is an integration failure, not a routing exception.
-- `ServiceProxyRoute` — `ServiceProxyPath.PREFIX`, `/workspaces/service/`, which is also baked into
-  the dev server's `QITS_PUBLIC_BASE` at spawn, so the two cannot be changed apart.
 - `ContainerProxyRoute` — `ContainerProxyPath.PREFIX`, `/workspaces/container/`, **the only path by
   which anything reaches a workspace-daemon's HTTP API.** `container` and not `daemon` because the
   control socket already owns that segment, and that literal is the one hardest to change (it is
@@ -394,15 +387,14 @@ the sixth raw route and carries no path at all — see below):
   address to configure, and this service owns the row and the lifecycle.
   **It rewrites no path**: the daemon receives `/workspaces/container/{id}/files`, not `/files`, and
   is told that prefix is its own address via `QITS_WORKSPACE_DAEMON_API_BASE_PATH`
-  (`ContainerProxyPath.base`, injected by `WorkspaceContainerFactory`) — the same arrangement
-  `ServiceProxyRoute` has with a dev server's `QITS_PUBLIC_BASE`. A hop that rewrites a path leaves
+  (`ContainerProxyPath.base`, injected by `WorkspaceContainerFactory`). A hop that rewrites a path leaves
   the two ends disagreeing about the destination's address; do not add a `substring` here.
   **A WebSocket upgrade does not go through `vertx-http-proxy` at all** — `proxyUpgrade` does it by
   hand. Two reasons, both read out of 4.5.26. The library skips its whole interceptor chain on an
   upgrade, so the bearer never reached the daemon and both interactive sockets answered 401 (the
   same defect the gateway works around in `EdgeHeaders.applyToUpgrade`). And the pipe it then builds
   is bare `a.handler(b::write)` installs with **no `writeQueueFull`, no `pause`, no `drainHandler`**
-  and a failure arm that prints `"Handle this case"` and a stack trace — so a chatty dev server on a
+  and a failure arm that prints `"Handle this case"` and a stack trace — so a chatty process on a
   terminal socket piles up in this process's heap. The hand-rolled path pauses and drains in both
   directions (the discipline `DaemonStreamRoute` already had one hop further in) and forwards a
   refused handshake with the daemon's own status instead of a bare 502. It pipes **raw bytes, never
@@ -436,7 +428,7 @@ own — do not pin it.
 **`quarkus.quinoa.ignored-path-prefixes` is what keeps the SPA fallback off all of that, and it is
 now one entry: `/workspaces`.** The values are **absolute** — Quinoa strips `ui-root-path` before
 matching, and stripping `/` leaves the path as it is — so a prefix match on `/workspaces` covers the
-JAX-RS routes, `/workspaces/q` and all four literals above at once. They used to be **relative**
+JAX-RS routes, `/workspaces/q` and all three literals above at once. They used to be **relative**
 (`/api`, never `/workspaces/api`), because the client was rooted at the segment; that is the one line
 of this paragraph that inverted with the move to a host of its own, and an entry left in the old
 spelling matches nothing and looks exactly like an unset key.
@@ -469,17 +461,38 @@ string, in another database, with no FK — so collections filter by `?repositor
 so the repository narrows and the body names the branch. `history/{id}` carries no repository at
 all; it was decoration on the item routes and a real filter only on the collection.
 
-**Two host surfaces were deleted rather than moved**: `/workspaces/{id}/services…` and
-`/workspaces/{id}/bootstrap-commands…`. Both ran inside the container with the host forwarding, and
-the daemon's own `ServiceSupervisor`/`BootstrapRunner` do the work. Everything host-side behind them
-stays — `ServiceSupervisor`, `WorkspaceBootstrapRunner`, both driver ports, the
-`StartService`/`SignalService`/`RunBootstrap` events, `service_event` and its SSE feed,
-`workspace_bootstrap_run`, `BootstrapRunService`, `ServiceProxyRoute` — because the
-provision → bootstrap → services sequence is host-orchestrated and is not REST-driven. What went is
-the addressability, not the capability. **Both are now re-exposed on the daemon's own `WorkspaceApi`**
-(`GET /services`, `POST /services/{name}/{start,signal}`, `GET /bootstrap-commands`, `POST
-/bootstrap-commands/[{name}/]run`) and reachable through `ContainerProxyRoute` — do not add host
-routes back — that is `migration-plan.md` §9 item 16, now closed.
+**A host surface was deleted rather than moved**: `/workspaces/{id}/bootstrap-commands…`. It ran
+inside the container with the host forwarding, and the daemon's own `BootstrapRunner` does the work.
+Everything host-side behind it stays — `WorkspaceBootstrapRunner`, the driver port, the
+`RunBootstrap` event, `workspace_bootstrap_run`, `BootstrapRunService` — because the
+provision → bootstrap sequence is host-orchestrated and is not REST-driven. What went is the
+addressability, not the capability. **It is re-exposed on the daemon's own `WorkspaceApi`** (`GET
+/bootstrap-commands`, `POST /bootstrap-commands/[{name}/]run`) and reachable through
+`ContainerProxyRoute` — do not add host routes back — that is `migration-plan.md` §9 item 16, now
+closed.
+
+**Workspace services are gone, not moved (qits-947).** The dev servers a repository could declare
+under `services:` — run by the daemon's `ServiceSupervisor`, projected here by a host
+`ServiceSupervisor`, framed through `/workspaces/service/{row}/{svc}/**` and recorded in
+`service_event` — were taken out of scope and removed end to end, with nothing replacing them:
+`ServiceProxyRoute`, `/workspaces/api/service-events`, the `SERVICES`/`SERVICE_EVENTS` hint topics,
+the `qits.services.*` keys and the table (`V18`). Three remnants stay on purpose, all for daemons
+built before the removal, and each goes once the workspace image carries the services-free daemon:
+`WorkspaceContainerFactory.identityEnv` pins `QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false` (an
+old daemon defaults it to true) with no key behind it; `QitsConfig` ignores unknown properties, so
+an old daemon's `services:` key does not degrade its config view to empty; and the sealed-protocol
+switches (`WorkspaceDaemonRegistry.onMessage`, `WorkspaceTunnels.capabilityFor`) end in a `default`
+arm instead of naming the service records and the `SERVICE` stream target, so this compiles against
+the protocol jar both with and without them. Do not reintroduce a host-side service concept on the
+strength of those remnants.
+
+**A streamed start ends when its bootstrap phase does.** With no service phase behind it, the
+start's `TechnicalProcess` is done once the provision has reported (`finishProvision`) and
+`WorkspaceBootstrapRunner` has reported the bootstrap phase over (`finishBootstrap`) — on the
+pass-through, on success, on failure, on an unexpected throw and when yielding to a manual run.
+That call is what used to be the service coupler's empty `expectServices`; a path that forgets it
+leaves every start open until the registry's idle reaper. `WorkspaceBootstrapRunnerTest` awaits
+`done` on each path for that reason.
 
 **`workspace_bootstrap_run` spent a release with no reader and now has one**:
 `GET /workspaces/api/workspaces/{id}/bootstrap-runs` (`WorkspaceBootstrapRunController`). That is
@@ -506,9 +519,6 @@ Three more host-owned surfaces landed on the same rule, all plain JAX-RS under `
   run is written in. Database rows, no container, so they work while the workspace is STOPPED.
 - `GET`/`POST`/`DELETE /workspaces/api/workspaces/{id}/prompt-attachments[/{attachmentId}]` — its
   images, on their own SSE topic so a debounced text autosave does not re-download every picture.
-
-Still keyed on the label, deliberately: `service_event.workspace_id` — diagnostic history that
-outlives the row, see `V2`'s header.
 
 Resolving an id costs a query, which matters on the **SSE routes**: a `Multi`-returning method runs
 on the IO thread, so a lookup in one throws `BlockingOperationNotAllowedException` (a 500) unless
@@ -1137,8 +1147,8 @@ the transition that contradicted it is the one direction that costs a reader a s
 have seen. Absence is "nothing reported" and never "no editor": a plain workspace, a container that
 is down and a first frame that has not arrived are one answer, and they deserve the same one.
 
-**Five answers, because a waiting editor is not a broken one.** `ServiceProxyRoute`'s splash pattern,
-gated on `WorkspaceEditorState`:
+**Five answers, because a waiting editor is not a broken one.** A splash gated on
+`WorkspaceEditorState`:
 
 - no container, or a stopped one → **200 and a self-refreshing page**. Opening the editor while it
   starts is the same act as opening it once it has.
@@ -1152,7 +1162,7 @@ gated on `WorkspaceEditorState`:
 
 **THE REVERSE TUNNEL IS THE ONLY WAY IN, and there is no direct dial to fall back to.** The daemon
 binds openvscode-server to the container's **loopback**, so no address on `qits-net` reaches an
-editor and `resolveTarget(container, editorPort)` names a port in another network namespace. This
+editor, and a container-name-and-port origin would name a port in another network namespace. This
 route carried that fallback for one commit; in the shipped topology every request it took was a dial
 and then a 502 — concretely, with `qits.workspace.daemon-tunnel.enabled=false` *every* editor request
 was one — and the real cost was in the suite, where the header strip, the verbatim path, the bounded
@@ -1701,7 +1711,7 @@ snapshot; `ensureContainer(Long)`, the bootstrap runner's manual-run entry, whic
 RUNNING runner row to its runner and asks a stopped one to start first (400); `describeEditor`; the listing's per-row DIRECT status; `directContainerExists`
 behind `isFullyPushed`, `isWorkspaceClean` and the integration source check (a RUNNER row answers
 false there with no call, as the by-name lookup always did); `DaemonProxyTargets.resolve`;
-`ServiceSupervisor.resolveOrigin`; and `EditorKeepalive`. A regular row there is an ERROR `direct
+and `EditorKeepalive`. A regular row there is an ERROR `direct
 placement refused for regular workspace <id>` and an `IllegalStateException`. The listing asks
 qits-containers only when the repository has a DIRECT row at all. Tests that prove the DIRECT ladder
 use **admin** rows (`createWorkspace(…, admin = true)`); the qits-776 move onto a runner
@@ -2096,12 +2106,10 @@ one edge in and none out, and no presence check can say that.
 
 ### What is deliberately not covered, and why
 
-- **The bootstrap chain and the dev-server autostart.** `qits.bootstrap.autorun-enabled` and
-  `qits.services.autostart-enabled` are both `false` in the profile: both observers are async, the
-  config read would draw an arrow in whichever diagram happened to be open, and the bootstrap await
-  holds the technical process open for its whole chain timeout — which is what the workspace story
-  polls to learn the provision is over. Both are covered by the `@QuarkusTest` suites and by the
-  docker-backed `Daemon*IT`, where a real daemon really runs them.
+- **The bootstrap chain.** `qits.bootstrap.autorun-enabled` is `false` in the profile: its observer
+  is async, and the bootstrap await holds the technical process open for its whole chain timeout —
+  which is what the workspace story polls to learn the provision is over. It is covered by the
+  `@QuarkusTest` suites and by the docker-backed `Daemon*IT`, where a real daemon really runs it.
 - **The reconcile's sweep.** Its listing is covered (the boot story); the listing is empty, so no
   credential is ever given back.
 - **The container-to-idp credential exchange.** The workspace story reads the commissioned pair out

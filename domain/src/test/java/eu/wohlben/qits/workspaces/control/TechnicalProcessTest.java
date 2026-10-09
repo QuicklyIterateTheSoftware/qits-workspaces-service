@@ -64,7 +64,7 @@ class TechnicalProcessTest {
     process.appendLine("clone", "done.");
     process.settleSegment("clone", true);
     process.finishProvision(true);
-    process.expectServices(List.of());
+    process.finishBootstrap();
 
     assertEquals(
         List.of(
@@ -83,32 +83,61 @@ class TechnicalProcessTest {
   }
 
   @Test
-  void doneWaitsForEveryExpectedServiceSegmentToSettle() {
+  void doneWaitsForTheBootstrapPhaseAfterASuccessfulProvision() {
     TechnicalProcess process = process();
+    RecordingListener listener = new RecordingListener();
+    process.attach(listener);
+    process.openSegment("container");
+    process.settleSegment("container", true);
     process.finishProvision(true);
-    assertFalse(process.isTerminal(), "no daemon declaration yet — must stay open");
+    assertFalse(process.isTerminal(), "the bootstrap phase has not reported — must stay open");
 
-    process.expectServices(List.of("web", "worker"));
-    assertFalse(process.isTerminal());
+    process.finishBootstrap();
 
-    process.settleSegment(TechnicalProcess.serviceSegment("web"), true);
-    assertFalse(process.isTerminal());
+    assertTrue(process.isTerminal(), "both phases in — done");
+    assertEquals("ok", listener.frames.get(listener.frames.size() - 1).status());
+  }
 
-    process.settleSegment(TechnicalProcess.serviceSegment("worker"), true);
+  @Test
+  void theBootstrapPhaseMayReportBeforeTheProvisionDoes() {
+    TechnicalProcess process = process();
+    process.finishBootstrap();
+    assertFalse(process.isTerminal(), "the provision phase has not reported — must stay open");
+
+    process.finishProvision(true);
+
     assertTrue(process.isTerminal());
   }
 
   @Test
-  void aCrashedServiceYieldsDoneFailed() {
+  void aFailedBootstrapSegmentYieldsDoneFailed() {
     TechnicalProcess process = process();
     RecordingListener listener = new RecordingListener();
     process.attach(listener);
     process.finishProvision(true);
-    process.expectServices(List.of("web"));
-    process.settleSegment(TechnicalProcess.serviceSegment("web"), false);
+    process.openSegment(WorkspaceBootstrapRunner.bootstrapSegment("install"));
+    process.settleSegment(WorkspaceBootstrapRunner.bootstrapSegment("install"), false);
+    assertFalse(process.isTerminal(), "a settled segment alone does not end the process");
+
+    process.finishBootstrap();
 
     assertTrue(process.isTerminal());
     assertEquals("failed", listener.frames.get(listener.frames.size() - 1).status());
+  }
+
+  @Test
+  void finishBootstrapIsIdempotentAndANoOpOnceTerminal() {
+    TechnicalProcess process = process();
+    RecordingListener listener = new RecordingListener();
+    process.attach(listener);
+    process.finishProvision(true);
+    process.finishBootstrap();
+    int frames = listener.frames.size();
+
+    process.finishBootstrap();
+
+    assertEquals(frames, listener.frames.size(), "a second report emits nothing");
+    assertEquals(1, completed.size(), "onDone ran exactly once");
   }
 
   @Test
@@ -119,7 +148,7 @@ class TechnicalProcessTest {
     process.openSegment("clone");
     process.failProvision("Clone into container failed: boom");
 
-    assertTrue(process.isTerminal(), "provision failure ends without any service phase");
+    assertTrue(process.isTerminal(), "provision failure ends without any bootstrap phase");
     TechnicalProcessFrame settle =
         listener.frames.stream()
             .filter(f -> "segment-settled".equals(f.kind()))

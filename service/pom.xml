@@ -186,9 +186,9 @@
             <artifactId>quarkus-hibernate-validator</artifactId>
         </dependency>
         <dependency>
-            <!-- In-process reverse proxy for a service's web view (/services/* -> the container's
-                 published port; ServiceProxyRoute). Managed by the platform BOM, so no version
-                 here; forwards WebSocket upgrades (dev-server HMR) by default. -->
+            <!-- In-process reverse proxy for the workspace-daemon and the editor, through the
+                 daemon's reverse tunnel (ContainerProxyRoute, EditorProxyRoute). Managed by the
+                 platform BOM, so no version here. -->
             <groupId>io.vertx</groupId>
             <artifactId>vertx-http-proxy</artifactId>
         </dependency>

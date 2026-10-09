@@ -24,7 +24,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * starts a short retention window ({@code qits.process.done-ttl-ms}) during which a late
  * (re)subscriber still gets the full replay plus an immediate {@code done} — after that the entry
  * is evicted and lookups 404. A max-lifetime backstop force-finishes a process that never converges
- * (e.g. a ready pattern that never matches). Activeness changes are announced on the existing
+ * (e.g. a daemon that never reports its bootstrap chain). Activeness changes are announced on the existing
  * payload-free workspace channel as a {@code PROCESS} hint — the hint stays data-free; the payload
  * rides only the process's own SSE stream.
  */
@@ -40,7 +40,7 @@ public class TechnicalProcessRegistry implements WorkspaceProcessTracker {
    * leak forever. Deliberately an idle window, not a total-lifetime cap: a provision's process now
    * spans the whole bootstrap chain, whose length is unbounded (N commands × the per-command
    * await), so a fixed cap would either cut a legitimately long-but-active chain mid-run or be far
-   * too long to reap a genuinely stuck process (e.g. a ready pattern that never matches). Measured
+   * too long to reap a genuinely stuck process (e.g. a daemon that never reports its chain). Measured
    * against {@link TechnicalProcess#millisSinceLastActivity()}: an actively streaming chain keeps
    * resetting it, a stalled one trips it.
    */
@@ -228,7 +228,7 @@ public class TechnicalProcessRegistry implements WorkspaceProcessTracker {
    * Fail the process outright: {@link TechnicalProcess#failProvision} settles whatever is open with
    * {@code message} in it, and {@link TechnicalProcess#forceFinish} then ends a process that was past
    * its provision phase — where {@code failProvision} alone settles the segments but leaves the
-   * process waiting on a service phase that will never come. Its {@code done} clears the active
+   * process waiting on a bootstrap phase that will never report. Its {@code done} clears the active
    * mapping like any other.
    */
   @Override

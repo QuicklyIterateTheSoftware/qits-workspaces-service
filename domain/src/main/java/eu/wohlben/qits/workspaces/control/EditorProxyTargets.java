@@ -57,8 +57,7 @@ public class EditorProxyTargets {
    * Resolve an editor origin to the editor's workspace, or empty.
    *
    * <p>{@code @Transactional} because the row read needs a session and the caller is a raw Vert.x
-   * route with none — which is also why the route runs this on a worker thread, exactly as {@code
-   * ServiceProxyRoute} runs its supervisor lookup off the event loop.
+   * route with none — which is also why the route runs this on a worker thread, never on the event loop.
    *
    * @param forwardedHost the raw {@code X-Forwarded-Host}; the first entry is the one that counts
    */

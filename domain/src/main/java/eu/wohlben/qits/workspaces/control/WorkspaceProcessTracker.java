@@ -38,7 +38,7 @@ public interface WorkspaceProcessTracker {
    * End a live operation as failed, whatever phase it is in, with {@code message} as the last line
    * of its stream. Unlike {@link Handle#failProvision}, which is a no-op once the provision phase
    * has reported, this also ends an operation that is past its provision and waiting on the
-   * bootstrap chain or the service phase — the window a start spends with its row already RUNNING.
+   * bootstrap chain — the window a start spends with its row already RUNNING.
    *
    * <p>It exists for one caller: a stop (or a container delete) that lands while a start is still
    * open (qits-1076). The start will never bring the container up now, and a process left open
