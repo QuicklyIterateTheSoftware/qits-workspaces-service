@@ -12,6 +12,7 @@ import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.enterprise.event.Observes;
 import jakarta.enterprise.event.TransactionPhase;
 import jakarta.enterprise.inject.Instance;
@@ -412,6 +413,12 @@ public class DispatchService {
    * workspace holds its launch, in the table".
    */
   @Inject HeldAgentLaunches heldLaunches;
+
+  /**
+   * Told when an accepted launch's command is on the row, so the agent-waiting relay follows the
+   * new agent (qits-895). See {@link #recordLaunchedCommand}.
+   */
+  @Inject Event<AgentLaunched> launched;
 
   /**
    * This process, as a claim on {@code pending_agent_launch} names it: one random id per boot, so a
@@ -1738,15 +1745,68 @@ public class DispatchService {
     }
   }
 
+  /**
+   * The port's launch, reduced to whether it was accepted — every caller's question — with the
+   * command it started kept on the row on the way (qits-895). An absent port and a broken one both
+   * answer false.
+   */
   private boolean launch(Long rowId, String instruction) {
     if (!agents.isResolvable()) {
       return false;
     }
+    WorkspaceAgentLauncher.Launch launch;
     try {
-      return agents.get().launch(rowId, instruction);
+      launch = agents.get().launch(rowId, instruction);
     } catch (RuntimeException e) {
       LOG.debugf(e, "the agent launch for workspace %s failed", rowId);
       return false;
+    }
+    if (launch == null || !launch.accepted()) {
+      return false;
+    }
+    if (launch.commandId() != null) {
+      recordLaunchedCommand(rowId, launch.commandId());
+    }
+    return true;
+  }
+
+  /**
+   * Keep the command an accepted launch started as the row's {@code dispatchCommandId}, replacing
+   * whatever the last launch left, and tell the agent-waiting relay once it is committed.
+   *
+   * <p><b>Every launch this class makes writes it</b>, a delivery's fallback launch included: that
+   * one is the same {@code POST /agents}, it starts the agent that now works the branch, and a relay
+   * still following the previous command would be following an agent that is gone. A turn delivered
+   * to a running agent starts no command and writes nothing.
+   *
+   * <p><b>Best effort, and never a reason to call the launch failed.</b> The agent is running
+   * whatever happens here, so a write that fails is a WARN — what it costs is that the dispatched
+   * agent's waiting state is not relayed until the next launch — and never a retry or a second
+   * launch. A row resolved in the meantime is skipped, as {@link #storeFacts} skips one. The write
+   * is {@link WorkspaceRepository#recordDispatchCommand}'s bulk update and never a field set on a
+   * loaded row; that method says why.
+   */
+  private void recordLaunchedCommand(Long rowId, String commandId) {
+    try {
+      Optional<AgentLaunched> recorded =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () ->
+                      workspaceRepository.recordDispatchCommand(rowId, commandId) == 0
+                          ? Optional.<AgentLaunched>empty()
+                          : workspaceRepository
+                              .findActiveById(rowId)
+                              .map(
+                                  workspace ->
+                                      new AgentLaunched(rowId, commandId, workspace.workId)));
+      recorded.ifPresent(launched::fire);
+    } catch (RuntimeException e) {
+      LOG.warnf(
+          e,
+          "workspace %s's agent was launched as command %s, but the command could not be kept on"
+              + " the row; its waiting state will not be relayed",
+          rowId,
+          commandId);
     }
   }
 

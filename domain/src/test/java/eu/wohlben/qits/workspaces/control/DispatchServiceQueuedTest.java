@@ -766,9 +766,10 @@ class DispatchServiceQueuedTest {
     }
 
     @Override
-    public boolean launch(Long workspaceRowId, String instruction) {
+    public Launch launch(Long workspaceRowId, String instruction) {
       launches.add(workspaceRowId + ":" + instruction);
-      return true;
+      // No command id: this test has no database for DispatchService to keep one in.
+      return Launch.accepted(null);
     }
 
     @Override

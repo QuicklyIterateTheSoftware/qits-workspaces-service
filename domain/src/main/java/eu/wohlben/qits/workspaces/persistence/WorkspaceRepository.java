@@ -355,6 +355,25 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
   }
 
   /**
+   * Keep {@code commandId} as the ACTIVE row's {@code dispatchCommandId} (qits-895): answers 1, or 0
+   * for a row that is gone or resolved.
+   *
+   * <p><b>A bulk update, and the only way the column is ever written.</b> It is mapped {@code
+   * insertable = false, updatable = false}, because without {@code @DynamicUpdate} every flush of a
+   * {@code Workspace} writes every column it loaded: a provisioning or commissioning transaction that
+   * read the row before the launch committed would put the previous command back when it committed
+   * after. That is the likeliest reading of the dispatch suite once seeing the previous id survive
+   * a launch the daemon took, with a commission of the same row in flight beside it.
+   */
+  public int recordDispatchCommand(Long id, String commandId) {
+    return update(
+        "dispatchCommandId = ?1 where id = ?2 and status = ?3",
+        commandId,
+        id,
+        WorkspaceStatus.ACTIVE);
+  }
+
+  /**
    * Start for a RUNNER row: STOPPED or FAILED becomes QUEUED, stamped {@code queuedAt}, keeping its
    * runner. A compare-and-swap, so two starts and a start racing anything else change the row once:
    * answers how many rows changed, 0 or 1.

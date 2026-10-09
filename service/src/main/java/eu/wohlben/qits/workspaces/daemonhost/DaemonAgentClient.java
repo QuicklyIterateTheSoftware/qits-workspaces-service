@@ -39,7 +39,7 @@ import org.jboss.logging.Logger;
  * outside this process.
  *
  * <p><b>Bodies are hand-built {@code JsonObject}s and read the same way</b>, matching the daemon's
- * own {@code CommandJson}: two keys out and three read, against a native image that would otherwise
+ * own {@code CommandJson}: a handful of keys out and fewer read, against a native image that would otherwise
  * need a databind registration for a shape this small.
  *
  * <p><b>No row lookup at all</b>, unlike the proxy's: that one only says which absence a missing
@@ -144,12 +144,18 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
    * is implemented nowhere on the platform — the agent would be told to call something that does not
    * exist and would sit there. The SPA's own client carries the same rule in the same words; this is
    * the second caller of that API and it makes the same promise.
+   *
+   * <p><b>The answer is read for the command it started</b> (qits-895): {@code {"command": {"id":
+   * …, …}}}, the daemon's {@code AgentJson.launched}, which is the commands routes' own shape. The
+   * id is what tells the dispatched agent apart from a person's other sessions in the workspace,
+   * and {@link DispatchService} keeps it on the row. A 2xx whose body names no command is still an
+   * accepted launch — see {@link Launch}.
    */
   @Override
-  public boolean launch(Long workspaceRowId, String instruction) {
+  public Launch launch(Long workspaceRowId, String instruction) {
     Route route = route(workspaceRowId);
     if (route == null) {
-      return false;
+      return Launch.REFUSED;
     }
     JsonObject body =
         new JsonObject()
@@ -160,15 +166,36 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
             .put("deliverTaskPrompt", false);
     Answer answer = send(route, HttpMethod.POST, "agents", body);
     if (answer == null) {
-      return false;
+      return Launch.REFUSED;
     }
     if (answer.status() < 200 || answer.status() >= 300) {
       LOG.warnf(
           "workspace %s's daemon answered %s to an agent launch",
           workspaceRowId, Integer.valueOf(answer.status()));
-      return false;
+      return Launch.REFUSED;
     }
-    return true;
+    String commandId = launchedCommandId(answer.body());
+    if (commandId == null) {
+      LOG.warnf(
+          "workspace %s's daemon accepted an agent launch without naming its command; that agent's"
+              + " waiting state will not be relayed",
+          workspaceRowId);
+    }
+    return Launch.accepted(commandId);
+  }
+
+  /**
+   * {@code command.id} out of a launch's answer, or null when the body is not JSON or names none —
+   * the same honest "nothing known" {@link #delivered} reads off a body nobody can read.
+   */
+  static String launchedCommandId(String body) {
+    try {
+      JsonObject command = new JsonObject(body).getJsonObject("command");
+      String id = command == null ? null : command.getString("id");
+      return id == null || id.isBlank() ? null : id;
+    } catch (RuntimeException notJson) {
+      return null;
+    }
   }
 
   /**
