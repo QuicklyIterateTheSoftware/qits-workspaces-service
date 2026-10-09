@@ -19,8 +19,8 @@ import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.AfterEach;
@@ -50,9 +50,13 @@ public class WorkspaceEnsureContainerProcessTest {
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
 
-  /** Records a terminal process's full replay (attach on a terminal process replays + done). */
+  /**
+   * Records a process's replay (attach on a terminal process replays + done). On a live process the
+   * listener stays attached and frames keep arriving from the start's own thread while a test
+   * streams them, so the list must iterate over a snapshot.
+   */
   private static final class Replay implements TechnicalProcess.Listener {
-    final List<TechnicalProcessFrame> frames = new ArrayList<>();
+    final List<TechnicalProcessFrame> frames = new CopyOnWriteArrayList<>();
 
     @Override
     public void onFrame(TechnicalProcessFrame frame) {
