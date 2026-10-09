@@ -12,7 +12,7 @@ import eu.wohlben.qits.workspaces.error.DomainException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.error.RunnerRefusals;
 import eu.wohlben.qits.workspaces.mapper.WorkspaceRunnerMapper;
-import eu.wohlben.qits.workspacesrunner.protocol.CheckResult;
+import eu.wohlben.qits.runner.protocol.health.CheckResult;
 import eu.wohlben.qits.workspacesrunner.protocol.HealthCheck;
 import eu.wohlben.qits.workspacesrunner.protocol.HealthChecked;
 import io.quarkus.scheduler.Scheduled;
