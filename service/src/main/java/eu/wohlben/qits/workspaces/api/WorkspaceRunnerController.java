@@ -317,6 +317,7 @@ public class WorkspaceRunnerController {
     PatchRunnerRequest change =
         request == null ? new PatchRunnerRequest(null, null, null, null) : request;
     UUID runnerId = runnerId(id);
+    Integer slotsBefore = change.slots() == null ? null : slotsOf(runnerId);
     WorkspaceRunner patched =
         runners.patch(
             runnerId,
@@ -327,8 +328,24 @@ public class WorkspaceRunnerController {
     if (change.slots() != null) {
       // A connected runner learns its slots only from an ack.
       registry.slotsChanged(runnerId);
+      if (slotsBefore != null && slotsBefore.intValue() != change.slots()) {
+        // Its stored report described the runner before the resize (qits-948); the re-ack first.
+        health.refresh(runnerId, "a resize to " + change.slots() + " slot(s)");
+      }
     }
     return views.view(patched);
+  }
+
+  /**
+   * The runner's slots before a PATCH moves them, or null for no such runner — which the PATCH
+   * itself then refuses, after its own validation, exactly as it did before anything read ahead.
+   */
+  private Integer slotsOf(UUID runnerId) {
+    try {
+      return runners.get(runnerId).slots;
+    } catch (NotFoundException gone) {
+      return null;
+    }
   }
 
   /**

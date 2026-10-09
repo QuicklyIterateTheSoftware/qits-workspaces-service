@@ -1,11 +1,14 @@
 package eu.wohlben.qits.workspaces.runnerhost;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import eu.wohlben.qits.workspaces.control.WorkspaceRunners;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
+import eu.wohlben.qits.workspaces.error.DomainException;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.arc.Arc;
@@ -41,10 +44,48 @@ public final class RunnerRows {
     return runners.markRegistered(id, clientId, null);
   }
 
-  /** {@link #registered}, then greenlit: a runner in service. */
+  /**
+   * {@link #registered}, then greenlit: a runner in service — whose last check passed at the
+   * workspace image it is pinned to now, as a greenlit runner's has, so its greeting owes it no
+   * check (qits-948). On a deployment that cannot name the image no report is stored.
+   */
   public WorkspaceRunner eligible(String clientId, int slots) {
     registered(clientId, slots);
-    return runners.greenlight(createdRunners.get(createdRunners.size() - 1));
+    UUID id = createdRunners.get(createdRunners.size() - 1);
+    runners.greenlight(id);
+    String pinned = pinnedImage();
+    return pinned == null ? runners.get(id) : reportedImage(id, pinned);
+  }
+
+  /**
+   * Records a passing check of {@code runnerId} whose {@code workspaceImage} check reported {@code
+   * image}; null records a report with no such check. Answers the row as it now is.
+   */
+  public WorkspaceRunner reportedImage(UUID runnerId, String image) {
+    ObjectNode report = JsonNodeFactory.instance.objectNode();
+    report.put("at", Instant.now().toString());
+    report.put("ok", true);
+    report.put("detail", "seeded by the suite");
+    report.putNull("requestId");
+    if (image != null) {
+      ObjectNode check = report.putArray("checks").addObject();
+      check.put("name", WorkspaceRunnerHealth.WORKSPACE_IMAGE_CHECK);
+      check.put("ok", true);
+      check.put("detail", image + " is here");
+      check.putObject("data").put("image", image);
+    } else {
+      report.putArray("checks");
+    }
+    return runners.recordHealthCheck(runnerId, true, Instant.now(), report);
+  }
+
+  /** The workspace image a runner is pinned to now, or null when the suite names no domain. */
+  public String pinnedImage() {
+    try {
+      return Arc.container().instance(WorkspaceRunnerAddresses.class).get().workspaceImage();
+    } catch (DomainException unconfigured) {
+      return null;
+    }
   }
 
   /** A runner declared and not registered yet, holding registration token subject {@code sub}. */

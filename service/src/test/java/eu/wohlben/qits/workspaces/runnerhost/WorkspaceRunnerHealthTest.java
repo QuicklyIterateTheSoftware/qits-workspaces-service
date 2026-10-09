@@ -34,6 +34,8 @@ import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.restassured.http.ContentType;
+import io.restassured.response.ValidatableResponse;
 import io.restassured.specification.RequestSpecification;
 import io.vertx.core.Vertx;
 import jakarta.inject.Inject;
@@ -401,6 +403,163 @@ class WorkspaceRunnerHealthTest {
         .statusCode(200)
         .body("requestId", is(requestId))
         .body("checks.size()", is(0));
+  }
+
+  // --- the stale report (qits-948) ----------------------------------------------------------------
+
+  /**
+   * A runner in service whose stored report is of another workspace image than its pin — a re-pin
+   * since its last check — is sent a check at its greeting, after its backlog; its answer replaces
+   * the report, and the next greeting, the report now of the pin, sends none.
+   */
+  @Test
+  void aRunnerInServiceGreetedWithAReportOfAnotherImageIsChecked() throws Exception {
+    WorkspaceRunner row = rows.eligible("wr-repinned", 1);
+    String pinned = rows.pinnedImage();
+    rows.reportedImage(row.id, "registry.qits.example.test/qits/workspace:2026.101.1");
+
+    FakeWorkspacesRunner runner = greeted("wr-repinned", 1);
+
+    HealthCheck check = runner.expect(HealthCheck.class);
+    assertEquals(check.requestId(), health.pendingCheck(row.id));
+    assertFalse(rows.runner(row.id).quarantined(), "a stale report quarantines nothing");
+    runner.send(
+        new HealthChecked(
+            true,
+            "6 checks passed",
+            check.requestId(),
+            List.of(
+                new CheckResult(
+                    "workspaceImage", true, pinned + " is here", Map.of("image", pinned)))));
+    awaitSettled(row);
+    as("qits:agent")
+        .when()
+        .get(RUNNERS + "/" + row.id + "/health")
+        .then()
+        .statusCode(200)
+        .body("requestId", is(check.requestId()))
+        .body("checks[0].data.image", is(pinned));
+    runner.close();
+    awaitDisconnected(row);
+
+    FakeWorkspacesRunner again = greeted("wr-repinned", 1);
+
+    assertNull(again.poll(Duration.ofMillis(500)), "the report is of the pin: nothing to ask");
+    assertNull(health.pendingCheck(row.id));
+  }
+
+  /** A stored report with no {@code workspaceImage} check counts as one of another image. */
+  @Test
+  void aRunnerInServiceWhoseReportNamesNoImageIsChecked() throws Exception {
+    WorkspaceRunner row = rows.eligible("wr-unnamed-image", 1);
+    rows.reportedImage(row.id, null);
+
+    FakeWorkspacesRunner runner = greeted("wr-unnamed-image", 1);
+
+    HealthCheck check = runner.expect(HealthCheck.class);
+    assertEquals(check.requestId(), health.pendingCheck(row.id));
+  }
+
+  /**
+   * A deployment that cannot name the workspace image has nothing to compare a report with: a
+   * runner in service with no report at all is greeted and asked nothing.
+   */
+  @Test
+  void noImageToCompareWithSendsNoCheck() throws Exception {
+    QuarkusMock.installMockForType(
+        WorkspaceRunnerAddressesFixture.withDomain(null), WorkspaceRunnerAddresses.class);
+    WorkspaceRunner row = rows.eligible("wr-no-domain", 1);
+    assertNull(rows.runner(row.id).lastHealthCheckAt, "no report was seeded");
+
+    FakeWorkspacesRunner runner = greeted("wr-no-domain", 1);
+
+    assertNull(runner.poll(Duration.ofMillis(500)), "nothing after the backlog");
+    assertNull(health.pendingCheck(row.id));
+  }
+
+  /**
+   * An operator's resize of a connected runner in service: {@code ack} with the new slots and its
+   * backlog first, then one {@code healthCheck}; its answer replaces the stored report. The PATCH answers as it
+   * always did.
+   */
+  @Test
+  void aResizeChecksTheRunnerAfterItsAck() throws Exception {
+    WorkspaceRunner row = rows.eligible("wr-resized", 1);
+    String seededAt =
+        as("qits:agent")
+            .when()
+            .get(RUNNERS + "/" + row.id + "/health")
+            .then()
+            .statusCode(200)
+            .extract()
+            .path("at");
+    FakeWorkspacesRunner runner = greeted("wr-resized", 1);
+
+    patchSlots(row, Map.of("slots", 3)).statusCode(200).body("slots", is(3));
+
+    assertEquals(3, runner.expect(Ack.class).slots());
+    runner.expect(Backlog.class);
+    HealthCheck check = runner.expect(HealthCheck.class);
+    assertEquals(check.requestId(), health.pendingCheck(row.id));
+    assertNull(runner.poll(Duration.ofMillis(300)), "one check");
+    runner.send(
+        new HealthChecked(
+            true,
+            "6 checks passed",
+            check.requestId(),
+            List.of(new CheckResult("session", true, "3 slot(s), 0 held", Map.of()))));
+    awaitSettled(row);
+    String at =
+        as("qits:agent")
+            .when()
+            .get(RUNNERS + "/" + row.id + "/health")
+            .then()
+            .statusCode(200)
+            .body("requestId", is(check.requestId()))
+            .body("checks.name", is(List.of("session")))
+            .body("checks[0].detail", is("3 slot(s), 0 held"))
+            .extract()
+            .path("at");
+    assertTrue(Instant.parse(at).isAfter(Instant.parse(seededAt)), at + " after " + seededAt);
+  }
+
+  /**
+   * A PATCH that leaves the slots as they are sends no check: the same value is re-acked as it
+   * always was, and a PATCH without slots sends nothing at all.
+   */
+  @Test
+  void aPatchThatLeavesTheSlotsSendsNoCheck() throws Exception {
+    WorkspaceRunner row = rows.eligible("wr-same-size", 2);
+    FakeWorkspacesRunner runner = greeted("wr-same-size", 2);
+
+    patchSlots(row, Map.of("slots", 2)).statusCode(200).body("slots", is(2));
+    assertEquals(2, runner.expect(Ack.class).slots());
+    runner.expect(Backlog.class);
+    patchSlots(row, Map.of("description", "by the window")).statusCode(200);
+
+    assertNull(runner.poll(Duration.ofMillis(500)), "no check");
+    assertNull(health.pendingCheck(row.id));
+  }
+
+  /** A resize of a runner with no connection answers 200 and asks nothing. */
+  @Test
+  void aResizeOfADisconnectedRunnerStillAnswers() {
+    WorkspaceRunner row = rows.eligible("wr-offline-resize", 1);
+
+    patchSlots(row, Map.of("slots", 4)).statusCode(200).body("slots", is(4));
+
+    assertNull(health.pendingCheck(row.id));
+    assertEquals(4, rows.runner(row.id).slots);
+  }
+
+  private ValidatableResponse patchSlots(
+      WorkspaceRunner row, Map<String, Object> body) {
+    return as("qits:admin")
+        .contentType(ContentType.JSON)
+        .body(body)
+        .when()
+        .patch(RUNNERS + "/" + row.id)
+        .then();
   }
 
   // --- what a quarantine leaves alone -------------------------------------------------------------

@@ -1,13 +1,17 @@
 package eu.wohlben.qits.workspaces.runnerhost;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import eu.wohlben.qits.workspaces.control.WorkspaceRunners;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
+import eu.wohlben.qits.workspaces.entity.WorkspaceRunnerCapabilities;
 import eu.wohlben.qits.workspaces.error.ConflictException;
+import eu.wohlben.qits.workspaces.error.DomainException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.error.RunnerRefusals;
+import eu.wohlben.qits.workspaces.mapper.WorkspaceRunnerMapper;
 import eu.wohlben.qits.workspacesrunner.protocol.CheckResult;
 import eu.wohlben.qits.workspacesrunner.protocol.HealthCheck;
 import eu.wohlben.qits.workspacesrunner.protocol.HealthChecked;
@@ -18,6 +22,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -58,8 +63,13 @@ import org.jboss.logging.Logger;
  * <p><b>A check is sent</b> when a runner awaiting its first one or coming back is greeted, when
  * somebody asks ({@link #request}: an operator, the bootstrap or an agent — it reads and self-tests
  * only), and by {@link #sweep} for each quarantined, connected runner with none pending once it is
- * <b>due</b>. A passing check reinstates a quarantined runner ({@code reinstated{by: "health
- * check"}}, then {@code ack} with its slots); one that is in service stays so.
+ * <b>due</b>. Two more keep an in-service runner's stored report from going stale (qits-948): an
+ * operator's PATCH that changes its slots ({@link #refresh}, after the re-{@code ack}), and a
+ * greeting at which the {@code workspaceImage} check's {@code data.image} in the stored report is
+ * not the workspace image the runner is pinned to now — a re-pin, or a report that never named one.
+ * Neither ever quarantines by itself: only the answer does, as any answer would. A passing check
+ * reinstates a quarantined runner ({@code reinstated{by: "health check"}}, then {@code ack} with its
+ * slots); one that is in service stays so.
  *
  * <p><b>The schedule backs off, counted from the quarantine</b> — CI's, key for key. {@code
  * qits.workspaces.runner.healthcheck.schedule} is a list of offsets from {@code quarantined_at},
@@ -103,11 +113,19 @@ public class WorkspaceRunnerHealth {
   /** The prefix of a failed check's quarantine reason. */
   static final String FAILED = "health check failed";
 
+  /**
+   * The runner's check of the workspace image it was told in its estate; its {@code data.image} is
+   * that image (qits-948).
+   */
+  static final String WORKSPACE_IMAGE_CHECK = "workspaceImage";
+
   @Inject WorkspaceRunners runners;
 
   @Inject WorkspaceRunnerRegistry registry;
 
   @Inject ObjectMapper objectMapper;
+
+  @Inject WorkspaceRunnerAddresses addresses;
 
   /** How long a sent check is waited for before it is settled {@value #NO_ANSWER}. */
   @ConfigProperty(name = "qits.workspaces.runner.healthcheck.timeout")
@@ -152,6 +170,23 @@ public class WorkspaceRunnerHealth {
   }
 
   /**
+   * Asks a connected runner for a fresh check because something its stored report describes has
+   * moved — {@code why}, for the log (qits-948): an operator's resize today. {@link #request}'s
+   * send, without its door: a check pending on a live connection is reused, a runner with no
+   * connection is asked nothing and noted at debug, and nothing is thrown, so the PATCH that caused
+   * it answers as it would have.
+   */
+  public void refresh(UUID runnerId, String why) {
+    try {
+      if (sendUnlessPending(runnerId, Instant.now()) == null) {
+        LOG.debugf("Runner %s is not connected; no health check after %s", runnerId, why);
+      }
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "Runner %s could not be asked for a health check after %s", runnerId, why);
+    }
+  }
+
+  /**
    * The registry admitted the first socket of a runner that held none for longer than the reconnect
    * grace: it is quarantined ({@value #RECONNECTED}) — unless it already is, when its quarantine
    * stands — and owed a check at its greeting. Never throws.
@@ -170,17 +205,54 @@ public class WorkspaceRunnerHealth {
 
   /**
    * A connection of the runner was greeted at the pin as {@code row}: a runner awaiting its first
-   * check, or one that came back, is sent one unless it has one pending on a live connection.
+   * check, or one that came back, is sent one unless it has one pending on a live connection — and
+   * so is a runner in service whose stored report is of another workspace image than the one it is
+   * pinned to now ({@link #reportedOtherImage}, qits-948). Never throws.
    */
   void onGreeted(WorkspaceRunner row) {
-    boolean owed = owedOnGreeting.remove(row.id);
-    if (!row.quarantined()
-        || !(owed || WorkspaceRunners.AWAITING_FIRST_HEALTH_CHECK.equals(row.quarantineReason))) {
-      return;
+    try {
+      boolean owed = owedOnGreeting.remove(row.id);
+      if (row.quarantined()) {
+        if (!(owed || WorkspaceRunners.AWAITING_FIRST_HEALTH_CHECK.equals(row.quarantineReason))) {
+          return;
+        }
+      } else if (!reportedOtherImage(row)) {
+        return;
+      }
+      if (sendUnlessPending(row.id, Instant.now()) == null) {
+        LOG.warnf("Runner %s was greeted and its health check could not be sent", row.name);
+      }
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "Runner %s was greeted and its health check could not be considered", row.name);
     }
-    if (sendUnlessPending(row.id, Instant.now()) == null) {
-      LOG.warnf("Runner %s was greeted and its health check could not be sent", row.name);
+  }
+
+  /**
+   * Whether the {@code workspaceImage} check of {@code row}'s stored report names another image
+   * than {@link WorkspaceRunnerAddresses#workspaceImage} — no report, no such check and no image
+   * all counting as another. False on a deployment that cannot name the image: there is nothing to
+   * compare with, and the estate told the runner none either.
+   */
+  private boolean reportedOtherImage(WorkspaceRunner row) {
+    String pinned;
+    try {
+      pinned = addresses.workspaceImage();
+    } catch (DomainException unconfigured) {
+      return false;
     }
+    JsonNode report =
+        WorkspaceRunnerMapper.healthNode(WorkspaceRunnerCapabilities.decode(row.capabilities));
+    String reported = null;
+    if (report != null) {
+      for (JsonNode check : report.path("checks")) {
+        if (WORKSPACE_IMAGE_CHECK.equals(check.path("name").asText(null))) {
+          JsonNode image = check.path("data").path("image");
+          reported = image.isTextual() ? image.asText() : null;
+          break;
+        }
+      }
+    }
+    return !Objects.equals(pinned, reported);
   }
 
   /** The runner's row was deleted: nothing about it is waited for any more. */
