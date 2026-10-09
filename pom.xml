@@ -79,11 +79,11 @@
              the qits/qits-workspaces-runner image every runner is told to upgrade to, so the frames
              this service speaks and the binary it hands out are one release. Moved by
              qits-maintenance on maintenance/dependencies, gated here; never by hand. -->
-        <qits.workspaces-runner-protocol.version>2026.1009.130828</qits.workspaces-runner-protocol.version>
+        <qits.workspaces-runner-protocol.version>2026.1009.134338</qits.workspaces-runner-protocol.version>
         <!-- qits-runner-javalib (qits-771): the lifecycle frames and their codec
              (qits-runner-protocol), and the install script template plus RunnerIdentity
              (qits-runner-toolkit). One release carries both, so one property pins both. -->
-        <qits.runner.version>2026.1009.132702</qits.runner.version>
+        <qits.runner.version>2026.1009.135338</qits.runner.version>
         <qits.coding-agents.version>2026.1009.92334</qits.coding-agents.version>
         <qits.eventstream.version>2026.1003.44717</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
