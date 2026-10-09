@@ -1056,21 +1056,30 @@ public class WorkspaceService {
                   wt.placement == WorkspacePlacement.RUNNER
                       ? runnerRuntime(wt)
                       : directRuntime(wt, runningIds);
-              // Clean/dirty is only knowable while the daemon is connected (RUNNING); otherwise it
-              // stays null (unknown ⇒ no badge). The daemon re-reports on reconnect.
+              // Clean/dirty, agent activity and the registry facts below are known only while the
+              // daemon's socket is live. That is RUNNING for a DIRECT row, but a RUNNER row's
+              // UNAVAILABLE is only the runner being unreachable — its daemon dials in through the
+              // edge, not through the runner, so the socket can still be live underneath the
+              // overlay. The registry ports are self-evicting (empty once the socket drops), so
+              // they are the ones that get to decide, not runtime.
+              boolean daemonReadable =
+                  runtime == WorkspaceRuntimeStatus.RUNNING
+                      || runtime == WorkspaceRuntimeStatus.UNAVAILABLE;
+              // Clean/dirty stays null (unknown ⇒ no badge) whenever the daemon isn't readable. The
+              // daemon re-reports on reconnect.
               Boolean clean =
-                  runtime == WorkspaceRuntimeStatus.RUNNING && gitStatus.isResolvable()
+                  daemonReadable && gitStatus.isResolvable()
                       ? gitStatus.get().isClean(wt.id).orElse(null)
                       : null;
-              // Agent activity shares clean/dirty's RUNNING-only, self-healing contract.
+              // Agent activity shares clean/dirty's daemon-readable, self-healing contract.
               AgentActivityState activity =
-                  runtime == WorkspaceRuntimeStatus.RUNNING && agentActivity.isResolvable()
+                  daemonReadable && agentActivity.isResolvable()
                       ? agentActivity.get().activityFor(wt.id).orElse(null)
                       : null;
               // Registry facts (connected-since + daemon build identity) share clean/dirty's
-              // RUNNING-only, in-memory contract: known only while the daemon's socket is live.
+              // daemon-readable, in-memory contract: known only while the daemon's socket is live.
               WorkspaceDaemonInfo.Info info =
-                  runtime == WorkspaceRuntimeStatus.RUNNING && daemonInfo.isResolvable()
+                  daemonReadable && daemonInfo.isResolvable()
                       ? daemonInfo.get().lookup(wt.id).orElse(null)
                       : null;
               return new WorkspaceDto(
@@ -1236,7 +1245,9 @@ public class WorkspaceService {
    * branch are null and {@code conflictsWithParent} is false — not because they were too expensive
    * to compute, but because there is nothing to compute them against. Everything keyed by the row
    * itself is answered exactly as the listing answers it: the live container check, clean/dirty,
-   * agent activity and the daemon's identity, all of them RUNNING-only on the same contract.
+   * agent activity and the daemon's identity, all of them known only while the daemon's socket is
+   * live — RUNNING here, since the editor is always DIRECT and never reads the listing's UNAVAILABLE
+   * overlay.
    *
    * <p>Five endpoints reach this method — the by-id read and the four container verbs that return
    * the refreshed workspace — so fixing it here is what makes all five answer for the editor rather
