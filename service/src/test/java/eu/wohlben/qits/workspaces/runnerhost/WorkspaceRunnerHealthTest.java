@@ -22,7 +22,7 @@ import eu.wohlben.qits.workspaces.daemonhost.DaemonControlSocketMachineAuthTest;
 import eu.wohlben.qits.workspaces.daemonhost.DaemonMachineTokens;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
-import eu.wohlben.qits.workspacesrunner.protocol.CheckResult;
+import eu.wohlben.qits.runner.protocol.health.CheckResult;
 import eu.wohlben.qits.workspacesrunner.protocol.Estate;
 import eu.wohlben.qits.workspacesrunner.protocol.HealthCheck;
 import eu.wohlben.qits.workspacesrunner.protocol.HealthChecked;
