@@ -60,6 +60,8 @@ public class WorkspaceRunnerPlacementTest {
   @Inject TechnicalProcessRegistry processes;
   @Inject FakeCredentialCommissioner commissioner;
   @Inject FakeWorkspaceGitStatus gitStatus;
+  @Inject FakeWorkspaceAgentActivity agentActivity;
+  @Inject FakeWorkspaceDaemonInfo daemonInfo;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -99,6 +101,8 @@ public class WorkspaceRunnerPlacementTest {
                             .ifPresent(w -> w.status = WorkspaceStatus.ABANDONED)));
     QuarkusTransaction.requiringNew().run(() -> createdRunners.forEach(runnerRepository::deleteById));
     rows.forEach(gitStatus::forget);
+    rows.forEach(agentActivity::forget);
+    rows.forEach(daemonInfo::forget);
     rows.clear();
     createdRunners.clear();
     placement.reset();
@@ -763,6 +767,58 @@ public class WorkspaceRunnerPlacementTest {
     assertEquals(
         WorkspaceRuntimeStatus.RUNNING, read(onRunner.id).runtimeStatus, "the overlay is not stored");
     containers.rm(containers.containerName("unplaced", repoId));
+  }
+
+  /**
+   * Clean/dirty, agent activity and the daemon's identity are known while the daemon's SOCKET is
+   * live, not only while the row reads RUNNING (qits-949): a RUNNER row's UNAVAILABLE overlay is
+   * only its runner being unreachable, and the in-container daemon dials in through the edge rather
+   * than through the runner, so the registry ports can still answer underneath it. The row is
+   * persisted RUNNING and its runner is simply never connected, which is exactly what "offline past
+   * the grace" looks like to {@code runnerPresent}.
+   */
+  @Test
+  public void anUnavailableRunnerRowStillReadsTheLiveDaemonFacts() throws Exception {
+    WorkspaceRunner runner = eligibleRunner();
+    String repoId = repo();
+    Workspace created = stoppedRunnerRow(repoId, "daemon-live");
+    running(created.id, runner.id);
+    gitStatus.report(created.id, false);
+    agentActivity.report(created.id, AgentActivityState.BUSY);
+    Instant buildTime = Instant.now();
+    daemonInfo.report(created.id, "1.2.3", buildTime);
+
+    WorkspaceDto dto = listed(repoId, created.id);
+
+    assertEquals(
+        WorkspaceRuntimeStatus.UNAVAILABLE, dto.runtimeStatus(), "the runner is unreachable");
+    assertEquals(Boolean.FALSE, dto.clean(), "the daemon's socket is still live through the edge");
+    assertEquals(AgentActivityState.BUSY, dto.agentActivity());
+    assertNotNull(dto.daemonConnectedAt());
+    assertEquals("1.2.3", dto.daemonVersion());
+    assertEquals(buildTime, dto.daemonBuildTime());
+  }
+
+  /**
+   * The same overlay with no live daemon at all: the registry ports answer exactly as empty as they
+   * would for a RUNNING row whose daemon never dialled home, so the three fields stay null rather
+   * than reading as some fallback.
+   */
+  @Test
+  public void anUnavailableRunnerRowWithNoDaemonReadsNullDaemonFacts() throws Exception {
+    WorkspaceRunner runner = eligibleRunner();
+    String repoId = repo();
+    Workspace created = stoppedRunnerRow(repoId, "daemon-absent");
+    running(created.id, runner.id);
+
+    WorkspaceDto dto = listed(repoId, created.id);
+
+    assertEquals(WorkspaceRuntimeStatus.UNAVAILABLE, dto.runtimeStatus());
+    assertNull(dto.clean());
+    assertNull(dto.agentActivity());
+    assertNull(dto.daemonConnectedAt());
+    assertNull(dto.daemonVersion());
+    assertNull(dto.daemonBuildTime());
   }
 
   // --- dispatch -----------------------------------------------------------------------------------
