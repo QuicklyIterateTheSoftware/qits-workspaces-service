@@ -1246,11 +1246,6 @@ public class WorkspaceContainerFactory {
     // The auto-push kill switch the daemon honours when it pushes committed work on its own
     // (docs/epics/qits-workspace-daemon/ bidirectional auto-sync).
     env.accept("QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED", String.valueOf(autoPushEnabled));
-    // Workspace services are gone (qits-947), but a daemon built before their removal defaults
-    // this to true and would still auto-start whatever a checkout declares under `services:`, with
-    // no host left to see it. Pinned off, with no config key behind it; the line goes once the
-    // workspace image carries the services-free daemon.
-    env.accept("QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART", "false");
   }
 
   private static String serviceBase(String configured) {

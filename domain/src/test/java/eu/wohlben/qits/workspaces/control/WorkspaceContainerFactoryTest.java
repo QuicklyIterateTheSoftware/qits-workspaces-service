@@ -205,9 +205,10 @@ class WorkspaceContainerFactoryTest {
     assertEnv(c, "QITS_WORKSPACE_DAEMON_REPO_NAME", "my-repo");
     // The bootstrap kill switch the daemon honours when it self-runs the chain on boot (Part 3).
     assertEnv(c, "QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN", "true");
-    // Workspace services are gone (qits-947): a pre-removal daemon defaults its auto-start to true,
-    // so the switch is pinned off, with no config key behind it to turn it back on.
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART", "false");
+    // Workspace services are gone (qits-947), and the image's daemon has no switch left to set.
+    assertFalse(
+        c.env().keySet().stream().anyMatch(k -> k.startsWith("QITS_WORKSPACE_DAEMON_SERVICE")),
+        "no service env reaches the container");
     // The shared network, so qits reaches the container's ports by DNS name with no host publish.
     assertEquals("qits-net", c.network());
     // The memory cap — without it a dev server's JVMs size against the whole host's RAM and can

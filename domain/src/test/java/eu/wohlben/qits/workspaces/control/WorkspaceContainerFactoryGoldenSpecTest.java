@@ -125,7 +125,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_WORKSPACE_DAEMON_REPO_NAME=my-repo
         env QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN=true
         env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
-        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false
         env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
         env QITS_COMMISSIONED_CLIENT_ID=ws-7-a
         env QITS_COMMISSIONED_CLIENT_SECRET=s3cr3t
@@ -203,7 +202,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_WORKSPACE_DAEMON_REPO_NAME=
         env QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN=true
         env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
-        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false
         env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
         env QITS_COMMISSIONED_CLIENT_ID=ws-7-a
         env QITS_COMMISSIONED_CLIENT_SECRET=s3cr3t
@@ -294,7 +292,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_WORKSPACE_DAEMON_REPO_NAME=my-repo
         env QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN=true
         env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
-        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false
         env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
         env QITS_COMMISSIONED_CLIENT_ID=ws-7-a
         env QITS_COMMISSIONED_CLIENT_SECRET=s3cr3t
@@ -403,7 +400,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_WORKSPACE_DAEMON_REPO_NAME=my-repo
         env QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN=true
         env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
-        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false
         env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
         env QITS_TOKEN=qits_tok_admin8
         env QITS_TOKEN_SUBJECT=tok-workspace-admin-8
@@ -470,7 +466,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_WORKSPACE_DAEMON_REPO_NAME=
         env QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN=true
         env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
-        env QITS_WORKSPACE_DAEMON_SERVICES_AUTOSTART=false
         env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
         env QITS_TOKEN=qits_tok_editor9
         env QITS_TOKEN_SUBJECT=tok-workspace-editor-9
