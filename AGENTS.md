@@ -1820,7 +1820,9 @@ that reason and reuse it rather than adding a profile.
   successor included, is not one; nor is a reconnect to a freshly started service, whose memory of
   the drop is gone), and when a check fails or is not answered within
   `qits.workspaces.runner.healthcheck.timeout` (`no answer`). A check is sent at the greeting of a
-  runner awaiting its first one or coming back, on demand, and by the sweep on CI's back-off
+  runner awaiting its first one or coming back, at the greeting of one in service whose stored
+  report's `workspaceImage` is not the pinned image, after a PATCH that changes its slots
+  (qits-948), on demand, and by the sweep on CI's back-off
   `qits.workspaces.runner.healthcheck.schedule` counted from `quarantined_at`, which a failed check
   of a runner already out keeps. The whole report sits in `capabilities.health`, bounded on its own;
   a pass reinstates (`reinstated{by: "health check"}`, `ack{slots}`). A quarantine never touches

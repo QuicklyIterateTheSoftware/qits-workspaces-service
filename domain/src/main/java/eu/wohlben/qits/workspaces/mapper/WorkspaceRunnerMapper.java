@@ -162,7 +162,12 @@ public class WorkspaceRunnerMapper {
         List.copyOf(checks));
   }
 
-  private static JsonNode healthNode(JsonNode said) {
+  /**
+   * The stored health report under {@link WorkspaceRunnerCapabilities#HEALTH} of decoded
+   * capabilities, or null when there is none or it is not an object — read by the host's own
+   * re-pin trigger as well as by the two views (qits-948).
+   */
+  public static JsonNode healthNode(JsonNode said) {
     JsonNode health = said == null ? null : said.get(WorkspaceRunnerCapabilities.HEALTH);
     return health != null && health.isObject() ? health : null;
   }
