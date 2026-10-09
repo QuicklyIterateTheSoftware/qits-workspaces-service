@@ -348,6 +348,27 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public Boolean entityBlocked;
 
   /**
+   * The daemon command the last agent launch this service made here started ({@code V18},
+   * qits-895), or null for a row no host-side launch ever reached.
+   *
+   * <p>It is how the dispatched agent is told apart from a person's other sessions in the same
+   * workspace: an agent-activity frame names its command, and only a frame naming this one is
+   * relayed to qits-projects as the work item's agent waiting (or not). Replaced by every launch
+   * {@code DispatchService} makes — a dispatch's, and a delivery's fallback launch — and by nothing
+   * else; a turn delivered to the running agent goes to the same command. Not on any DTO.
+   *
+   * <p><b>Read-only to the entity</b>: written by {@code WorkspaceRepository.recordDispatchCommand}
+   * alone, a bulk update, so that no other transaction's flush of a row it loaded earlier can put
+   * the previous command back. Setting this field does nothing.
+   */
+  @Column(
+      name = "dispatch_command_id",
+      columnDefinition = "text",
+      insertable = false,
+      updatable = false)
+  public String dispatchCommandId;
+
+  /**
    * The Git refs this workspace's container may push, as a JSON array ({@code V6}). Read and written
    * through {@link eu.wohlben.qits.workspaces.control.GitRefs}, never by hand.
    *

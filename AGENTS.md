@@ -193,6 +193,14 @@ a QUEUED runner workspace, keyed by the workspace id, with a `claimed_by`/`claim
 `PendingAgentLaunch` is **`@Uncaused`**, for the prompt draft's reasons — a native insert, and a row
 rewritten by its claim. See "Dispatching an agent onto a branch".
 
+**`V18__dispatch_command_id.sql` adds `dispatch_command_id` to `workspace`** (qits-895): the daemon
+command the last launch this service made started, replaced by every accepted launch
+(`DispatchService.recordLaunchedCommand`). A column on a `CausedRow`, so no `ArchRulesTest` decision.
+**It is mapped `insertable = false, updatable = false` and written only by
+`WorkspaceRepository.recordDispatchCommand`, a bulk update**: `Workspace` has no `@DynamicUpdate`,
+so any other transaction's flush of a row it loaded before the launch committed would put the old
+id back. See "The agent-activity rollup", the relay paragraph.
+
 **The target is PostgreSQL 18.4** — the tag `components/qits-database/qits-database-oci` is built
 from, and the version the suites' embedded binaries are, so a migration is proved against the engine it ships on.
 Two H2 habits are gone with it: a rule that applies to some rows is a **partial unique index** now
@@ -559,6 +567,19 @@ through `AgentKills` and takes it back off on the next `BUSY`. Every re-provisio
 clears any `runtimeError`; a runner inventory deliberately does **not** (the container is running,
 which is no news to an agent kill). Until the protocol pin carries `AgentActivity.message()` the
 sentence is the host's own and names no memory cap.
+
+**The dispatched agent's waiting state is relayed to qits-projects** (qits-895), which derives a work
+item's BLOCKED from it. A daemon at capability 8 sets `AgentActivity.awaitingInput` (null = unknown,
+never relayed). `WorkspaceDaemonRegistry.onAgentWaiting` relays a frame only when its `commandId` is
+the row's `dispatch_command_id` (`V18`, written by every accepted launch — `DaemonAgentClient.launch`
+reads `command.id` off the daemon's answer) and the row has a `workId`; a person's other sessions
+are ignored. Only a flip per workspace is sent, the last value is kept across reconnects and
+forgotten on a new launch (`AgentLaunched`) or resolution, and the row read and the HTTP call run on
+`sinkDispatch`. The transport is the `AgentWaitingReporter` port, shipped as
+`wiring/HttpAgentWaitingReporter` → `POST /projects/api/work/{workId}/agent-waiting`; a 404/405
+from a qits-projects older than the door is logged once at INFO, anything else is a WARN and the next
+frame in that state tries again. The call is not in the consumer pact yet: the provider has no
+golden-master state for the door.
 
 ## The protocol is a dependency, and its version is the workspace image
 
