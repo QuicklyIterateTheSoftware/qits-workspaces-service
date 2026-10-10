@@ -982,9 +982,11 @@ connection and the next frames.
 **The doors** (machine doors `{qits:admin, qits:admin-agent, qits:system}`, reads add `qits:agent`):
 
 - `POST /workspaces/api/agent-dispatches` `{repositoryId, wrapperBranch, workId, entityId,
-  entityTitle, entityStatus, entityBlocked, ticketId?, epicId?, admin?, harness?, instruction}` →
+  entityTitle, entityStatus, entityBlocked, ticketId?, epicId?, harness?, instruction}` →
   `{agent, fresh, agentLaunch: SCHEDULED|SKIPPED_RUNNING|QUEUED, agentIdentity}`. Idempotent per
-  `workId`: the ACTIVE agent is the answer (`fresh:false`).
+  `workId`: the ACTIVE agent is the answer (`fresh:false`). `admin: true` is refused (400): an admin
+  agent holds the host's docker socket, so only the person door below makes one, never a door
+  `qits:system` may press.
 - `GET …/agent-dispatches/references?workId=…` (repeating; `ticketId`/`epicId` read as work ids) →
   `entries[].agent`.
 - `POST …/delivery` `{workId, text, compactFirst}` → `{agentId, delivered, launched, resumed,

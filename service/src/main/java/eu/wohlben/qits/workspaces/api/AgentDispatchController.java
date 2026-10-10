@@ -4,6 +4,7 @@ import eu.wohlben.qits.workspaces.control.AgentService;
 import eu.wohlben.qits.workspaces.control.EntityFacts;
 import eu.wohlben.qits.workspaces.dto.AgentDto;
 import eu.wohlben.qits.workspaces.entity.AgentHarness;
+import eu.wohlben.qits.workspaces.error.BadRequestException;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -46,7 +47,9 @@ public class AgentDispatchController {
    *     submodule branches {@code <wrapperBranch>-<its choice>}
    * @param workId the work item (D24)
    * @param entityId the item's qualified id, which names the agent's session
-   * @param admin an admin agent runs only in an admin workspace (D10)
+   * @param admin refused when true: an admin agent holds the host's docker socket, so it comes
+   *     only from a person's door ({@code POST /agents}, {@code qits:admin}/{@code
+   *     qits:admin-agent}), never from this machine door that {@code qits:system} may press
    * @param instruction the agent's first turn
    */
   public static record DispatchAgentRequest(
@@ -76,7 +79,9 @@ public class AgentDispatchController {
               + " none.")
   @APIResponse(
       responseCode = "400",
-      description = "A blank repository, wrapper branch or work item, or a branch git will not take.",
+      description =
+          "A blank repository, wrapper branch or work item, a branch git will not take, or"
+              + " `admin: true` (admin agents come only from `POST /workspaces/api/agents`).",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @APIResponse(
       responseCode = "404",
@@ -86,6 +91,11 @@ public class AgentDispatchController {
   // makes downstream (pacts/qits-workspaces-service_qits-projects-service.json).
   @Operation(operationId = "dispatchAgent")
   public AgentService.Dispatch dispatch(@Valid DispatchAgentRequest request) {
+    if (Boolean.TRUE.equals(request.admin())) {
+      throw new BadRequestException(
+          "This door never creates an admin agent: an admin agent holds the host's docker socket"
+              + " and comes only from a person's door, POST /workspaces/api/agents.");
+    }
     return agents.dispatch(
         new AgentService.AgentRequest(
             request.repositoryId(),
@@ -94,7 +104,7 @@ public class AgentDispatchController {
             request.entityId(),
             request.ticketId(),
             request.epicId(),
-            Boolean.TRUE.equals(request.admin()),
+            false,
             request.harness(),
             request.instruction(),
             factsOf(request.entityTitle(), request.entityStatus(), request.entityBlocked())));

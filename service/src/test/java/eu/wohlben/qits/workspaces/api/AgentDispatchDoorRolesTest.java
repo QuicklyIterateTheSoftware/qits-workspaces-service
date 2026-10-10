@@ -65,6 +65,26 @@ class AgentDispatchDoorRolesTest {
         .statusCode(404);
   }
 
+  /**
+   * Admin agents hold the host's docker socket, so this machine door never makes one: {@code
+   * qits:system} asking for one is refused before anything is looked up (a 400, not the 404 of the
+   * unknown repository). Admin agents come from {@code POST /workspaces/api/agents} only.
+   */
+  @Test
+  void theSystemRoleCannotDispatchAnAdminAgent() {
+    Map<String, Object> admin = new java.util.HashMap<>(aDispatch());
+    admin.put("admin", true);
+    given()
+        .header("X-Qits-User", "qits-projects")
+        .header("X-Qits-Roles", "qits:system")
+        .contentType(ContentType.JSON)
+        .body(admin)
+        .when()
+        .post("/workspaces/api/agent-dispatches")
+        .then()
+        .statusCode(400);
+  }
+
   /** A person may still press it. */
   @Test
   void theAdminRoleIsAdmitted() {

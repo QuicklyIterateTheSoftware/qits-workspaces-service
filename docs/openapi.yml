@@ -1162,8 +1162,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Dispatch"
         "400":
-          description: "A blank repository, wrapper branch or work item, or a branch\
-            \ git will not take."
+          description: "A blank repository, wrapper branch or work item, a branch\
+            \ git will not take, or `admin: true` (admin agents come only from `POST\
+            \ /workspaces/api/agents`)."
           content:
             application/json:
               schema:
