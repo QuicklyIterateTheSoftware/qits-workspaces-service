@@ -303,6 +303,18 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
    */
   @Override
   public boolean setEntity(Long workspaceRowId, EntityFacts facts) {
+    return setEntity(workspaceRowId, facts, null);
+  }
+
+  /**
+   * {@link #setEntity(Long, EntityFacts)}, adding {@code blockSource} (qits-895) to the body when
+   * it is not null — the effective block's source, carried live only: it never reaches {@link
+   * EntityFacts} and so never the row and never the container's environment. The 404/405 fallback
+   * is unchanged and carries only the flag, exactly as {@link #setEntity(Long, EntityFacts)} always
+   * did.
+   */
+  @Override
+  public boolean setEntity(Long workspaceRowId, EntityFacts facts, String blockSource) {
     Route route = route(workspaceRowId);
     if (route == null) {
       return false;
@@ -312,6 +324,9 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
             .put("title", facts.title())
             .put("status", facts.status())
             .put("blocked", facts.blocked());
+    if (blockSource != null) {
+      body.put("blockSource", blockSource);
+    }
     Answer answer = send(route, HttpMethod.POST, "agents/entity", body, blockedTimeoutMs);
     if (answer == null) {
       return false;
