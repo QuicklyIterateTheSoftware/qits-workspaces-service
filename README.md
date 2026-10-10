@@ -1,16 +1,18 @@
 # qits-workspaces-service
 
-The **host side** of qits workspaces: the workspace entity and its lifecycle, container
-orchestration, host-side git through a mirror of each repository, the workspace-daemon registry, the
-bootstrap-chain runner, the technical-process framework, prompt composition,
-feature capture, and the routes over all of it — the machine surface at `/workspaces`, its segment,
-and the client at the root of `workspaces.<env>.<domain>`.
+The **host side** of qits workspaces: workspaces and the agents that run in them, their scheduling
+and lifecycle, container orchestration, host-side git through a mirror of each repository, the
+workspace-daemon registry, the technical-process framework, prompt composition, feature capture, and
+the routes over all of it — the machine surface at `/workspaces`, its segment, and the client at the
+root of `workspaces.<env>.<domain>`.
 
-A workspace is a branch of a repository **plus** a per-workspace container that clones that branch
-into `/workspace`. This service creates, merges and deletes that branch the same way anything else
-does: by pushing to the git host. It does **not** release one — a release is a release request in
-qits-projects, which folds the sources through qits-githost and lands a tag. This repo owns everything about that from the host's side of
-the boundary. Everything that runs *inside* the container belongs to
+Since epic qits-1152 a **workspace** is a slot: one container on a workspace runner (an admin one on
+the platform host), scoped to a project's wrapper, holding one long-lived clone. An **agent** is one
+work item's coding agent and its worktree inside a workspace; a workspace hosts many agents and runs
+one at a time. The agent's branches are its own: the daemon creates the wrapper branch locally, the
+agent names its submodule branches, and each push is reported back. This service does **not** release
+anything — a release is a release request in qits-projects, which folds the sources through
+qits-githost and lands a tag. AGENTS.md, "Agents and the workspaces they run in", has the model. Everything that runs *inside* the container belongs to
 [qits-workspace-daemon](https://github.com/QuicklyIterateTheSoftware/qits-workspace-daemon).
 
     mvn verify        # resolves qits-eventstream 1.0.0 from local qits-artifacts
@@ -80,9 +82,10 @@ the consuming application implements:
 | `WorkspaceCommandHistory` | no | a workspace's history shows no commands |
 | `AgentSessionReporter` | no | `SessionStart` lineage is not forwarded |
 | `WorkspaceProcessTracker` | *implemented here* | `TechnicalProcessRegistry` is the default; the port stays so an application can substitute its own |
-| `WorkspaceAgentLauncher` | *implemented here* | `DaemonAgentClient` is the default; absent means the agent-dispatch door creates the workspace and starts the container but never launches an agent, and the delivery door says nothing to anybody |
+| `AgentDaemon` | *implemented here* | `DaemonAgentClient` (the daemon's `agent-worktrees` API through the tunnel); absent means agents are placed but never started |
+| `WorkFiler` | *implemented here* | `HttpWorkFiler` (`POST /projects/api/work`); absent means a capture is a 500 |
 | `CredentialCommissioner` | no | no container is given a platform credential — today's behaviour |
-| `ContainerRuntime` | *implemented here* | `WorkspaceContainers`, over qits-containers — **admin and editor workspaces only**; every regular workspace runs on a workspace runner (`RunnerPlacement`) and never reaches it (qits-780) |
+| `ContainerRuntime` | *implemented here* | `WorkspaceContainers`, over qits-containers — **admin workspaces only**; every regular workspace runs on a workspace runner (`RunnerPlacement`) and never reaches it (qits-780) |
 
 In the other direction this context publishes `WorkspaceResolved` when a workspace is integrated or
 abandoned. Because the delete is **soft**, no FK cascade ever fires for rows other contexts hang off
@@ -138,44 +141,30 @@ key). A release is a **release request in qits-projects**: it folds `main`, the 
 every released-but-unmerged tag onto a `release/<id>` branch through qits-githost's git primitives,
 the QA pipeline builds that fold, and a green gate stamps the manifests and creates the version tag.
 `main` is finalized after the deployment. Nothing here writes a default branch — `/branches/merge`
-and `/workspaces/{id}/integrate` refuse it with `RELEASE_REQUIRED`.
+refuses it with `RELEASE_REQUIRED`.
 
-**One door a release calls, and it is a workspace-lifecycle door rather than a release one.**
-`POST /workspaces/api/branches/resolution?repositoryId=<id>` (`{qits:admin, qits:system}`), body
-`{branch, target?, commit?, result?}` → `{resolved, workspaceId?}`. A released branch is deleted on
-the git host by a primitive that fires no event, so the workspace standing on it stayed ACTIVE
-forever — holding a container, a volume and a commissioned credential for a branch nobody can fetch.
-This resolves that one workspace as INTEGRATED, tearing the container, the volume and the credential
-down without touching the ref (it is already gone). A branch with no workspace answers
-`resolved:false` — the ordinary case, not an error — and the repository's main workspace is refused
-on both belts. AGENTS.md, "The release door left, and what stayed", has the reasoning.
+**One door a release calls.** `POST /workspaces/api/branches/resolution?repositoryId=<id>`
+(`{qits:admin, qits:system}`), body `{branch, target?, commit?, result?}` → `{resolved, agentIds}`. A
+released branch is deleted on the git host by a primitive that fires no event, so the release says
+so here: every ACTIVE agent owning the branch becomes OBSOLETE, and the cleanup sweep removes it once
+its work item is VERIFIED and it has been idle (leftover work is handed back to the agent, never
+deleted). A branch nothing owns answers `resolved:false` — the ordinary case.
 
-**The other machine door dispatches an agent.** `POST /workspaces/api/agent-dispatches`
-(`{qits:admin, qits:system}`), body
-`{repositoryId, branch, branchTree, preamble, ticketId, epicId, instruction}` →
-`{workspace, fresh, agentLaunch, technicalProcessId}`. qits-projects presses it to hand a ticket to a
-coding agent, and it is one call for an arc that previously had no machine entrance at all: creating
-a workspace was `qits:admin`-only and no host-side agent launch existed anywhere. It creates the
-workspace on the branch — naming its **subject** in `ticketId`/`epicId` rather than rendering the
-whole row into the preamble, which is why both dispatch doors at qits-projects now send no preamble
-at all — starts its container, and launches an agent
-seeded with the instruction once the daemon answers — which through an image pull is minutes away, so
-the launch happens long after this returns. Idempotent throughout: an existing workspace is answered
-with `fresh:false`, a running agent with `agentLaunch: SKIPPED_RUNNING`, and a re-press is how a
-caller recovers from anything, including a restart that dropped a scheduled launch. AGENTS.md,
-"Dispatching an agent onto a branch", has the reasoning.
+**The machine doors qits-projects presses** (`{qits:admin, qits:system}`), every one keyed by the
+work item:
 
-**Beside it, one door SAYS something to the agent that is already there.**
-`POST /workspaces/api/agent-dispatches/delivery` (`{qits:admin, qits:system}`), body
-`{repositoryId, branch, text, compactFirst}` → `{delivered, launched, workspaceId, detail}`. It is
-the user turn a host could not originate: until it existed, the only entrance for one was a browser
-on the daemon's command websocket, which is why the dispatch above can answer nothing better than
-`SKIPPED_RUNNING` about an agent already at work. One call, three arms, and the caller chooses none
-of them — an agent is running, so it is told; none is, so one is launched with the text as its seed
-turn; **no workspace stands on the branch, so nothing happens and the answer says so** with
-`workspaceId: null` and a 200. That last one is the only way it differs from a dispatch: **it never
-creates a workspace**, because a ticket nobody put an agent on has none and a status moved by hand
-must not conjure one. AGENTS.md, "Saying something to the agent already on a branch", has the rest.
+- `POST /workspaces/api/agent-dispatches` `{repositoryId, wrapperBranch, workId, entityId,
+  entityTitle, entityStatus, entityBlocked, ticketId?, epicId?, admin?, instruction}` → `{agent,
+  fresh, agentLaunch, agentIdentity}`: there should be an agent working on this item. Idempotent; a
+  queued agent waits for a free runner slot.
+- `POST …/agent-dispatches/delivery` `{workId, text, compactFirst}` → `{agentId, delivered, launched,
+  resumed, detail}`: say this to the item's agent. Never creates one; `agentId: null` is the answer
+  for an item nobody works on.
+- `POST …/agent-dispatches/entity` and `…/blocked` → `{agentId, applied}`; `GET
+  …/agent-dispatches/references?workId=…` → `entries[].agent`.
+
+A person's doors are `GET`/`POST /workspaces/api/agents` (an agent for an existing work item, with
+`admin` for the docker socket), `GET /workspaces/api/agents/{id}` and `POST …/{id}/discard`.
 
 One behaviour worth knowing before you debug it: **a missing repository and an unreachable
 qits-projects are different answers.** Only a 404 becomes "no such repository" (and then a 404 from
@@ -219,57 +208,50 @@ is the qits-net alias. Set it when the bus lives somewhere else:
 
 `Workspace.placement` (DIRECT or RUNNER, `V12`) is decided once, at create, and never changed
 (qits-837, qits-774). The split is by posture and nothing else: **a regular workspace runs on a
-workspace runner (RUNNER), and only admin and editor workspaces use the direct path** — a container
-on the platform host through qits-containers (DIRECT). An admin workspace holds the host's docker
-socket, and the shared editor is the platform's one container; neither may run on a node the
-platform does not own. `WorkspacePlacements.forNewRow(admin, editor)` writes it.
+workspace runner (RUNNER), and only admin workspaces use the direct path** — a container on the
+platform host through qits-containers (DIRECT). An admin workspace holds the host's docker socket and
+may not run on a node the platform does not own. `WorkspacePlacements.forNewRow(admin)` writes it.
 
 Three things hold the rule, from the schema in:
 
-- **`ck_workspace_runner_posture`** (`V12`): an admin or editor row is never RUNNER.
-- **`ck_workspace_direct_only_admin_editor`** (`V15`, qits-780): an ACTIVE row is RUNNER, or admin,
-  or editor — so no ACTIVE regular row can be DIRECT. Resolved rows keep their placement as history.
+- **`ck_workspace_runner_posture`** (`V12`, rewritten in `V20`): an admin row is never RUNNER.
+- **`ck_workspace_direct_only_admin`** (`V15`, rewritten in `V20`): an ACTIVE row is RUNNER or admin
+  — so no ACTIVE regular row can be DIRECT. Resolved rows keep their placement as history.
   `V15` first abandoned the leftover main workspaces of the retired per-project editor (no parent;
   in SQL, so their default branch stayed on the git host).
 - **The router's refusal**: every DIRECT branch of every verb — start, recreate, stop,
-  delete-container, discard, the listing, the editor's read, the clean/pushed probes and the daemon
+  delete-container, discard, the listing, the clean/pushed probes and the daemon
   proxy's lookup — calls `WorkspacePlacements.requireDirectAllowed` before
   it reaches `ContainerRuntime`, and a regular row there is an ERROR `direct placement refused for
   regular workspace <id>` and an `IllegalStateException`, never a container on the platform host.
 
-Whether a runner is registered, connected or eligible does not enter into it: with none that could
-take it, a regular workspace is still written RUNNER on no runner and waits `QUEUED`, and
-`ensure-container` answers `QUEUED` with the reason `no enabled workspace runner` rather than an error
-(a dispatch parks its launch on that QUEUED row the same way). A create may state a placement, but
-only one that agrees: `placement: "RUNNER"` on an admin workspace is a 400, and `placement: "DIRECT"`
-on a regular one a 400 `DIRECT_PLACEMENT_REFUSED`. Dropping every runner's slots to 0 parks new work
-QUEUED until a runner has a slot again; it never routes it to the platform host. The owner-wide
+The agent scheduler creates a RUNNER slot only while the eligible runners' slots outnumber the RUNNER
+workspaces; otherwise an agent waits QUEUED, with no workspace, until one is free. Dropping every
+runner's slots to 0 parks new agents that way; it never routes them to the platform host. The owner-wide
 qits-containers listing a workspace listing used to make is asked for only when the repository has
 a DIRECT row, so a repository of regular workspaces costs qits-containers nothing.
 
-**Kept for the direct path, deliberately.** All of it serves the admin and editor workspaces, and
+**Kept for the direct path, deliberately.** All of it serves the admin workspaces, and
 none of it is a leftover of regular DIRECT rows:
 
 - `containershost/WorkspaceContainers` and `containers/ContainersClientProducer` — the
-  `ContainerRuntime` over qits-containers that admin and editor containers are started, stopped and
+  `ContainerRuntime` over qits-containers that admin containers are started, stopped and
   removed through.
 - `qits.containers.url` / `QITS_CONTAINERS_URL` — where that orchestrator answers.
-- `qits.workspace.containers.owner` — the owner every admin and editor container and volume is
+- `qits.workspace.containers.owner` — the owner every admin container and volume is
   claimed under, so two environments never name each other's.
-- `qits.workspace.containers.launch-patience` — admin and editor launches still use the retry loop
+- `qits.workspace.containers.launch-patience` — admin launches still use the retry loop
   in `WorkspaceContainers.run`.
-- `EditorKeepalive` and `qits.editor.*` — the editor is a DIRECT container, with its own image pin,
-  idle-stop switch and keepalive.
 - The internal-plane keys — `qits.workspace.network`, `qits.workspace.git-host`,
   `qits.workspace.qits-port`, `qits.workspace.container-git-url` — what a container on `qits-net`
   dials home and clones through.
 - The volume and resource keys — `qits.workspace.workspace-volume-prefix`, `claude-volume`,
   `maven-volume`, `pnpm-volume`, `memory-limit`, `memory-swap-limit` — the platform host's volumes
-  and limits for admin and editor containers (the two limits are also the defaults a runner row's
+  and limits for admin containers (the two limits are also the defaults a runner row's
   own lay over).
 - `commissionFor`, `CommissionReconciler` and the `V3` columns — the commissioned client pair is the
-  admin and editor container's credential on a deployment with **no** edge plane. With a public
-  `QITS_DOMAIN` an admin or editor container holds a workspace token instead, as every RUNNER row
+  admin container's credential on a deployment with **no** edge plane. With a public
+  `QITS_DOMAIN` an admin container holds a workspace token instead, as every RUNNER row
   does (qits-1084) — see "The credential a workspace container holds".
 
 ### The credential a workspace container holds
@@ -285,7 +267,7 @@ the superproject's `authenticated-reads-plan.md`.
     QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL  its token endpoint
     QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE   the platform audience, qits-platform (C4)
 
-**On a deployment with a public `QITS_DOMAIN` an admin or editor container holds a workspace token
+**On a deployment with a public `QITS_DOMAIN` an admin container holds a workspace token
 instead of that pair** (qits-1084) — the same non-expiring `qits_tok_` every RUNNER container holds,
 minted at `POST /idp/api/tokens` and stored on the row. An admin row's is of kind `workspace-admin`
 (so `qits:agent` and `qits:admin-agent`), the editor's of kind `workspace` and unscoped. The
@@ -366,7 +348,7 @@ trailing `/*` patterns under `refs/heads/`. qits-idp stamps the list into every 
 
 **It mirrors the container's lifetime, not the row's.** A provision commissions, a recreate
 commissions afresh and hands the old one back, `deleteContainer` hands it back while the workspace
-stays ACTIVE (the next start commissions again), and every resolution — integrate, discard, the
+stays ACTIVE (the next start commissions again), and every resolution — discard, the
 branch-gone abandon — hands it back for good. **A stop-then-start keeps it**, because the
 orchestrator has no start verb: a stopped container is started by presenting its spec again, and a
 spec whose environment moved is a *replaced* container. That is also why the pair lives on the
@@ -401,26 +383,14 @@ edge or on `qits-net`.
 
 | Prefix | What | Set by |
 |---|---|---|
-| `/workspaces/api/…` | the JSON API — `workspaces`, `branches`, `history`, `events`, `technical-processes`, `capture`, `editor`, `agent-dispatches`, `gc`, `pins` | `qits.rest.path`, which `quarkus.rest.path` is derived from |
+| `/workspaces/api/…` | the JSON API — `workspaces`, `agents`, `branches`, `history`, `events`, `technical-processes`, `capture`, `agent-dispatches`, `work`, `gc`, `pins` | `qits.rest.path`, which `quarkus.rest.path` is derived from |
 | `/workspaces/q/…` | `openapi`, `swagger-ui` — what the framework serves, not application code | `quarkus.http.non-application-root-path` |
 | `/workspaces/daemon/{id}` | the daemon's dial-home control socket | `DaemonControlSocket`, literal |
 | `/workspaces/container/{id}/*` | the workspace-daemon reverse proxy | `ContainerProxyPath.PREFIX`, literal |
 | `/workspaces/daemon/stream/{nonce}` | where a daemon's tunnel dial-back lands | `WorkspaceTunnels.STREAM_PATH_PREFIX`, literal |
 | `/` | the SPA, and every client-side route under it — its own paths and the scoped `/<project>/<category>/<repo>/…` | `quarkus.quinoa.ui-root-path` + `enable-spa-routing` |
 
-**One surface is in no row of that table, because it is a HOST and not a path.** Everything whose
-`X-Forwarded-Host` starts with the label `editor` is the web editor's and is forwarded whole to the
-platform's one editor container (`EditorProxyRoute`), over the daemon's reverse tunnel and by no
-other route — openvscode-server is bound to the container's loopback, so it has no address on
-`qits-net` to dial: openvscode-server serves from `/`, so an
-editor claims every path there is and no prefix could name it. The first label is the whole test and
-what follows it is not read: the origin still carries the old per-project grammar
-(`editor.<project>.<env>.<domain>`) and is moving to `editor.<env>.<domain>`, and there is one
-editor either way, so the name has nothing left to select. It is kept off the SPA fallback by
-**route order** rather than by `ignored-path-prefixes` — 1000, ahead of the built client's static
-files (1060) and of the fallback (40000) — and once it recognises an editor origin it never falls
-through: its 404 and its splash are answers. It sits deliberately *behind* the rows above, which take
-Vert.x's own sequence from 0, so the machine surface keeps its paths on every host.
+**The web editor's vhost is gone** with the editor (qits-1152; epic qits-1150).
 
 The `/` row is a **fallback over the whole port**, and the six above it are what it must not
 swallow. Quinoa derives its skip list from `quarkus.rest.path` and
@@ -481,7 +451,7 @@ open terminal down for the length of a blip.
 
 **`GET /workspaces/api/pins` says which images a launch by this process would pull** —
 `{generatedAt, pins:[{image, version, launches}]}`, one row per configured pair (`workspace`,
-`editor`), the image registry-relative and a blank version omitted. It is a pin source for
+`runner`), the image registry-relative and a blank version omitted. It is a pin source for
 qits-artifacts' registry GC, read by qits-platform-orchestrator with a bearer and open to
 `qits:admin` beside `qits:system`, like `/workspaces/api/gc/branches`. It answers the **effective**
 version — what this running process resolved at boot — where qits-configuration answers the
@@ -500,9 +470,6 @@ collections filter by `?repositoryId=` and a workspace is `{id}` alone. `AGENTS.
   where the host shelled `docker exec find/cat/realpath`
 - framework detection and the component map (`/detection`, `/component-map`) —
   `workspace-daemon-detection`
-- bootstrap chain *execution* — the daemon's `BootstrapRunner`. The host's awaiter and the run record
-  are here (`WorkspaceBootstrapRunner`, `workspace_bootstrap_run`); the **surface over it is not, any
-  more** (below)
 - `.config/qits/repository.yml` parsing — the daemon's `ConfigParser`. This context holds the shape
   (`QitsConfig`) and reads it back over the socket (`WorkspaceConfigReader`), never the file
 - periodic checkpoint push — deleted rather than relocated; the daemon's `OriginSync` pushes per
@@ -518,21 +485,8 @@ dev-server proxy (`/workspaces/service/{id}/{serviceId}/*`) and the auto-start c
 and nothing replaces them, nor does any `SERVICE*` env var reach a container. `AGENTS.md` lists
 the two tolerances kept for daemons built before the removal.
 
-**No longer addressable from the host at all**: `/bootstrap-commands`, `/bootstrap-commands/run` and
-`/bootstrap-commands/{stepId}/run`. They ran inside the container and the host only forwarded —
-everything else took its addressing into the daemon's own HTTP API when its execution moved.
-`WorkspaceBootstrapController` is deleted; the daemon's `WorkspaceApi` is where the endpoints
-belong, and it has them — reached through `ContainerProxyRoute`, which is the only address a daemon
-has and deliberately not a gateway route (one process per container has none to configure).
-
-**What was removed is the externally addressable surface, not the capability.** The
-provision → bootstrap sequence is host-orchestrated and untouched: `WorkspaceBootstrapRunner` still
-awaits the chain on `WorkspaceContainerStarted` and ends the start's technical process when it is
-over. Its host projection stays too — `workspace_bootstrap_run`, which spent a release with **no
-reader** and now has one:
-`GET /workspaces/api/workspaces/{id}/bootstrap-runs`. That is a read of a host table, not the
-forwarding controller returning — the run verbs stay on the daemon, and a client joins the two on
-`bootstrapCommandId`.
+**The bootstrap chain is gone** (qits-1152, D19), host and daemon: agents set up what they need
+themselves.
 
 Still host-side but *should* follow the file/detection work into the daemon: `containerGit` and its
 callers (`fast-forward`, `update-from-parent`, `pushBranch`, `isFullyPushed`) still shell git into

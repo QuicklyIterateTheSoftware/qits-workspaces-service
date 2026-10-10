@@ -117,18 +117,19 @@ an applied file's body — Flyway checksums it.
 backfill, part of no constraint and never a foreign key, because the event it names lives in
 qits-events' store. The decisions behind it are enforced by `ArchRulesTest` in `domain`: every
 `@Entity` here implements `CausedRow` or declares `@Uncaused` with its reason in the javadoc, and a
-new entity that skips the decision fails the build naming the class. Two in, three out:
+new entity that skips the decision fails the build naming the class. Three in, three out:
 
-- **`Workspace`** — in. Both creation paths (`createWorkspace`, and `CaptureService.capture` behind
-  the capture ingest) run on the request thread, so the `CausationStamp` listener reads the REST
-  filter's restored scope. Nothing is set as data because nothing crosses an executor.
+- **`Workspace`** — in. Its creators run on the request thread or behind the agent scheduler; the
+  `CausationStamp` listener reads whatever scope stands, and a slot written by a scheduler pass
+  records none.
 - **`WorkspaceEvent`** — in, and it is the one that carries the trace. The workspace row says why
   the unit of work exists; a MERGED/INTEGRATED entry answers to whatever asked for *that* landing.
   All six `recordEvent` sites are on the flow's own thread, including the ones a machine caller
   drives with a bearer of its own.
-- **`BootstrapRun`** — out. An updatable singleton: one row per `(workspace, command)`, overwritten
-  by every run. The stamp is insert-only, so it would pin the first run's cause while every column
-  beside it moved on.
+- **`AgentWorktree`** (qits-1152) — in. The dispatch door and a person's door write it on the
+  request thread; the stamp says why the agent exists, and later updates do not move it.
+- **`AgentBranch`** (qits-1152) — out: a native upsert on the daemon registry's thread, where no
+  scope stands, recording the agent's own push.
 - **`WorkspacePromptDraft`** — out, twice: the row is only ever written by the native `insert … on
   conflict` upsert, which no `@PrePersist` can see, and it is an updatable singleton besides.
 - **`WorkspacePromptAttachment`** — out, following the draft it is the payload of: composition
@@ -192,6 +193,16 @@ resolved row, so they kept reading RUNNING. The code writes it now.
 a QUEUED runner workspace, keyed by the workspace id, with a `claimed_by`/`claimed_at` claim.
 `PendingAgentLaunch` is **`@Uncaused`**, for the prompt draft's reasons — a native insert, and a row
 rewritten by its claim. See "Dispatching an agent onto a branch".
+
+**`V20__remove_editor_and_bootstrap.sql`** (qits-1152) resolves the editor's row, drops
+`uq_workspace_active_editor`, rewrites `ck_workspace_runner_posture` and the V15 check (now
+`ck_workspace_direct_only_admin`) to name the admin posture alone, and drops
+`workspace_bootstrap_run`. **`V21__agent_worktrees.sql`** adds `agent_worktree` and `agent_branch` (see
+"Agents and the workspaces they run in"). **`V22__agent_prompt_and_held_launch.sql`** drops
+`pending_agent_launch` (the agent row's `pending_text` holds what is still to be said) and re-keys the
+prompt draft and its images on the agent (`agent_prompt_draft`, `agent_prompt_attachment`), dropping
+the old composition state rather than migrating it. V17 and V18 below describe columns and a table
+no code reads any more.
 
 **`V18__dispatch_command_id.sql` adds `dispatch_command_id` to `workspace`** (qits-895): the daemon
 command the last launch this service made started, replaced by every accepted launch
@@ -288,7 +299,7 @@ Three things follow, and each is a way to get this wrong:
   The draft's own writes need no flush: they are native `insert … on conflict` / `delete`
   statements, which execute where they stand.
 
-**Four writes are wrapped, and they were chosen for what a lost one costs**, not for being writes:
+**Three writes are wrapped, and they were chosen for what a lost one costs**, not for being writes:
 
 - **`WorkspacePromptDraftService.saveDraft`** — the autosave, on a debounce while someone types. It
   is also the perfect first adopter: one `insert … on conflict`, idempotent by construction, which
@@ -298,16 +309,11 @@ Three things follow, and each is a way to get this wrong:
 - **`WorkspacePromptAttachmentService.addAttachment`** — a paste, whose bytes nothing else holds a
   copy of. The row id is minted **before** the retried unit so every attempt writes the same primary
   key; generated inside, a retry would be a second row.
-- **`BootstrapRunService.recordOutcome`** — bookkeeping after the step already ran in the container,
-  and the caller swallows failures by design, so a dropped row is silent. Its thread is the
-  registry's single `daemon-sink-dispatch`, never a socket thread or a monitor: a held attempt
-  delays the outcomes queued behind it and loses none.
-
 **What is deliberately not wrapped**, beyond the read-seam rules above (which all still hold — stay
 outside `WorkspaceService`'s `synchronized` methods, and never split a multi-op bracket):
 
-- **The workflow verbs** — `createWorkspace`, `merge*`, `integrateWorkspace`, `cleanupBranch`,
-  `discardWorkspace`. They orchestrate pushes and containers, so their bodies are not database-only
+- **The workflow verbs** — `createWorkspace`, `createSlot`, `mergeBranch`, `cleanupBranch`,
+  `discardWorkspace`, and every agent scheduler pass. They orchestrate pushes and containers, so their bodies are not database-only
   and re-running one is not a re-run of a write.
 - **The fail-soft diagnostics**: dropping one is the designed behaviour.
 - **`updateAttachment` / `deleteAttachment`** — verbs on an image already on screen and already in
@@ -364,8 +370,7 @@ edge or on `qits-net`. `README.md` has the table.
 
 The one thing to know before you add a route: **`quarkus.rest.path` moves the JAX-RS routes and
 nothing else.** A raw Vert.x route or a `@WebSocket` path registers straight onto the router with a
-literal and must carry `/workspaces` itself. Four do, each for its own reason (`EditorProxyRoute` is
-the fifth raw route and carries no path at all — see below):
+literal and must carry `/workspaces` itself. Four do, each for its own reason:
 
 - `DaemonControlSocket` — `/workspaces/daemon/{id}`, and a **cross-repo contract**:
   `WorkspaceContainerFactory` injects `ws://<host>:<port>/workspaces/daemon/<id>` as
@@ -450,34 +455,15 @@ websockets-next claims only the upgrade — each answered **200 `text/html`** wi
 under `/workspaces` and there is nothing to do here; add a **root-level** one and add its prefix in
 the same commit. `application.properties` carries the reasoning.
 
-**The editor is the one surface this key could never protect, and it is protected by ROUTE ORDER
-instead.** `EditorProxyRoute` is matched on the forwarded host and claims *every* path under it —
-`/`, `/static/…`, `/stable-<commit>/…` — because openvscode-server serves from `/`, so there is no
-prefix to list. What keeps it off `index.html` is that it runs first and then never falls through:
-registered at order **1000**, ahead of the built client's static files (**1060**,
-`GeneratedStaticResourcesProcessor`) and of Quinoa's SPA-routing fallback (**40000**,
-`QuinoaProcessor.runtimeInit`) — both read out of the 3.34.6 / 2.8.2 bytecode on 2026-08-31, not
-measured against a packaged jar, because a Quinoa build needs an npm registry this workspace cannot
-reach. Once the route recognises an editor origin every answer it gives is an answer: the 404 and the
-splash included, `rc.next()` is never called. It sits deliberately **behind** the application's own
-routes, which take Vert.x's auto-sequence from 0, so the machine surface keeps its paths on every
-host. A second root-level catch-all added here has to think about all three numbers.
-
 **A workspace is not a sub-resource of a repository.** This context holds a repository id as a
 string, in another database, with no FK — so collections filter by `?repositoryId=` and an item is
 `{id}` alone. `/branches/{merge,cleanup,resolution}` take `?repositoryId=` too: a branch has no id of its own,
 so the repository narrows and the body names the branch. `history/{id}` carries no repository at
 all; it was decoration on the item routes and a real filter only on the collection.
 
-**A host surface was deleted rather than moved**: `/workspaces/{id}/bootstrap-commands…`. It ran
-inside the container with the host forwarding, and the daemon's own `BootstrapRunner` does the work.
-Everything host-side behind it stays — `WorkspaceBootstrapRunner`, the driver port, the
-`RunBootstrap` event, `workspace_bootstrap_run`, `BootstrapRunService` — because the
-provision → bootstrap sequence is host-orchestrated and is not REST-driven. What went is the
-addressability, not the capability. **It is re-exposed on the daemon's own `WorkspaceApi`** (`GET
-/bootstrap-commands`, `POST /bootstrap-commands/[{name}/]run`) and reachable through
-`ContainerProxyRoute` — do not add host routes back — that is `migration-plan.md` §9 item 16, now
-closed.
+**The bootstrap chain is gone (qits-1152, D19)**: the host's runner, `workspace_bootstrap_run`
+(`V20`), its `bootstrap-runs` read and the protocol's bootstrap frames. Agents set up what they need
+themselves.
 
 **Workspace services are gone, not moved (qits-947).** The dev servers a repository could declare
 under `services:` — run by the daemon's `ServiceSupervisor`, projected here by a host
@@ -492,38 +478,17 @@ arm instead of naming the service records and the `SERVICE` stream target, so th
 the protocol jar both with and without them. Do not reintroduce a host-side service concept on the
 strength of those remnants.
 
-**A streamed start ends when its bootstrap phase does.** With no service phase behind it, the
-start's `TechnicalProcess` is done once the provision has reported (`finishProvision`) and
-`WorkspaceBootstrapRunner` has reported the bootstrap phase over (`finishBootstrap`) — on the
-pass-through, on success, on failure, on an unexpected throw and when yielding to a manual run.
-That call is what used to be the service coupler's empty `expectServices`; a path that forgets it
-leaves every start open until the registry's idle reaper. `WorkspaceBootstrapRunnerTest` awaits
-`done` on each path for that reason.
+**A streamed start ends when its provision does** (`finishProvision`); the bootstrap phase that
+used to follow it went with the chain.
 
-**`workspace_bootstrap_run` spent a release with no reader and now has one**:
-`GET /workspaces/api/workspaces/{id}/bootstrap-runs` (`WorkspaceBootstrapRunController`). That is
-not the deleted controller returning — it reads a **host** table, while the run verbs stay on the
-daemon. Host-owned state gets a host route; nothing forwards. The client joins it against the
-daemon's declared `GET /bootstrap-commands` on `bootstrapCommandId`. `BootstrapRun`'s javadoc
-carries the full note.
-
-Three more host-owned surfaces landed on the same rule, all plain JAX-RS under `qits.rest.path`:
+Host-owned surfaces are plain JAX-RS under `qits.rest.path`:
 
 - `GET /workspaces/api/workspaces/{id}` — the single-workspace read. The same `WorkspaceDto` the
   collection serves, so a detail page opens from a bare id; ACTIVE only, 404 for a resolved one
   (whose live half would be uniformly null — `history/{id}` is where that record stays readable).
-  **The editor row answers here, by a path of its own**, and the reason is worth keeping: the
-  ordinary path re-derives the row from `listWorkspaces(repositoryId)`, which opens with
-  `repositories.require` and refreshes a git mirror, and the editor's sentinel `repositoryId`
-  resolves to nothing — so it 404'd for a row that plainly exists. `getWorkspace` now reads an editor
-  straight off its row. The repository-shaped fields (`repositoryMainBranch`, `ahead`, `behind`) come
-  back null because there is nothing to compute them against, and everything keyed by the row —
-  live container, clean/dirty, agent activity, daemon identity — is answered from the same ports the
-  listing uses. Fixing it there rather than at the endpoint is what also repaired the four container
-  verbs, which all return `getWorkspace(id)` and so all 404'd for the editor after doing their work.
-- `GET`/`PUT`/`DELETE /workspaces/api/workspaces/{id}/prompt-draft` — the composition the next agent
-  run is written in. Database rows, no container, so they work while the workspace is STOPPED.
-- `GET`/`POST`/`DELETE /workspaces/api/workspaces/{id}/prompt-attachments[/{attachmentId}]` — its
+- `GET`/`PUT`/`DELETE /workspaces/api/agents/{id}/prompt-draft` — the composition the agent's next
+  turn is written in (keyed on the agent since qits-1152). Database rows, no container.
+- `GET`/`POST`/`DELETE /workspaces/api/agents/{id}/prompt-attachments[/{attachmentId}]` — its
   images, on their own SSE topic so a debounced text autosave does not re-download every picture.
 
 Resolving an id costs a query, which matters on the **SSE routes**: a `Multi`-returning method runs
@@ -566,18 +531,13 @@ clears any `runtimeError`; a runner inventory deliberately does **not** (the con
 which is no news to an agent kill). Until the protocol pin carries `AgentActivity.message()` the
 sentence is the host's own and names no memory cap.
 
-**The dispatched agent's waiting state is relayed to qits-projects** (qits-895), which derives a work
-item's BLOCKED from it. A daemon at capability 8 sets `AgentActivity.awaitingInput` (null = unknown,
-never relayed). `WorkspaceDaemonRegistry.onAgentWaiting` relays a frame only when its `commandId` is
-the row's `dispatch_command_id` (`V18`, written by every accepted launch — `DaemonAgentClient.launch`
-reads `command.id` off the daemon's answer) and the row has a `workId`; a person's other sessions
-are ignored. Only a flip per workspace is sent, the last value is kept across reconnects and
-forgotten on a new launch (`AgentLaunched`) or resolution, and the row read and the HTTP call run on
-`sinkDispatch`. The transport is the `AgentWaitingReporter` port, shipped as
-`wiring/HttpAgentWaitingReporter` → `POST /projects/api/work/{workId}/agent-waiting`; a 404/405
-from a qits-projects older than the door is logged once at INFO, anything else is a WARN and the next
-frame in that state tries again. The call is not in the consumer pact yet: the provider has no
-golden-master state for the door.
+**An agent's waiting state is relayed to qits-projects** (qits-895; per agent since qits-1152),
+which derives a work item's BLOCKED from it. A daemon sets `AgentActivity.awaitingInput` (null =
+unknown, never relayed) and, at capability 10, `agentId`. `AgentService.onActivity` stores the flip on
+the agent row (`waiting_since`) and relays only a flip, through the `AgentWaitingReporter` port
+(`wiring/HttpAgentWaitingReporter` → `POST /projects/api/work/{workId}/agent-waiting`). A frame naming
+no agent is a person's own session and relays nothing. The registry also keeps the last state per
+agent (`AgentActivityView`), which the scheduler reads to say a turn at a turn boundary.
 
 ## The protocol is a dependency, and its version is the workspace image
 
@@ -590,9 +550,7 @@ precisely so the swap would be a pom change with no source edits, and it was.
 **The version of that jar IS the `qits/workspace` tag this service starts containers from.** One
 artifact carries both, because the thing this service must *speak* and the thing it must *start* are
 one release. `WorkspaceImage.VERSION` is the constant; `WorkspaceContainerFactory.imageVersion()`
-reads it. The editor's pin is the same shape one repository over —
-`eu.wohlben.qits:qits-workspace-editor-image`, `WorkspaceEditorImage.VERSION` — with no protocol in
-it, because there is no wire to share with an image the daemon merely starts a process out of.
+reads it. (The editor image's pin went with the editor, qits-1152.)
 
 **What that replaced, because the failure is the reason for all of it.** Both versions used to
 arrive as `env.QITS_WORKSPACE_IMAGE_VERSION` / `env.QITS_EDITOR_IMAGE_VERSION`, qits-configuration
@@ -670,17 +628,10 @@ and publishes `SCMRelease`. `main` is finalized after the deployment. The bump e
 ported to qits-projects (`PomVersions` there carries the note); the version-uniqueness guarantee is
 now githost's refusal to overwrite a tag ref rather than an atomic branch+tag push.
 
-**What stayed is the workspace feature.** `BranchIntegrator` — the renamed `ReleaseIntegrator`, with
-every release arm removed — is the git half of landing one workspace branch on another: refresh the
-mirror, preflight the merge in the object store, merge in a **detached worktree on the mirror**,
-commit once, push. `WorkspaceService.landWorkspace`/`landOnBranch` wrap it with the guards, the
-repository lease and the workspace's resolution.
-
-**`POST /workspaces/api/workspaces/{id}/integrate`** lands a workspace on **its parent branch** — a
-`task/…` on the `epic/…` it forked from — as one pushed commit `integrate(<source>): <summary>`. No
-stamp, no bump, no push option, no tag, no event, no `version` in the response. A workspace whose
-parent *is* the default branch is refused with `RELEASE_REQUIRED` naming the release flow, because
-this service writes no default branch at all.
+**`/workspaces/{id}/integrate` and `/workspaces/{id}/merge` are gone (qits-1152, D21)**, and
+`BranchIntegrator` with them: a workspace is a slot with no branch, and the "done" signal is the work
+item's VERIFIED, which opens a release request in qits-projects for the agent's branches. What
+stayed is the branch-keyed pair below and the `gitmirror` primitives.
 
 **`POST /workspaces/api/branches/{merge,cleanup}`** are the branch-keyed pair, and both are a
 person's door (`@RolesAllowed("qits:admin")` at class level, restated in each body — see
@@ -763,17 +714,13 @@ The enum reaches `docs/openapi.yml` through `api/ApiError`, a schema-only record
 `@APIResponse`s and returned by nothing — the mapper still builds the body, because the extra fields
 are present only when they apply and a record would write them as explicit nulls.
 
-**`merge` and `branches/merge` 409 with `RELEASE_REQUIRED` when the target resolves to the default
-branch.** They keep every other target — merging into a *parent* branch is what stacked workspaces do
-all day, which is also what `/integrate` does with a push and a lease behind it. **`merge` is not
-redundant**: it still takes an arbitrary target and answers with conflicts rather than throwing, and
-`branches/merge` needs no workspace at all.
+**`branches/merge` 409s with `RELEASE_REQUIRED` when the target resolves to the default branch.** It
+keeps every other target, answers a conflict rather than throwing, and needs no workspace.
 
 One consequence, recorded because it is a real loss rather than an oversight: **a plain branch can no
 longer be auto-cleaned up after integration.** A plain branch's cleanup parent is the main branch by
 definition (`canCleanupBranch`), so it is eligible only once merged *into* that branch — and nothing
-here merges into that branch. Workspace branches still resolve and are still deleted; that happens
-inside `/integrate`.
+here merges into that branch.
 
 **Three inherited sharp edges this flow had to fix rather than inherit**, and two of them were
 platform-wide:
@@ -981,529 +928,103 @@ real value will arrive through the train (or by hand at the first published calv
 workspace launch fails at the orchestrator's pull, which is the loud version of what used to be
 silent.
 
-## The web editor: ONE container for the platform, a second image, and an origin of its own
-
-The editor is **one workspace row, one container, one volume, for the whole platform**. Everybody
-who opens it lands on the same container — `qits-ws-editor-editor`, on `qits_workspace_editor` —
-because both halves of that name are constants. The door's answer carries the *workspace* row id,
-which is what makes the two ways out of a stuck editor the ordinary container verbs:
-`/workspaces/{id}/stop-container` and `/recreate-container`, the routes that already existed.
-
-**What it replaced was PER PROJECT and derived.** Until then a project's editor was its wrapper
-repository's main workspace — the per-project singleton `createMainWorkspace` maintained (that create
-went in qits-780, and `V15` abandoned the rows it left) — started
-from the richer image because of what that workspace *was*: `WorkspacePostures.isWrapperMain` was
-repository archetype `PROJECT` plus branch == that repository's main branch, and there was
-deliberately no column, because a derivation cannot go stale while a fourth copy of somebody else's
-fact can. All of that reasoning was right for a per-project editor and none of it survives a single
-one: there is no project behind the editor, no wrapper repository whose archetype could answer, and
-no branch that means anything.
-
-**So the posture is a COLUMN now** — `Workspace.editor`, `V7`, with
-`uq_workspace_active_editor` making "at most one ACTIVE editor row" structural rather than agreed.
-`WorkspacePostures.isEditor` reads it and `PersistedWorkspacePostures` is three lines. The whole
-memo went with the derivation: it existed because the answer took a live `RepositoryLookup` call
-that an outage could turn into "not the wrapper", and a false answer there describes a plain-image
-spec, which under `Recreate.ifChanged` **replaces** the editor's container. A column in this
-service's own database gives the same answer at every ensure by construction, so there is nothing
-left to promise. `RepositoryView.archetype`, `isWrapper()` and `WRAPPER_ARCHETYPE` went with that
-reader — and came back for a different one a step later, which is the clone list below. They answer
-the same question (*is this repository a project's wrapper*) for a reason that is no longer a
-posture: not which image THIS workspace runs, but which repository of each project the one editor
-checks out.
-
-**`isEditor` is a `default` method**, and that is mechanical as well as semantic: every hand-built
-test factory writes `WorkspacePostures` as a lambda, so a second abstract method would break all of
-them at once. False is the right default — a port that does not answer is a plain workspace.
-
-**The row belongs to no repository, and three places have to know it.** `repository_id` is a
-sentinel (`EditorWorkspace.REPOSITORY_ID`, the string `editor`) because the column is not nullable;
-`branch` and `parent` are null. So: `WorkspaceContainerFactory` writes the daemon's repository id,
-repo name, project id, branch and parent **blank** and makes neither lookup — a daemon handed the
-sentinel would try to clone `/git/editor`, which is not a repository anywhere. `ensureContainer`'s
-branch-still-there check is skipped, because that check abandons a workspace whose ref was deleted
-and the editor never had one. `WorkspaceResolver` skips the repository existence check, which is a
-fail-closed guard against dangling history and would otherwise 404 the exact row the door hands out
-for the container verbs. Each of the three is a narrow exemption with the reason beside it.
-
-**One container reaching every project is an accepted consequence, decided by the epic.** It holds an
-ordinary `qits:agent` workspace credential — no new client, no new audience — but it is no longer
-one project's container, so an unattended agent inside it acts platform-wide. Its commission is
-unscoped (no repository ⇒ no `project` claim), and its stated Git refs are empty — it pushes nothing,
-which is a separate decision from what it reads.
-
-**What it clones instead is every project's wrapper, and that is a second environment variable.**
-`QITS_WORKSPACE_DAEMON_PROJECTS` carries `<projectId>/<repoName>` entries separated by commas — the
-same two halves the daemon already builds a clone url from, so each wrapper lands at
-`/workspace/<repoName>`. It is the other half of the blank repository id above and the two are one
-contract: the daemon **skips the root clone** exactly when a container has no repository of its own
-*and* carries a list, while an ordinary workspace carries no list and still fails loudly without a
-repository. So the key is written on the editor and on nothing else.
-
-**Where the list comes from is a derivation, and the narrowing is deliberate.** There is no "every
-project" door to ask: this context holds no project table, and qits-projects exposes a repository and
-a project's repository listing here, not a listing of projects. `PersistedEditorProjects` therefore
-walks `WorkspaceRepository.activeRepositoryIds` → `RepositoryLookup.find` (which project owns it) →
-`listByProject` (which of its repositories is the wrapper). **A project nobody has ever opened a
-workspace in is not in the list**, and that self-corrects the moment somebody does. A project added
-later is picked up on the next container recreate — no polling, no watch, no scheduler, because the
-list rides the container spec and is only ever asked for while one is being built.
-
-That query reads **every** active row and not only the parentless ones, which is the correction worth
-remembering: it was written as `parent is null` back when `createMainWorkspace` wrote one such row per
-project for the per-project editor. That door is gone and `createWorkspace` always sets a parent, so
-the narrow form would have answered EMPTY on a live platform and the editor would have cloned nothing.
-
-**`RepositoryView.archetype` is bound again, for this reader and no other.** Which repository of a
-project *is* the wrapper is a fact only qits-projects holds. The per-project editor avoided asking by
-DERIVING the name a wrapper carries (`<slug>-<slug>`) and matching it — a convention this context is
-not entitled to re-derive, and one that went with that editor. The comparison is trimmed and
-case-insensitive because the vocabulary is another service's to change.
-
-**Sorted, and the key is written even when empty.** Environment is part of the spec, `Recreate.ifChanged`
-compares the spec, and this door is polled every two seconds — so a list that reshuffled would
-*replace* the container somebody is working in. Both the query and the composer order. And the key is
-present even when nothing could be composed, because omitting it would make the spec differ between a
-registry outage and the ordinary state, so the container would be replaced each time the registry came
-back: present-with-a-varying-value churns on the value, present-or-absent churns on both. A registry
-that cannot be asked costs that project its entry and never the ensure — the standing reading here —
-which trades a little churn for not taking the editor away from everybody because qits-projects
-blinked.
-
-**Two image keys, not a suffix.** `qits.editor.image-repo`/`-version` are a second pin because two
-repositories publish the two images on two calvers: qits-workspace-daemon publishes `qits/workspace`
-and qits-workspace-editor-oci follows it one release later. A derived name (`${image-repo}-editor`)
-would tie the versions into one string and be wrong the moment either train ran alone. The version
-half is a fallback the deployer overrides with `QITS_EDITOR_IMAGE_VERSION`, exactly as the workspace
-pin does. **The shipped default names no released tag** — qits-workspace-editor-oci has never been
-released — so it states the `qits/workspace` calver the editor recipe currently sits on, and the
-editor workspace fails at the orchestrator's pull with `IMAGE_MISSING` until the first real
-release moves it. That is the same posture the workspace pin shipped with, and the loud version of
-the same absence.
-
-**The editor environment is both-or-neither**, the rule the commissioned credential block follows:
-`QITS_WORKSPACE_DAEMON_EDITOR_ENABLED` without `…_EDITOR_PORT` would name a supervisor with no port
-to bind, and a port alone would name a listener nothing starts. `qits.editor.port` is where that
-number is spelled once, and it equals the daemon's own default so a container launched before the key
-existed answers where this expects it. **Nothing on the host side DIALS it** — the port is loopback
-inside the container and the proxy asks the tunnel for the listener by name — so the only reader here
-is `WorkspaceContainerFactory`, which writes it into the environment and nothing else. Every other workspace is
-told **nothing** — silence is what the daemon reads as "no editor", so an explicitly-false pair would
-be a second way of saying the same thing.
-
-### The origin, and how it reaches the editor
-
-`openvscode-server` serves from `/` with its own service worker, websockets and webviews, and this
-platform rewrites no paths anywhere — so the editor is a whole host, aliased at the edge onto this
-service. Which surface a request is for arrives in `X-Forwarded-Host`.
-
-**The FIRST LABEL is the whole test, and nothing behind it is read.** `EditorHost.isEditorHost`
-answers a boolean: a name whose first label is `editor` is the editor's, whatever follows. That is
-deliberately grammar-agnostic, because the origin is not changing in the same step as the routing —
-what is deployed is still `editor.<slug>.<env>.<domain>` and it is moving to `editor.<env>.<domain>`,
-and both reach the one editor. It is the first LABEL and not a prefix: `editorial.example.eu` is
-somebody else's host. The tolerances stay what they were — the first entry of the comma list, a port
-suffix, a trailing dot, surrounding space, letter case.
-
-**What went with the project label is the whole resolution behind it.** `EditorHost` used to parse
-position 1 against qits-projects' slug grammar and `EditorProxyTargets` used to turn that label into
-a repository by DERIVING the name a wrapper carries (`<slug>-<slug>`) and scanning every repository
-somebody had opened a main workspace for — one registry round trip each, with the hits cached
-forever (a project's wrapper cannot change) and the misses cached against the candidate set they
-were computed over, `qits.editor.label-miss-ttl-ms` underneath as a backstop. All of it is deleted:
-`EditorProxyTargets.editor()` is `findActiveEditor()`, one indexed local query, and the config key is
-retired (the properties file names it among the keys nothing reads).
-
-**The row is still re-read on every request** — that half of the old cache was always right, because
-a workspace row can be resolved and made again and a remembered row id would point the proxy at
-nothing.
-
-**No editor row is a 404 with nothing dialled**, and it is the fresh-platform answer: the row is
-written by the *door*, so a browser that navigates straight to the editor origin before anybody has
-opened it finds nothing, and a GET at an origin deliberately does not start a container.
-
-### The data path, and the five answers it can give
-
-`EditorProxyRoute` is `ContainerProxyRoute`'s sibling and takes its hardened parts wholesale — the
-hand-rolled `proxyUpgrade`/`openUpgrade`/`completeUpgrade`/`pipe`, `writeQueueFull`/`drainHandler` in
-both directions, a refused handshake forwarded with the origin's own status, `DbRetry` at the lookup.
-**Never route an upgrade through `vertx-http-proxy`**: it skips its interceptor chain (so the header
-strip below would be dead on exactly the requests that carry a session) and its pipe has no flow
-control at all. That measurement is in `ContainerProxyRoute.proxyUpgrade` and it did not stop being
-true one origin over.
-
-**The path is forwarded verbatim, and there was never anything to rewrite.** That is the whole
-payoff of the editor being a host: openvscode-server serves from `/`, so a prefix would have had to
-be stripped somewhere, and this platform strips nothing anywhere.
-
-**The identity headers are required and then removed, and each half is wrong without the other.**
-Required, because this route authenticates nothing and must not invent a boundary — the edge's
-session gate is the boundary, and `X-Qits-*` is what says a request came through it. The edge strips
-that namespace from every inbound request unconditionally, so its presence cannot be forged and its
-*absence* is evidence too: a **403**, not an anonymous pass. 403 rather than 401 because this hop has
-no challenge to issue; the login lives at the edge, which redirects a session-less browser long
-before a request arrives here. Removed, because the editor runs an untrusted checkout with a shell —
-a platform header it can read is one it can echo at something that trusts the namespace.
-`Authorization` goes with the namespace and **nothing replaces it**: unlike the daemon, the editor is
-not a peer this service authenticates to, so a bearer would be a credential moved inside the sandbox
-for nobody's benefit.
-
-**What is NOT stripped today is the platform session cookie**, and that is a known gap rather than a
-decision made in this repo's favour. `EdgeRouter`'s cookie strip is guarded by `session == null`, so
-a browser navigation to an editor vhost carries its cookie through (see the edge reading below). A
-blanket `Cookie` strip would break the cookies the editor sets for itself, and a name-based one needs
-the edge's cookie name, which is not this repository's to spell. Whoever writes the `qits.edge.apps`
-entry should settle it there — that is where both facts live.
-
-**Where the state comes from, and its three caching rules.** `WorkspaceDaemonRegistry` implements
-`WorkspaceEditorState` off the daemon's `EditorState` frame — sent once per control-socket connect
-and then once per transition — caching it per row id beside `gitClean`/`agentActivity`. A
-**disconnect drops the entry**, because nothing is known then and that is not the same as the editor
-having ended; **`ENDED` is kept**, because it is the one value that lets a splash stop waiting; and a
-**state this host cannot name drops the entry** rather than keeping the last one, since the wire
-carries a String precisely so a newer daemon can say something new, and a stale `RUNNING` outliving
-the transition that contradicted it is the one direction that costs a reader a splash they should
-have seen. Absence is "nothing reported" and never "no editor": a plain workspace, a container that
-is down and a first frame that has not arrived are one answer, and they deserve the same one.
-
-**Five answers, because a waiting editor is not a broken one.** A splash gated on
-`WorkspaceEditorState`:
-
-- no container, or a stopped one → **200 and a self-refreshing page**. Opening the editor while it
-  starts is the same act as opening it once it has.
-- container up, editor `STARTING` **or nothing reported** → the same splash. A reader cannot act on
-  the difference, and "no frame yet" and "starting" are one state to them.
-- editor `ENDED` → a **502 of its own**, and deliberately not a splash: it is terminal, so a page
-  that kept refreshing would spin for the container's lifetime.
-- editor `RUNNING` and **no tunnel** → a second, distinct **502**, naming the daemon tunnel. Also not
-  a splash: nothing this side does will make a tunnel appear.
-- no such project → **404 with nothing dialled**.
-
-**THE REVERSE TUNNEL IS THE ONLY WAY IN, and there is no direct dial to fall back to.** The daemon
-binds openvscode-server to the container's **loopback**, so no address on `qits-net` reaches an
-editor, and a container-name-and-port origin would name a port in another network namespace. This
-route carried that fallback for one commit; in the shipped topology every request it took was a dial
-and then a 502 — concretely, with `qits.workspace.daemon-tunnel.enabled=false` *every* editor request
-was one — and the real cost was in the suite, where the header strip, the verbatim path, the bounded
-pipe and the upgrade were all proved on the arm production never takes. So "RUNNING editor, no
-tunnel" is the answer above, and `EditorTunnelRouteTest` is where the forwarding is proved. Nothing
-in this route states a port any more; the listener is asked for by name.
-
-**The tunnel is asked before the orchestrator, and that ordering is the performance decision that
-matters.** A live control socket at the editor capability is stronger evidence that the container is
-up than a status call is — `ContainerProxyRoute.resolve` records the same reasoning — and an editor
-session is a stream of requests, so a round trip per request would cost more than the container. The
-container read runs only where there is no tunnel, and it still earns its keep there: it is what
-tells a stopped workspace's splash from the 502 above.
-
-**The tunnel carries a TARGET now, and one tunnel serves one target.** `OpenStream` names
-`StreamTarget.EDITOR`; the daemon resolves the name against its own allow-list, so the host still
-never states a port inside a container. `WorkspaceTunnels` keys its `NetServer`/`HttpClient` pair on
-`(workspace, target)` and never shares one across targets — the ephemeral-port hazard the class
-documents, pointed inward: a listener is chosen once, when a socket is accepted, so a shared port
-would make the pooled connection behind a keep-alive an editor stream or an API stream depending on
-which request opened it first. The **capability gate is per target** for the complementary reason: an
-older daemon decodes an absent target as `API`, so a name it has never heard of would be served by
-the wrong listener rather than refused, and an editor answering the daemon's 404s reads to a browser
-as broken rather than absent. `EDITOR_CAPABILITY_VERSION` (5) lives in `WorkspaceTunnels` and not in
-`DaemonProtocol` only because that module is a byte-identical source copy; move it the day the daemon
-repo declares one.
-
-**That gate is read TWICE, and the second reading is the one a race needs.** `originFor` checks the
-capability once per resolution and hands back a listening port; `onAccepted` mints the nonce and
-sends the `OpenStream` one accepted connection later. A daemon that reconnected on an older image
-between the two would be sent a target its codec drops — and an absent target decodes as `API`, so
-the stream would land on the daemon's own API port instead of being refused. Bounded (that port wants
-a bearer this side does not send) and still wrong: a browser reads someone else's 401s as its editor.
-So `onAccepted` re-reads the registry and closes the socket when the target no longer suffices, which
-is the same connection error the nonce's own expiry would give a few seconds later.
-
-**The keepalive fires in three places, and the third is the one that makes it true.** Per request,
-per opened stream, and **per frame from the browser** through the pipe. An open tab that reads a file
-for an hour sends nothing over HTTP and everything over that socket, so a keepalive that only fired
-per request would let the sweep stop a container somebody is looking at. It is affordable because
-`EditorKeepalive` debounces (and is a no-op entirely while the idle-stop switch is unset, which is
-how it ships) — the class was written for exactly this call site.
-
-**`Host` is not rewritten and the editor sees the origin's authority**, on both transports, so it
-cannot tell which one a request took. What says the public name is `X-Forwarded-Host`, forwarded
-untouched. Nothing in openvscode-server reads `Host` today; if that changes, the header to hand it is
-already on the request.
-
-### The door
-
-`POST /workspaces/api/editor/ensure` — **no parameters**, an empty body — answering a **bare**
-JSON object `{workspaceId, containerStatus, editorState, editorReady}` — 201 fresh, 200 existing, the
-`TerminalController.open` pairing. It is the whole readiness protocol: there is no status read beside
-it, so a caller polls this and nothing else and a reader who reloads mid-start rejoins the editor
-already coming up. The body is bare rather than enveloped because a two-second poll reads four
-scalars off it; the `WorkspaceDto` routes keep their envelope.
-
-**`editorReady` is the service's judgement, not the caller's**: the container is running *and* the
-daemon says the editor is serving. A client that waited on `editorState` alone would be deciding for
-itself when the editor answers requests.
-
-**No locks, and none are needed.** `createEditorWorkspace` is find-or-write,
-`uq_workspace_active_editor` makes that true under a race, and the orchestrator's ensure is a PUT per
-place. What the door adds is not a lock but two reasons **not to ask**: a technical process already
-running for the workspace *is* the start this call would make, and a container that is up with a
-daemon on its socket is up. Without them a two-second poll would spawn one provision per tick through
-a multi-gigabyte pull. A RUNNING row whose daemon is *not* live is asked about anyway — that is what
-a container which died out-of-band looks like, and the ensure ladder's first rung is to find out.
-
-**The 400 and the 404 are gone, and they had one cause.** They answered a `?repositoryId=` that was
-not a project's wrapper, or named nothing at all — refusals that existed so a caller sent at the
-wrong repository could not poll a plain workspace to a readiness it could never reach. There is one
-editor and no parameter, so there is nothing left to name wrongly.
-
-### The idle-stop switch, and the keepalive
-
-`qits.editor.idle-stop-after` (**blank as shipped**) gives the editor's container an `IDLE_STOP`
-lifetime instead of `EXPLICIT`, so qits-containers' existing `IdleSweep` stops it. It applies to that
-one workspace deliberately: a workspace is somewhere a person works and an agent runs unattended, so
-nothing but a person may end one, while the editor's workspace is the one that is opened, read and
-left.
-
-**Stopping is not losing, and the reopen path is code that already exists.** The sweep *stops* a
-place: the container keeps its id and its writable layer, `/workspace` is a volume of its own, and
-the ensure ladder's second rung starts it back up where it stands — the daemon then finds a populated
-checkout and clones nothing.
-
-**It rides the POLICY, not the spec.** `Recreate.ifChanged` compares the spec, and a policy is not
-part of one, so turning the switch on does not replace a running container.
-
-`EditorKeepalive.touched(rowId)` is the entrypoint both sources call — the editor proxy route (per
-request, per opened stream, and **per frame from the browser**, which is the one that covers a tab
-left open on a file for an hour), and `WorkspaceDaemonRegistry.onAgentActivity` for an agent working
-unattended (an editor that closed on a running agent would kill work in progress). Three things about
-it are deliberate:
-
-- **The debounce is not an optimisation.** A keystroke is a websocket frame, so one keepalive per
-  request would cost more than the container it keeps. `qits.editor.touch-interval` (30 s) bounds it,
-  and it **must stay well under the deadline** — the sweep measures time since the last touch, so an
-  interval near the deadline would let a busy editor be stopped between two touches.
-- **The claim is a `compute` and not a get-then-put.** Frames arrive on several threads; a
-  read-then-write would let two of them see the same stale timestamp and both touch.
-- **The claim is inline and the call is not.** Both callers are on threads that must not block — an
-  event loop and a socket thread — so the cheap atomic part runs there and the database read plus the
-  HTTP call go to one `editor-keepalive` thread. One thread is plenty: the debounce bounds the
-  arrival rate, not the executor.
-
-`ContainerRuntime.touch` is best-effort and never throws, for the reason `stop` and `rm` are: a
-missed keepalive costs at worst a sweep, and a swept container is started back up in place.
-
-### What the edge does with the editor's vhost (read 2026-08-31, host tier re-read 2026-09-07; not run)
-
-A `qits.edge.apps` entry receives **full browser-session treatment**, which is what the editor needs
-and what registry/mirror vhosts deliberately do not get. `EdgeRouter.handle:295` sends every service
-target through `serviceGate`, which looks up the session cookie whenever sessions are on and the
-request carries no `Authorization` (`:424-432`) and proxies with that session (`:446`).
-`EdgeRouter.proxy:598` calls `EdgeHeaders.applyIdentity`, which strips the reserved `X-Qits-*`
-namespace and writes `X-Qits-User`/`-User-Id`/`-Roles` (`EdgeHeaders:114-129`).
-
-**The cookie is not stripped for such a request**, and the reason is worth knowing because it is not a
-per-vhost rule at all: the strip at `EdgeRouter:599-604` is guarded by `session == null` alone.
-Registry and mirror lose their cookie only because they arrive with an `Authorization` header or under
-`anonymous-read-apps` and therefore reach `proxy(…, null)`. A browser navigation with no session is
-refused into the login redirect rather than a 401 (`refuseService:521-531`), and an upgrade takes the
-same gate and the same `proxy`, so a websocket carries the identity too (`:598` runs before the
-branch at `:605`).
-
-**The editor vhost is FOUR labels, and the edge reads the environment out of position 2.** The alias
-is `editor.<slug>.<env>.<domain>`: the edge matches `$app.$env.$domain` at positions 0 and 1
-(`HostEnvironments.route`), so `editor` is the app and the label behind it is the environment whose
-processes the request is routed to. One upstream per environment, and every project on it told apart
-by the forwarded host.
-
-**The short `editor.<slug>.<domain>` form is on its way out.** It never matched that reading; it
-reached an editor by falling through to the `$app.$domain` form, which lands on the `editor` app in
-the **default** environment. That fallthrough is being removed at the edge, and when it ships the
-three-label name 404s — so an alias, a bookmark or a client that still spells it has to move to the
-four-label one. The client side moved with it: `/main-navigation` gained a top-level `projectOrigin`,
-the environment's origin with the env label **always** present even where the environment is served
-from the bare apex, and the workspaces SPA composes the hand-off against that rather than deciding an
-env label for itself (`editor-origin.ts` carries the bug history).
-
-**Nothing on this side reads any label but the first, deliberately.** `EditorHost` asks whether label
-0 is `editor` and stops — the edge already decided which environment's process this is, so reading
-the name again would be one routing decision made twice, by the endpoint of the first. It is also a
-header a client may write: `X-Forwarded-Host` is `set`-if-absent at the edge
-(`EdgeHeaders.applyForwarded:193-200`), so a client-supplied value wins, which is why it is treated
-as caller-shaped input that selects a SURFACE and never an address — and why a permissive test costs
-nothing, since every name that passes it reaches the same one editor, behind the same 403 for a
-request that did not come through the session gate. **The slug in the alias is now decoration**: the
-per-project origin is what is deployed and the editor behind it is the platform's, so moving to
-`editor.<env>.<domain>` is the edge's and the client's change to make, with nothing to do here.
-
-## Dispatching an agent onto a branch
-
-`POST /workspaces/api/agent-dispatches` is the machine door qits-projects presses to hand a ticket to
-a coding agent. Body `{repositoryId, branch, branchTree, preamble, ticketId, epicId, instruction}`,
-answering
-`{workspace, fresh, agentLaunch, technicalProcessId}` with `agentLaunch` ∈ `SCHEDULED` /
-`SKIPPED_RUNNING`. `AgentDispatchController` is a class of its own at `{qits:admin, qits:system}`,
-for `BranchResolutionController`'s reason — `WorkspaceController`'s class role is a person's, and a
-class-level `@RolesAllowed` is enforced on ArC's internal calls too, so a machine verb added there is
-the 403 of 2026-09-03 pointed the other way. `DispatchService` holds the semantics.
-
-**`GET /workspaces/api/agent-dispatches/references?ticketId=…&epicId=…` is the reference read back**,
-both parameters repeating, one call per caller's listing, answering `{workspaceRowId, repositoryId,
-workspaceId, branch, ticketId, epicId}` per live workspace. It is on **this** class and the reason is
-the warning above being ignored once: it shipped on `WorkspaceController` in 2026.911.151414 and was
-**dead on arrival** — qits-projects holds a machine credential, that class is `qits:admin`, so every
-lookup was a 403, and the caller's port contract turns a failed lookup into an empty list on purpose,
-so the field was always empty and nothing anywhere said why. **A machine read goes on a class that
-states `qits:system`, and a door whose caller cannot tell a refusal from an empty answer needs a role
-test, not only a behaviour test** — `AgentDispatchDoorRolesTest` pins all three outcomes now.
-`WorkspaceRepository.findActiveBySubjects` is where "live" is defined, once: an ACTIVE row, whatever
-its container is doing, so a stopped workspace stays reported and navigable and only resolution ends
-the reference.
-
-**It is one call for an arc that had no machine entrance at all.** Creating a workspace was
-`qits:admin`-only, and **no host-side agent launch existed anywhere**: every agent this platform has
-ever run was started by a browser posting `POST /workspaces/container/{id}/agents` through
-`ContainerProxyRoute`. So the door does three things — find-or-create the workspace on
-`(repository, branch)`, ensure its container, launch an agent once the daemon answers — and only the
-first two are finished when it replies.
-
-Five decisions, each of which is a way to get this wrong:
-
-- **Idempotent, never 409.** A branch that already carries an ACTIVE workspace is answered *with* it
-  and `fresh:false`; a workspace whose agent is already running is answered `SKIPPED_RUNNING`. The
-  caller presses this to reach a state and will press it again, so a conflict would make its retry an
-  error and its poll impossible. The ensure is skipped when a technical process is already running
-  or the daemon already answers — `EditorService.worthStarting`'s guard, for its reason.
-- **The literal-first-segment fallback**, `CaptureService.branchPrefix`'s defense aimed at the
-  requested name: a repository holding `refs/heads/ticket` can hold no `refs/heads/ticket/*`, so
-  `ticket/fix-login` becomes `ticket-fix-login` rather than failing on a push nothing here could
-  explain. Only the first segment flips, and the workspace slug is identical either way.
-- **A launch for a row that is not queued is IN MEMORY and a restart drops it** — it waits seconds
-  to minutes for a daemon. A launch held for a QUEUED row is not: see the next point. A launch that
-  fails is a WARN and nothing else; it is deliberately not a workspace event, because `WorkspaceEventType` is a
-  five-value *lifecycle* vocabulary about the branch and an agent that did not start is not something
-  that happened to the branch.
-- **A workspace queued for a runner PARKS its launch** (qits-626). The launch window starts when a
-  runner takes the row, not at the press: a QUEUED row's launch (or delivery) is held in memory by
-  row id under the same `pending` claim, on no thread, until `WorkspaceTaken` (fired by
-  `RunnerClaims` after the claim commits) submits it, or `WorkspaceUnqueued` (fired by
-  `RunnerClaims.abandonStart` — stop, delete, recreate, resolution) drops it with an INFO. The row is
-  re-read after parking, so a claim landing in between cannot strand it. **Since qits-1064 the held
-  launch is also a row** (`pending_agent_launch`, `V17`, behind the `HeldAgentLaunches` port): "a
-  re-press recovers it" was the old premise and nobody is ever told to re-press, so every deploy
-  stranded the queued workspaces' launches. One row per workspace is the one-launch rule; whoever
-  wins a conditional claim on it delivers it, and it is deleted once the daemon answered or the
-  window closed, on unqueue, and on resolution. A boot drain and `wiring/HeldAgentLaunchSweep` (every
-  `qits.workspace.agent-dispatch.held-launch-sweep-interval`) resume what nobody delivers; a stopping
-  process gives its claims back, and a claim older than twice the launch window is takeable. The
-  `DispatchService` class javadoc has the whole design. The answer is unchanged in shape — `SCHEDULED`,
-  `runtimeStatus: QUEUED`. A row whose runner is offline past the grace is 409 `RUNNER_UNAVAILABLE`
-  naming the runner, never parked.
-- **The instruction is not stored.** It rides into the launch and nowhere else; keeping it beside
-  the goal would make one conversation's opening turn look like the statement of the work.
-- **What a dispatched workspace is for is a FIELD, not the preamble.** `ticketId`/`epicId` are two
-  nullable `text` columns on `workspace` (`V5`), carried on `WorkspaceDto` and written once, by
-  `recordWorkspace`, out of a `WorkspaceSubject` — a record rather than two adjacent strings, for the
-  reason `admin` is kept off the positional forms. qits-projects used to render the whole ticket (or
-  the epic's outline) into the `preamble`, which was a stale copy of something the instruction sends
-  the agent to read live, and it buried the one fact a person scanning the workspace list wants. Both
-  its doors now send **no preamble at all**. Nothing here resolves either id and nothing here renders
-  one: the SPA composes the link, because that needs this platform's public origin — which the
-  browser is told by `/main-navigation` and this service is not told at all. The ad-hoc create keeps
-  its hand-written goal, and a workspace from before `V5` keeps its prose, which stays readable.
-- **`deliverTaskPrompt` is false and must stay false.** True seeds the session with an instruction to
-  fetch the real prompt through an MCP tool named `taskPrompt`, which is implemented nowhere on the
-  platform. The SPA's own client carries that rule in the same words; `DaemonAgentClient` is the
-  second caller of that API and makes the same promise.
-
-**`DaemonAgentClient` (in `daemonhost/`) is the transport**, behind the `WorkspaceAgentLauncher` port
-so `domain` stays free of Vert.x. It reaches a daemon exactly as `ContainerProxyRoute` does —
-through its reverse tunnel, using *that tunnel's* client, and no other way (the direct
-`container:13338` fallback is gone, qits-780) — sets qits' own bearer rather than forwarding one, and
-pins the authority to `localhost:13338` (`ContainerProxyPath.DAEMON_API_PORT`) so the daemon cannot
-tell which tunnel port a request took. The path is the **full proxied one**
-(`ContainerProxyPath.base(rowId) + "agents"`), because that prefix is the daemon's own address; a
-bare `/agents` would 404 against every container this service ever made. Two things about it were
-paid for on 2026-09-08; one is still worth not undoing (the other, a direct client with keep-alive
-off, went with the direct path): each exchange is **composed and awaited once** — awaiting the response and
-then asking it for its body is two blocking steps with an event loop between them, and the body can
-already have been delivered and dropped by the time the second one is reached, so the call sits on
-its whole timeout and reports the daemon unreachable while the daemon answered.
-
-**Liveness here is the daemon's own API answering, not the control socket** — `DaemonProxyTargets`
-already records why the two are independent listeners. So the probe is the request: `GET
-/commands?status=RUNNING`, and a RUNNING command counts as an agent's when its kind is `CHAT` **or**
-it carries `agentSessions` lineage. The lineage alone would leave a window — it is populated from the
-harness's first `SessionStart`, seconds after the launch — in which a just-launched agent looks like
-nothing and a re-press puts a second one on the same checkout.
-
-## Saying something to the agent already on a branch
-
-`POST /workspaces/api/agent-dispatches/delivery` — **"say this to the workspace's agent"**, the same
-thing a person types into its chat tab. Body `{repositoryId, branch, text, compactFirst}`, answering
-`{delivered, launched, workspaceId, detail}`, on the dispatch class and therefore at
-`{qits:admin, qits:system}`. `DispatchService.deliver` holds the semantics.
-
-**It exists because a user turn had exactly one entrance and no machine holds it.** Every turn this
-platform has ever delivered came from a browser on the daemon's command websocket, which is the whole
-reason the dispatch door's answer has a `SKIPPED_RUNNING` in it: an agent already at work could be
-left alone and nothing else. The first caller is the ticket phase machinery — a status transition
-that should reach the agent working on the ticket — but **nothing in the feature knows what a ticket
-is**, deliberately.
-
-Five things are decided rather than incidental:
-
-- **It NEVER creates a workspace, and that is the one way it differs from a dispatch.** Find-only on
-  `(repository, branch)`: an ACTIVE workspace or nothing. A ticket nobody dispatched has no
-  workspace, and a status a person dragged across a board must not conjure a branch, a container and
-  an agent as a side effect of being dragged. The branch lookup tries the requested name and then the
-  dash shape a dispatch would have fallen back to — as a **string**, never by asking the git host
-  whether the literal first segment exists, because that read is a network call that throws and this
-  verb answers "nobody to tell" for a branch it cannot find.
-- **A branch with no workspace is a 200 with `workspaceId: null` and a sentence, not a 404.** The
-  caller is a machine reacting to a status change and "there was nobody to tell" is the ordinary
-  outcome for most tickets. A 404 would make it a stack trace per transition at the far end, a retry
-  loop over a condition no retry can change, and an alert channel somebody eventually mutes.
-- **Three arms, chosen by what is there.** Agent running → the text is delivered as a user turn
-  (`POST /agents/turn` on the daemon, `{"text": …}` → `{"delivered", "commandId", "kind"}`). No agent
-  running → `launch` with the text as the seed turn, the path that already existed. Container not
-  answering → ensured behind `EditorService.worthStarting`'s guard (an idle-stopped container is the
-  ordinary between-phase state), and the arm is chosen on the wait thread once the daemon answers.
-  `delivered`/`launched` report the arm the **call** took from the state it read; the round trip is
-  later, on the launch-wait thread, for the reason a dispatch's launch is.
-- **A delivery claims the same one-wait-per-workspace slot a launch does.** Its own fallback arm *is*
-  a launch, so two waits on one workspace is exactly the "two agents on one checkout" that set
-  exists to stop. The cost — a second delivery arriving inside the milliseconds a first one takes is
-  dropped rather than queued — is stated in the answer and never silent.
-- **It waits for the turn to END before speaking, and the signal is the activity rollup — not
-  `agentState`.** That one is command-level (`GET /commands?status=RUNNING`) and a chat-mode agent's
-  command stays RUNNING for the whole session, between turns as much as during one, so it answers
-  "is there an agent" and can never answer "is it mid-turn". The turn boundary is on the *other*
-  wire: the daemon relays the harness's lifecycle hooks over its dial-home socket and
-  `WorkspaceDaemonRegistry` caches them as `WorkspaceAgentActivity`'s per-workspace rollup. **The
-  predicate is "control is with the user" — IDLE or WAITING — and BUSY is the only state that keeps
-  waiting**; ENDED is the launch arm, because a finished session has nobody to interrupt and nobody
-  to hear it. The two ports answer two different questions and a delivery needs both. Without this
-  the feature is pointless for its first caller: the phase prompt is produced by the agent's own last
-  act of a turn, so it would always land mid-turn.
-- **An absent rollup DELIVERS, and that is a decision.** The rollup is in-memory and exists only
-  while the daemon's socket is connected, and activity tracking is a per-launch knob
-  (`activityTracking`) that can be off — so a live agent can be untracked. Blocking on a signal that
-  is never coming would turn each of those into a delivery silently dropped a quarter of an hour
-  later, which is worse than the thing the wait prevents: delivering mid-turn costs an interruption,
-  waiting out the window costs the message. An absent tracker is not a busy agent. The same branch
-  covers an app with no activity backend at all (cli), where the port is simply unsatisfied.
-
-**`qits.workspace.agent-dispatch.compact-before-turn` is `false` and stays false until somebody reads
-a transcript.** Whether Claude Code in ACP/chat mode honours a *delivered* `/compact` as the slash
-command or echoes it back as ordinary text is **not established** — the daemon-side spike is recorded
-as unrun in that route's javadoc — and this side cannot tell the two apart, because both answer
-`delivered: true`. Off means the phase prompt is simply the first turn after a reset, which the epic
-calls an acceptable substitute for compaction. What would justify `true` is one observation: a
-transcript showing a compaction boundary in the harness's own log and the next turn answering with
-the summarised context, rather than an assistant turn quoting the word back. The caller's
-`compactFirst` is a request, not an instruction; with the knob on it is exactly one turn ahead of the
-prompt and never a gate — a compaction that did not land is a longer context, while refusing the turn
-over it would lose the phase prompt entirely.
+## The web editor: removed (qits-1152)
+
+The shared editor workspace — its door (`POST /workspaces/api/editor/ensure`), its proxy route on the
+`editor.*` vhost, its keepalive and idle-stop switch, its `EditorState` frame and
+`StreamTarget.EDITOR` tunnel target, its image pin (`qits-workspace-editor-image`) and the
+`qits.editor.*` keys — went with epic qits-1152 (D11) and is rethought in epic qits-1150. `V20`
+resolved its row; the `editor` column stays, unread.
+
+## Agents and the workspaces they run in (epic qits-1152)
+
+A **workspace** is a slot: one container on a runner (an admin one DIRECT on the platform host),
+scoped to a project's wrapper, holding one long-lived clone. An **agent** is one work item's coding
+agent and its worktree inside a workspace (`/workspace/agents/<agentId>/<wrapper name>` on the
+daemon). A workspace hosts many agents and runs one harness at a time. The decisions are D1–D26 of the
+superproject's `agent-workspace-decoupling-plan.md`; `AgentService` holds the semantics.
+
+**The rows.** `agent_worktree` (`V21`, `AgentWorktree`, a `CausedRow`): work item, wrapper branch,
+slot, `state` ACTIVE → OBSOLETE → REMOVED, `run_state` QUEUED → RUNNING ⇄ YIELDED, session, the turn
+still to be said (`pending_text`), the agent's own token and Git refs. `agent_branch` (`@Uncaused`, a
+native upsert on the registry's thread) holds every (repository, branch) the daemon reported pushed.
+Unique indexes keep one ACTIVE agent per work item and one RUNNING agent per workspace. A slot is a
+`workspace` row with **no branch**; the old work columns on `workspace` stay, unread by slots (D20).
+
+**The doors write rows; one scheduler talks to the daemons.** Dispatch, delivery, entity, a person's
+create and a release's resolution write the agent row and answer at once. `AgentService.reconcile`
+makes every daemon call, one pass at a time, kicked after each door and every
+`qits.workspace.agent.sweep-interval` (`wiring/AgentSweep`):
+
+1. **Resume** — a workspace with no RUNNING agent gives the slot to a YIELDED agent with something to
+   hear. A resume goes before a new agent (D17).
+2. **Place** — a QUEUED agent goes to an empty workspace of its wrapper and posture, else to a new
+   one while the eligible runners' slots outnumber the RUNNER workspaces (an admin agent always gets
+   a new DIRECT admin workspace, D10), else to a workspace whose agents have all yielded, else it
+   waits.
+3. **Yield** — a RUNNING agent waiting for input longer than `qits.workspace.agent.yield-after` (30 s)
+   yields when another agent wants its slot (D14, D16).
+4. **Drive** — a RUNNING agent whose daemon answers is started with `POST agent-worktrees` (its
+   instruction, session, entity facts and credential), and its pending turn is said at a turn
+   boundary (`/turn`; BUSY waits up to the launch window). The daemon keeps the agent credential in
+   memory only, so every agent is started again after its daemon connects (`onDaemonConnection`).
+5. **Clean up** (D4, D5, D7) — an OBSOLETE agent whose item is VERIFIED (the status the entity door
+   stores) and that has been idle for `qits.workspace.agent.cleanup-idle` (30 s) is checked
+   (`cleanup-check`): clean → `DELETE agent-worktrees/{id}`, token deleted, REMOVED; leftover work →
+   the D7 prompt is its next turn, never a deletion. It is prompted again only after it has worked.
+6. **Remove empty workspaces** (D2) — a slot whose agents are all REMOVED is discarded: container,
+   volume and daemon credential.
+
+Every pending thing is a row, so a restart loses nothing. What is in memory — which agents this
+process started on the current daemon connection, the per-agent activity — is rebuilt by the next
+connection and the next frames.
+
+**The doors** (machine doors `{qits:admin, qits:admin-agent, qits:system}`, reads add `qits:agent`):
+
+- `POST /workspaces/api/agent-dispatches` `{repositoryId, wrapperBranch, workId, entityId,
+  entityTitle, entityStatus, entityBlocked, ticketId?, epicId?, admin?, harness?, instruction}` →
+  `{agent, fresh, agentLaunch: SCHEDULED|SKIPPED_RUNNING|QUEUED, agentIdentity}`. Idempotent per
+  `workId`: the ACTIVE agent is the answer (`fresh:false`).
+- `GET …/agent-dispatches/references?workId=…` (repeating; `ticketId`/`epicId` read as work ids) →
+  `entries[].agent`.
+- `POST …/delivery` `{workId, text, compactFirst}` → `{agentId, delivered, launched, resumed,
+  detail}`; `agentId: null` is "nobody works on it", never a 404, and nothing is created.
+- `POST …/entity` `{workId, title, status, blocked, blockSource?}` and `…/blocked` `{workId, blocked,
+  blockSource?}` → `{agentId, applied}`.
+- `POST /workspaces/api/branches/resolution?repositoryId=` → `{resolved, agentIds}`: every ACTIVE
+  agent owning the branch (wrapper branch or a pushed one) becomes OBSOLETE. An old-model workspace
+  on the branch resolves as before.
+- `GET /workspaces/api/agents?workId=&workspaceId=&state=`, `GET /workspaces/api/agents/{id}`;
+  person doors `{qits:admin, qits:admin-agent}`: `POST /workspaces/api/agents` (an agent for an
+  existing work item, D24; `wrapperBranch` defaults to `ticket|epic/<entityId>`) and `POST
+  /workspaces/api/agents/{id}/discard` (`409 AGENT_HAS_LEFTOVER_WORK` unless `force`).
+- The prompt draft and its images are the agent's: `/workspaces/api/agents/{id}/prompt-draft` and
+  `/prompt-attachments` (`V22` re-keyed the tables; composition state was dropped, not migrated).
+- `/work/workspaces` and `/work/{ref}/workspaces` keep their shape (the landing app's pact): one entry
+  per placed agent, its slot's row id and label, the wrapper branch as `branch`, ACTIVE/INTEGRATED
+  (obsolete)/ABANDONED; old-model rows follow.
+
+**The agent credential** (D3, D18): a token of the workspace kind (`workspace-admin` for an admin
+agent), context id `agent-<id>`, scoped to the project, with Git refs `[refs/heads/<wrapperBranch>,
+refs/heads/<wrapperBranch>-*]` (a trailing `*` is a prefix glob, `GitRefs`). Minted only where there is
+an edge plane, stored on the row, handed to the daemon as the harness `env` (`QITS_TOKEN`,
+`QITS_TOKEN_SUBJECT`) and nowhere else, deleted when the agent is REMOVED. `CommissionReconciler`
+counts it claimed while the agent is not REMOVED. The slot keeps its own token for the daemon, with
+`gitRefs []`: every push is an agent's.
+
+**What the daemon reports** (protocol capability 10): `AgentActivity.agentId` — the activity time,
+session id and waiting flip are stored on the agent, and a flip is relayed to qits-projects
+(`AgentWaitingReporter`, per agent now); `AgentBranchPushed {agentId, repository name, branch, sha}` —
+the name is mapped to a repository id through the agent's project and upserted into `agent_branch`.
+
+**Capture files a ticket and stops** (D25): `POST /workspaces/api/capture` asks qits-projects `POST
+/projects/api/work` for an IMPROVEMENT ticket in the captured repository's project (`WorkFiler`,
+`wiring/HttpWorkFiler`) and answers `{work: {id, qualifiedId}}`. No workspace, branch or agent.
+
+**Known limits.** A yielded agent's unpushed commits wait until it resumes (its credential is
+re-handed only on a start). The person door derives the wrapper branch from what it is told; it does
+not read the work item. `MountedClaudeTranscripts` reads a slot's sessions per agent directory, keyed
+on the wrapper's name.
 
 ## The credential a workspace container holds
 
@@ -1667,10 +1188,10 @@ qits-githost enforces it. Roles stay the owner's until phase 4.
 ## Admin workspaces: the one privilege a workspace can be granted
 
 An **admin workspace** is an ordinary workspace whose container holds the **host's docker socket**,
-so that platform administration can be done from inside a workspace. It is asked for at creation —
-`POST /workspaces/api/workspaces` with `admin: true`, which the workspaces SPA offers as a checkbox
-on the ad-hoc create form — and it is the only thing about a workspace container that is not the
-same for every workspace.
+so that platform administration can be done from inside a workspace. Since qits-1152 it is asked for
+per agent — `admin: true` on `POST /workspaces/api/agents` or the dispatch door — and an admin agent
+runs only in an admin workspace (D10), which the scheduler creates DIRECT for it. It is the only thing
+about a workspace container that is not the same for every workspace.
 
 **A container holding that socket is root-equivalent on the host.** Everything below follows from
 that one sentence, and each piece is a place the property could be lost:
@@ -1713,24 +1234,22 @@ than per caller. A second role invented here would be a vocabulary qits-idp does
 
 A workspace's container runs either **DIRECT** (the platform host, through qits-containers) or
 **RUNNER** (a workspace runner's node). `Workspace.placement` is written once, by `recordWorkspace`,
-from `WorkspacePlacements.forNewRow(admin, editor)`: **a regular workspace is always RUNNER, and only
-admin and editor workspaces are DIRECT** (qits-774) — create door and dispatch alike, whether or not
-any runner is eligible. With none, the row waits QUEUED on no runner and its start's `queued` line
-reads `no enabled workspace runner` (`WorkspaceService.NO_ENABLED_RUNNER`); that is a waiting state,
-not a refusal. Only `POST /workspaces/api/workspaces` may state a placement, and only one that
-agrees: RUNNER with `admin` is a 400, DIRECT without it a 400 `DIRECT_PLACEMENT_REFUSED`. The
-refusal codes live in `error/RunnerRefusals`.
+from `WorkspacePlacements.forNewRow(admin)`: **a regular workspace is always RUNNER, and only admin
+workspaces are DIRECT** (qits-774). Since qits-1152 the agent scheduler creates a RUNNER slot only
+while the eligible runners have free slots, so an agent waits QUEUED rather than a row on no runner;
+an old-model row still waits QUEUED with `no enabled workspace runner`
+(`WorkspaceService.NO_ENABLED_RUNNER`). The refusal codes live in `error/RunnerRefusals`.
 
 **No regular row is DIRECT any more, and three things hold that** (qits-780): `V15`'s
-`ck_workspace_direct_only_admin_editor` (an ACTIVE row is RUNNER, admin or editor), the create rule
+`ck_workspace_direct_only_admin` (an ACTIVE row is RUNNER or admin; `V20`), the create rule
 above, and **the router's refusal** — `WorkspacePlacements.requireDirectAllowed(Workspace)`, called at
 every DIRECT branch before `ContainerRuntime` is touched: the top of `beginEnsureContainer`,
 `beginRecreateContainer`, `stopContainer`, `deleteContainer` and `doDiscard`; the ensure ladder's
 snapshot; `ensureContainer(Long)`, the bootstrap runner's manual-run entry, which leaves a
-RUNNING runner row to its runner and asks a stopped one to start first (400); `describeEditor`; the listing's per-row DIRECT status; `directContainerExists`
+RUNNING runner row to its runner and asks a stopped one to start first (400); the listing's per-row DIRECT status; `directContainerExists`
 behind `isFullyPushed`, `isWorkspaceClean` and the integration source check (a RUNNER row answers
-false there with no call, as the by-name lookup always did); `DaemonProxyTargets.resolve`;
-and `EditorKeepalive`. A regular row there is an ERROR `direct
+false there with no call, as the by-name lookup always did); and `DaemonProxyTargets.resolve`. A
+regular row there is an ERROR `direct
 placement refused for regular workspace <id>` and an `IllegalStateException`. The listing asks
 qits-containers only when the repository has a DIRECT row at all. Tests that prove the DIRECT ladder
 use **admin** rows (`createWorkspace(…, admin = true)`); the qits-776 move onto a runner
@@ -1759,11 +1278,10 @@ workspace in SQL rather than through the door.
   (`RunnerClaims.reserveFor`, the CAS in `WorkspaceRepository.claimForRunner`, which refuses a row
   with no token too). `launched` keeps the row PROVISIONING until its daemon reported the self-clone
   (rung 3's provisioner and windows), then RUNNING; no daemon, or a failed clone, is FAILED.
-- **The create door starts what it creates** (qits-853, `createAndStartWorkspace`): a DIRECT row's
-  container is started in the same request and the answer carries its `technicalProcessId`, so no
-  client makes a second call. Dispatch, the editor and capture create through `createWorkspace` and
-  start (or do not) on their own, which is why the start is not in `createWorkspace` itself. An
-  ensure-container right after a create joins the start still running instead of provisioning twice
+- **A slot is started by its create** (`createSlot`): a RUNNER one queued, a DIRECT admin one
+  through `beginEnsureContainer`. (The ad-hoc create door went with qits-1152; `createWorkspace`
+  stays as the writer of old-model rows the suites build on.) An ensure-container right after a
+  create joins the start still running instead of provisioning twice
   — **but never a start a stop overtook** (qits-1076). A DIRECT stop or container delete counts
   itself on an in-memory per-row stop marker before it touches anything, and once it commits it
   releases the start's provision await (`WorkspaceDaemonProvisioner.abandonProvision`) and ends its
@@ -1866,11 +1384,12 @@ unknown field, a 500, not JSON) stay hand-written: they are what the provider do
 backend of one component stay apart. Pact V4. Three test classes in `service/…/wiring/`:
 
 - `ProjectsContract` — the table, one row per **(trigger, call)**. The trigger is the workspaces
-  entry point that reaches `RepositoryLookup`, named by its openapi `operationId`, and it is what
-  tells apart the rows that send the identical request. The `operationId`s exist for this:
-  `dispatchAgent`, `createWorkspace`, `mergeWorkspace`, `ensureEditor` and `captureWorkspace` (the
-  last on an `@Operation(hidden = true)`, so it is in no document). The class javadoc traces each one
-  from the call site up; renaming an `operationId` renames a trigger in the pact.
+  entry point that reaches qits-projects, named by its openapi `operationId` (or the daemon frame), and
+  it is what tells apart the rows that send the identical request. Since qits-1152: `dispatchAgent`,
+  `createAgent`, `workspace-daemon:agent-branch-pushed` and `captureWork` (on an `@Operation(hidden =
+  true)`, so in no document) — the last also files the ticket, `createWork` in state `a project with
+  no work`, with this service's own request body. The class javadoc traces each one from the call
+  site up; renaming an `operationId` renames a trigger in the pact.
 - `ProjectsConsumerPactTest` — a real `HttpRepositoryLookup` with the real generated REST clients
   against a pact-jvm mock server, one mock server per row. **A `@QuarkusTest`, by necessity**: the
   reactive REST client refuses to build outside a running application ("needs to be built within the
@@ -2044,7 +1563,6 @@ running.
 | --- | --- | --- |
 | `api.TokenValidationBootstrapIT` | authentication | the boot: the JWKS fetch, the commission reconcile, and a bearer cut for another audience |
 | `stories.creation.WorkspaceProvisionIT` | workspaces | a workspace provisioned end to end, daemon dial included |
-| `stories.editor.EditorEnsureIT` | editor | the editor door — the one editor workspace begun, with no repository read and no git at all |
 | `stories.operations.OperatorReadsIT` | operations | what a live read costs, and what a stored read does not |
 | `stories.refusals.MergeDoorRefusalIT` | refusals | four ways not to get through a door, told at `/branches/merge` |
 
@@ -2058,7 +1576,7 @@ has one run per module and flipping it would turn the five docker-backed `Daemon
 it. Run it — and the composed QA pipeline's verify runs it — as a comma list:
 
     ./mvnw verify -DskipITs=false -Dquarkus.quinoa=false \
-      -Dit.test=TokenValidationBootstrapIT,WorkspaceProvisionIT,EditorEnsureIT,OperatorReadsIT,MergeDoorRefusalIT
+      -Dit.test=TokenValidationBootstrapIT,WorkspaceProvisionIT,OperatorReadsIT,MergeDoorRefusalIT
 
 Adding a story class means adding it there **and** in `.config/qits/userflow-stories`, which is
 what that selection is composed from. `-Dit.test` alone still runs the
