@@ -1,7 +1,9 @@
 package eu.wohlben.qits.workspaces.control;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import java.util.ArrayList;
@@ -32,11 +34,21 @@ class GitRefsTest {
   }
 
   @Test
-  void aStarIsOnlyATrailingSlashStar() {
+  void aStarIsOnlyTheLastCharacter() {
     assertThrows(BadRequestException.class, () -> GitRefs.validated(List.of("refs/heads/*x")));
-    assertThrows(BadRequestException.class, () -> GitRefs.validated(List.of("refs/heads/a*")));
     assertThrows(
         BadRequestException.class, () -> GitRefs.validated(List.of("refs/heads/a/*/b")));
+    // A trailing * after any character is a prefix glob (qits-1152): an agent's own branches.
+    List<String> agent = List.of("refs/heads/ticket/qits-1", "refs/heads/ticket/qits-1-*");
+    assertEquals(agent, GitRefs.validated(agent));
+  }
+
+  @Test
+  void aTrailingStarCoversWhatStartsWithWhatPrecedesIt() {
+    assertTrue(GitRefs.covers("refs/heads/ticket/qits-1-*", "refs/heads/ticket/qits-1-fix"));
+    assertFalse(GitRefs.covers("refs/heads/ticket/qits-1-*", "refs/heads/ticket/qits-10"));
+    assertTrue(GitRefs.covers("refs/heads/epic/*", "refs/heads/epic/x"));
+    assertTrue(GitRefs.covers("refs/heads/ticket/qits-1", "refs/heads/ticket/qits-1"));
   }
 
   @Test

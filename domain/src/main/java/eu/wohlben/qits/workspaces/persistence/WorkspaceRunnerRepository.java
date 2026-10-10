@@ -52,4 +52,19 @@ public class WorkspaceRunnerRepository implements PanacheRepositoryBase<Workspac
   public boolean existsEligible() {
     return count("clientId is not null and slots > 0 and quarantinedAt is null") > 0;
   }
+
+  /**
+   * The slots of every runner that may take a workspace — registered, in service, with slots
+   * (qits-1152): how many workspaces may run on runners at once.
+   */
+  public long eligibleSlots() {
+    Number sum =
+        getEntityManager()
+            .createQuery(
+                "select coalesce(sum(r.slots), 0) from WorkspaceRunner r"
+                    + " where r.clientId is not null and r.slots > 0 and r.quarantinedAt is null",
+                Number.class)
+            .getSingleResult();
+    return sum == null ? 0 : sum.longValue();
+  }
 }

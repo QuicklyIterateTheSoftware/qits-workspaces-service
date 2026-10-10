@@ -177,6 +177,22 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
         .toList();
   }
 
+  /**
+   * The ACTIVE slot workspaces (qits-1152): the rows that name no branch of their own, whose agents
+   * carry the work. Old-model rows on a branch are not slots and drain as before (D20).
+   */
+  public List<Workspace> findActiveSlots() {
+    return list("status = ?1 and branch is null order by id", WorkspaceStatus.ACTIVE);
+  }
+
+  /** How many ACTIVE rows are placed on runners: the slots in use against the runners' capacity. */
+  public long countActiveOnRunners() {
+    return count(
+        "status = ?1 and placement = ?2",
+        WorkspaceStatus.ACTIVE,
+        eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER);
+  }
+
   // --- Any-status (history / discovery) ----------------------------------------------------------
 
   /** Every workspace (active + resolved) for a repository, newest first — for the history view. */

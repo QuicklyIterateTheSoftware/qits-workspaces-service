@@ -12,7 +12,9 @@ import java.util.Set;
 /**
  * The Git refs a workspace's credential may push, in the shape of contract C1
  * (principal-bound-git-refs-plan.md): a list of exact refs ({@code refs/heads/ticket/x}) and prefix
- * patterns ending in {@code /*}.
+ * patterns ending in {@code *}. A trailing {@code *} means "starts with what precedes it", wherever
+ * it follows: {@code refs/heads/ticket/qits-1-*} covers {@code ticket/qits-1-fix}, and {@code /*} is
+ * the special case it always was (qits-1152). Any other {@code *} is invalid.
  *
  * <p>Pure functions and no state. The rules here are the ones qits-idp applies to a commission
  * (C2), so a list this service accepts is a list the idp accepts too. A list the idp refused would
@@ -64,7 +66,7 @@ public final class GitRefs {
 
   /**
    * {@code refs} without every entry that lets a push to the default branch through: its exact ref,
-   * and a {@code /*} pattern that covers it (the githost's matching rule, C3). Order kept.
+   * and a trailing-{@code *} pattern that covers it (the githost's matching rule, C3). Order kept.
    *
    * @param defaultBranch the repository's default branch; null or blank when not known, which drops
    *     nothing
@@ -79,9 +81,12 @@ public final class GitRefs {
     return List.copyOf(kept);
   }
 
-  /** Whether {@code entry} lets a push to {@code ref} through: the same ref, or a {@code /*} over it. */
+  /**
+   * Whether {@code entry} lets a push to {@code ref} through: the same ref, or a trailing-{@code *}
+   * prefix over it.
+   */
   static boolean covers(String entry, String ref) {
-    if (entry.endsWith("/*")) {
+    if (entry.endsWith("*")) {
       return ref.startsWith(entry.substring(0, entry.length() - 1));
     }
     return entry.equals(ref);
@@ -108,9 +113,9 @@ public final class GitRefs {
             "gitRefs entry is longer than " + MAX_LENGTH + " characters: " + ref);
       }
       int star = ref.indexOf('*');
-      if (star >= 0 && (star != ref.length() - 1 || !ref.endsWith("/*"))) {
+      if (star >= 0 && star != ref.length() - 1) {
         throw new BadRequestException(
-            "gitRefs entry may use * only as a trailing /*: " + ref);
+            "gitRefs entry may use * only as its last character: " + ref);
       }
       if (!seen.add(ref)) {
         throw new BadRequestException("gitRefs names an entry twice: " + ref);
