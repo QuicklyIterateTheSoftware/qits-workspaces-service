@@ -40,7 +40,7 @@ import eu.wohlben.qits.userflows.NetworkTaps;
  * <p>A cumulative source is attributed by a cursor, so pre-story traffic lands in whichever story
  * drains FIRST. {@code UserflowClassOrderer} sorts by fully-qualified class name, so {@code
  * …workspaces.api} runs before {@code …workspaces.stories.*} and the boot story owns the startup
- * JWKS fetch; within {@code stories}, {@code creation} runs before {@code editor}, {@code
+ * JWKS fetch; within {@code stories}, {@code creation} runs before {@code
  * operations} and {@code refusals}, which is why the outbound token mints — cached for an hour, so
  * they land once — belong to the first workspace story rather than to whoever needed one next.
  * {@code @UserflowRunsAfter} states the ones that are real dependencies as well as being true of

@@ -19,7 +19,7 @@ import java.util.Map;
  *
  * <h2>Its own databases</h2>
  *
- * <p>The catalogue <b>writes</b>: a workspace, its provision, an editor and their events. Sharing
+ * <p>The catalogue <b>writes</b>: a workspace, its provision, an agent and their events. Sharing
  * the surefire suite's databases would make either suite's assertions depend on whether the other
  * had run, so the names here are this profile's own, and both are cleaned at start so a re-run does
  * not read the last run's rows.
@@ -177,7 +177,7 @@ public class StoryProfile implements QuarkusTestProfile, NecessaryTestProfileDup
     config.put("qits.workspace.git.mirror-freshness-ms", "0");
 
     // --- no edge plane, whatever the step container's QITS_DOMAIN says ------------------------------
-    // With a public domain an admin or editor workspace is minted a workspace token and addressed
+    // With a public domain an admin workspace is minted a workspace token and addressed
     // through the edge (qits-1084); with none it holds the commissioned client pair. The provision
     // story tells the pair's arc — a commission at POST /idp/api/clients, the pair in the spec — so
     // the domain is pinned empty here, as %test pins it, and an ambient QITS_DOMAIN in the launching

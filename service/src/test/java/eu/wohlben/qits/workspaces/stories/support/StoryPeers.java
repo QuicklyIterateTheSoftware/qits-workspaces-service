@@ -494,7 +494,7 @@ public final class StoryPeers {
    *
    * <p>It carried a fifth field for one release, {@code archetype}, and it had exactly one reader:
    * the web editor asked whether a repository was a project's wrapper, because there was one editor
-   * per project. There is one editor for the platform now and it belongs to no repository, so
+   * per project. The editor is gone (qits-1152), so
    * nothing in this service binds that field and no story sets it.
    */
   public record Repository(String id, String projectId, String name, String mainBranch) {
