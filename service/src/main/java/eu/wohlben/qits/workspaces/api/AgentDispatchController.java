@@ -353,6 +353,13 @@ public class AgentDispatchController {
    *     body without it is a 400 rather than a silent {@code false} that would clear a real {@code ❗}
    * @param workId the work item the workspace is bound to (qits-112). Optional; found first when
    *     given
+   * @param blockSource the effective block's source — qits-projects' {@code EntityBlockState}'s
+   *     {@code "EXPLICIT"}, {@code "AGENT_WAITING"} or {@code "BOTH"} (qits-895). Optional, and
+   *     absent reads as unknown rather than as not-blocked: an older qits-projects sends none of
+   *     this, and {@code blocked} alone is still the fact {@code applied} is about. Passed through
+   *     to the daemon live only — never stored on the row and never carried onto the container's
+   *     environment, because a derived block can flap on a debounce and a container is not recreated
+   *     over one
    */
   public static record MarkEntityRequest(
       @NotBlank String repositoryId,
@@ -360,7 +367,8 @@ public class AgentDispatchController {
       String title,
       String status,
       @NotNull Boolean blocked,
-      String workId) {}
+      String workId,
+      String blockSource) {}
 
   /**
    * <b>Tell the workspace what its subject looks like now</b> — title, status and blocked flag at
@@ -378,6 +386,10 @@ public class AgentDispatchController {
    * #blocked}'s rule, for its reason. {@code applied} reports the live half only: {@code false} with
    * a non-null {@code workspaceId} means the row was updated and the daemon was not reachable or did
    * not take it.
+   *
+   * <p><b>{@code blockSource} (qits-895) rides the live half alone.</b> It is never stored on the
+   * row and never reaches the container's environment — see the request's own javadoc for why a
+   * derived value is kept out of both.
    */
   @POST
   @Path("/entity")
@@ -398,7 +410,8 @@ public class AgentDispatchController {
         request.workId(),
         request.branch(),
         new EntityFacts(
-            request.title(), request.status(), request.blocked().booleanValue()));
+            request.title(), request.status(), request.blocked().booleanValue()),
+        request.blockSource());
   }
 
   public static record ListSubjectRefsRequest() {
