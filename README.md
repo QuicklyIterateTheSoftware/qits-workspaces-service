@@ -181,7 +181,7 @@ gets a turn when it happens:
   `qits:system` on any.
 - A durable bus listener (`qits-workspaces.agent-waits`, subscribed to `*`) matches arriving events.
   A match or a timeout closes the wait and gives the agent a turn naming the label, the event, its
-  time and a short payload; a yielded agent resumes for it. `GET /agents/{id}` shows `waitingOn`,
+  time and the matched values (never the raw payload); a yielded agent resumes for it. `GET /agents/{id}` shows `waitingOn`,
   and the waiting relay to qits-projects says `cause: "Wait"` with `waitingOn` instead of a plain
   wait for input.
 
