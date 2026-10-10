@@ -9,9 +9,8 @@ import eu.wohlben.qits.workspaces.control.CaptureService;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.SharedTuningProfile;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
-import eu.wohlben.qits.workspaces.control.WorkspaceService;
+import eu.wohlben.qits.workspaces.control.FakeWorkFiler;
 import eu.wohlben.qits.workspaces.dto.CaptureContent;
-import eu.wohlben.qits.workspaces.entity.Workspace;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
@@ -38,7 +37,7 @@ public class CaptureResourceTest {
   @Inject CaptureService captureService;
 
   @Inject FakeRepositoryLookup repositories;
-  @Inject WorkspaceService workspaceService;
+  @Inject FakeWorkFiler filer;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -127,101 +126,44 @@ public class CaptureResourceTest {
     }
   }
 
+  /** A capture files a ticket in the repository's project and stops (qits-1152, D25). */
   @Test
-  public void testCaptureCreatesBranchWorkspaceAndGoal() throws Exception {
+  public void testCaptureFilesATicketAndCreatesNoWorkspace() throws Exception {
     String repoId = repository();
 
-    var response =
-        given()
-            .contentType(ContentType.JSON)
-            .header("Origin", "http://app.example:4200")
-            .body(payload(repoId))
-            .when()
-            .post("/workspaces/api/capture")
-            .then()
-            .statusCode(Response.Status.CREATED.getStatusCode())
-            .body(
-                "workspace.workspaceId",
-                matchesPattern("feature-\\d{4}-\\d{2}-\\d{2}-\\d{4}(-\\d+)?"))
-            .body("workspace.id", notNullValue())
-            .extract();
+    given()
+        .contentType(ContentType.JSON)
+        .header("Origin", "http://app.example:4200")
+        .body(payload(repoId))
+        .when()
+        .post("/workspaces/api/capture")
+        .then()
+        .statusCode(Response.Status.CREATED.getStatusCode())
+        .body("work.id", notNullValue())
+        .body("work.qualifiedId", notNullValue());
 
-    String workspaceId = response.path("workspace.workspaceId");
-    String branch = response.path("workspace.branch");
-    String url = response.path("url");
-
-    // testing-repo's bare `feature` branch blocks feature/* refs, so this repo gets the dash
-    // fallback shape — branch name and workspace id coincide.
-    assertEquals(workspaceId, branch);
-    // Host-first: the URL points at the address the request reached qits on — NOT the app's
-    // Origin (http://app.example:4200), where /repositories/… doesn't exist.
-    String expectedBase = "http://localhost:" + io.restassured.RestAssured.port;
-    assertEquals(
-        expectedBase + "/repositories/" + repoId + "/workspaces/" + workspaceId + "/wip", url);
+    FakeWorkFiler.Filing filing = filer.last();
+    assertEquals(FakeRepositoryLookup.PROJECT_ID, filing.projectId());
+    assertEquals("Captured: Greeting", filing.title());
+    org.hamcrest.MatcherAssert.assertThat(
+        filing.impetus(),
+        allOf(
+            containsString("greeting/:name"),
+            containsString("http://app.example:4200/greeting/anna"),
+            containsString("## App state at capture"),
+            containsString("**Picked**: `button` in `app-greeting` — `#go`"),
+            containsString("hello anna")));
 
     given()
         .when()
         .get("/workspaces/api/workspaces?repositoryId=" + repoId)
         .then()
-        .statusCode(Response.Status.OK.getStatusCode())
-        .body("entries.workspace.workspaceId", hasItem(workspaceId))
-        .body(
-            "entries.find { it.workspace.workspaceId == '" + workspaceId + "' }.workspace.parent",
-            equalTo("master"))
-        .body(
-            "entries.find { it.workspace.workspaceId == '" + workspaceId + "' }.workspace.branch",
-            equalTo(branch))
-        .body(
-            "entries.find { it.workspace.workspaceId == '"
-                + workspaceId
-                + "' }.workspace.runtimeStatus",
-            equalTo("STOPPED"))
-        .body(
-            "entries.find { it.workspace.workspaceId == '" + workspaceId + "' }.workspace.preamble",
-            allOf(
-                containsString("greeting/:name"),
-                containsString("http://app.example:4200/greeting/anna"),
-                containsString("**Source workspace**: `master`"),
-                containsString("## App state at capture"),
-                containsString("\"items\" : 2"),
-                containsString("## Selected component (style-frozen)"),
-                containsString("**Picked**: `button` in `app-greeting` — `#go`"),
-                containsString("<app-greeting"),
-                containsString("<details><summary>"),
-                containsString("hello anna")));
-  }
-
-  @Test
-  public void testSameInstantCapturesGetSuffixedNames() throws Exception {
-    // The slash-safe fixture (no bare `feature` branch) exercises the normal feature/<ts> shape.
-    String repoId = repository(false);
-    // Straight through the service seam with one fixed instant — a REST-level double post would
-    // flake at minute boundaries.
-    Instant fixed = Instant.parse("2026-07-14T12:00:11Z");
-    CaptureContent content = new CaptureContent(null, null, null, null, null, null, null);
-
-    Workspace first = captureService.capture(repoId, content, fixed);
-    Workspace second = captureService.capture(repoId, content, fixed);
-    Workspace third = captureService.capture(repoId, content, fixed);
-
-    assertEquals("feature/2026-07-14-1200", first.branch);
-    assertEquals("feature-2026-07-14-1200", first.workspaceId);
-    assertEquals("feature/2026-07-14-1200-2", second.branch);
-    assertEquals("feature-2026-07-14-1200-2", second.workspaceId);
-    assertEquals("feature/2026-07-14-1200-3", third.branch);
-    // TestOrigin's main branch, where the monorepo fixture's was `main`.
-    assertEquals("master", first.parent);
-
-    given()
-        .when()
-        .get("/workspaces/api/workspaces?repositoryId=" + repoId)
-        .then()
-        .body("entries.workspace.workspaceId", hasItems(first.workspaceId, second.workspaceId));
+        .body("entries", hasSize(0));
   }
 
   @Test
   public void testUnknownOrMissingRepositoryIs404AndCreatesNothing() throws Exception {
-    String repoId = repository();
+    int before = filer.count();
 
     Map<String, Object> unknownRepo = new LinkedHashMap<>();
     unknownRepo.put("identity", identity(UUID.randomUUID().toString(), null));
@@ -242,12 +184,6 @@ public class CaptureResourceTest {
         .then()
         .statusCode(Response.Status.NOT_FOUND.getStatusCode());
 
-    // Nothing leaked: the repository has no workspace at all.
-    given()
-        .when()
-        .get("/workspaces/api/workspaces?repositoryId=" + repoId)
-        .then()
-        .body("entries", hasSize(0));
   }
 
   @Test
@@ -279,12 +215,6 @@ public class CaptureResourceTest {
         .post("/workspaces/api/capture")
         .then()
         .statusCode(413);
-
-    given()
-        .when()
-        .get("/workspaces/api/workspaces?repositoryId=" + repoId)
-        .then()
-        .body("entries", hasSize(0));
   }
 
   @Test
@@ -368,35 +298,4 @@ public class CaptureResourceTest {
         .header("Access-Control-Allow-Origin", nullValue());
   }
 
-  @Test
-  public void testStateLessCaptureOmitsStateSection() throws Exception {
-    String repoId = repository();
-
-    Map<String, Object> root = new LinkedHashMap<>();
-    root.put("identity", identity(repoId, null));
-    String html = "<html><body>bare</body></html>";
-    root.put("dom", Map.of("html", html, "truncated", false, "bytes", html.length()));
-
-    String workspaceId =
-        given()
-            .contentType(ContentType.JSON)
-            .body(toJson(root))
-            .when()
-            .post("/workspaces/api/capture")
-            .then()
-            .statusCode(Response.Status.CREATED.getStatusCode())
-            .extract()
-            .path("workspace.workspaceId");
-
-    given()
-        .when()
-        .get("/workspaces/api/workspaces?repositoryId=" + repoId)
-        .then()
-        .body(
-            "entries.find { it.workspace.workspaceId == '" + workspaceId + "' }.workspace.preamble",
-            allOf(
-                not(containsString("## App state at capture")),
-                containsString("**Source workspace**: —"),
-                containsString("bare")));
-  }
 }

@@ -34,6 +34,9 @@ class AdminAgentAccessTest {
 
   private static final String NO_ROW = "999999999";
 
+  /** An agent id nobody holds: past the role gate it is a 404. */
+  private static final String NO_AGENT = "00000000-0000-4000-8000-00000000dead";
+
   private static Matcher<Integer> admitted() {
     return not(anyOf(is(401), is(403)));
   }
@@ -50,20 +53,20 @@ class AdminAgentAccessTest {
     return as("qits:agent");
   }
 
-  /** The representative admin write: creating a workspace, WorkspaceController's class role. */
+  /** The representative admin write: a person's agent for a work item, AgentController's class role. */
   @Test
-  void anAdminAgentCreatesAWorkspaceAndAnAgentStillMayNot() {
-    Map<String, Object> body = Map.of("repositoryId", "no-such", "workspaceId", "x");
+  void anAdminAgentCreatesAnAgentAndAnAgentStillMayNot() {
+    Map<String, Object> body = Map.of("repositoryId", "no-such", "workId", "w-x");
     asAdminAgent()
         .contentType(ContentType.JSON)
         .body(body)
-        .post("/workspaces/api/workspaces")
+        .post("/workspaces/api/agents")
         .then()
         .statusCode(admitted());
     asAgent()
         .contentType(ContentType.JSON)
         .body(body)
-        .post("/workspaces/api/workspaces")
+        .post("/workspaces/api/agents")
         .then()
         .statusCode(403);
   }
@@ -106,11 +109,11 @@ class AdminAgentAccessTest {
     asAdminAgent()
         .contentType(ContentType.JSON)
         .body(Map.of("content", "x"))
-        .put("/workspaces/api/workspaces/" + NO_ROW + "/prompt-draft")
+        .put("/workspaces/api/agents/" + NO_AGENT + "/prompt-draft")
         .then()
         .statusCode(admitted());
     asAdminAgent()
-        .delete("/workspaces/api/workspaces/" + NO_ROW + "/prompt-attachments/some-id")
+        .delete("/workspaces/api/agents/" + NO_AGENT + "/prompt-attachments/some-id")
         .then()
         .statusCode(admitted());
   }
@@ -128,7 +131,7 @@ class AdminAgentAccessTest {
   @Test
   void anAdminAgentDispatchesAndAnAgentStillMayNot() {
     Map<String, Object> body =
-        Map.of("repositoryId", "no-such", "branch", "ticket/x", "instruction", "go");
+        Map.of("repositoryId", "no-such", "wrapperBranch", "ticket/x", "workId", "w-x", "instruction", "go");
     asAdminAgent()
         .contentType(ContentType.JSON)
         .body(body)
@@ -148,8 +151,8 @@ class AdminAgentAccessTest {
   void aRoleThatOnlyLooksLikeItIsRefused() {
     as("qits:admin-agents")
         .contentType(ContentType.JSON)
-        .body(Map.of("repositoryId", "no-such", "workspaceId", "x"))
-        .post("/workspaces/api/workspaces")
+        .body(Map.of("repositoryId", "no-such", "workId", "w-x"))
+        .post("/workspaces/api/agents")
         .then()
         .statusCode(403);
   }

@@ -5,10 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import au.com.dius.pact.consumer.dsl.DslPart;
 import au.com.dius.pact.consumer.dsl.PactDslJsonBody;
+import eu.wohlben.qits.workspaces.control.AgentDaemon;
 import eu.wohlben.qits.workspaces.control.EntityFacts;
-import eu.wohlben.qits.workspaces.control.WorkspaceAgentLauncher.AgentState;
-import eu.wohlben.qits.workspaces.control.WorkspaceAgentLauncher.DeliveryOutcome;
-import eu.wohlben.qits.workspaces.control.WorkspaceAgentLauncher.Launch;
 import eu.wohlben.qits.workspaces.testing.contracts.ConsumerPacts;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenMasters;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenMasters.Trigger;
@@ -17,32 +15,26 @@ import io.vertx.core.Vertx;
 import jakarta.inject.Inject;
 import java.net.URI;
 import java.util.List;
-import java.util.function.Consumer;
+import java.util.Map;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 /**
- * <b>The consumer half of the qits-workspace-daemon contract</b>: the agent surface {@link
- * DaemonAgentClient} calls in every workspace container, through the container's reverse tunnel —
- * here {@link StubDaemonTunnels}, pointed at a pact mock server.
+ * <b>The consumer half of the qits-workspace-daemon contract</b>: the agent-worktree surface {@link
+ * DaemonAgentClient} calls in every workspace container (qits-1152), through the container's
+ * reverse tunnel — here {@link StubDaemonTunnels}, pointed at a pact mock server.
  *
  * <p><b>Every row waits on qits-workspace-daemon.</b> It publishes no golden masters yet, so each
  * test is disabled naming the provider state it needs; the operationIds are proposed here. Each
- * state is expected to carry {@code workspaceRowId}: the daemon serves under {@code
- * /workspaces/container/<row id>/}, the prefix this service hands it at container creation, and the
- * client sends the full path.
- *
- * <p><b>What is read.</b> The running-command list for each entry's {@code command.status}, {@code
- * command.kind} and {@code command.agentSessions}; a launch's {@code command.id}; a turn's {@code
- * delivered}. The blocked marker and the subject facts are read by status alone. The bodies sent are
- * this service's own, so they are matched exactly.
+ * state is expected to carry {@code workspaceRowId} (the daemon serves under {@code
+ * /workspaces/container/<row id>/}) and {@code agentId}.
  */
 @QuarkusTest
 @Disabled("needs qits-workspace-daemon golden masters — each row names its provider state")
 public class WorkspaceDaemonConsumerPactTest {
 
-  static final String IDLE = "a workspace daemon with no agent running";
-  static final String AGENT_RUNNING = "a workspace daemon with a chat agent running";
+  static final String SIGNED_IN = "a workspace daemon with a signed-in harness";
+  static final String AGENT_RUNNING = "a workspace daemon with an agent running";
 
   @Inject DaemonAgentClient client;
 
@@ -50,94 +42,98 @@ public class WorkspaceDaemonConsumerPactTest {
 
   @Test
   @Disabled(
-      "needs provider state 'a workspace daemon with a chat agent running' for listCommands in"
+      "needs provider state 'a workspace daemon with a signed-in harness' for startAgentWorktree in"
           + " qits-workspace-daemon")
-  public void listCommands() {
-    run(
-        AGENT_RUNNING,
-        "listCommands",
-        Trigger.operation("dispatchAgent"),
-        null,
-        List.of(
-            "$.entries[*].command.status",
-            "$.entries[*].command.kind",
-            "$.entries[*].command.agentSessions"),
-        row -> assertEquals(AgentState.RUNNING, client.agentState(row)));
-  }
-
-  @Test
-  @Disabled(
-      "needs provider state 'a workspace daemon with no agent running' for launchAgent in"
-          + " qits-workspace-daemon")
-  public void launchAgent() {
-    DslPart body =
+  public void startAgentWorktree() {
+    PactDslJsonBody body =
         new PactDslJsonBody()
-            .stringValue("scope", "REPOSITORY")
+            .stringType("agentId", "00000000-0000-4000-8000-0000000000a1")
+            .stringType("workId", "00000000-0000-4000-8000-000000000001")
+            .stringType("entityId", "contract-00000001-10")
+            .stringType("wrapperBranch", "ticket/contract-00000001-10")
+            .stringValue("harness", "CLAUDE")
             .stringValue("surface", "ticket.dispatch")
             .stringValue("mode", "CHAT")
-            .stringType("initialContext", "Work the ticket.")
-            .booleanValue("deliverTaskPrompt", false);
+            .stringType("instruction", "Work the ticket.");
+    body.object("env").closeObject();
     run(
-        IDLE,
-        "launchAgent",
+        SIGNED_IN,
+        "startAgentWorktree",
         Trigger.operation("dispatchAgent"),
         body,
-        List.of("$.command.id"),
-        row -> {
-          Launch launch = client.launch(row, "Work the ticket.");
-          assertTrue(launch.accepted());
-          assertTrue(launch.commandId() != null, "the launch names its command");
+        List.of("$.commandId", "$.sessionId", "$.resumed"),
+        (row, agentId) -> {
+          AgentDaemon.Started started =
+              client.start(
+                  row,
+                  new AgentDaemon.Start(
+                      agentId,
+                      "00000000-0000-4000-8000-000000000001",
+                      "contract-00000001-10",
+                      "ticket/contract-00000001-10",
+                      "CLAUDE",
+                      null,
+                      Map.of(),
+                      "Work the ticket.",
+                      null,
+                      null));
+          assertEquals(AgentDaemon.Outcome.OK, started.outcome());
         });
   }
 
   @Test
   @Disabled(
-      "needs provider state 'a workspace daemon with a chat agent running' for deliverAgentTurn"
+      "needs provider state 'a workspace daemon with an agent running' for deliverAgentWorktreeTurn"
           + " in qits-workspace-daemon")
-  public void deliverAgentTurn() {
+  public void deliverAgentWorktreeTurn() {
     run(
         AGENT_RUNNING,
-        "deliverAgentTurn",
+        "deliverAgentWorktreeTurn",
         Trigger.operation("deliverAgentTurn"),
         new PactDslJsonBody().stringType("text", "Carry on."),
-        List.of("$.delivered"),
-        row -> assertEquals(DeliveryOutcome.DELIVERED, client.deliver(row, "Carry on.")));
-  }
-
-  @Test
-  @Disabled(
-      "needs provider state 'a workspace daemon with a chat agent running' for setAgentBlocked in"
-          + " qits-workspace-daemon")
-  public void setAgentBlocked() {
-    run(
-        AGENT_RUNNING,
-        "setAgentBlocked",
-        Trigger.operation("markAgentBlocked"),
-        new PactDslJsonBody().booleanType("blocked", true),
         List.of(),
-        row -> assertTrue(client.setBlocked(row, true)));
+        (row, agentId) -> assertEquals(AgentDaemon.Outcome.OK, client.turn(row, agentId, "Carry on.")));
   }
 
   @Test
   @Disabled(
-      "needs provider state 'a workspace daemon with a chat agent running' for setAgentEntity in"
-          + " qits-workspace-daemon")
-  public void setAgentEntity() {
+      "needs provider state 'a workspace daemon with an agent running' for setAgentWorktreeEntity"
+          + " in qits-workspace-daemon")
+  public void setAgentWorktreeEntity() {
     run(
         AGENT_RUNNING,
-        "setAgentEntity",
-        Trigger.operation("markAgentEntity"),
+        "setAgentWorktreeEntity",
+        Trigger.operation("markAgentDispatchEntity"),
         new PactDslJsonBody()
             .stringType("title", "Fix the login")
             .stringType("status", "IMPLEMENTING")
             .booleanType("blocked", false),
         List.of(),
-        row ->
-            assertTrue(
-                client.setEntity(row, new EntityFacts("Fix the login", "IMPLEMENTING", false))));
+        (row, agentId) ->
+            assertEquals(
+                AgentDaemon.Outcome.OK,
+                client.entity(row, agentId, new EntityFacts("Fix the login", "IMPLEMENTING", false), null)));
+  }
+
+  @Test
+  @Disabled(
+      "needs provider state 'a workspace daemon with an agent running' for checkAgentWorktree in"
+          + " qits-workspace-daemon")
+  public void checkAgentWorktree() {
+    run(
+        AGENT_RUNNING,
+        "checkAgentWorktree",
+        Trigger.schedule("AgentService.cleanUp"),
+        null,
+        List.of("$.clean", "$.dirty", "$.unpushed"),
+        (row, agentId) -> assertTrue(client.cleanupCheck(row, agentId).isPresent()));
   }
 
   // --- support -----------------------------------------------------------------------------------
+
+  interface Call {
+    void run(Long row, String agentId);
+  }
 
   private void run(
       String state,
@@ -145,10 +141,10 @@ public class WorkspaceDaemonConsumerPactTest {
       Trigger trigger,
       DslPart requestBody,
       List<String> consumes,
-      Consumer<Long> call) {
-    Long row =
-        Long.valueOf(
-            GoldenMasters.params(GoldenMasters.WORKSPACE_DAEMON, state).get("workspaceRowId"));
+      Call call) {
+    Map<String, String> params = GoldenMasters.params(GoldenMasters.WORKSPACE_DAEMON, state);
+    Long row = Long.valueOf(params.get("workspaceRowId"));
+    String agentId = params.get("agentId");
     ConsumerPacts.verify(
         ConsumerPacts.pact(
             GoldenMasters.WORKSPACE_DAEMON,
@@ -165,7 +161,7 @@ public class WorkspaceDaemonConsumerPactTest {
           StubDaemonTunnels tunnels =
               StubDaemonTunnels.install(vertx, URI.create(url).getPort(), id -> id == row.longValue());
           try {
-            call.accept(row);
+            call.run(row, agentId);
           } finally {
             tunnels.close();
           }

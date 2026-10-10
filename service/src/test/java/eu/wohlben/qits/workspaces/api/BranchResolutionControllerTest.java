@@ -114,7 +114,8 @@ public class BranchResolutionControllerTest {
         resolve(repoId, body("feat", "2026.905.120000", "0123456789abcdef", "released"), 200);
 
     assertThat(answer.getBoolean("resolved"), is(true));
-    assertThat(answer.getLong("workspaceId"), is(rowId));
+    // An old-model workspace on the branch resolves as before (the drain); no agent owned it.
+    assertThat(answer.getList("agentIds"), is(java.util.List.of()));
 
     // The row: soft-deleted with a resolution stamp, and readable through the history route the
     // client falls back to.
@@ -147,7 +148,7 @@ public class BranchResolutionControllerTest {
     JsonPath answer = resolve(repoId, body("never-had-a-workspace", "v1", null, null), 200);
 
     assertThat(answer.getBoolean("resolved"), is(false));
-    assertThat(answer.get("workspaceId"), is(nullValue()));
+    assertThat(answer.getList("agentIds"), is(java.util.List.of()));
     assertThat(containers.exists(containers.containerName("feat", repoId)), is(true));
     assertThat(commissioner.decommissioned(), is(List.of()));
   }

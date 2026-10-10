@@ -63,6 +63,47 @@
       ]
     },
     {
+      "name": "a project with agents bound to work items",
+      "slug": "a-project-with-agents-bound-to-work-items",
+      "params": {
+        "bugTicketId": "00000000-0000-4000-8000-000000000001"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listAgentDispatchReferences",
+          "method": "GET",
+          "path": "/workspaces/api/agent-dispatches/references",
+          "query": {
+            "workId": "{bugTicketId}"
+          },
+          "status": 200,
+          "file": "a-project-with-agents-bound-to-work-items/listAgentDispatchReferences.json",
+          "frozen": {
+            "ids": [
+              "$.entries[*].agent.agentId",
+              "$.entries[*].agent.repositoryId",
+              "$.entries[*].agent.workId",
+              "$.entries[*].agent.ticketId",
+              "$.entries[*].agent.branches[*].repositoryId"
+            ],
+            "instants": [
+              "$.entries[*].agent.branches[*].pushedAt",
+              "$.entries[*].agent.lastActivityAt",
+              "$.entries[*].agent.createdAt",
+              "$.entries[*].agent.obsoleteAt",
+              "$.entries[*].agent.removedAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.entries[*].agent.workspaceRowId"
+            ],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "a project with workspaces bound to work items",
       "slug": "a-project-with-workspaces-bound-to-work-items",
       "params": {
@@ -78,31 +119,6 @@
       },
       "dependsOn": [],
       "operations": [
-        {
-          "operationId": "listAgentDispatchReferences",
-          "method": "GET",
-          "path": "/workspaces/api/agent-dispatches/references",
-          "query": {
-            "ticketId": "{bugTicketId}"
-          },
-          "status": 200,
-          "file": "a-project-with-workspaces-bound-to-work-items/listAgentDispatchReferences.json",
-          "frozen": {
-            "ids": [
-              "$.entries[*].workspace.repositoryId",
-              "$.entries[*].workspace.ticketId",
-              "$.entries[*].workspace.workId"
-            ],
-            "instants": [
-              "$.entries[*].workspace.resolvedAt"
-            ],
-            "strings": [],
-            "numbers": [
-              "$.entries[*].workspace.workspaceRowId"
-            ],
-            "listFilteredTo": null
-          }
-        },
         {
           "operationId": "listOpenWorkspaces",
           "method": "GET",
@@ -183,54 +199,6 @@
       ]
     },
     {
-      "name": "a repository with a branch for a ticket",
-      "slug": "a-repository-with-a-branch-for-a-ticket",
-      "params": {
-        "branch": "ticket/invoice-totals-are-off-by-one-cent",
-        "repositoryId": "00000000-0000-4000-8000-000000000014",
-        "ticketId": "00000000-0000-4000-8000-000000000001",
-        "ticketQualifiedId": "contract-00000001-10"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "dispatchAgent",
-          "method": "POST",
-          "path": "/workspaces/api/agent-dispatches",
-          "body": {
-            "repositoryId": "{repositoryId}",
-            "branch": "{branch}",
-            "branchTree": false,
-            "ticketId": "{ticketId}",
-            "workId": "{ticketId}",
-            "entityId": "{ticketQualifiedId}",
-            "entityTitle": "Invoice totals are off by one cent",
-            "entityStatus": "REFINED",
-            "entityBlocked": false,
-            "instruction": "Fix contract-00000001-10."
-          },
-          "status": 200,
-          "file": "a-repository-with-a-branch-for-a-ticket/dispatchAgent.json",
-          "frozen": {
-            "ids": [
-              "$.workspace.ticketId"
-            ],
-            "instants": [
-              "$.workspace.createdAt",
-              "$.workspace.queuedAt"
-            ],
-            "strings": [
-              "$.agentIdentity"
-            ],
-            "numbers": [
-              "$.workspace.id"
-            ],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
       "name": "a work item with no workspaces",
       "slug": "a-work-item-with-no-workspaces",
       "params": {
@@ -263,10 +231,57 @@
       ]
     },
     {
-      "name": "a workspace standing on a released branch",
-      "slug": "a-workspace-standing-on-a-released-branch",
+      "name": "a wrapper repository and a ticket to dispatch",
+      "slug": "a-wrapper-repository-and-a-ticket-to-dispatch",
       "params": {
-        "branch": "ticket/invoice-totals-are-off-by-one-cent",
+        "repositoryId": "00000000-0000-4000-8000-000000000014",
+        "ticketId": "00000000-0000-4000-8000-000000000001",
+        "ticketQualifiedId": "contract-00000001-10",
+        "wrapperBranch": "ticket/contract-00000001-10"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "dispatchAgent",
+          "method": "POST",
+          "path": "/workspaces/api/agent-dispatches",
+          "body": {
+            "repositoryId": "{repositoryId}",
+            "wrapperBranch": "{wrapperBranch}",
+            "workId": "{ticketId}",
+            "entityId": "{ticketQualifiedId}",
+            "entityTitle": "Fix it",
+            "entityStatus": "REFINED",
+            "entityBlocked": false,
+            "ticketId": "{ticketId}",
+            "instruction": "Fix contract-00000001-10."
+          },
+          "status": 200,
+          "file": "a-wrapper-repository-and-a-ticket-to-dispatch/dispatchAgent.json",
+          "frozen": {
+            "ids": [
+              "$.agent.agentId",
+              "$.agent.repositoryId",
+              "$.agent.workId",
+              "$.agent.ticketId"
+            ],
+            "instants": [
+              "$.agent.createdAt"
+            ],
+            "strings": [
+              "$.agentIdentity"
+            ],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "an agent owning a released branch",
+      "slug": "an-agent-owning-a-released-branch",
+      "params": {
+        "branch": "ticket/contract-00000001-10-totals",
         "repositoryId": "00000000-0000-4000-8000-000000000015",
         "sha": "0123456789abcdef0123456789abcdef01234567",
         "version": "2026.101.120000"
@@ -287,27 +302,24 @@
             "result": "released as 2026.101.120000"
           },
           "status": 200,
-          "file": "a-workspace-standing-on-a-released-branch/resolveReleasedBranch.json",
+          "file": "an-agent-owning-a-released-branch/resolveReleasedBranch.json",
           "frozen": {
-            "ids": [],
+            "ids": [
+              "$.agentIds[*]"
+            ],
             "instants": [],
             "strings": [],
-            "numbers": [
-              "$.workspaceId"
-            ],
+            "numbers": [],
             "listFilteredTo": null
           }
         }
       ]
     },
     {
-      "name": "a workspace standing on a ticket's branch",
-      "slug": "a-workspace-standing-on-a-ticket-s-branch",
+      "name": "an agent working on a ticket",
+      "slug": "an-agent-working-on-a-ticket",
       "params": {
-        "branch": "ticket/invoice-totals-are-off-by-one-cent",
-        "repositoryId": "00000000-0000-4000-8000-000000000013",
-        "ticketId": "00000000-0000-4000-8000-000000000001",
-        "ticketQualifiedId": "contract-00000001-10"
+        "ticketId": "00000000-0000-4000-8000-000000000001"
       },
       "dependsOn": [],
       "operations": [
@@ -316,21 +328,19 @@
           "method": "POST",
           "path": "/workspaces/api/agent-dispatches/delivery",
           "body": {
-            "repositoryId": "{repositoryId}",
-            "branch": "{branch}",
-            "text": "The ticket moved to REVIEW.",
             "workId": "{ticketId}",
+            "text": "The ticket moved to REVIEW.",
             "compactFirst": false
           },
           "status": 200,
-          "file": "a-workspace-standing-on-a-ticket-s-branch/deliverAgentTurn.json",
+          "file": "an-agent-working-on-a-ticket/deliverAgentTurn.json",
           "frozen": {
-            "ids": [],
+            "ids": [
+              "$.agentId"
+            ],
             "instants": [],
             "strings": [],
-            "numbers": [
-              "$.workspaceId"
-            ],
+            "numbers": [],
             "listFilteredTo": null
           }
         },
@@ -339,20 +349,18 @@
           "method": "POST",
           "path": "/workspaces/api/agent-dispatches/blocked",
           "body": {
-            "repositoryId": "{repositoryId}",
-            "branch": "{branch}",
-            "blocked": true,
-            "workId": "{ticketId}"
+            "workId": "{ticketId}",
+            "blocked": true
           },
           "status": 200,
-          "file": "a-workspace-standing-on-a-ticket-s-branch/markAgentDispatchBlocked.json",
+          "file": "an-agent-working-on-a-ticket/markAgentDispatchBlocked.json",
           "frozen": {
-            "ids": [],
+            "ids": [
+              "$.agentId"
+            ],
             "instants": [],
             "strings": [],
-            "numbers": [
-              "$.workspaceId"
-            ],
+            "numbers": [],
             "listFilteredTo": null
           }
         },
@@ -361,22 +369,20 @@
           "method": "POST",
           "path": "/workspaces/api/agent-dispatches/entity",
           "body": {
-            "repositoryId": "{repositoryId}",
-            "branch": "{branch}",
+            "workId": "{ticketId}",
             "title": "Invoice totals are off by one cent",
             "status": "IMPLEMENTING",
-            "blocked": false,
-            "workId": "{ticketId}"
+            "blocked": false
           },
           "status": 200,
-          "file": "a-workspace-standing-on-a-ticket-s-branch/markAgentDispatchEntity.json",
+          "file": "an-agent-working-on-a-ticket/markAgentDispatchEntity.json",
           "frozen": {
-            "ids": [],
+            "ids": [
+              "$.agentId"
+            ],
             "instants": [],
             "strings": [],
-            "numbers": [
-              "$.workspaceId"
-            ],
+            "numbers": [],
             "listFilteredTo": null
           }
         }

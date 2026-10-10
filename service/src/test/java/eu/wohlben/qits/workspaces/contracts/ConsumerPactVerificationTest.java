@@ -105,19 +105,24 @@ class ConsumerPactVerificationTest {
     return states.params(ProviderStates.NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE);
   }
 
-  @State(ProviderStates.A_REPOSITORY_WITH_A_BRANCH_FOR_A_TICKET)
-  Map<String, String> aRepositoryWithABranchForATicket() {
-    return states.params(ProviderStates.A_REPOSITORY_WITH_A_BRANCH_FOR_A_TICKET);
+  @State(ProviderStates.A_TICKET_TO_DISPATCH)
+  Map<String, String> aTicketToDispatch() {
+    return states.params(ProviderStates.A_TICKET_TO_DISPATCH);
   }
 
-  @State(ProviderStates.A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH)
-  Map<String, String> aWorkspaceStandingOnATicketsBranch() {
-    return states.params(ProviderStates.A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH);
+  @State(ProviderStates.AGENTS_BOUND_TO_WORK_ITEMS)
+  Map<String, String> agentsBoundToWorkItems() {
+    return states.params(ProviderStates.AGENTS_BOUND_TO_WORK_ITEMS);
   }
 
-  @State(ProviderStates.A_WORKSPACE_STANDING_ON_A_RELEASED_BRANCH)
-  Map<String, String> aWorkspaceStandingOnAReleasedBranch() {
-    return states.params(ProviderStates.A_WORKSPACE_STANDING_ON_A_RELEASED_BRANCH);
+  @State(ProviderStates.AN_AGENT_ON_A_TICKET)
+  Map<String, String> anAgentOnATicket() {
+    return states.params(ProviderStates.AN_AGENT_ON_A_TICKET);
+  }
+
+  @State(ProviderStates.AN_AGENT_ON_A_RELEASED_BRANCH)
+  Map<String, String> anAgentOnAReleasedBranch() {
+    return states.params(ProviderStates.AN_AGENT_ON_A_RELEASED_BRANCH);
   }
 
   @State(ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES)

@@ -442,7 +442,7 @@ public class ContainerProxyRoute {
   }
 
   /**
-   * Errors here answer JSON, not the qits-branded HTML {@link EditorProxyRoute} uses. That route's
+   * Errors here answer JSON, not the qits-branded HTML {@code EditorProxyRoute} (gone since qits-1152) uses. That route's
    * client is a browser rendering the editor; this one's is code calling a JSON API, and the shape matches what the daemon itself answers a failure with ({@code {"message": …}}) so a
    * client's error handling does not fork on which hop failed.
    */

@@ -59,6 +59,9 @@ public final class StoryTarget {
 
   public static final String BRANCH_EXECUTE_RELEASE_PATH = API_PATH + "/branches/execute-release";
 
+  /** Agents, a person's door: an agent for an existing work item (qits-1152). */
+  public static final String AGENTS_PATH = API_PATH + "/agents";
+
   /** Workspaces, addressed by their own id — the collection. */
   public static final String WORKSPACES_PATH = API_PATH + "/workspaces";
 
@@ -67,9 +70,6 @@ public final class StoryTarget {
 
   /** The narrative record of what flowed through a repository. */
   public static final String HISTORY_PATH = API_PATH + "/history";
-
-  /** The web editor's one door — {@code POST …/editor/ensure?repositoryId=<wrapper>}. */
-  public static final String EDITOR_ENSURE_PATH = API_PATH + "/editor/ensure";
 
   /**
    * The control socket every workspace container dials on boot, as the diagram carries it. The
@@ -106,26 +106,6 @@ public final class StoryTarget {
   /** A repository id nothing has ever been worked in. Authored, and never registered anywhere. */
   public static final String UNWORKED_REPO_ID = "story-unworked-repo";
 
-  // --- the one editor -----------------------------------------------------------------------------
-
-  /**
-   * The editor workspace's label and its sentinel repository id, which are the same word.
-   *
-   * <p>There is one editor for the platform, so nothing about it is generated and nothing needs
-   * authoring to keep a diagram stable: the row belongs to no repository, and both halves of its
-   * container name are constants. What this replaced was a project's <b>wrapper</b> repository —
-   * archetype {@code PROJECT}, whose main workspace <em>was</em> that project's editor — whose row
-   * id had to be a literal precisely because eight characters of it travelled inside a container
-   * name where {@code Labels} could not rewrite them.
-   */
-  public static final String EDITOR_LABEL = "editor";
-
-  /**
-   * The container name the editor gets — {@code qits-ws-<label>-<repoId[0:8]>} like every other
-   * workspace's, except that both halves are the same constant, so the whole name is one.
-   */
-  public static final String EDITOR_CONTAINER_NAME = "qits-ws-" + EDITOR_LABEL + "-" + EDITOR_LABEL;
-
   // --- branches ---------------------------------------------------------------------------------
 
   /** The default branch of every fixture origin, and the one branch only a release may write. */
@@ -134,8 +114,15 @@ public final class StoryTarget {
   /** The branch a refusal story asks about, which nothing ever reads. */
   public static final String WORK_BRANCH = "story-work";
 
-  /** The label the workspace stories ask for, which is also the branch they claim. */
-  public static final String WORKSPACE_LABEL = "story-work";
+  /**
+   * The label of the first workspace slot the stories make (qits-1152): a slot is named after its
+   * own row id, and the provision story writes the launched process's first workspace row, which a
+   * fresh database numbers 1.
+   */
+  public static final String WORKSPACE_LABEL = "ws-1";
+
+  /** The work item the provision story asks an agent for. Authored, so it survives into a label. */
+  public static final String WORK_ID = "story-work-item";
 
   /** The container name a workspace of that label in that repository gets. */
   public static final String CONTAINER_NAME =

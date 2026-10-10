@@ -7,7 +7,7 @@ import eu.wohlben.qits.db.DbRetry;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.error.PayloadTooLargeException;
-import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.entity.WorkspacePromptDraft;
 import eu.wohlben.qits.workspaces.persistence.WorkspacePromptAttachmentRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspacePromptDraftRepository;
@@ -33,7 +33,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 @ApplicationScoped
 public class WorkspacePromptDraftService {
 
-  @Inject WorkspaceResolver workspaceResolver;
+  @Inject AgentResolver agentResolver;
 
   @Inject WorkspacePromptDraftRepository draftRepository;
 
@@ -57,27 +57,25 @@ public class WorkspacePromptDraftService {
    * session stays idle).
    */
   @Transactional
-  public boolean hasDeliverablePrompt(Long id) {
-    Workspace workspace = workspaceResolver.resolveActive(id);
-    String repoId = workspace.repositoryId;
-    String workspaceId = workspace.workspaceId;
+  public boolean hasDeliverablePrompt(java.util.UUID id) {
+    AgentWorktree agent = agentResolver.resolveLive(id);
+    String repoId = agent.repositoryId;
     boolean hasMarkdown =
         draftRepository
-            .findByWorkspaceId(workspace.id)
+            .findByAgentId(agent.id)
             .map(d -> d.serializedPrompt)
             .filter(s -> s != null && !s.isBlank())
             .isPresent();
-    return hasMarkdown || !attachmentRepository.listByWorkspaceId(workspace.id).isEmpty();
+    return hasMarkdown || !attachmentRepository.listByAgentId(agent.id).isEmpty();
   }
 
   /** The workspace's current draft, or 404 when none has been saved. */
-  public WorkspacePromptDraft getDraft(Long id) {
-    Workspace workspace = workspaceResolver.resolveActive(id);
-    String repoId = workspace.repositoryId;
-    String workspaceId = workspace.workspaceId;
+  public WorkspacePromptDraft getDraft(java.util.UUID id) {
+    AgentWorktree agent = agentResolver.resolveLive(id);
+    String repoId = agent.repositoryId;
     return draftRepository
-        .findByWorkspaceId(workspace.id)
-        .orElseThrow(() -> new NotFoundException("No prompt draft for workspace: " + workspaceId));
+        .findByAgentId(agent.id)
+        .orElseThrow(() -> new NotFoundException("No prompt draft for agent: " + id));
   }
 
   /**
@@ -91,7 +89,7 @@ public class WorkspacePromptDraftService {
    * used to be here would only get in its way; the validation above stays outside it, because it
    * touches no database and re-running it on every attempt buys nothing.
    */
-  public WorkspacePromptDraft saveDraft(Long id, String content, String serializedPrompt) {
+  public WorkspacePromptDraft saveDraft(java.util.UUID id, String content, String serializedPrompt) {
     // Validate the payload before touching the DB — the cheap in-memory guards fail fast, so a
     // buggy autosave loop of rejected requests costs no repository round-trips.
     long serializedBytes =
@@ -117,13 +115,13 @@ public class WorkspacePromptDraftService {
     // emitted per attempt would be one SSE wake-up per lost connection. Notifies other open clients
     // (another device/browser) to rehydrate — they apply the refetched draft only when their local
     // copy is pristine, so this never clobbers mid-typing.
-    changePublisher.fire(written.repositoryId(), id, WorkspaceChangeHint.Topic.PROMPT_DRAFT);
+    changePublisher.fire(written.repositoryId(), null, WorkspaceChangeHint.Topic.PROMPT_DRAFT);
     return written.draft();
   }
 
   /** One attempt of {@link #saveDraft}'s database work: the upsert and the read-back, and no more. */
-  private Written writeDraft(Long id, String content, String serializedPrompt) {
-    Workspace workspace = workspaceResolver.resolveActive(id);
+  private Written writeDraft(java.util.UUID id, String content, String serializedPrompt) {
+    AgentWorktree agent = agentResolver.resolveLive(id);
     // Atomic DB-level upsert (`insert … on conflict`) rather than a read-then-insert: the PK *is* the
     // workspace id (shared 1:1 PK/FK), so two concurrent first-saves for a draftless workspace —
     // the exact cross-device flow this feature targets — would both find no row and both insert the
@@ -132,17 +130,17 @@ public class WorkspacePromptDraftService {
     // See docs/issues/resolved/2026-07-20_prompt-draft-concurrent-first-insert-500.md.
     // It is also what makes this retriable: `insert … on conflict` executes as a statement, so the
     // write is on the statement side of the commit line and a re-run of it is the same one row.
-    draftRepository.upsert(workspace.id, content, serializedPrompt);
+    draftRepository.upsert(agent.id, content, serializedPrompt);
     // Re-read so the returned entity carries the DB-assigned updatedAt (the value a later GET will
     // return) — the client stores it to dedup its own SSE echo, so it must match byte-for-byte.
     WorkspacePromptDraft draft =
         draftRepository
-            .findByWorkspaceId(workspace.id)
+            .findByAgentId(agent.id)
             .orElseThrow(
                 () ->
                     new NotFoundException(
-                        "No prompt draft for workspace: " + workspace.workspaceId));
-    return new Written(draft, workspace.repositoryId);
+                        "No prompt draft for agent: " + agent.id));
+    return new Written(draft, agent.repositoryId);
   }
 
   /**
@@ -160,12 +158,11 @@ public class WorkspacePromptDraftService {
    * Called from {@code AgentLaunchService} after a launch that delivered the bootstrap turn.
    */
   @Transactional
-  public void recordRun(Long id, String commandId) {
-    Workspace workspace = workspaceResolver.resolveActive(id);
-    String repoId = workspace.repositoryId;
-    String workspaceId = workspace.workspaceId;
-    draftRepository.recordRun(workspace.id, commandId);
-    changePublisher.fire(repoId, workspace.id, WorkspaceChangeHint.Topic.PROMPT_DRAFT);
+  public void recordRun(java.util.UUID id, String commandId) {
+    AgentWorktree agent = agentResolver.resolveLive(id);
+    String repoId = agent.repositoryId;
+    draftRepository.recordRun(agent.id, commandId);
+    changePublisher.fire(repoId, agent.workspaceId, WorkspaceChangeHint.Topic.PROMPT_DRAFT);
   }
 
   /**
@@ -177,16 +174,16 @@ public class WorkspacePromptDraftService {
    * The two are deliberately in ONE transaction still — a draft kept with its images gone is a
    * broken composition, and the retry re-runs the pair or neither.
    */
-  public void deleteDraft(Long id) {
+  public void deleteDraft(java.util.UUID id) {
     String repositoryId = DbRetry.inNewTx("discard prompt draft " + id, () -> deleteDraftRows(id));
-    changePublisher.fire(repositoryId, id, WorkspaceChangeHint.Topic.PROMPT_DRAFT);
+    changePublisher.fire(repositoryId, null, WorkspaceChangeHint.Topic.PROMPT_DRAFT);
   }
 
   /** One attempt of {@link #deleteDraft}'s database work. */
-  private String deleteDraftRows(Long id) {
-    Workspace workspace = workspaceResolver.resolveActive(id);
-    draftRepository.deleteByWorkspaceId(workspace.id);
-    attachmentRepository.deleteByWorkspaceId(workspace.id);
-    return workspace.repositoryId;
+  private String deleteDraftRows(java.util.UUID id) {
+    AgentWorktree agent = agentResolver.resolveLive(id);
+    draftRepository.deleteByAgentId(agent.id);
+    attachmentRepository.deleteByAgentId(agent.id);
+    return agent.repositoryId;
   }
 }

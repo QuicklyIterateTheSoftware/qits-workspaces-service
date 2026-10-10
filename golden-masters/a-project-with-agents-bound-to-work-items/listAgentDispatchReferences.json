@@ -1,0 +1,92 @@
+{
+  "entries": [
+    {
+      "agent": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "workspaceRowId": 1,
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workId": "00000000-0000-4000-8000-000000000001",
+        "entityId": "contract-00000001-10",
+        "ticketId": "00000000-0000-4000-8000-000000000001",
+        "epicId": null,
+        "wrapperBranch": "ticket/contract-00000001-10",
+        "branches": [
+          {
+            "repositoryId": "00000000-0000-4000-8000-000000000015",
+            "branch": "ticket/contract-00000001-10-totals",
+            "sha": "0123456789abcdef0123456789abcdef01234567",
+            "pushedAt": "2026-01-01T00:00:00Z"
+          }
+        ],
+        "state": "ACTIVE",
+        "runState": "RUNNING",
+        "admin": false,
+        "harness": "CLAUDE",
+        "sessionId": null,
+        "entityTitle": "Invoice totals are off by one cent",
+        "entityStatus": "IMPLEMENTING",
+        "entityBlocked": false,
+        "activity": null,
+        "waitingSince": null,
+        "lastActivityAt": "2026-01-01T00:00:00Z",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "obsoleteAt": null,
+        "removedAt": null
+      }
+    },
+    {
+      "agent": {
+        "agentId": "00000000-0000-4000-8000-0000000000a2",
+        "workspaceRowId": 1,
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workId": "00000000-0000-4000-8000-000000000001",
+        "entityId": "contract-00000001-10",
+        "ticketId": "00000000-0000-4000-8000-000000000001",
+        "epicId": null,
+        "wrapperBranch": "ticket/contract-00000001-10",
+        "branches": [],
+        "state": "OBSOLETE",
+        "runState": "YIELDED",
+        "admin": false,
+        "harness": "CLAUDE",
+        "sessionId": null,
+        "entityTitle": "Invoice totals are off by one cent",
+        "entityStatus": "VERIFIED",
+        "entityBlocked": false,
+        "activity": null,
+        "waitingSince": null,
+        "lastActivityAt": "2026-01-01T00:00:00Z",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "obsoleteAt": "2026-01-01T00:00:00Z",
+        "removedAt": null
+      }
+    },
+    {
+      "agent": {
+        "agentId": "00000000-0000-4000-8000-0000000000a3",
+        "workspaceRowId": 1,
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workId": "00000000-0000-4000-8000-000000000001",
+        "entityId": "contract-00000001-10",
+        "ticketId": "00000000-0000-4000-8000-000000000001",
+        "epicId": null,
+        "wrapperBranch": "ticket/contract-00000001-10",
+        "branches": [],
+        "state": "REMOVED",
+        "runState": "YIELDED",
+        "admin": false,
+        "harness": "CLAUDE",
+        "sessionId": null,
+        "entityTitle": "Invoice totals are off by one cent",
+        "entityStatus": "VERIFIED",
+        "entityBlocked": false,
+        "activity": null,
+        "waitingSince": null,
+        "lastActivityAt": "2026-01-01T00:00:00Z",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "obsoleteAt": "2026-01-01T00:00:00Z",
+        "removedAt": "2026-01-01T00:00:00Z"
+      }
+    }
+  ]
+}

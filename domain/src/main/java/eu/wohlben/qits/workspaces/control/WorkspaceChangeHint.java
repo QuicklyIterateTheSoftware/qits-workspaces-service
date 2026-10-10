@@ -21,7 +21,6 @@ public record WorkspaceChangeHint(String repoId, Long workspaceRowId, Topic topi
      * command's last-run outcome was recorded. The frontend re-fetches the workspace bootstrap
      * surface.
      */
-    BOOTSTRAP,
     /**
      * The workspace working tree changed on disk — a file was created, modified, deleted, or moved
      * (typically the coding agent scaffolding without a commit). Fired by {@code
@@ -69,6 +68,8 @@ public record WorkspaceChangeHint(String repoId, Long workspaceRowId, Topic topi
      * so the far larger image-bytes refetch fires only on an actual attachment change, not on every
      * debounced prompt-text keystroke autosave.
      */
-    PROMPT_ATTACHMENTS
+    PROMPT_ATTACHMENTS,
+    /** An agent was placed, started, pushed a branch or changed state (qits-1152). */
+    AGENTS
   }
 }

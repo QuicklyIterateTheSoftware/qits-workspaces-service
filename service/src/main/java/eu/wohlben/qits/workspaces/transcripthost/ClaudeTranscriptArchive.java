@@ -159,7 +159,20 @@ public final class ClaudeTranscriptArchive {
 
   private final Path archiveRoot;
 
+  /** The harness working directory the transcripts are keyed on. */
+  private final String cwd;
+
   public ClaudeTranscriptArchive(Path archiveRoot) {
+    this(archiveRoot, CONTAINER_CWD);
+  }
+
+  /**
+   * An archive read for one working directory: an agent's (qits-1152) is {@code
+   * /workspace/agents/<agentId>/<wrapper name>}, where its harness ran, and the harness keys its
+   * transcripts on the escaped cwd.
+   */
+  public ClaudeTranscriptArchive(Path archiveRoot, String cwd) {
+    this.cwd = cwd == null || cwd.isBlank() ? CONTAINER_CWD : cwd;
     this.archiveRoot = archiveRoot;
   }
 
@@ -481,15 +494,15 @@ public final class ClaudeTranscriptArchive {
    * than composed, so the escaping rule stays the library's alone.
    */
   private Path projectsDir() {
-    return configDir().resolve(new ClaudeCodeAgent().transcriptPath(CONTAINER_CWD, "probe").getParent());
+    return configDir().resolve(new ClaudeCodeAgent().transcriptPath(cwd, "probe").getParent());
   }
 
   private Path transcriptFile(String sessionId) {
-    return configDir().resolve(new ClaudeCodeAgent().transcriptPath(CONTAINER_CWD, sessionId));
+    return configDir().resolve(new ClaudeCodeAgent().transcriptPath(cwd, sessionId));
   }
 
   private Path subagentsDir(String sessionId) {
-    return configDir().resolve(new ClaudeCodeAgent().subagentsDir(CONTAINER_CWD, sessionId));
+    return configDir().resolve(new ClaudeCodeAgent().subagentsDir(cwd, sessionId));
   }
 
   private Path sidechainFile(String sessionId, String agentId) {

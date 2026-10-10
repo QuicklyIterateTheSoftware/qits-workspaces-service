@@ -9,7 +9,6 @@ import eu.wohlben.qits.workspaces.error.RunnerRefusals;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
 import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerRefDto;
 import eu.wohlben.qits.workspaces.dto.WorkItemWorkspaceDto;
-import eu.wohlben.qits.workspaces.dto.WorkspaceSubjectRefDto;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspaceEvent;
 import eu.wohlben.qits.workspaces.entity.WorkspaceEventType;
@@ -35,16 +34,11 @@ import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import jakarta.transaction.TransactionSynchronizationRegistry;
 import jakarta.transaction.Transactional;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -1087,54 +1081,6 @@ public class WorkspaceService {
   }
 
   /**
-   * The workspaces that name one of these qits-projects tickets or epics — what a ticket panel over
-   * there asks so it can say "an agent is already on this one, here is the way in", or "the work on
-   * this one was integrated".
-   *
-   * <p><b>Not {@link #listWorkspaces} with a filter, and the difference is the cost.</b> That
-   * listing exists to draw the branch tree of <em>one</em> repository: it refreshes the mirror,
-   * lists containers and computes ahead/behind per row. This question spans every repository, is
-   * asked about a page full of rows at once, and needs none of that — a link and the row it belongs
-   * to is the whole answer. So it is a straight query and a thin shape, and it costs one statement.
-   *
-   * <p>Which rows come back is {@code WorkspaceRepository.findBySubjects}' to say, and it says it
-   * there rather than here: every workspace the subject names, whatever its status and whatever its
-   * container is doing. So each row carries its own status and its {@code resolvedAt}, and what to
-   * make of a resolved one is the reader's question — this service has no view on whether a landed
-   * workspace is still worth showing beside a ticket.
-   */
-  public List<WorkspaceSubjectRefDto> workspacesReferencing(
-      Collection<String> ticketIds, Collection<String> epicIds) {
-    return workspacesReferencing(ticketIds, epicIds, List.of());
-  }
-
-  /**
-   * {@link #workspacesReferencing(Collection, Collection)}, also matching {@code workIds} — the
-   * work id of any archetype (qits-112). A row matched twice is answered once.
-   */
-  public List<WorkspaceSubjectRefDto> workspacesReferencing(
-      Collection<String> ticketIds, Collection<String> epicIds, Collection<String> workIds) {
-    java.util.Map<Long, Workspace> rows = new java.util.LinkedHashMap<>();
-    workspaceRepository.findBySubjects(ticketIds, epicIds).forEach(w -> rows.put(w.id, w));
-    workspaceRepository.findByWorkIds(workIds).forEach(w -> rows.putIfAbsent(w.id, w));
-    return rows.values().stream()
-        .map(
-            w ->
-                new WorkspaceSubjectRefDto(
-                    w.id,
-                    w.repositoryId,
-                    w.workspaceId,
-                    w.branch,
-                    w.ticketId,
-                    w.epicId,
-                    w.status == null ? null : w.status.name(),
-                    w.resolvedAt,
-                    w.workId,
-                    w.entityId))
-        .toList();
-  }
-
-  /**
    * Every open workspace bound to a work item, oldest first (qits-112): ACTIVE only, so integrated
    * and abandoned ones are left out and a work item shows at most one here.
    */
@@ -2016,342 +1962,54 @@ public class WorkspaceService {
                       stated,
                       placement));
     }
-    if (adoptExisting) {
-      throw new BadRequestException("A branch-tree workspace cannot adopt an existing branch");
-    }
-    if (workspaceId == null
-        || !workspaceId.matches("[A-Za-z0-9_-]{1,64}")
-        || workspaceId.startsWith("-")) {
-      throw new BadRequestException("Invalid workspace id: " + workspaceId);
-    }
-    var root = repositories.require(repoId);
-    String parentBranch = (parent == null || parent.isBlank()) ? defaultMainBranch(root) : parent;
-    String newBranch = (branch == null || branch.isBlank()) ? workspaceId : branch;
-    if (parentBranch.startsWith("-") || newBranch.startsWith("-")) {
-      throw new BadRequestException("Invalid branch name");
-    }
-    // The same two guards the ordinary form opens with, run before any ref is pushed: a tree is
-    // expensive to create and worse to undo, so a workspace that could never be recorded must fail
-    // before the first push rather than after the last one.
-    QuarkusTransaction.requiringNew()
-        .run(
-            () -> {
-              if (workspaceRepository.existsActiveByRepositoryAndWorkspaceId(repoId, workspaceId)) {
-                throw new BadRequestException("Workspace already exists: " + workspaceId);
-              }
-              if (workspaceRepository.existsActiveByRepositoryAndBranch(repoId, newBranch)) {
-                throw new ConflictException("Branch already has an active workspace: " + newBranch);
-              }
-              refuseSecondActiveForWork(
-                  subject == null ? null : subject.normalized().workId());
-              refuseUnplaceable(placement, admin);
-            });
-    createBranchTree(root, newBranch, parentBranch);
-    return QuarkusTransaction.requiringNew()
-        .call(
-            () ->
-                recordWorkspace(
-                    repoId,
-                    workspaceId,
-                    parentBranch,
-                    newBranch,
-                    preamble,
-                    true,
-                    admin,
-                    subject,
-                    stated,
-                    placement));
+    // The branch tree (a branch in every submodule, plus a WORKSPACE.md commit) went with
+    // qits-1152: an agent names its own submodule branches, and nothing is created up front (D9).
+    throw new BadRequestException("Branch-tree workspaces are gone; dispatch an agent instead.");
   }
 
   /**
-   * What {@link #createAndStartWorkspace} answers: the row it recorded, and the start it ran on it —
-   * the process {@link #beginEnsureContainer} answered, or why that start was refused.
+   * <b>A workspace slot</b> (qits-1152, D2): one container on a runner — or, for an admin, on the
+   * platform host — scoped to a project's wrapper, created when an agent needs a slot and removed
+   * when its last agent is. It names no branch, parent or work item: those are its agents'. It
+   * pushes nothing either ({@code gitRefs []}); every push is an agent's, with the agent's own
+   * credential.
+   *
+   * <p>Started at once: a RUNNER row is queued for a runner through the RUNNER start (edge plane,
+   * workspace token), a DIRECT admin row through the ensure ladder.
    */
-  public record CreatedWorkspace(Workspace workspace, String technicalProcessId, String startError) {}
-
-  /**
-   * <b>Creating a workspace starts it</b> (qits-853, owner decision 2026-10-05: "the frontend
-   * requests a workspace — why is there a second REST call?"). The create door's method.
-   *
-   * <ul>
-   *   <li>A RUNNER row needs nothing more: {@link #createWorkspace} queued it through the RUNNER
-   *       start (token minted, runners told), and a runner's reserve takes it from there. No
-   *       process is answered — the row's runtime status is its progress.
-   *   <li>A DIRECT row is started by {@link #beginEnsureContainer}, the start the {@code
-   *       ensure-container} door runs: the three-rung ladder, behind the process it answers.
-   * </ul>
-   *
-   * <p>Either way a later ensure-container is the no-op it is on a row already starting, so a client
-   * that still makes the second call keeps working.
-   *
-   * <p>Only the create door calls this. The domain's other creators decide for themselves whether
-   * and when to start — dispatch and the editor start the row they wrote once, themselves, and
-   * capture leaves it stopped — so the start is not folded into {@link #createWorkspace}, where it
-   * would double theirs.
-   *
-   * <p><b>A start refused after the row exists does not undo the create.</b> The refusal is answered
-   * in {@link CreatedWorkspace#startError} beside the row instead of thrown: the row is committed and
-   * real, and an error status would tell the caller the create failed when it is the start that
-   * did. A refusal before the row exists — every guard {@link #createWorkspace} runs — still throws
-   * as it always did. A start that fails later, on the worker, fails its process as an
-   * ensure-container's does.
-   */
-  public CreatedWorkspace createAndStartWorkspace(
-      String repoId,
-      String workspaceId,
-      String parent,
-      String branch,
-      String preamble,
-      boolean adoptExisting,
-      boolean branchTree,
-      boolean admin,
-      WorkspaceSubject subject,
-      List<String> gitRefs,
-      WorkspacePlacement placement) {
+  public Workspace createSlot(String repoId, boolean admin) {
+    RepositoryLookup.RepositoryView repo = repositories.require(repoId);
+    WorkspacePlacement placed = WorkspacePlacements.forNewRow(admin);
     Workspace created =
-        createWorkspace(
-            repoId,
-            workspaceId,
-            parent,
-            branch,
-            preamble,
-            adoptExisting,
-            branchTree,
-            admin,
-            subject,
-            gitRefs,
-            placement);
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  Workspace workspace = new Workspace();
+                  // Named after its own row id once it has one: unique, and stable for a reader.
+                  workspace.workspaceId = "ws-pending-" + UUID.randomUUID().toString().substring(0, 8);
+                  workspace.repositoryId = repo.id();
+                  workspace.status = WorkspaceStatus.ACTIVE;
+                  workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                  workspace.admin = admin;
+                  workspace.placement = placed;
+                  workspace.gitRefs = GitRefs.write(List.of());
+                  workspaceRepository.persist(workspace);
+                  workspaceRepository.flush();
+                  workspace.workspaceId = "ws-" + workspace.id;
+                  recordEvent(workspace, WorkspaceEventType.CREATED, null, null, null);
+                  return workspace;
+                });
+    LOG.infof("Workspace %s/%s created as a slot (placement=%s)", repoId, created.workspaceId, placed);
     if (created.placement == WorkspacePlacement.RUNNER) {
-      return new CreatedWorkspace(created, null, null);
+      return queuedOnRunner(created);
     }
     try {
-      return new CreatedWorkspace(created, beginEnsureContainer(created.id), null);
+      beginEnsureContainer(created.id);
     } catch (RuntimeException refused) {
-      LOG.warnf(
-          refused,
-          "Workspace %s/%s was created but its start was refused",
-          repoId,
-          created.workspaceId);
-      String message = refused.getMessage();
-      return new CreatedWorkspace(
-          created,
-          null,
-          message == null || message.isBlank() ? refused.getClass().getSimpleName() : message);
+      LOG.warnf(refused, "Workspace %s was created but its start was refused", created.id);
     }
+    return created;
   }
-
-  /**
-   * Creates {@code branch} in the wrapper and in every registered repository its committed
-   * submodule declarations reach, then publishes the hand-off document on the wrapper's copy.
-   *
-   * <p>Three phases, in this order for a reason: the closure is discovered first (no ref is written
-   * while it is being read), then <em>every</em> repository is checked for a colliding branch, and
-   * only then does the first push happen. A collision therefore refuses the whole request while it
-   * still costs nothing.
-   */
-  private void createBranchTree(
-      RepositoryLookup.RepositoryView root, String branch, String rootParent) {
-    Collection<RepositoryLookup.RepositoryView> closure = submoduleClosure(root, rootParent);
-
-    for (var repository : closure) {
-      if (mirrors.of(repository.id()).remoteHasBranch(branch)) {
-        throw new ConflictException("Branch already exists in " + repository.name() + ": " + branch);
-      }
-    }
-
-    List<RepositoryLookup.RepositoryView> created = new ArrayList<>();
-    try {
-      for (var repository : closure) {
-        createBranchOnHost(
-            mirrors.of(repository.id()), branch, sourceOf(repository, root, rootParent));
-        created.add(repository);
-      }
-      writeWorkspaceGuide(mirrors.of(root.id()), branch);
-    } catch (RuntimeException failure) {
-      undoBranchTree(created, branch);
-      throw failure;
-    }
-  }
-
-  /**
-   * Removes what a failed tree already created. Without it a tree that broke half way through would
-   * fail its own collision check on every retry, and the branch name would be spent for good — the
-   * caller cannot tell a ref this service left behind from one somebody else owns.
-   *
-   * <p>Best-effort by necessity: what brings us here is usually the git host refusing or being
-   * unreachable, and a deletion it will not take leaves a ref to remove by hand. The original
-   * failure is what the caller is told about either way.
-   */
-  private void undoBranchTree(List<RepositoryLookup.RepositoryView> created, String branch) {
-    for (var repository : created) {
-      try {
-        PushOutcome deleted = mirrors.of(repository.id()).deleteBranch(branch);
-        if (!deleted.accepted()) {
-          LOG.warnf(
-              "the git host refused to roll back branch '%s' of %s: %s",
-              branch, repository.name(), deleted.output());
-        }
-      } catch (RuntimeException e) {
-        LOG.warnf(e, "failed to roll back branch '%s' of %s", branch, repository.name());
-      }
-    }
-  }
-
-  /**
-   * The wrapper and every registered repository reachable from committed {@code .gitmodules} urls,
-   * wrapper first and each repository once.
-   *
-   * <p>Registered is the whole rule: a submodule url resolves through the project's repository list
-   * by the name it addresses ({@code ../<name>.git}) and, for an adopted repository that owns no
-   * alias row, by its id — the same two spellings qits-projects resolves a name through. A
-   * submodule naming nothing registered is skipped rather than guessed at.
-   */
-  private Collection<RepositoryLookup.RepositoryView> submoduleClosure(
-      RepositoryLookup.RepositoryView root, String rootParent) {
-    List<RepositoryLookup.RepositoryView> registered =
-        repositories.listByProject(root.projectId());
-    if (registered.isEmpty()) {
-      // The project holds at least this wrapper, so an empty answer is a registry that did not
-      // answer. Read as "no submodules" it would branch the wrapper alone and call that a tree.
-      throw new InternalServerErrorException(
-          "The repository registry listed no repositories in project " + root.projectId());
-    }
-    Map<String, RepositoryLookup.RepositoryView> byName = new LinkedHashMap<>();
-    Map<String, RepositoryLookup.RepositoryView> byId = new LinkedHashMap<>();
-    for (var repository : registered) {
-      if (repository.name() != null) {
-        byName.put(repository.name(), repository);
-      }
-      byId.put(repository.id(), repository);
-    }
-    byName.put(root.name(), root);
-    byId.put(root.id(), root);
-
-    Map<String, RepositoryLookup.RepositoryView> closure = new LinkedHashMap<>();
-    ArrayDeque<RepositoryLookup.RepositoryView> pending = new ArrayDeque<>();
-    pending.add(root);
-    while (!pending.isEmpty()) {
-      var repository = pending.removeFirst();
-      if (closure.putIfAbsent(repository.id(), repository) != null) {
-        continue;
-      }
-      RepoMirror mirror = mirrors.of(repository.id());
-      mirror.refreshNow();
-      String source = sourceOf(repository, root, rootParent);
-      try (MirrorWorktree worktree =
-          mirror.worktree("branch-tree-discovery", "refs/heads/" + source)) {
-        Path modules = worktree.path().resolve(".gitmodules");
-        if (!Files.isRegularFile(modules)) {
-          continue;
-        }
-        for (String line : Files.readAllLines(modules)) {
-          String trimmed = line.trim();
-          if (!trimmed.startsWith("url") || !trimmed.contains("=")) {
-            continue;
-          }
-          String name = repositoryName(trimmed.substring(trimmed.indexOf('=') + 1));
-          var child = byName.containsKey(name) ? byName.get(name) : byId.get(name);
-          if (child != null && !closure.containsKey(child.id())) {
-            pending.addLast(child);
-          }
-        }
-      } catch (IOException failure) {
-        throw new InternalServerErrorException(
-            "Could not read the submodule tree of "
-                + repository.name()
-                + ": "
-                + failure.getMessage());
-      }
-    }
-    return closure.values();
-  }
-
-  /** What a repository's copy of the workspace branch forks from: the wrapper's parent, or main. */
-  private static String sourceOf(
-      RepositoryLookup.RepositoryView repository,
-      RepositoryLookup.RepositoryView root,
-      String rootParent) {
-    return repository.id().equals(root.id()) ? rootParent : defaultMainBranch(repository);
-  }
-
-  private static String repositoryName(String url) {
-    String value = url.trim().replaceAll("/+$", "");
-    value = value.substring(Math.max(value.lastIndexOf('/'), value.lastIndexOf(':')) + 1);
-    return value.endsWith(".git") ? value.substring(0, value.length() - 4) : value;
-  }
-
-  /**
-   * Publishes the hand-off document on the wrapper's copy of the workspace branch — a commit and a
-   * push like any other write here, so the branch a workspace opens on already explains itself.
-   */
-  private void writeWorkspaceGuide(RepoMirror mirror, String branch) {
-    mirror.refreshNow();
-    try (MirrorWorktree worktree = mirror.worktree("workspace-guide", "refs/heads/" + branch)) {
-      Path guide = worktree.path().resolve("WORKSPACE.md");
-      // A parent that already carries the guide verbatim leaves nothing to commit — and a commit
-      // with a clean index fails, which used to fail the whole creation once a released guide had
-      // reached the fork point.
-      if (Files.exists(guide) && WORKSPACE_GUIDE.equals(Files.readString(guide))) {
-        return;
-      }
-      Files.writeString(guide, WORKSPACE_GUIDE);
-      worktree.stage(List.of(Path.of("WORKSPACE.md")));
-      worktree.commit(
-          "docs: add workspace development flow",
-          "Record how changes from this aggregate workspace reach a running environment.",
-          gitIdentity.forMirror());
-      PushOutcome pushed = worktree.push(PushSpec.of(PushSpec.Ref.branch("HEAD", branch)));
-      if (!pushed.accepted()) {
-        throw new InternalServerErrorException(
-            "Failed to publish WORKSPACE.md: " + pushed.output());
-      }
-    } catch (IOException failure) {
-      throw new InternalServerErrorException(
-          "Could not write WORKSPACE.md: " + failure.getMessage());
-    }
-  }
-
-  static final String WORKSPACE_GUIDE = """
-      # Workspace development flow
-
-      This checkout is an aggregate workspace. The wrapper and every checked-out submodule use the same workspace branch. Commit and push changes in the repository where they belong; the workspace credential has normal Git push access so each repository can move independently.
-
-      A local commit is not automatically part of the running environment. Changes have to be orchestrated by **releasing** them: a release request folds your branch with `main` (and with every released tag not yet merged back), the quality gate builds that fold, and a green gate turns it into a version **tag**. A service's deployment follows from that release; `main` is merged only once the deployment is live.
-
-      Release dependencies before their consumers, then let the affected application or service release carry the new versions into the environment. Keep the wrapper branch as the map of the workspace, but treat each submodule's own release as the unit that promotes code.
-
-      ## Releasing from inside this container
-
-      **Branch → release request.** Never push `main` yourself. Push your branch, then ask **qits-projects** to release it. Use `qits` first (next section): `qits release-request create --project <project> --repository <repository> --branch <your branch> --summary '<what this release is>'` is the door with the credential handled for you. The fallback is a hand-written `curl` against the service's public name, `https://<app>.qits.$QITS_DOMAIN/…`, with the bearer `qits-token qits-platform` prints — it works from the platform network and from a runner node alike, because the public names answer from both:
-
-          PROJECTS=https://projects.qits.$QITS_DOMAIN/projects/api
-
-          curl -sS -X POST -H "Authorization: Bearer $(qits-token qits-platform)" -H 'Content-Type: application/json' "$PROJECTS/repositories/<repository>/release-requests" -d '{"branch":"<your branch>","summary":"<what this release is>"}'
-
-      Nothing has merged when that answers. The request folds `main`, your branch and every released tag still in flight onto its own `release/<id>` branch, the QA pipeline builds that fold, and a green gate releases it: the manifests are stamped, the fold is tagged with the version, and the source branches are deleted. Poll the request (`GET $PROJECTS/repositories/<repository>/release-requests/<id>`) until it reads `RELEASED` — `CONFLICTED` means the fold does not merge and is yours to resolve, `FAILED` and `REJECTED` say why in `detail`. Watch the build behind it: `curl -sS -H "Authorization: Bearer $(qits-token qits-platform)" https://ci.qits.$QITS_DOMAIN/ci/api/runs/active` (and `/ci/api/runs/finished?limit=10`).
-
-      **Trains.** Releasing an SPA or a library deploys nothing by itself: the service that embeds or depends on it follows by event — CI commits a `bump(...)` onto that service's `maintenance/<dependency>` branch and releases it on its own. To ship a service change together with its SPA, release the SPA first and the service once the bump has reached the service's `main`; the service branch then merges cleanly on top of the new pin. Never move a submodule gitlink (`service/src/main/webui`) by hand to follow a release you made — the train owns that pin, and `git add -A` would stage it silently (`.gitmodules` says `ignore = all`); confirm with `git ls-tree HEAD <path>` before committing.
-
-      **After a release the source branch is gone in that repository** (the release deletes it). Your local checkout still holds it; `git fetch && git switch main` there before the next change. Note `main` catches up only after the deployment, so a freshly released repository can sit at the tag for a while. The wrapper's branch and this workspace are untouched by a submodule's release.
-
-      ## The qits CLI
-
-      `qits` is on PATH and already signed in by this container's credential, so there is no `qits login` to run in here. That credential is one of two: `QITS_TOKEN` on a runner-placed workspace — one opaque token, used as it is — or the commissioned pair `QITS_COMMISSIONED_CLIENT_ID` / `QITS_COMMISSIONED_CLIENT_SECRET`, from which a bearer is minted once per process and kept in memory, never written to disk. It finds each service by itself, so none of the addressing above has to be composed by hand.
-
-          qits work list --project qits
-          qits ci runs --project qits --repository <repository> --limit 3
-          qits release-request --project qits --repository <repository> list
-
-      `qits events` and `qits observe` are the other two an agent reaches for; `qits --help` lists everything, and `qits help skill` prints the whole surface as a SKILL.md. The credential is `qits:agent`: reads answer, and an operator write comes back `403 - this credential is qits:agent, which reads but does not write`. That is the credential doing its job, not a misconfiguration — a write that matters goes through the release request above, or through a person.
-
-      The two shell helpers keep their jobs and carry whichever credential this container holds: `qits-git-credential` is git's credential helper, and `qits-token qits-platform` prints the bearer for a hand-written `curl`.
-
-      ## Toolchain notes
-
-      - Run builds in a login shell (`bash -lc '...'`): `/etc/profile.d/qits-workspace.sh` gives the container uid a passwd entry (embedded-postgres suites need it) and adds `-s /etc/qits/maven-settings.xml` to `MAVEN_ARGS`. The local repository is `/caches/m2` (`MAVEN_OPTS`).
-      - Package registries are derived from `QITS_DOMAIN` and nothing else: the platform's own packages (the `@qits` npm scope, the hosted Maven repository) at `https://registry.qits.<domain>`, npmjs and Maven Central through the caches at `https://mirror.qits.<domain>`. The `npm` shim on PATH and the Maven settings file authenticate both with this container's credential, so no `.npmrc` token and no `-D` repository override is needed — plain `npm ci` / `npm install` and `mvn` just work. A lockfile committed from here only ever names those public https hosts; never rewrite its `resolved` URLs. A service's `mvn verify` runs the same install inside `service/src/main/webui` (Quinoa).
-      - qits-projects, CI and every other platform API answer at their public names, `https://<app>.qits.<domain>`: the public edge accepts this container's bearer on every service vhost, so the same `curl` works wherever this container runs.
-      """;
 
   /**
    * Sanitizes a branch name into a workspace-id slug ([A-Za-z0-9_-], ≤64 chars, not dash-leading).
@@ -2758,9 +2416,11 @@ public class WorkspaceService {
       }
     }
 
-    if (snapshot.branch() == null
-        || snapshot.branch().isBlank()
-        || !branchExists(repoId, snapshot.branch())) {
+    // A slot (qits-1152) names no branch and is never abandoned for lacking one; an old-model row
+    // whose durable branch is gone is.
+    if (snapshot.branch() != null
+        && !snapshot.branch().isBlank()
+        && !branchExists(repoId, snapshot.branch())) {
       // The durable branch is gone: this is genuine death, so abandon (persisted before we throw).
       QuarkusTransaction.requiringNew()
           .run(
@@ -3066,7 +2726,7 @@ public class WorkspaceService {
 
   /**
    * Integrates an arbitrary branch into a target branch, defaulting to the repository's configured
-   * main branch when {@code target} is blank. Unlike {@link #mergeWorkspace}, the source needs no
+   * main branch when {@code target} is blank. Unlike {@code mergeWorkspace} (gone since qits-1152), the source needs no
    * workspace of its own — its branch ref is merged into the target's workspace (a temporary one is
    * created and removed when the target isn't checked out anywhere).
    */
@@ -3688,7 +3348,8 @@ public class WorkspaceService {
       }
       return process == null ? null : process.id();
     }
-    if (row.branch == null || row.branch.isBlank() || !branchExists(row.repositoryId, row.branch)) {
+    // A slot (qits-1152) names no branch, so only an old-model row can have lost its own.
+    if (row.branch != null && !row.branch.isBlank() && !branchExists(row.repositoryId, row.branch)) {
       abandonRunnerRow(row);
     }
     // The edge plane, BEFORE the row is queued: a deployment with no public domain has no address a

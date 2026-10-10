@@ -8,17 +8,147 @@
         "references": {
           "qits-call": {
             "app": "qits-projects-service",
+            "operationId": "createWork"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "captureWork"
+          }
+        }
+      },
+      "description": "captureWork: createWork",
+      "key": "126aad53",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a project with no work",
+          "params": {
+            "projectId": "00000000-0000-4000-8000-000000000001"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "archetype": "TICKET",
+            "impetus": "# Captured page",
+            "project": "00000000-0000-4000-8000-000000000001",
+            "ticketType": "IMPROVEMENT",
+            "title": "Captured: Greeting"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/projects/api/work",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.impetus": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.project": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.title": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/projects/api/work"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "id": "00000000-0000-4000-8000-000000000002",
+            "qualifiedId": "contract-00000001-1"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.qualifiedId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-projects-service",
             "operationId": "getRepository"
           },
           "qits-trigger": {
             "app": "qits-workspaces-service",
             "kind": "operation",
-            "operationId": "captureWorkspace"
+            "operationId": "captureWork"
           }
         }
       },
-      "description": "captureWorkspace: getRepository",
-      "key": "30b0898a",
+      "description": "captureWork: getRepository",
+      "key": "23888fb2",
       "pending": false,
       "providerStates": [
         {
@@ -130,12 +260,12 @@
           "qits-trigger": {
             "app": "qits-workspaces-service",
             "kind": "operation",
-            "operationId": "createWorkspace"
+            "operationId": "createAgent"
           }
         }
       },
-      "description": "createWorkspace: getRepository",
-      "key": "8a720e5c",
+      "description": "createAgent: getRepository",
+      "key": "30b9178c",
       "pending": false,
       "providerStates": [
         {
@@ -400,17 +530,134 @@
         "references": {
           "qits-call": {
             "app": "qits-projects-service",
+            "operationId": "getRepository"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "event": "workspace-daemon:agent-branch-pushed",
+            "kind": "event"
+          }
+        }
+      },
+      "description": "workspace-daemon:agent-branch-pushed: getRepository",
+      "key": "3d764c85",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a repository exists",
+          "params": {
+            "projectId": "00000000-0000-4000-8000-000000000001",
+            "repositoryId": "00000000-0000-4000-8000-000000000002"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/projects/api/repositories/${repositoryId}",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/projects/api/repositories/00000000-0000-4000-8000-000000000002"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "repository": {
+              "archetype": "SERVICE",
+              "id": "00000000-0000-4000-8000-000000000002",
+              "mainBranch": "main",
+              "name": "contract-service",
+              "projectId": "00000000-0000-4000-8000-000000000001"
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.repository.archetype": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.repository.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.repository.mainBranch": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.repository.name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.repository.projectId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-projects-service",
             "operationId": "listProjectRepositories"
           },
           "qits-trigger": {
             "app": "qits-workspaces-service",
-            "kind": "operation",
-            "operationId": "dispatchAgent"
+            "event": "workspace-daemon:agent-branch-pushed",
+            "kind": "event"
           }
         }
       },
-      "description": "dispatchAgent: listProjectRepositories",
-      "key": "8f77aade",
+      "description": "workspace-daemon:agent-branch-pushed: listProjectRepositories",
+      "key": "76494bad",
       "pending": false,
       "providerStates": [
         {
@@ -527,397 +774,6 @@
               ]
             },
             "$.entries[*].repository.projectId": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                }
-              ]
-            }
-          },
-          "header": {
-            "Content-Type": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "application/json.*"
-                }
-              ]
-            }
-          }
-        },
-        "status": 200
-      },
-      "type": "Synchronous/HTTP"
-    },
-    {
-      "comments": {
-        "references": {
-          "qits-call": {
-            "app": "qits-projects-service",
-            "operationId": "getRepository"
-          },
-          "qits-trigger": {
-            "app": "qits-workspaces-service",
-            "kind": "operation",
-            "operationId": "ensureEditor"
-          }
-        }
-      },
-      "description": "ensureEditor: getRepository",
-      "key": "b7f0ba16",
-      "pending": false,
-      "providerStates": [
-        {
-          "name": "a repository exists",
-          "params": {
-            "projectId": "00000000-0000-4000-8000-000000000001",
-            "repositoryId": "00000000-0000-4000-8000-000000000002"
-          }
-        }
-      ],
-      "request": {
-        "generators": {
-          "path": {
-            "dataType": "RAW",
-            "expression": "/projects/api/repositories/${repositoryId}",
-            "type": "ProviderState"
-          }
-        },
-        "method": "GET",
-        "path": "/projects/api/repositories/00000000-0000-4000-8000-000000000002"
-      },
-      "response": {
-        "body": {
-          "content": {
-            "repository": {
-              "archetype": "SERVICE",
-              "id": "00000000-0000-4000-8000-000000000002",
-              "mainBranch": "main",
-              "name": "contract-service",
-              "projectId": "00000000-0000-4000-8000-000000000001"
-            }
-          },
-          "contentType": "application/json",
-          "encoded": false
-        },
-        "headers": {
-          "Content-Type": [
-            "application/json"
-          ]
-        },
-        "matchingRules": {
-          "body": {
-            "$.repository.archetype": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.id": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                }
-              ]
-            },
-            "$.repository.mainBranch": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.name": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.projectId": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                }
-              ]
-            }
-          },
-          "header": {
-            "Content-Type": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "application/json.*"
-                }
-              ]
-            }
-          }
-        },
-        "status": 200
-      },
-      "type": "Synchronous/HTTP"
-    },
-    {
-      "comments": {
-        "references": {
-          "qits-call": {
-            "app": "qits-projects-service",
-            "operationId": "listProjectRepositories"
-          },
-          "qits-trigger": {
-            "app": "qits-workspaces-service",
-            "kind": "operation",
-            "operationId": "ensureEditor"
-          }
-        }
-      },
-      "description": "ensureEditor: listProjectRepositories",
-      "key": "55e8b7fe",
-      "pending": false,
-      "providerStates": [
-        {
-          "name": "a project with 3 repositories",
-          "params": {
-            "projectId": "00000000-0000-4000-8000-000000000001"
-          }
-        }
-      ],
-      "request": {
-        "generators": {
-          "path": {
-            "dataType": "RAW",
-            "expression": "/projects/api/projects/${projectId}/repositories",
-            "type": "ProviderState"
-          }
-        },
-        "method": "GET",
-        "path": "/projects/api/projects/00000000-0000-4000-8000-000000000001/repositories"
-      },
-      "response": {
-        "body": {
-          "content": {
-            "entries": [
-              {
-                "repository": {
-                  "archetype": "PROJECT",
-                  "id": "00000000-0000-4000-8000-000000000002",
-                  "mainBranch": "main",
-                  "name": "contract-00000001-contract-00000001",
-                  "projectId": "00000000-0000-4000-8000-000000000001"
-                }
-              },
-              {
-                "repository": {
-                  "archetype": "PROJECT",
-                  "id": "00000000-0000-4000-8000-000000000002",
-                  "mainBranch": "main",
-                  "name": "contract-00000001-contract-00000001",
-                  "projectId": "00000000-0000-4000-8000-000000000001"
-                }
-              },
-              {
-                "repository": {
-                  "archetype": "PROJECT",
-                  "id": "00000000-0000-4000-8000-000000000002",
-                  "mainBranch": "main",
-                  "name": "contract-00000001-contract-00000001",
-                  "projectId": "00000000-0000-4000-8000-000000000001"
-                }
-              },
-              {
-                "repository": {
-                  "archetype": "PROJECT",
-                  "id": "00000000-0000-4000-8000-000000000002",
-                  "mainBranch": "main",
-                  "name": "contract-00000001-contract-00000001",
-                  "projectId": "00000000-0000-4000-8000-000000000001"
-                }
-              }
-            ]
-          },
-          "contentType": "application/json",
-          "encoded": false
-        },
-        "headers": {
-          "Content-Type": [
-            "application/json"
-          ]
-        },
-        "matchingRules": {
-          "body": {
-            "$.entries": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type",
-                  "max": 4,
-                  "min": 4
-                }
-              ]
-            },
-            "$.entries[*].repository.archetype": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.entries[*].repository.id": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                }
-              ]
-            },
-            "$.entries[*].repository.mainBranch": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.entries[*].repository.name": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.entries[*].repository.projectId": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                }
-              ]
-            }
-          },
-          "header": {
-            "Content-Type": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "application/json.*"
-                }
-              ]
-            }
-          }
-        },
-        "status": 200
-      },
-      "type": "Synchronous/HTTP"
-    },
-    {
-      "comments": {
-        "references": {
-          "qits-call": {
-            "app": "qits-projects-service",
-            "operationId": "getRepository"
-          },
-          "qits-trigger": {
-            "app": "qits-workspaces-service",
-            "kind": "operation",
-            "operationId": "mergeWorkspace"
-          }
-        }
-      },
-      "description": "mergeWorkspace: getRepository",
-      "key": "a193b5f0",
-      "pending": false,
-      "providerStates": [
-        {
-          "name": "a repository exists",
-          "params": {
-            "projectId": "00000000-0000-4000-8000-000000000001",
-            "repositoryId": "00000000-0000-4000-8000-000000000002"
-          }
-        }
-      ],
-      "request": {
-        "generators": {
-          "path": {
-            "dataType": "RAW",
-            "expression": "/projects/api/repositories/${repositoryId}",
-            "type": "ProviderState"
-          }
-        },
-        "method": "GET",
-        "path": "/projects/api/repositories/00000000-0000-4000-8000-000000000002"
-      },
-      "response": {
-        "body": {
-          "content": {
-            "repository": {
-              "archetype": "SERVICE",
-              "id": "00000000-0000-4000-8000-000000000002",
-              "mainBranch": "main",
-              "name": "contract-service",
-              "projectId": "00000000-0000-4000-8000-000000000001"
-            }
-          },
-          "contentType": "application/json",
-          "encoded": false
-        },
-        "headers": {
-          "Content-Type": [
-            "application/json"
-          ]
-        },
-        "matchingRules": {
-          "body": {
-            "$.repository.archetype": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.id": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                }
-              ]
-            },
-            "$.repository.mainBranch": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.name": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.projectId": {
               "combine": "AND",
               "matchers": [
                 {

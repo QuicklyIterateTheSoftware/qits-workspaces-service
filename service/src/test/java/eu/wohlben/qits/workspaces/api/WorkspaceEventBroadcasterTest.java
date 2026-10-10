@@ -124,11 +124,11 @@ class WorkspaceEventBroadcasterTest {
             .subscribe()
             .withSubscriber(AssertSubscriber.create(Long.MAX_VALUE));
 
-    fire("repo-1", 1L, Topic.BOOTSTRAP);
+    fire("repo-1", 1L, Topic.AGENTS);
     fire("repo-1", 1L, Topic.COMMANDS);
 
     sub.awaitItems(2, Duration.ofSeconds(2));
-    assertTrue(sub.getItems().contains("bootstrap"));
+    assertTrue(sub.getItems().contains("agents"));
     assertTrue(sub.getItems().contains("commands"));
   }
 

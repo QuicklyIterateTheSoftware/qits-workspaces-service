@@ -38,6 +38,7 @@ public class CommissionReconcilerRunnerArmsTest {
   @Inject WorkspaceRunners workspaceRunners;
   @Inject WorkspaceRunnerRepository runnerRepository;
   @Inject WorkspaceRepository workspaceRepository;
+  @Inject eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository agentRows;
   @Inject GitRefScopes gitRefScopes;
 
   private IdpStub idp;
@@ -59,6 +60,7 @@ public class CommissionReconcilerRunnerArmsTest {
     CommissionReconciler reconciler = new CommissionReconciler();
     reconciler.commissioner = StubInstance.of(idp.credentialCommissioner());
     reconciler.workspaces = workspaceRepository;
+    reconciler.agentRows = agentRows;
     reconciler.gitRefScopes = gitRefScopes;
     reconciler.runners = runnerRepository;
     reconciler.runnerCommissioner = idp.runnerCommissioner();

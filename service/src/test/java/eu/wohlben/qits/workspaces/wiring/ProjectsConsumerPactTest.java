@@ -50,7 +50,9 @@ public class ProjectsConsumerPactTest {
               (mockServer, context) -> {
                 row.call()
                     .run(
-                        HttpRepositoryLookupTest.lookupAgainst(mockServer.getUrl()),
+                        new ProjectsContract.Clients(
+                            HttpRepositoryLookupTest.lookupAgainst(mockServer.getUrl()),
+                            filerAgainst(mockServer.getUrl())),
                         GoldenMasters.params(row.state()));
                 return null;
               });
@@ -61,6 +63,23 @@ public class ProjectsConsumerPactTest {
     if (!failures.isEmpty()) {
       fail(failures.size() + " contract row(s) failed:\n  " + String.join("\n  ", failures));
     }
+  }
+
+  /** The shipped {@link HttpWorkFiler} with the real generated client, and no bearer. */
+  static HttpWorkFiler filerAgainst(String baseUrl) {
+    HttpWorkFiler filer = new HttpWorkFiler();
+    filer.projectsBearer =
+        new IdpProjectsBearer() {
+          @Override
+          public java.util.Optional<String> authorization() {
+            return java.util.Optional.empty();
+          }
+        };
+    filer.door =
+        io.quarkus.rest.client.reactive.QuarkusRestClientBuilder.newBuilder()
+            .baseUri(java.net.URI.create(baseUrl))
+            .build(ProjectsWork.class);
+    return filer;
   }
 
   private static String describe(PactVerificationResult result) {

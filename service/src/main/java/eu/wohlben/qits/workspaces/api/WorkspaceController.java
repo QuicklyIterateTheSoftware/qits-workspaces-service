@@ -2,15 +2,11 @@ package eu.wohlben.qits.workspaces.api;
 
 import eu.wohlben.qits.workspaces.control.WorkspaceProcessTracker;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
-import eu.wohlben.qits.workspaces.control.WorkspaceSubject;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
-import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.mapper.WorkspaceMapper;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
@@ -21,7 +17,6 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import java.util.List;
-import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -119,140 +114,9 @@ public class WorkspaceController {
     return new GetWorkspaceRequest.Response(workspaceService.getWorkspace(id));
   }
 
-  /**
-   * {@code repositoryId} rides in the body rather than the path or a query parameter: a create
-   * carries its scope in the payload, and the repository is not a filter on a POST.
-   *
-   * <p>{@code id} is the requested <em>label</em> (the path/container-name segment), not an
-   * identifier — the created workspace's identifier comes back in the response.
-   *
-   * <p>{@code adoptExisting} lets the workspace take over a branch that already exists (the
-   * branch-list "Create workspace" button on a workspaceless branch) instead of forking a new one;
-   * false for the normal "branch off" flow, which creates a fresh branch and 409s on a name
-   * collision. Either way the branch must have no active workspace already — it is the resource
-   * being claimed.
-   *
-   * <p>{@code admin} asks for the <b>admin posture</b>: the workspace's container is launched with
-   * the host's docker socket bound into it, so that platform administration can be done from inside
-   * the workspace. It is <b>off unless the request says otherwise</b> — a field absent from the body
-   * is an ordinary workspace, which is what every existing client sends — and it is decided here and
-   * never again: no route promotes an existing workspace, because the point of the posture is that
-   * the socket belongs to the few workspaces somebody deliberately created for it.
-   *
-   * <p>Who may ask is answered by this class's own {@code @RolesAllowed("qits:admin")}: creating any
-   * workspace already requires the platform admin role, and the socket is granted per workspace
-   * rather than per caller. A second role invented here would be a vocabulary the platform's idp
-   * does not issue and a gate nothing could pass. {@code qits:admin-agent} is admitted too
-   * (qits-628 follow-up); remove it here if this door must stay human-only.
-   *
-   * <p>{@code placement} is where the container runs (epic qits-624): {@code DIRECT} on the platform
-   * host, or {@code RUNNER} on a workspace runner's node. It is not a choice (qits-774): a regular
-   * workspace is always RUNNER and an admin workspace always DIRECT, so absent means exactly that,
-   * and a stated value may only agree. {@code RUNNER} with {@code admin} is a 400; {@code DIRECT}
-   * without it is a 400 {@code DIRECT_PLACEMENT_REFUSED} (the domain's refusal, answered in the
-   * usual {@code message}/{@code code} envelope). No eligible runner is not an error: the row is
-   * written RUNNER and waits QUEUED. Decided here and never changed.
-   */
-  public static record CreateWorkspaceRequest(
-      @NotBlank String repositoryId,
-      @NotBlank String id,
-      String parent,
-      String branch,
-      String preamble,
-      boolean adoptExisting,
-      boolean branchTree,
-      boolean admin,
-      WorkspacePlacement placement) {
-    /** The form before placement existed: the placement the rule answers. */
-    public CreateWorkspaceRequest(
-        String repositoryId,
-        String id,
-        String parent,
-        String branch,
-        String preamble,
-        boolean adoptExisting,
-        boolean branchTree,
-        boolean admin) {
-      this(repositoryId, id, parent, branch, preamble, adoptExisting, branchTree, admin, null);
-    }
-
-    /** The form before the admin posture existed: an ordinary, socket-free workspace. */
-    public CreateWorkspaceRequest(
-        String repositoryId,
-        String id,
-        String parent,
-        String branch,
-        String preamble,
-        boolean adoptExisting,
-        boolean branchTree) {
-      this(repositoryId, id, parent, branch, preamble, adoptExisting, branchTree, false, null);
-    }
-
-    /** Backward-compatible form used before aggregate wrapper workspaces were introduced. */
-    public CreateWorkspaceRequest(
-        String repositoryId,
-        String id,
-        String parent,
-        String branch,
-        String preamble,
-        boolean adoptExisting) {
-      this(repositoryId, id, parent, branch, preamble, adoptExisting, false, false, null);
-    }
-
-    /** Backward-compatible "branch off" form: create a new branch, never adopt an existing one. */
-    public CreateWorkspaceRequest(
-        String repositoryId, String id, String parent, String branch, String preamble) {
-      this(repositoryId, id, parent, branch, preamble, false, false, false, null);
-    }
-
-    /**
-     * The created workspace and the start the create ran on it. {@code technicalProcessId} is a
-     * DIRECT row's start, the same process {@code ensure-container} answers — follow it at {@code
-     * /workspaces/api/technical-processes/{technicalProcessId}/events}. It is null for a RUNNER row,
-     * which the create wrote QUEUED and whose runtime status is its progress, and null when the
-     * start was refused or no process tracker is installed. {@code startError} is null unless the
-     * start was refused after the row was written: the row exists all the same, so the refusal is
-     * reported here rather than as an error status that would say the create failed.
-     */
-    public record Response(WorkspaceDto workspace, String technicalProcessId, String startError) {
-      /** A create with no start: the shape before create started the workspace. */
-      public Response(WorkspaceDto workspace) {
-        this(workspace, null, null);
-      }
-    }
-  }
-
-  @POST
-  // The operationId is the name a consumer pact uses for this door as the TRIGGER of the calls it
-  // makes downstream (pacts/qits-workspaces-service_qits-projects-service.json,
-  // `qits-trigger`). Renaming it renames the trigger there.
-  //
-  // Creating a workspace starts it (qits-853), in WorkspaceService.createAndStartWorkspace: a RUNNER
-  // row is written QUEUED for a runner to take, a DIRECT row's container is started and the answer
-  // carries that start's process, so a client follows it and makes no second call. A start refused
-  // after the row exists answers 200 with the row and the refusal in startError — see the method.
-  @Operation(operationId = "createWorkspace")
-  public CreateWorkspaceRequest.Response create(@Valid CreateWorkspaceRequest request) {
-    var created =
-        workspaceService.createAndStartWorkspace(
-            request.repositoryId(),
-            request.id(),
-            request.parent(),
-            request.branch(),
-            request.preamble(),
-            request.adoptExisting(),
-            request.branchTree(),
-            request.admin(),
-            WorkspaceSubject.none(),
-            null,
-            request.placement());
-    // The thin view of the row as written, as before: a RUNNER row already reads QUEUED in it, and
-    // a DIRECT row's start is followed through the process, not through a re-read of the listing.
-    return new CreateWorkspaceRequest.Response(
-        workspaceMapper.toDto(created.workspace()),
-        created.technicalProcessId(),
-        created.startError());
-  }
+  // POST /workspaces (the ad-hoc create) is gone (qits-1152): a workspace is a slot the agent
+  // scheduler creates when an agent needs one. A person asks for an agent on a work item instead,
+  // POST /workspaces/api/agents (D24).
 
   public static record EnsureContainerRequest() {
     /**

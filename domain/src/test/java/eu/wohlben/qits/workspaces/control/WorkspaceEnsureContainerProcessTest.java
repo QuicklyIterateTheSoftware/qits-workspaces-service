@@ -349,44 +349,4 @@ public class WorkspaceEnsureContainerProcessTest {
     }
   }
 
-  /**
-   * qits-853 still holds: an ensure-container straight after the create joins the create's start —
-   * before its thread has marked the row PROVISIONING and while it is cloning — and the container is
-   * run once.
-   */
-  @Test
-  public void anEnsureRightAfterTheCreateJoinsTheCreatesStart() throws Exception {
-    provisioner.holdDirectRows();
-    String repoId = TestOrigin.create(dataDir);
-    repositories.register(repoId);
-    WorkspaceService.CreatedWorkspace created =
-        workspaceService.createAndStartWorkspace(
-            repoId,
-            "joined",
-            "master",
-            "joined",
-            null,
-            false,
-            false,
-            true,
-            WorkspaceSubject.none(),
-            null,
-            null);
-    Long id = created.workspace().id;
-    assertNotNull(created.technicalProcessId());
-
-    assertEquals(created.technicalProcessId(), workspaceService.beginEnsureContainer(id));
-    await(
-        () ->
-            provisioner.isHolding(id)
-                && persisted(id).runtimeStatus == WorkspaceRuntimeStatus.PROVISIONING,
-        "the create's start never reached its clone window");
-    assertEquals(created.technicalProcessId(), workspaceService.beginEnsureContainer(id));
-
-    provisioner.complete(id, ProvisionResult.ok(""));
-    assertEquals(
-        "ok", doneFrame(replayOf(awaitTerminal(created.technicalProcessId()))).status());
-    assertEquals(1, containers.runCount(containers.containerName("joined", repoId)));
-    assertEquals(WorkspaceRuntimeStatus.RUNNING, persisted(id).runtimeStatus);
-  }
 }

@@ -57,6 +57,7 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     tokensWired = true;
     tokenFailure = null;
     tokensMinted.clear();
+    agentTokensMinted.clear();
     tokensDeleted.clear();
     tokenGitRefUpdates.clear();
     synchronized (liveTokens) {
@@ -129,6 +130,48 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     synchronized (liveTokens) {
       return new ArrayList<>(liveTokens.keySet());
     }
+  }
+
+  /** The agent tokens minted (qits-1152), in order. */
+  public record MintedAgentToken(
+      String agentId, WorkspaceToken token, String projectId, List<String> gitRefs, String contextKind) {}
+
+  private final List<MintedAgentToken> agentTokensMinted = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+  public List<MintedAgentToken> agentTokensMinted() {
+    return List.copyOf(agentTokensMinted);
+  }
+
+  @Override
+  public Optional<WorkspaceToken> commissionAgentToken(
+      String agentId, String projectId, List<String> statedGitRefs, boolean admin) {
+    if (!tokensWired) {
+      return Optional.empty();
+    }
+    if (tokenFailure != null) {
+      throw tokenFailure;
+    }
+    int serial = tokenSerial.incrementAndGet();
+    WorkspaceToken token =
+        new WorkspaceToken(
+            "tok-id-agent-" + serial, "qits_tok_fakeagent" + serial, "tok-agent-" + agentId);
+    agentTokensMinted.add(
+        new MintedAgentToken(
+            agentId,
+            token,
+            projectId,
+            statedGitRefs == null ? null : List.copyOf(statedGitRefs),
+            CredentialCommissioner.contextKindFor(admin)));
+    synchronized (liveTokens) {
+      liveTokens.put(
+          token.tokenId(),
+          new TokenCommission(
+              token.tokenId(),
+              CredentialCommissioner.contextKindFor(admin),
+              CredentialCommissioner.AGENT_CONTEXT_PREFIX + agentId,
+              Instant.now()));
+    }
+    return Optional.of(token);
   }
 
   @Override

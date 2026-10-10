@@ -1,8 +1,8 @@
 package eu.wohlben.qits.workspaces.daemonhost;
 
+import eu.wohlben.qits.workspaces.control.AgentDaemon;
 import eu.wohlben.qits.workspaces.control.ContainerProxyPath;
 import eu.wohlben.qits.workspaces.control.EntityFacts;
-import eu.wohlben.qits.workspaces.control.WorkspaceAgentLauncher;
 import io.vertx.core.Future;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpMethod;
@@ -12,313 +12,142 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.SocketAddress;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 /**
- * The host's own client for a workspace-daemon's coding-agent surface — {@link
- * WorkspaceAgentLauncher} over the wire.
+ * The host's own client for a workspace daemon's agent worktrees — {@link AgentDaemon} over the
+ * wire ({@code agent-worktrees} on the daemon's HTTP API, qits-1152).
  *
  * <p><b>It reaches a daemon the way {@code ContainerProxyRoute} does: through its reverse tunnel,
- * and only that.</b> The direct {@code container:13338} fallback for daemons older than the tunnel
- * is gone (qits-780), so a daemon with no tunnel is simply unreachable and the caller asks again.
- * The tunnel's client is used and never a shared one, for the reason {@link
- * WorkspaceTunnels} spells out at length: an ephemeral port is reused, and a pooled connection
- * behind a shared client is how one workspace's request lands in another's container. The bearer is
- * this service's own peer credential, set rather than forwarded, because there is nobody to forward
- * one from — the caller here is a scheduler thread. And the authority is pinned to {@code
- * localhost:<daemon port>} exactly as the proxy's {@code hostRewrite} pins it, so the daemon cannot
- * tell whether a request arrived through the proxy or from the host itself — and must not be able
- * to.
+ * and only that.</b> The tunnel's own client is used and never a shared one ({@link
+ * WorkspaceTunnels} says why: an ephemeral port is reused, and a pooled connection behind a shared
+ * client is how one workspace's request lands in another's container). The bearer is this
+ * service's peer credential, and the authority is pinned to {@code localhost:<daemon port>}, as the
+ * proxy pins it. The path is the full proxied one ({@link ContainerProxyPath#base}), because that
+ * prefix is the daemon's own address.
  *
- * <p><b>It lives beside the tunnel rather than in {@code api/}.</b> Nothing here serves a route:
- * this is the host talking to a container, which is what {@code daemonhost} is. {@code
- * ContainerProxyRoute} is in {@code api/} because it is a route a browser hits; this has no caller
- * outside this process.
+ * <p><b>Each exchange is composed and awaited once</b> (2026-09-08): awaiting the response and then
+ * asking it for its body is two blocking steps with an event loop between them, and the body can
+ * have been delivered and dropped by the second.
  *
- * <p><b>Bodies are hand-built {@code JsonObject}s and read the same way</b>, matching the daemon's
- * own {@code CommandJson}: a handful of keys out and fewer read, against a native image that would otherwise
- * need a databind registration for a shape this small.
- *
- * <p><b>No row lookup at all</b>, unlike the proxy's: that one only says which absence a missing
- * tunnel is, so a browser can be told, and every absence reads the same to a poll.
+ * <p>Bodies are hand-built {@code JsonObject}s, matching the daemon's own JSON: a handful of keys,
+ * no databind registration for the native image.
  */
 @ApplicationScoped
-public class DaemonAgentClient implements WorkspaceAgentLauncher {
+public class DaemonAgentClient implements AgentDaemon {
 
   private static final Logger LOG = Logger.getLogger(DaemonAgentClient.class);
 
   /**
-   * The MCP scope every launch this service makes asks for. {@code ACTIONS} fails with an
-   * explanation — no service in the split serves that server — so there is one value to send.
+   * Which surface asked; the daemon requires one. {@code ticket.dispatch} is the key written for
+   * the agent a work item's dispatch starts (the vocabulary is the harness library's
+   * {@code AgentSurface}, which this classpath does not carry).
    */
-  private static final String SCOPE = "REPOSITORY";
+  static final String SURFACE = "ticket.dispatch";
 
-  /** Chat mode: the stream-json conversation, which is what a headless dispatch can drive. */
-  private static final String MODE = "CHAT";
+  /** Chat mode: the stream-json conversation, which is what a headless start can drive. */
+  static final String MODE = "CHAT";
 
-  /**
-   * Which surface asked, and the daemon <b>requires</b> it — a launch body without one is a 400.
-   *
-   * <p><b>It is a literal, and the value is not `workspace.chat`.</b> The vocabulary lives in the
-   * harness library the daemon carries (`AgentSurface`) and nothing on this classpath declares it,
-   * so the string is spelled here; the key is the one written for exactly this caller — "the agent a
-   * ticket dispatch starts in a freshly cut workspace". Sending `workspace.chat` instead would work
-   * and would be a lie: it is the SPA's chat tab's key, and a configuration given to one surface
-   * would then be given to the other.
-   *
-   * <p><b>This client sent no surface at all for one release, and every launch it made was a 400.</b>
-   * qits-workspace-daemon 2026.909.125238 removed the guess that had been inferring a surface from
-   * the request's shape — the crutch that let the daemons ship before their callers — and this
-   * caller predated the removal, so ticket dispatch cut a workspace, brought a container up and
-   * launched nothing. A refused launch is never retried, so nothing recovered it. There is no
-   * absent-is-supported reading available here: the field is mandatory, and the whole point of it
-   * being mandatory is that a launch site cannot quietly omit it.
-   */
-  private static final String SURFACE = "ticket.dispatch";
+  static final String BASE = "agent-worktrees";
 
   @Inject WorkspaceTunnels tunnels;
 
-  /** The bearer the daemon requires; the same value {@code WorkspaceContainerFactory} injects. */
   @ConfigProperty(name = "qits.workspace.daemon-api-token", defaultValue = "qits-workspace-daemon")
   String daemonApiToken;
 
-  /**
-   * How long one call to a daemon may take. Short: both calls are local to the host or one hop down
-   * a loopback tunnel, and the caller polls — a request that hangs is worse than one that is retried
-   * two seconds later.
-   */
-  @ConfigProperty(
-      name = "qits.workspace.agent-dispatch.request-timeout-ms",
-      defaultValue = "10000")
+  /** One daemon call's bound; a start creates worktrees, so it is not short. */
+  @ConfigProperty(name = "qits.workspace.agent-dispatch.request-timeout-ms", defaultValue = "30000")
   long requestTimeoutMs;
 
-  /**
-   * How long the blocked-marker call may take — shorter than {@link #requestTimeoutMs}, on purpose.
-   * {@link #setBlocked} never ensures a container and never waits for one: its caller ({@link
-   * DispatchService#markBlocked}) asks once, immediately, and a daemon that is slow to answer a
-   * cosmetic rename is not worth holding qits-projects' request open for as long as a launch or a
-   * turn delivery is.
-   */
-  @ConfigProperty(
-      name = "qits.workspace.agent-dispatch.blocked-timeout-ms",
-      defaultValue = "5000")
-  long blockedTimeoutMs;
-
-  /**
-   * {@code GET /commands?status=RUNNING} — one question, answered by whether any of them is an
-   * agent's.
-   *
-   * <p><b>A CHAT command counts as an agent run even with no session lineage yet.</b> {@code
-   * agentSessions} is the lineage the SPA reads to badge a run as agent-driven, and it is the right
-   * signal for a run that has been going for a while — but it is populated from the harness's first
-   * {@code SessionStart}, which arrives some seconds after the launch. Reading lineage alone would
-   * leave a window in which a just-launched agent looks like nothing at all, and a re-press landing
-   * in that window would put a second agent on the same checkout. The kind is known at launch, so
-   * it closes the window; the lineage is kept beside it for a run whose kind an older daemon does
-   * not report.
-   */
   @Override
-  public AgentState agentState(Long workspaceRowId) {
-    Route route = route(workspaceRowId);
-    if (route == null) {
-      return AgentState.UNREACHABLE;
-    }
-    Answer answer = send(route, HttpMethod.GET, "commands?status=RUNNING", null);
-    if (answer == null || answer.status() != 200) {
-      return AgentState.UNREACHABLE;
-    }
-    return anyAgentRunning(answer.body()) ? AgentState.RUNNING : AgentState.IDLE;
+  public boolean reachable(Long workspaceRowId) {
+    return route(workspaceRowId) != null;
   }
 
-  /**
-   * {@code POST /agents} — the launch, with the instruction as the seed turn.
-   *
-   * <p><b>The body names its {@link #SURFACE} and the daemon refuses one that does not.</b> See that
-   * constant for why the value is {@code ticket.dispatch} and what a release without it cost.
-   *
-   * <p><b>{@code deliverTaskPrompt} is false and must stay false.</b> True seeds the session with an
-   * instruction to fetch the real prompt through an MCP tool named {@code taskPrompt}, and that tool
-   * is implemented nowhere on the platform — the agent would be told to call something that does not
-   * exist and would sit there. The SPA's own client carries the same rule in the same words; this is
-   * the second caller of that API and it makes the same promise.
-   *
-   * <p><b>The answer is read for the command it started</b> (qits-895): {@code {"command": {"id":
-   * …, …}}}, the daemon's {@code AgentJson.launched}, which is the commands routes' own shape. The
-   * id is what tells the dispatched agent apart from a person's other sessions in the workspace,
-   * and {@link DispatchService} keeps it on the row. A 2xx whose body names no command is still an
-   * accepted launch — see {@link Launch}.
-   */
   @Override
-  public Launch launch(Long workspaceRowId, String instruction) {
+  public Started start(Long workspaceRowId, Start start) {
     Route route = route(workspaceRowId);
     if (route == null) {
-      return Launch.REFUSED;
+      return Started.of(Outcome.UNREACHABLE, "the daemon is not connected");
+    }
+    JsonObject env = new JsonObject();
+    if (start.env() != null) {
+      for (Map.Entry<String, String> entry : start.env().entrySet()) {
+        if (entry.getValue() != null) {
+          env.put(entry.getKey(), entry.getValue());
+        }
+      }
     }
     JsonObject body =
         new JsonObject()
-            .put("scope", SCOPE)
+            .put("agentId", start.agentId())
+            .put("workId", start.workId())
+            .put("entityId", start.entityId())
+            .put("wrapperBranch", start.wrapperBranch())
+            .put("harness", start.harness())
+            .put("env", env)
             .put("surface", SURFACE)
-            .put("mode", MODE)
-            .put("initialContext", instruction == null ? "" : instruction)
-            .put("deliverTaskPrompt", false);
-    Answer answer = send(route, HttpMethod.POST, "agents", body);
+            .put("mode", MODE);
+    if (start.sessionId() != null) {
+      body.put("sessionId", start.sessionId());
+    }
+    if (start.instruction() != null) {
+      body.put("instruction", start.instruction());
+    }
+    EntityFacts facts = start.facts();
+    if (facts != null) {
+      body.put("entityTitle", facts.title())
+          .put("entityStatus", facts.status())
+          .put("entityBlocked", facts.blocked());
+    }
+    if (start.blockSource() != null) {
+      body.put("blockSource", start.blockSource());
+    }
+    Answer answer = send(route, HttpMethod.POST, BASE, body);
     if (answer == null) {
-      return Launch.REFUSED;
+      return Started.of(Outcome.UNREACHABLE, "the daemon did not answer");
+    }
+    if (answer.status() == 409) {
+      return Started.of(Outcome.REFUSED, answer.body());
     }
     if (answer.status() < 200 || answer.status() >= 300) {
       LOG.warnf(
-          "workspace %s's daemon answered %s to an agent launch",
-          workspaceRowId, Integer.valueOf(answer.status()));
-      return Launch.REFUSED;
+          "workspace %s's daemon answered %s to starting agent %s: %s",
+          workspaceRowId, Integer.valueOf(answer.status()), start.agentId(), answer.body());
+      return Started.of(
+          answer.status() >= 500 ? Outcome.UNREACHABLE : Outcome.REFUSED, answer.body());
     }
-    String commandId = launchedCommandId(answer.body());
-    if (commandId == null) {
-      LOG.warnf(
-          "workspace %s's daemon accepted an agent launch without naming its command; that agent's"
-              + " waiting state will not be relayed",
-          workspaceRowId);
-    }
-    return Launch.accepted(commandId);
+    JsonObject json = json(answer.body());
+    return new Started(
+        Outcome.OK,
+        json == null ? null : blankToNull(json.getString("commandId")),
+        json == null ? null : blankToNull(json.getString("sessionId")),
+        json != null && Boolean.TRUE.equals(json.getBoolean("resumed")),
+        null);
   }
 
-  /**
-   * {@code command.id} out of a launch's answer, or null when the body is not JSON or names none —
-   * the same honest "nothing known" {@link #delivered} reads off a body nobody can read.
-   */
-  static String launchedCommandId(String body) {
-    try {
-      JsonObject command = new JsonObject(body).getJsonObject("command");
-      String id = command == null ? null : command.getString("id");
-      return id == null || id.isBlank() ? null : id;
-    } catch (RuntimeException notJson) {
-      return null;
-    }
-  }
-
-  /**
-   * {@code POST /agents/turn} — <b>say this to whoever is running</b>, the same thing a person types
-   * into the chat tab.
-   *
-   * <p><b>The body is one key and the answer is read for one.</b> {@code {"text": …}} out; {@code
-   * {"delivered": <bool>, "commandId": …, "kind": …}} back, and only {@code delivered} is acted on —
-   * the command id and the kind are there for a reader, and this caller has nobody to show them to.
-   * A daemon with nothing running answers 200 and {@code delivered:false} with a reason, which is
-   * why the status alone is not the answer.
-   *
-   * <p><b>A non-2xx is NOT_DELIVERED and not UNREACHABLE, and the distinction is the caller's whole
-   * retry story.</b> {@link DeliveryOutcome#UNREACHABLE} means "ask again in a moment" — a container
-   * still starting — so a daemon that answered 404 (an image older than this route) or 400 would be
-   * polled until the launch window closed, every couple of seconds, for nothing. A daemon that
-   * answered has said what it has to say.
-   *
-   * <p>Blank text is refused here rather than at the daemon: it is a 400 there, and there is no
-   * reason to spend a round trip discovering that the host built an empty turn.
-   */
   @Override
-  public DeliveryOutcome deliver(Long workspaceRowId, String text) {
+  public Outcome yield(Long workspaceRowId, String agentId) {
+    return simple(workspaceRowId, HttpMethod.POST, path(agentId, "yield"), new JsonObject());
+  }
+
+  @Override
+  public Outcome turn(Long workspaceRowId, String agentId, String text) {
     if (text == null || text.isBlank()) {
-      LOG.warnf("refusing to deliver a blank turn to workspace %s", workspaceRowId);
-      return DeliveryOutcome.NOT_DELIVERED;
+      return Outcome.REFUSED;
     }
-    Route route = route(workspaceRowId);
-    if (route == null) {
-      return DeliveryOutcome.UNREACHABLE;
-    }
-    Answer answer = send(route, HttpMethod.POST, "agents/turn", new JsonObject().put("text", text));
-    if (answer == null) {
-      return DeliveryOutcome.UNREACHABLE;
-    }
-    if (answer.status() != 200) {
-      LOG.warnf(
-          "workspace %s's daemon answered %s to a delivered turn",
-          workspaceRowId, Integer.valueOf(answer.status()));
-      return DeliveryOutcome.NOT_DELIVERED;
-    }
-    return delivered(answer.body()) ? DeliveryOutcome.DELIVERED : DeliveryOutcome.NOT_DELIVERED;
+    return simple(
+        workspaceRowId, HttpMethod.POST, path(agentId, "turn"), new JsonObject().put("text", text));
   }
 
-  /**
-   * {@code POST /agents/blocked} — <b>rename the session</b>, never launch one.
-   *
-   * <p><b>No ensure, no wait, no fallback.</b> Every other verb here is written around a container
-   * that might still be coming up — {@link #launch} and {@link #deliver} are reached only after
-   * {@link DispatchService} has ensured one and waited for the daemon to answer. This one is not:
-   * {@link DispatchService#markBlocked} calls straight through, and a daemon this is not currently
-   * reachable through is simply {@code false} — never a reason to start anything. A {@code ❗ }
-   * marker is worth a rename and never worth a cold image pull.
-   *
-   * <p><b>A non-2xx — including the 404 an older daemon image answers, this route not existing on
-   * it yet — is {@code false} and logged no louder than DEBUG here.</b> {@link
-   * DispatchService#markBlocked} is the one place that turns a false into the WARN qits-projects'
-   * caller sees: there is no wait and no retry behind this call, so that is the single line the
-   * whole attempt gets, and logging twice would double it for no reason.
-   */
   @Override
-  public boolean setBlocked(Long workspaceRowId, boolean blocked) {
-    Route route = route(workspaceRowId);
-    if (route == null) {
-      return false;
-    }
-    Answer answer =
-        send(
-            route,
-            HttpMethod.POST,
-            "agents/blocked",
-            new JsonObject().put("blocked", blocked),
-            blockedTimeoutMs);
-    if (answer == null) {
-      return false;
-    }
-    if (answer.status() < 200 || answer.status() >= 300) {
-      LOG.debugf(
-          "workspace %s's daemon answered %s to a blocked-marker update",
-          workspaceRowId, Integer.valueOf(answer.status()));
-      return false;
-    }
-    return true;
-  }
-
-  /**
-   * {@code POST /agents/entity} — <b>rename the sessions after the subject as it is now</b>: {@code
-   * {"title": …, "status": …, "blocked": …}}, title and status null when unknown (qits-617).
-   * {@link #setBlocked}'s successor, under its rules and its shorter {@link #blockedTimeoutMs}: no
-   * ensure, no wait, a non-2xx is {@code false} at DEBUG.
-   *
-   * <p><b>A 404 OR A 405 falls back to {@code POST /agents/blocked}</b> — the route an older daemon
-   * image does carry, so a container that has not been recreated onto a daemon that knows {@code
-   * /entity} still gets the {@code ❗} right. 404 is the straightforward absence; 405 is the same
-   * absence read a different way, measured live on 2026-10-01 against daemon 2026.1001.72420: its
-   * {@code /agents/*} router rejects a method it does not recognise for a sub-path before it ever
-   * resolves the path, so an old daemon answers {@code POST /agents/entity} with 405 rather than 404.
-   * Treating only 404 as "this daemon predates {@code /agents/entity}" left every such container
-   * falling through to the non-2xx branch below instead of the fallback, which is why qits-projects
-   * logged "did not take the subject facts" for a daemon that was in fact reachable and willing to
-   * take the blocked flag alone (qits-617). Any other refusal is a daemon that has the route and said
-   * no, and asking it a narrower question would not change its mind. Each container asks again on
-   * every relay, rather than remembering which daemons are old, because a recreate can upgrade one
-   * between two relays under the same row id.
-   */
-  @Override
-  public boolean setEntity(Long workspaceRowId, EntityFacts facts) {
-    return setEntity(workspaceRowId, facts, null);
-  }
-
-  /**
-   * {@link #setEntity(Long, EntityFacts)}, adding {@code blockSource} (qits-895) to the body when
-   * it is not null — the effective block's source, carried live only: it never reaches {@link
-   * EntityFacts} and so never the row and never the container's environment. The 404/405 fallback
-   * is unchanged and carries only the flag, exactly as {@link #setEntity(Long, EntityFacts)} always
-   * did.
-   */
-  @Override
-  public boolean setEntity(Long workspaceRowId, EntityFacts facts, String blockSource) {
-    Route route = route(workspaceRowId);
-    if (route == null) {
-      return false;
-    }
+  public Outcome entity(Long workspaceRowId, String agentId, EntityFacts facts, String blockSource) {
     JsonObject body =
         new JsonObject()
             .put("title", facts.title())
@@ -327,50 +156,98 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
     if (blockSource != null) {
       body.put("blockSource", blockSource);
     }
-    Answer answer = send(route, HttpMethod.POST, "agents/entity", body, blockedTimeoutMs);
+    return simple(workspaceRowId, HttpMethod.POST, path(agentId, "entity"), body);
+  }
+
+  @Override
+  public Optional<CleanupCheck> cleanupCheck(Long workspaceRowId, String agentId) {
+    Route route = route(workspaceRowId);
+    if (route == null) {
+      return Optional.empty();
+    }
+    Answer answer = send(route, HttpMethod.GET, path(agentId, "cleanup-check"), null);
+    if (answer == null || answer.status() != 200) {
+      return Optional.empty();
+    }
+    return Optional.ofNullable(cleanupCheckOf(json(answer.body())));
+  }
+
+  @Override
+  public Outcome remove(Long workspaceRowId, String agentId, boolean force) {
+    return simple(
+        workspaceRowId, HttpMethod.DELETE, path(agentId, null) + (force ? "?force=true" : ""), null);
+  }
+
+  /** The cleanup check's body, or null when it is not one. Package-private for its test. */
+  static CleanupCheck cleanupCheckOf(JsonObject json) {
+    if (json == null || json.getValue("clean") == null) {
+      return null;
+    }
+    List<String> dirty = new ArrayList<>();
+    JsonArray dirtyArray = json.getJsonArray("dirty");
+    if (dirtyArray != null) {
+      for (int i = 0; i < dirtyArray.size(); i++) {
+        dirty.add(String.valueOf(dirtyArray.getValue(i)));
+      }
+    }
+    List<CleanupCheck.Unpushed> unpushed = new ArrayList<>();
+    JsonArray unpushedArray = json.getJsonArray("unpushed");
+    if (unpushedArray != null) {
+      for (int i = 0; i < unpushedArray.size(); i++) {
+        JsonObject entry = unpushedArray.getJsonObject(i);
+        if (entry == null) {
+          continue;
+        }
+        Integer commits = entry.getInteger("commits");
+        unpushed.add(
+            new CleanupCheck.Unpushed(
+                entry.getString("repository"),
+                entry.getString("branch"),
+                commits == null ? 0 : commits));
+      }
+    }
+    return new CleanupCheck(Boolean.TRUE.equals(json.getBoolean("clean")), dirty, unpushed);
+  }
+
+  private Outcome simple(Long workspaceRowId, HttpMethod method, String path, JsonObject body) {
+    Route route = route(workspaceRowId);
+    if (route == null) {
+      return Outcome.UNREACHABLE;
+    }
+    Answer answer = send(route, method, path, body);
     if (answer == null) {
-      return false;
+      return Outcome.UNREACHABLE;
     }
-    if (answer.status() == 404 || answer.status() == 405) {
+    int status = answer.status();
+    if (status >= 200 && status < 300) {
+      return Outcome.OK;
+    }
+    if (status == 404) {
+      return Outcome.UNKNOWN_AGENT;
+    }
+    if (status >= 500) {
       LOG.debugf(
-          "workspace %s's daemon has no agents/entity route (status %s); telling it the blocked"
-              + " flag alone",
-          workspaceRowId, Integer.valueOf(answer.status()));
-      return setBlocked(workspaceRowId, facts.blocked());
+          "workspace %s's daemon answered %s to %s %s", workspaceRowId, Integer.valueOf(status), method, path);
+      return Outcome.UNREACHABLE;
     }
-    if (answer.status() < 200 || answer.status() >= 300) {
-      LOG.debugf(
-          "workspace %s's daemon answered %s to a subject-facts update",
-          workspaceRowId, Integer.valueOf(answer.status()));
-      return false;
-    }
-    return true;
+    LOG.debugf(
+        "workspace %s's daemon refused %s %s with %s: %s",
+        workspaceRowId, method, path, Integer.valueOf(status), answer.body());
+    return Outcome.REFUSED;
   }
 
-  /**
-   * Whether the daemon said it gave the turn to an agent. An unparseable body reads as not
-   * delivered: the only honest answer about a body nobody can read is that nothing is known to have
-   * happened, and this caller's fallback for that is a launch, not a retry.
-   */
-  private static boolean delivered(String body) {
-    try {
-      return Boolean.TRUE.equals(new JsonObject(body).getBoolean("delivered"));
-    } catch (RuntimeException notJson) {
-      return false;
-    }
+  private static String path(String agentId, String verb) {
+    return BASE + "/" + agentId + (verb == null ? "" : "/" + verb);
   }
 
-  /** Where a daemon is and which client may target it. Null when it is not reachable at all. */
   private record Route(Long workspaceRowId, HttpClient client, String host, int port) {}
 
-  /** One answered request. */
   private record Answer(int status, String body) {}
 
-  /**
-   * The daemon's reverse tunnel, or null when it holds none — the only route there is (qits-780).
-   * This caller acts the same on every absence: it waits and asks again.
-   */
   private Route route(Long workspaceRowId) {
+    if (workspaceRowId == null) {
+      return null;
+    }
     Optional<WorkspaceTunnels.TunnelOrigin> tunnel = tunnels.originFor(workspaceRowId);
     if (tunnel.isEmpty()) {
       LOG.debugf("workspace %s's daemon is not connected", workspaceRowId);
@@ -379,39 +256,7 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
     return new Route(workspaceRowId, tunnel.get().client(), "127.0.0.1", tunnel.get().port());
   }
 
-  /**
-   * One request to a daemon, blocking.
-   *
-   * <p>{@code setServer} is where we connect and {@code setHost}/{@code setPort} are what we claim
-   * to be calling — which is how the authority stays {@code localhost:<daemon port>} whichever
-   * loopback port the tunnel bound. The path is the FULL proxied one ({@link
-   * ContainerProxyPath#base}), because that prefix is the daemon's own address:
-   * {@code WorkspaceContainerFactory} injected it at container creation, and the proxy forwards
-   * paths verbatim for exactly this reason. A client that posted a bare {@code /agents} would 404
-   * against every container this service ever made.
-   *
-   * <p><b>The whole exchange is composed and awaited ONCE, and that is not style.</b> Awaiting the
-   * response and then asking it for its body is two blocking steps with an event loop running
-   * between them — and by the time the second one is reached the response may already have been
-   * delivered and dropped, so {@code body()} never completes and the call sits on its timeout
-   * instead of answering. Measured here on 2026-09-08, as a request that took exactly {@code
-   * requestTimeoutMs} and then reported the daemon unreachable while the daemon had in fact
-   * answered. Composing keeps every step on the event loop and leaves one thing to block on.
-   *
-   * <p>Blocking, so it must be called off the event loop. Its callers are the dispatch door's
-   * request thread and its wait thread; neither is one.
-   */
   private Answer send(Route route, HttpMethod method, String path, JsonObject body) {
-    return send(route, method, path, body, requestTimeoutMs);
-  }
-
-  /**
-   * The same exchange, taking its own timeout rather than {@link #requestTimeoutMs} — {@link
-   * #setBlocked} is the one caller that needs a shorter one, for the reason {@link
-   * #blockedTimeoutMs} carries.
-   */
-  private Answer send(
-      Route route, HttpMethod method, String path, JsonObject body, long timeoutMs) {
     RequestOptions options =
         new RequestOptions()
             .setMethod(method)
@@ -419,7 +264,7 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
             .setHost("localhost")
             .setPort(Integer.valueOf(ContainerProxyPath.DAEMON_API_PORT))
             .setURI(ContainerProxyPath.base(route.workspaceRowId()) + path)
-            .setTimeout(timeoutMs);
+            .setTimeout(requestTimeoutMs);
     try {
       return await(
           route
@@ -427,8 +272,6 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
               .request(options)
               .compose(
                   request -> {
-                    // Peer authentication between qits and the container: set, never forwarded.
-                    // There is nothing to forward here anyway — no caller is holding this open.
                     request.putHeader("Authorization", "Bearer " + daemonApiToken);
                     if (body == null) {
                       return request.send();
@@ -441,7 +284,7 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
                       response
                           .body()
                           .map(buffer -> new Answer(response.statusCode(), buffer.toString()))),
-          timeoutMs);
+          requestTimeoutMs);
     } catch (RuntimeException e) {
       LOG.debugf(
           e, "workspace %s's daemon did not answer %s %s", route.workspaceRowId(), method, path);
@@ -449,29 +292,16 @@ public class DaemonAgentClient implements WorkspaceAgentLauncher {
     }
   }
 
-  /** Whether the daemon's running-command list holds one that an agent is driving. */
-  private static boolean anyAgentRunning(String body) {
-    JsonArray entries;
+  private static JsonObject json(String body) {
     try {
-      entries = new JsonObject(body).getJsonArray("entries");
+      return body == null || body.isBlank() ? null : new JsonObject(body);
     } catch (RuntimeException notJson) {
-      return false;
+      return null;
     }
-    if (entries == null) {
-      return false;
-    }
-    for (int i = 0; i < entries.size(); i++) {
-      JsonObject entry = entries.getJsonObject(i);
-      JsonObject command = entry == null ? null : entry.getJsonObject("command");
-      if (command == null || !"RUNNING".equals(command.getString("status"))) {
-        continue;
-      }
-      JsonArray sessions = command.getJsonArray("agentSessions");
-      if ("CHAT".equals(command.getString("kind")) || (sessions != null && !sessions.isEmpty())) {
-        return true;
-      }
-    }
-    return false;
+  }
+
+  private static String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
   }
 
   private <T> T await(Future<T> future, long timeoutMs) {

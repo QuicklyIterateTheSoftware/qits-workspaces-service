@@ -6,7 +6,12 @@ import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes;
 import eu.wohlben.qits.workspaces.control.WorkspaceRunners;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
+import eu.wohlben.qits.workspaces.entity.AgentRunState;
+import eu.wohlben.qits.workspaces.entity.AgentState;
+import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
+import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
@@ -71,12 +76,11 @@ public class ProviderStates {
   public static final String NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE =
       "no work item has an open workspace";
 
-  public static final String A_REPOSITORY_WITH_A_BRANCH_FOR_A_TICKET =
-      "a repository with a branch for a ticket";
-  public static final String A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH =
-      "a workspace standing on a ticket's branch";
-  public static final String A_WORKSPACE_STANDING_ON_A_RELEASED_BRANCH =
-      "a workspace standing on a released branch";
+  // The agent states (qits-1152), named as qits-projects' consumer pact names them.
+  public static final String A_TICKET_TO_DISPATCH = "a wrapper repository and a ticket to dispatch";
+  public static final String AGENTS_BOUND_TO_WORK_ITEMS = "a project with agents bound to work items";
+  public static final String AN_AGENT_ON_A_TICKET = "an agent working on a ticket";
+  public static final String AN_AGENT_ON_A_RELEASED_BRANCH = "an agent owning a released branch";
   public static final String REPOSITORIES_WITH_MERGED_BRANCHES =
       "repositories with merged branches";
   public static final String A_CONFIGURED_WORKSPACE_IMAGE = "a configured workspace image";
@@ -123,6 +127,9 @@ public class ProviderStates {
   /** A hand-made workspace's label: bound to no work item, so no open list shows it. */
   private static final String HAND_MADE_LABEL = "contract-hand-made";
 
+  /** The label of the slot workspace the agent states seed. */
+  private static final String SLOT_LABEL = "ws-contract";
+
   /**
    * What a state answers.
    *
@@ -133,6 +140,8 @@ public class ProviderStates {
   public record Setup(Map<String, String> params, List<Long> rowIds) {}
 
   @Inject WorkspaceRepository workspaces;
+  @Inject AgentWorktreeRepository agentRows;
+  @Inject AgentBranchRepository agentBranches;
   @Inject WorkspaceService workspaceService;
   @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceRunners runners;
@@ -152,9 +161,10 @@ public class ProviderStates {
         A_PROJECT_WITH_WORKSPACES_BOUND_TO_WORK_ITEMS,
         A_WORK_ITEM_WITH_NO_WORKSPACES,
         NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE,
-        A_REPOSITORY_WITH_A_BRANCH_FOR_A_TICKET,
-        A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH,
-        A_WORKSPACE_STANDING_ON_A_RELEASED_BRANCH,
+        A_TICKET_TO_DISPATCH,
+        AGENTS_BOUND_TO_WORK_ITEMS,
+        AN_AGENT_ON_A_TICKET,
+        AN_AGENT_ON_A_RELEASED_BRANCH,
         REPOSITORIES_WITH_MERGED_BRANCHES,
         A_CONFIGURED_WORKSPACE_IMAGE,
         NO_RUNNERS,
@@ -173,9 +183,10 @@ public class ProviderStates {
       case A_PROJECT_WITH_WORKSPACES_BOUND_TO_WORK_ITEMS -> boundToWorkItems();
       case A_WORK_ITEM_WITH_NO_WORKSPACES -> new Setup(params(), List.of());
       case NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE -> noOpenWorkspace();
-      case A_REPOSITORY_WITH_A_BRANCH_FOR_A_TICKET -> branchForATicket();
-      case A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH -> standingOnATicketsBranch();
-      case A_WORKSPACE_STANDING_ON_A_RELEASED_BRANCH -> standingOnAReleasedBranch();
+      case A_TICKET_TO_DISPATCH -> ticketToDispatch();
+      case AGENTS_BOUND_TO_WORK_ITEMS -> agentsBoundToWorkItems();
+      case AN_AGENT_ON_A_TICKET -> agentOnATicket();
+      case AN_AGENT_ON_A_RELEASED_BRANCH -> agentOwningAReleasedBranch();
       case REPOSITORIES_WITH_MERGED_BRANCHES -> mergedBranches();
       case A_CONFIGURED_WORKSPACE_IMAGE -> new Setup(new TreeMap<>(), List.of());
       case NO_RUNNERS -> noRunners();
@@ -193,6 +204,10 @@ public class ProviderStates {
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
+              // Agents first: they name their workspace (and cascade their pushed branches).
+              agentRows.delete("workId in ?1", List.copyOf(WORK_IDS));
+              workspaces.delete(
+                  "repositoryId = ?1 and workspaceId = ?2", WRAPPER_REPOSITORY_ID, SLOT_LABEL);
               workspaces.delete("workId in ?1", List.copyOf(WORK_IDS));
               workspaces.delete(
                   "repositoryId = ?1 and workspaceId = ?2",
@@ -341,74 +356,6 @@ public class ProviderStates {
     return new Setup(params(), List.copyOf(ids));
   }
 
-  /** The bug ticket's id, its qualified id and the branch a dispatch for it names. */
-  private static Map<String, String> ticketParams(String repositoryId) {
-    Map<String, String> params = new TreeMap<>();
-    params.put("branch", TICKET_BRANCH);
-    params.put("repositoryId", repositoryId);
-    params.put("ticketId", BUG_TICKET_ID);
-    params.put("ticketQualifiedId", "contract-00000001-10");
-    return params;
-  }
-
-  /**
-   * A repository with a git origin and no workspace: a dispatch for the bug ticket creates one on
-   * {@link #TICKET_BRANCH}. Its container is the fake runtime's and no daemon ever answers, so the
-   * answer is a fresh workspace with the launch {@code SCHEDULED}.
-   */
-  private Setup branchForATicket() {
-    // A fresh dispatch's row is RUNNER, and queueing it needs a public domain (the edge plane).
-    QuarkusMock.installMockForType(
-        WorkspaceRunnerAddressesFixture.planesWithDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
-        WorkspaceAddressPlanes.class);
-    buildOrigins();
-    deleteOriginBranch(DISPATCH_REPOSITORY_ID, TICKET_BRANCH);
-    return new Setup(ticketParams(DISPATCH_REPOSITORY_ID), List.of());
-  }
-
-  /**
-   * The bug ticket's ACTIVE workspace on {@link #TICKET_BRANCH} of the wrapper, QUEUED for a
-   * workspace runner: a turn waits for one, and the subject's facts are stored on the row while no
-   * daemon takes them live.
-   */
-  private Setup standingOnATicketsBranch() {
-    List<Long> ids = new ArrayList<>();
-    QuarkusTransaction.requiringNew()
-        .run(
-            () ->
-                ids.add(
-                    write(
-                        BUG_TICKET_ID,
-                        "contract-00000001-10",
-                        TICKET_BRANCH,
-                        WorkspaceStatus.ACTIVE,
-                        WorkspaceRuntimeStatus.QUEUED)));
-    return new Setup(ticketParams(WRAPPER_REPOSITORY_ID), List.copyOf(ids));
-  }
-
-  /** An ACTIVE workspace forked off {@code master} on {@link #TICKET_BRANCH}, which a release took. */
-  private Setup standingOnAReleasedBranch() {
-    buildOrigins();
-    List<Long> ids = new ArrayList<>();
-    String label = WorkspaceService.toWorkspaceSlug(TICKET_BRANCH);
-    workspaceService.createWorkspace(
-        RELEASED_REPOSITORY_ID, label, "master", TICKET_BRANCH, null, true, false, true);
-    QuarkusTransaction.requiringNew()
-        .run(
-            () ->
-                ids.add(
-                    workspaces
-                        .findActiveByRepositoryAndBranch(RELEASED_REPOSITORY_ID, TICKET_BRANCH)
-                        .orElseThrow()
-                        .id));
-    Map<String, String> params = new TreeMap<>();
-    params.put("branch", TICKET_BRANCH);
-    params.put("repositoryId", RELEASED_REPOSITORY_ID);
-    params.put("sha", RELEASED_SHA);
-    params.put("version", RELEASED_VERSION);
-    return new Setup(params, List.copyOf(ids));
-  }
-
   /**
    * A repository whose origin holds {@code master}, a diverged {@code feature} and {@link
    * #MERGED_BRANCH}, whose tip is {@code master}'s: a sweep removes that one.
@@ -425,6 +372,133 @@ public class ProviderStates {
     params.put("repositoryId", SWEPT_REPOSITORY_ID);
     params.put("repositoryName", "contract-service");
     return new Setup(params, List.of());
+  }
+
+  // --- agents (qits-1152) -------------------------------------------------------------------------
+
+  static final String AGENT_ACTIVE_ID = "00000000-0000-4000-8000-0000000000a1";
+  static final String AGENT_OBSOLETE_ID = "00000000-0000-4000-8000-0000000000a2";
+  static final String AGENT_REMOVED_ID = "00000000-0000-4000-8000-0000000000a3";
+  static final String WRAPPER_BRANCH = "ticket/contract-00000001-10";
+  static final String PUSHED_BRANCH = WRAPPER_BRANCH + "-totals";
+
+  /** A wrapper repository and a ticket nobody dispatched yet; no runner, so a dispatch queues. */
+  private Setup ticketToDispatch() {
+    // An agent's credential is minted only where it can be spent: through an edge plane.
+    QuarkusMock.installMockForType(
+        WorkspaceRunnerAddressesFixture.planesWithDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
+        WorkspaceAddressPlanes.class);
+    buildOrigins();
+    Map<String, String> params = new TreeMap<>();
+    params.put("repositoryId", DISPATCH_REPOSITORY_ID);
+    params.put("ticketId", BUG_TICKET_ID);
+    params.put("ticketQualifiedId", "contract-00000001-10");
+    params.put("wrapperBranch", WRAPPER_BRANCH);
+    return new Setup(params, List.of());
+  }
+
+  /** The bug ticket's agents in every state: ACTIVE in a slot (with a pushed branch), OBSOLETE, REMOVED. */
+  private Setup agentsBoundToWorkItems() {
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Long slot = slot(WorkspaceRuntimeStatus.RUNNING);
+              ids.add(slot);
+              agent(AGENT_REMOVED_ID, slot, AgentState.REMOVED, AgentRunState.YIELDED);
+              agent(AGENT_OBSOLETE_ID, slot, AgentState.OBSOLETE, AgentRunState.YIELDED);
+              agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
+              agentBranches.upsert(
+                  UUID.fromString(AGENT_ACTIVE_ID),
+                  RELEASED_REPOSITORY_ID,
+                  PUSHED_BRANCH,
+                  RELEASED_SHA,
+                  Instant.now());
+            });
+    Map<String, String> params = new TreeMap<>();
+    params.put("bugTicketId", BUG_TICKET_ID);
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /** One ACTIVE agent on the bug ticket, holding a slot that waits for a runner. */
+  private Setup agentOnATicket() {
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Long slot = slot(WorkspaceRuntimeStatus.QUEUED);
+              ids.add(slot);
+              agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
+            });
+    Map<String, String> params = new TreeMap<>();
+    params.put("ticketId", BUG_TICKET_ID);
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /** An ACTIVE agent that pushed the branch a release just consumed. */
+  private Setup agentOwningAReleasedBranch() {
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Long slot = slot(WorkspaceRuntimeStatus.QUEUED);
+              ids.add(slot);
+              agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
+              agentBranches.upsert(
+                  UUID.fromString(AGENT_ACTIVE_ID),
+                  RELEASED_REPOSITORY_ID,
+                  PUSHED_BRANCH,
+                  RELEASED_SHA,
+                  Instant.now());
+            });
+    Map<String, String> params = new TreeMap<>();
+    params.put("branch", PUSHED_BRANCH);
+    params.put("repositoryId", RELEASED_REPOSITORY_ID);
+    params.put("sha", RELEASED_SHA);
+    params.put("version", RELEASED_VERSION);
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /** A slot workspace of the wrapper, on a runner, naming no branch (qits-1152). */
+  private Long slot(WorkspaceRuntimeStatus runtime) {
+    Workspace row = new Workspace();
+    row.repositoryId = WRAPPER_REPOSITORY_ID;
+    row.workspaceId = SLOT_LABEL;
+    row.status = WorkspaceStatus.ACTIVE;
+    row.runtimeStatus = runtime;
+    row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
+    row.gitRefs = "[]";
+    workspaces.persist(row);
+    workspaces.flush();
+    return row.id;
+  }
+
+  private void agent(String id, Long slot, AgentState state, AgentRunState runState) {
+    AgentWorktree agent = new AgentWorktree();
+    agent.id = UUID.fromString(id);
+    agent.workspaceId = slot;
+    agent.repositoryId = WRAPPER_REPOSITORY_ID;
+    agent.workId = BUG_TICKET_ID;
+    agent.entityId = "contract-00000001-10";
+    agent.ticketId = BUG_TICKET_ID;
+    agent.wrapperBranch = WRAPPER_BRANCH;
+    agent.state = state;
+    agent.runState = runState;
+    agent.entityTitle = "Invoice totals are off by one cent";
+    agent.entityStatus = state == AgentState.ACTIVE ? "IMPLEMENTING" : "VERIFIED";
+    agent.entityBlocked = false;
+    agent.gitRefs = "[\"refs/heads/" + WRAPPER_BRANCH + "\",\"refs/heads/" + WRAPPER_BRANCH + "-*\"]";
+    // Apart by state, so a listing newest first is the same order on every run.
+    agent.createdAt = Instant.now().minusSeconds(60L * state.ordinal());
+    agent.lastActivityAt = Instant.now();
+    if (state != AgentState.ACTIVE) {
+      agent.obsoleteAt = Instant.now();
+    }
+    if (state == AgentState.REMOVED) {
+      agent.removedAt = Instant.now();
+    }
+    agentRows.persist(agent);
+    agentRows.flush();
   }
 
   private static Map<String, String> runnerParams() {
@@ -540,15 +614,6 @@ public class ProviderStates {
 
   private File origin(String repoId) {
     return Path.of(originsDir, repoId, "origin").toAbsolutePath().toFile();
-  }
-
-  /** Deletes a branch from a git origin, if it is there. */
-  private void deleteOriginBranch(String repoId, String branch) {
-    try {
-      TestGit.exec(origin(repoId), "git", "branch", "-D", branch);
-    } catch (Exception absent) {
-      // Not there: nothing to delete.
-    }
   }
 
   private Long write(

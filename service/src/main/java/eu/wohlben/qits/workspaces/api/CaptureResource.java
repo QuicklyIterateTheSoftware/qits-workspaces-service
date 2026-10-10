@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import eu.wohlben.qits.workspaces.control.CaptureService;
 import eu.wohlben.qits.workspaces.dto.CaptureContent;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
-import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.control.WorkFiler;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -15,14 +15,11 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.UriInfo;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.net.URI;
 import java.time.Instant;
 import java.util.zip.GZIPInputStream;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -30,8 +27,8 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 
 /**
  * The capture ingest: a running app's browser posts an SPA snapshot here (CORS-opened by {@link
- * CaptureCorsRoute} on exactly this path) and lands on a new workspace whose goal carries the
- * captured context. Identity comes self-stamped from the payload ({@code qits.repository.id}) at
+ * CaptureCorsRoute} on exactly this path) and files a ticket in qits-projects whose impetus carries
+ * the captured context (qits-1152, D25) — no workspace, no branch, no agent. Identity comes self-stamped from the payload ({@code qits.repository.id}) at
  * the same unauthenticated trust level as the OTLP receiver's resource attributes — but unlike
  * telemetry, ingest fails closed: an unresolvable repository creates nothing.
  *
@@ -57,7 +54,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
       CaptureResource.CaptureRequest.Dom.class,
       CaptureResource.CaptureRequest.Selection.class,
       CaptureResource.CaptureResponse.class,
-      CaptureResource.CaptureResponse.WorkspaceRef.class
+      CaptureResource.CaptureResponse.WorkRef.class
     })
 @Path("capture")
 @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
@@ -78,26 +75,16 @@ public class CaptureResource {
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   // Hidden from docs/openapi.yml, but it still carries an operationId: the consumer pact against
-  // qits-projects names this door as the trigger of its repository lookup (`qits-trigger`).
-  @Operation(hidden = true, operationId = "captureWorkspace")
-  public Response capture(byte[] body, @Context UriInfo uriInfo) {
+  // qits-projects names this door as the trigger of its repository lookup and of the ticket it files
+  // (`qits-trigger`).
+  @Operation(hidden = true, operationId = "captureWork")
+  public Response capture(byte[] body) {
     byte[] json = gunzipBounded(body == null ? new byte[0] : body);
     CaptureRequest request = parse(json);
     String repoId = request.identity() == null ? null : request.identity().repositoryId();
-    Workspace workspace = captureService.capture(repoId, toContent(request), Instant.now());
-    String url =
-        requestOrigin(uriInfo)
-            + "/repositories/"
-            + workspace.repositoryId
-            + "/workspaces/"
-            + workspace.workspaceId
-            + "/wip";
+    WorkFiler.Filed filed = captureService.capture(repoId, toContent(request), Instant.now());
     return Response.status(Response.Status.CREATED)
-        .entity(
-            new CaptureResponse(
-                new CaptureResponse.WorkspaceRef(
-                    workspace.id, workspace.workspaceId, workspace.branch),
-                url))
+        .entity(new CaptureResponse(new CaptureResponse.WorkRef(filed.id(), filed.qualifiedId())))
         .build();
   }
 
@@ -135,8 +122,12 @@ public class CaptureResource {
         String component) {}
   }
 
-  public record CaptureResponse(WorkspaceRef workspace, String url) {
-    public record WorkspaceRef(Long id, String workspaceId, String branch) {}
+  /**
+   * The ticket the capture filed (qits-1152, D25): its id and qualified id. No workspace and no url:
+   * a person decides in qits-projects whether to dispatch an agent for it.
+   */
+  public record CaptureResponse(WorkRef work) {
+    public record WorkRef(String id, String qualifiedId) {}
   }
 
   private CaptureRequest parse(byte[] json) {
@@ -199,17 +190,6 @@ public class CaptureResource {
     } catch (JacksonException e) {
       throw new BadRequestException("Malformed capture state");
     }
-  }
-
-  /**
-   * The browser-facing origin of the created workspace's page: scheme + authority the request
-   * actually reached qits on ({@code Host}), which is browser-reachable by definition. Deliberately
-   * <em>not</em> the {@code Origin} header — that is the capturing <em>app's</em> origin, where
-   * {@code /repositories/…} doesn't exist for a standalone cross-origin app.
-   */
-  private static String requestOrigin(UriInfo uriInfo) {
-    URI base = uriInfo.getBaseUri();
-    return base.getScheme() + "://" + base.getAuthority();
   }
 
   /**

@@ -6,7 +6,7 @@ import jakarta.inject.Inject;
 
 /**
  * The one-liners {@link WorkspaceService} calls to announce a workspace container's lifecycle
- * edges: {@code started} is observed by {@link WorkspaceBootstrapRunner}; {@code stopping} has no
+ * edges: {@code started} is observed by {@code WorkspaceBootstrapRunner} (gone since qits-1152); {@code stopping} has no
  * production observer since the workspace services concept went (qits-947), and stays as the
  * synchronous pre-removal edge the lifecycle tests pin. {@code domain} stays web-framework-free; the
  * coupling is CDI events, inverting the forbidden direct dependency.

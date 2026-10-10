@@ -32,7 +32,7 @@ import org.hibernate.annotations.CreationTimestamp;
  * on a row that does not outlive the composition, buys nothing the draft does not already decline.
  */
 @Entity
-@Table(name = "workspace_prompt_attachment")
+@Table(name = "agent_prompt_attachment")
 @Uncaused
 public class WorkspacePromptAttachment extends PanacheEntityBase {
 
@@ -40,8 +40,8 @@ public class WorkspacePromptAttachment extends PanacheEntityBase {
   @Id public String id;
 
   /** The owning {@link Workspace}'s surrogate {@code id}. */
-  @Column(name = "workspace_id_fk", nullable = false)
-  public Long workspaceId;
+  @Column(name = "agent_id", nullable = false)
+  public java.util.UUID agentId;
 
   /** The effective media type — the sniffed type, which wins over the client's claim. */
   @Column(name = "mime_type", nullable = false)

@@ -30,14 +30,14 @@ import org.hibernate.annotations.UpdateTimestamp;
  * edit and then misname every one after it.
  */
 @Entity
-@Table(name = "workspace_prompt_draft")
+@Table(name = "agent_prompt_draft")
 @Uncaused
 public class WorkspacePromptDraft extends PanacheEntityBase {
 
   /** Shares the owning {@link Workspace}'s {@code id} — this is both the PK and the FK. */
   @Id
-  @Column(name = "workspace_id_fk")
-  public Long workspaceId;
+  @Column(name = "agent_id")
+  public java.util.UUID agentId;
 
   /**
    * Opaque composition JSON (picks, references, canvas, chat draft, …), never read by the server.

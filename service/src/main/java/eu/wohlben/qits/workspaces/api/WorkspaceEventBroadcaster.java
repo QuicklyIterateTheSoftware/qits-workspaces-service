@@ -2,7 +2,6 @@ package eu.wohlben.qits.workspaces.api;
 
 import eu.wohlben.qits.workspaces.control.WorkspaceChangeHint;
 import eu.wohlben.qits.workspaces.control.WorkspaceResolver;
-import eu.wohlben.qits.workspaces.entity.Workspace;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.operators.multi.processors.BroadcastProcessor;
 import jakarta.annotation.PreDestroy;

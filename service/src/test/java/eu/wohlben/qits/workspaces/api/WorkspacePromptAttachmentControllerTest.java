@@ -7,6 +7,7 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import eu.wohlben.qits.workspaces.control.AgentService;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
@@ -29,17 +30,26 @@ public class WorkspacePromptAttachmentControllerTest {
 
   @Inject WorkspaceIds workspaceIds;
 
-  @Inject WorkspaceService workspaceService;
+  @Inject AgentService agentService;
 
-  private Long workspace(String label) throws Exception {
+  /**
+   * An agent for a fresh work item (qits-1152): the draft is the agent's. No runner, so it waits
+   * QUEUED, which is all a draft needs.
+   */
+  private String workspace(String label) throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createWorkspace(repoId, label, "master", label);
-    return workspaceIds.of(repoId, label);
+    return agentService
+        .dispatch(
+            new AgentService.AgentRequest(
+                repoId, "ticket/" + label, label + "-" + java.util.UUID.randomUUID(), null, null,
+                null, false, null, null, null))
+        .agent()
+        .agentId();
   }
 
-  private static String base(Long id) {
-    return "/workspaces/api/workspaces/" + id + "/prompt-attachments";
+  private static String base(String id) {
+    return "/workspaces/api/agents/" + id + "/prompt-attachments";
   }
 
   private static WorkspacePromptAttachmentController.AddAttachmentRequest paste(
@@ -50,7 +60,7 @@ public class WorkspacePromptAttachmentControllerTest {
 
   @Test
   public void anAttachedImageComesBackWithItsBytesOldestFirst() throws Exception {
-    Long id = workspace("attach-roundtrip");
+    String id = workspace("attach-roundtrip");
 
     // No images is an ordinary state, not a missing resource.
     given().get(base(id)).then().statusCode(200).body("attachments", hasSize(0));
@@ -97,7 +107,7 @@ public class WorkspacePromptAttachmentControllerTest {
 
   @Test
   public void contentHasAStableBrowserUrlWhenTheSketchIsUpdated() throws Exception {
-    Long id = workspace("attachment-content");
+    String id = workspace("attachment-content");
     String attachmentId =
         given()
             .contentType(ContentType.JSON)
@@ -146,7 +156,7 @@ public class WorkspacePromptAttachmentControllerTest {
 
   @Test
   public void anythingThatIsNotAPngOrJpegIs400() throws Exception {
-    Long id = workspace("attach-sniff");
+    String id = workspace("attach-sniff");
 
     given()
         .contentType(ContentType.JSON)
@@ -178,7 +188,7 @@ public class WorkspacePromptAttachmentControllerTest {
 
   @Test
   public void anOversizedImageIs413() throws Exception {
-    Long id = workspace("attach-oversized");
+    String id = workspace("attach-oversized");
 
     // A real PNG signature followed by enough padding to pass the per-image cap, so the size guard
     // is what refuses this and not the sniff.
@@ -198,8 +208,8 @@ public class WorkspacePromptAttachmentControllerTest {
 
   @Test
   public void deleteIsScopedToItsWorkspace() throws Exception {
-    Long mine = workspace("attach-mine");
-    Long theirs = workspace("attach-theirs");
+    String mine = workspace("attach-mine");
+    String theirs = workspace("attach-theirs");
 
     String attachmentId =
         given()
@@ -229,15 +239,15 @@ public class WorkspacePromptAttachmentControllerTest {
     assertEquals(
         404,
         given()
-            .get(base(999_999L))
+            .get(base("00000000-0000-4000-8000-00000000dead"))
             .thenReturn()
             .statusCode());
     given()
         .contentType(ContentType.JSON)
         .body(paste("Pasted image 1", PromptAttachmentFixtures.ONE_PIXEL_PNG))
-        .post(base(999_999L))
+        .post(base("00000000-0000-4000-8000-00000000dead"))
         .then()
         .statusCode(404);
-    given().delete(base(999_999L) + "/whatever").then().statusCode(404);
+    given().delete(base("00000000-0000-4000-8000-00000000dead") + "/whatever").then().statusCode(404);
   }
 }

@@ -35,7 +35,7 @@ import org.junit.jupiter.api.Test;
  * real {@link WorkspaceRunnerRepository} rather than the fake used for the RUNNER verb-table in
  * {@link WorkspaceRunnerPlacementTest}: a regular create is RUNNER whatever the estate holds — no
  * runner, a quarantined one, an unregistered one, one with no slots, or an eligible one — through
- * both {@link WorkspaceService#createWorkspace} and {@link DispatchService#dispatch}; with none
+ * both {@link WorkspaceService#createWorkspace}; with none
  * eligible the row waits QUEUED and says "no enabled workspace runner"; a stated DIRECT on a regular
  * create is refused; admin and the editor are DIRECT; and a legacy DIRECT row never moves.
  *
@@ -46,7 +46,6 @@ import org.junit.jupiter.api.Test;
 public class WorkspaceServicePlacementTest {
 
   @Inject WorkspaceService workspaceService;
-  @Inject DispatchService dispatchService;
   @Inject WorkspaceRunners runners;
   @Inject WorkspaceRunnerRepository runnerRepository;
   @Inject WorkspaceRepository workspaceRepository;
@@ -92,45 +91,6 @@ public class WorkspaceServicePlacementTest {
     QuarkusTransaction.requiringNew().run(() -> createdRunners.forEach(runnerRepository::deleteById));
     rows.clear();
     createdRunners.clear();
-  }
-
-  /**
-   * The rule's zero-runner side (qits-774), through the create door: with no runner at all a create
-   * is still RUNNER on no runner and the create queues it, and a following ensure-container answers
-   * QUEUED with the reason — no refusal, and no fall back to DIRECT.
-   */
-  @Test
-  public void noRunnerAtAllPlacesACreateOnARunnerAndEnsureAnswersQueuedWithTheReason()
-      throws Exception {
-    String repoId = repo();
-
-    WorkspaceService.CreatedWorkspace answer =
-        workspaceService.createAndStartWorkspace(
-            repoId,
-            "none-at-all",
-            "master",
-            "none-at-all",
-            null,
-            false,
-            false,
-            false,
-            WorkspaceSubject.none(),
-            null,
-            null);
-    Long id = answer.workspace().id;
-    rows.add(id);
-
-    Workspace row = read(id);
-    assertEquals(WorkspacePlacement.RUNNER, row.placement);
-    assertNull(row.runnerId);
-    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
-    assertNull(answer.startError(), "waiting for a runner is not a refused start");
-
-    String processId = workspaceService.beginEnsureContainer(id);
-
-    assertEquals(WorkspaceRuntimeStatus.QUEUED, workspaceService.getWorkspace(id).runtimeStatus());
-    assertNotNull(processId, "the ensure answers a process saying why the row waits");
-    assertEquals(List.of("no enabled workspace runner"), lines(processId));
   }
 
   /**
@@ -202,42 +162,6 @@ public class WorkspaceServicePlacementTest {
     assertFalse(
         lines(processId).contains(WorkspaceService.NO_ENABLED_RUNNER),
         "a runner could take it, so the row does not say none could");
-  }
-
-  @Test
-  public void anEligibleRunnerPlacesADispatchsCreateOnARunnerToo() throws Exception {
-    eligibleRunner(1);
-    String repoId = repo();
-
-    DispatchService.Dispatch answer =
-        dispatchService.dispatch(repoId, "dispatched-default", false, null, WorkspaceSubject.none(), "go");
-    rows.add(answer.workspace().id());
-
-    assertEquals(WorkspacePlacement.RUNNER, read(answer.workspace().id()).placement);
-  }
-
-  /**
-   * A dispatch with no runner at all (qits-774) creates a RUNNER row on no runner and parks its
-   * launch on QUEUED, as qits-626 made dispatch queue-aware — no 409, and nothing on the direct path.
-   */
-  @Test
-  public void aDispatchWithNoRunnerAtAllCreatesARunnerRowAndParks() throws Exception {
-    String repoId = repo();
-
-    DispatchService.Dispatch answer =
-        dispatchService.dispatch(repoId, "dispatched-none", false, null, WorkspaceSubject.none(), "go");
-    Long id = answer.workspace().id();
-    rows.add(id);
-
-    Workspace row = read(id);
-    assertEquals(WorkspacePlacement.RUNNER, row.placement);
-    assertNull(row.runnerId);
-    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
-    assertEquals(WorkspaceRuntimeStatus.QUEUED, answer.workspace().runtimeStatus());
-    assertEquals(DispatchService.AgentLaunch.SCHEDULED, answer.agentLaunch());
-    assertTrue(dispatchService.isParked(id), "the launch waits for a runner");
-
-    workspaceService.stopContainer(id); // drops the parked launch
   }
 
   @Test

@@ -39,7 +39,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * encoding overhead. The service sniffs the magic bytes and stores <em>that</em> media type — the
  * claimed one is a hint and only the bytes decide.
  */
-@Path("/workspaces/{id}/prompt-attachments")
+@Path("/agents/{id}/prompt-attachments")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
@@ -67,8 +67,8 @@ public class WorkspacePromptAttachmentController {
       responseCode = "404",
       description = "No such ACTIVE workspace.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
-  public ListAttachmentsRequest.Response list(@PathParam("id") Long id) {
-    return new ListAttachmentsRequest.Response(promptAttachments.listAttachments(id));
+  public ListAttachmentsRequest.Response list(@PathParam("id") String id) {
+    return new ListAttachmentsRequest.Response(promptAttachments.listAttachments(AgentController.agentId(id)));
   }
 
   /**
@@ -119,10 +119,10 @@ public class WorkspacePromptAttachmentController {
       responseCode = "413",
       description = "The image exceeds the configured per-image byte cap.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
-  public Response add(@PathParam("id") Long id, @Valid AddAttachmentRequest request) {
+  public Response add(@PathParam("id") String id, @Valid AddAttachmentRequest request) {
     WorkspacePromptAttachment attachment =
         promptAttachments.addAttachment(
-            id, request.mimeType(), request.label(), request.source(), request.dataBase64());
+            AgentController.agentId(id), request.mimeType(), request.label(), request.source(), request.dataBase64());
     return Response.status(Response.Status.CREATED)
         .entity(
             new AddAttachmentRequest.Response(
@@ -148,12 +148,12 @@ public class WorkspacePromptAttachmentController {
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @APIResponse(responseCode = "413", description = "The image exceeds the configured limit.")
   public AddAttachmentRequest.Response update(
-      @PathParam("id") Long id,
+      @PathParam("id") String id,
       @PathParam("attachmentId") String attachmentId,
       @Valid AddAttachmentRequest request) {
     WorkspacePromptAttachment attachment =
         promptAttachments.updateAttachment(
-            id,
+            AgentController.agentId(id),
             attachmentId,
             request.mimeType(),
             request.label(),
@@ -178,8 +178,8 @@ public class WorkspacePromptAttachmentController {
       description = "No such ACTIVE workspace, or no such attachment on it.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   public Response content(
-      @PathParam("id") Long id, @PathParam("attachmentId") String attachmentId) {
-    WorkspacePromptAttachment attachment = promptAttachments.getAttachment(id, attachmentId);
+      @PathParam("id") String id, @PathParam("attachmentId") String attachmentId) {
+    WorkspacePromptAttachment attachment = promptAttachments.getAttachment(AgentController.agentId(id), attachmentId);
     return Response.ok(attachment.bytes, attachment.mimeType)
         .header("Cache-Control", "no-cache")
         .build();
@@ -196,8 +196,8 @@ public class WorkspacePromptAttachmentController {
       description = "No such ACTIVE workspace, or no such attachment on it.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   public Response delete(
-      @PathParam("id") Long id, @PathParam("attachmentId") String attachmentId) {
-    promptAttachments.deleteAttachment(id, attachmentId);
+      @PathParam("id") String id, @PathParam("attachmentId") String attachmentId) {
+    promptAttachments.deleteAttachment(AgentController.agentId(id), attachmentId);
     return Response.noContent().build();
   }
 }

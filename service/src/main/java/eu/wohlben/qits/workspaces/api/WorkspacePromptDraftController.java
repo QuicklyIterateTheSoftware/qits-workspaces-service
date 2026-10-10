@@ -37,7 +37,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * singleton sub-resource of a workspace with its own verbs, and keeping it here is what keeps that
  * controller about the workspace's own lifecycle.
  */
-@Path("/workspaces/{id}/prompt-draft")
+@Path("/agents/{id}/prompt-draft")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
@@ -65,8 +65,8 @@ public class WorkspacePromptDraftController {
       responseCode = "404",
       description = "No such ACTIVE workspace, or it has no saved draft.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
-  public GetPromptDraftRequest.Response get(@PathParam("id") Long id) {
-    return new GetPromptDraftRequest.Response(promptDraftMapper.toDto(promptDrafts.getDraft(id)));
+  public GetPromptDraftRequest.Response get(@PathParam("id") String id) {
+    return new GetPromptDraftRequest.Response(promptDraftMapper.toDto(promptDrafts.getDraft(AgentController.agentId(id))));
   }
 
   /**
@@ -109,10 +109,10 @@ public class WorkspacePromptDraftController {
       description = "The draft exceeds the configured byte cap.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   public SavePromptDraftRequest.Response save(
-      @PathParam("id") Long id, @Valid SavePromptDraftRequest request) {
+      @PathParam("id") String id, @Valid SavePromptDraftRequest request) {
     return new SavePromptDraftRequest.Response(
         promptDraftMapper.toDto(
-            promptDrafts.saveDraft(id, request.content(), request.serializedPrompt())));
+            promptDrafts.saveDraft(AgentController.agentId(id), request.content(), request.serializedPrompt())));
   }
 
   /**
@@ -126,8 +126,8 @@ public class WorkspacePromptDraftController {
       responseCode = "404",
       description = "No such ACTIVE workspace.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
-  public Response delete(@PathParam("id") Long id) {
-    promptDrafts.deleteDraft(id);
+  public Response delete(@PathParam("id") String id) {
+    promptDrafts.deleteDraft(AgentController.agentId(id));
     return Response.noContent().build();
   }
 }

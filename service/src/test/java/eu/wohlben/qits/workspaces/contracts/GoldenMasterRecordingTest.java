@@ -127,9 +127,9 @@ class GoldenMasterRecordingTest {
               WORKSPACES + "/work/{bugTicketId}/workspaces",
               null),
           Interaction.read(
-              ProviderStates.A_PROJECT_WITH_WORKSPACES_BOUND_TO_WORK_ITEMS,
+              ProviderStates.AGENTS_BOUND_TO_WORK_ITEMS,
               "listAgentDispatchReferences",
-              WORKSPACES + "/agent-dispatches/references?ticketId={bugTicketId}",
+              WORKSPACES + "/agent-dispatches/references?workId={bugTicketId}",
               null),
           Interaction.read(
               ProviderStates.A_WORK_ITEM_WITH_NO_WORKSPACES,
@@ -142,42 +142,39 @@ class GoldenMasterRecordingTest {
               WORKSPACES + "/work/workspaces",
               null),
           Interaction.write(
-              ProviderStates.A_REPOSITORY_WITH_A_BRANCH_FOR_A_TICKET,
+              ProviderStates.A_TICKET_TO_DISPATCH,
               "dispatchAgent",
               WORKSPACES + "/agent-dispatches",
               200,
-              "{\"repositoryId\":\"{repositoryId}\",\"branch\":\"{branch}\",\"branchTree\":false,"
-                  + "\"ticketId\":\"{ticketId}\",\"workId\":\"{ticketId}\","
-                  + "\"entityId\":\"{ticketQualifiedId}\","
-                  + "\"entityTitle\":\"Invoice totals are off by one cent\","
+              "{\"repositoryId\":\"{repositoryId}\",\"wrapperBranch\":\"{wrapperBranch}\","
+                  + "\"workId\":\"{ticketId}\",\"entityId\":\"{ticketQualifiedId}\","
+                  + "\"entityTitle\":\"Fix it\","
                   + "\"entityStatus\":\"REFINED\",\"entityBlocked\":false,"
+                  + "\"ticketId\":\"{ticketId}\","
                   + "\"instruction\":\"Fix contract-00000001-10.\"}")
-              .fixing("$.agentIdentity", "contract-workspace-token-subject"),
+              .fixing("$.agentIdentity", "contract-agent-token-subject"),
           Interaction.write(
-              ProviderStates.A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH,
+              ProviderStates.AN_AGENT_ON_A_TICKET,
               "markAgentDispatchEntity",
               WORKSPACES + "/agent-dispatches/entity",
               200,
-              "{\"repositoryId\":\"{repositoryId}\",\"branch\":\"{branch}\","
-                  + "\"title\":\"Invoice totals are off by one cent\",\"status\":\"IMPLEMENTING\","
-                  + "\"blocked\":false,\"workId\":\"{ticketId}\"}"),
+              "{\"workId\":\"{ticketId}\",\"title\":\"Invoice totals are off by one cent\","
+                  + "\"status\":\"IMPLEMENTING\",\"blocked\":false}"),
           Interaction.write(
-              ProviderStates.A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH,
+              ProviderStates.AN_AGENT_ON_A_TICKET,
               "markAgentDispatchBlocked",
               WORKSPACES + "/agent-dispatches/blocked",
               200,
-              "{\"repositoryId\":\"{repositoryId}\",\"branch\":\"{branch}\",\"blocked\":true,"
-                  + "\"workId\":\"{ticketId}\"}"),
+              "{\"workId\":\"{ticketId}\",\"blocked\":true}"),
           Interaction.write(
-              ProviderStates.A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH,
+              ProviderStates.AN_AGENT_ON_A_TICKET,
               "deliverAgentTurn",
               WORKSPACES + "/agent-dispatches/delivery",
               200,
-              "{\"repositoryId\":\"{repositoryId}\",\"branch\":\"{branch}\","
-                  + "\"text\":\"The ticket moved to REVIEW.\",\"workId\":\"{ticketId}\","
+              "{\"workId\":\"{ticketId}\",\"text\":\"The ticket moved to REVIEW.\","
                   + "\"compactFirst\":false}"),
           Interaction.write(
-              ProviderStates.A_WORKSPACE_STANDING_ON_A_RELEASED_BRANCH,
+              ProviderStates.AN_AGENT_ON_A_RELEASED_BRANCH,
               "resolveReleasedBranch",
               WORKSPACES + "/branches/resolution?repositoryId={repositoryId}",
               200,

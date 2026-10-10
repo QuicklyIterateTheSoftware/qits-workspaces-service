@@ -61,7 +61,7 @@ import org.jboss.logging.Logger;
  * <p>Each write is its own {@code requiringNew} transaction, and every hint and notification fires
  * after it commits.
  *
- * <p><b>Two in-process events say a row left the queue</b> (qits-626), for {@link DispatchService}'s
+ * <p><b>Two in-process events say a row left the queue</b> (qits-626), for {@code DispatchService} (gone since qits-1152)'s
  * parked launches: {@link WorkspaceTaken} when a runner took it — the claim, or an inventory that
  * found it running — and {@link WorkspaceUnqueued} from {@link #abandonStart}, which every other
  * way out passes through. Both are fired after the write committed.

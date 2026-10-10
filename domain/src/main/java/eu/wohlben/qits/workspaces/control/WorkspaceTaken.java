@@ -8,7 +8,7 @@ import java.util.UUID;
  * reported holding it running while it was still queued ({@link RunnerClaims#reconcile}).
  *
  * <p>Fired in-process <b>after the write committed</b>, never inside it, so a claim that rolled back
- * releases nothing. Its one reader is {@link DispatchService}, which holds an agent launch (or a
+ * releases nothing. Its one reader is {@code DispatchService} (gone since qits-1152), which holds an agent launch (or a
  * delivery) parked while the row waits in the queue and starts its window from this moment.
  *
  * @param rowId the workspace row, {@code Workspace.id}

@@ -1,5 +1,12 @@
 package eu.wohlben.qits.workspaces.transcripthost;
 
+import eu.wohlben.qits.workspaces.control.RepositoryLookup;
+import eu.wohlben.qits.workspaces.entity.AgentWorktree;
+import eu.wohlben.qits.workspaces.error.NotFoundException;
+import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
+import io.quarkus.narayana.jta.QuarkusTransaction;
+import jakarta.inject.Inject;
+
 import eu.wohlben.qits.workspaces.control.ArchivedAgentTranscripts;
 import eu.wohlben.qits.workspaces.dto.ArchivedSessionDto;
 import eu.wohlben.qits.workspaces.entity.Workspace;
@@ -49,14 +56,61 @@ public class MountedClaudeTranscripts implements ArchivedAgentTranscripts {
     return existing;
   }
 
+  /** The agents of a slot workspace, whose transcripts are keyed on their own directories. */
+  @Inject AgentWorktreeRepository agents;
+
+  @Inject RepositoryLookup repositories;
+
+  /**
+   * An old-model workspace's sessions, keyed on {@code /workspace} and its branch; a slot's
+   * (qits-1152) are its agents', each keyed on {@code /workspace/agents/<id>/<wrapper>} and
+   * attributed by its wrapper branch.
+   */
   @Override
   public List<ArchivedSessionDto> sessionsFor(Workspace workspace) {
-    return archive().sessionsFor(attribution(workspace));
+    if (workspace.branch != null) {
+      return archive().sessionsFor(attribution(workspace));
+    }
+    List<ArchivedSessionDto> sessions = new java.util.ArrayList<>();
+    for (AgentWorktree agent : agentsOf(workspace)) {
+      sessions.addAll(agentArchive(workspace, agent).sessionsFor(attribution(agent)));
+    }
+    return sessions;
   }
 
   @Override
   public List<String> transcriptOf(Workspace workspace, String sessionId) {
-    return archive().transcriptOf(attribution(workspace), sessionId);
+    if (workspace.branch != null) {
+      return archive().transcriptOf(attribution(workspace), sessionId);
+    }
+    for (AgentWorktree agent : agentsOf(workspace)) {
+      ClaudeTranscriptArchive archive = agentArchive(workspace, agent);
+      ClaudeTranscriptArchive.Attribution attribution = attribution(agent);
+      if (archive.sessionsFor(attribution).stream().anyMatch(s -> s.sessionId().equals(sessionId))) {
+        return archive.transcriptOf(attribution, sessionId);
+      }
+    }
+    throw new NotFoundException("Agent session not found: " + sessionId);
+  }
+
+  private List<AgentWorktree> agentsOf(Workspace workspace) {
+    return QuarkusTransaction.requiringNew().call(() -> agents.findByWorkspace(workspace.id));
+  }
+
+  private ClaudeTranscriptArchive agentArchive(Workspace workspace, AgentWorktree agent) {
+    String name;
+    try {
+      name = repositories.find(workspace.repositoryId).map(RepositoryLookup.RepositoryView::name).orElse(null);
+    } catch (RuntimeException registryDidNotAnswer) {
+      name = null;
+    }
+    String cwd = "/workspace/agents/" + agent.id + (name == null ? "" : "/" + name);
+    return new ClaudeTranscriptArchive(Path.of(archiveRoot), cwd);
+  }
+
+  private static ClaudeTranscriptArchive.Attribution attribution(AgentWorktree agent) {
+    return new ClaudeTranscriptArchive.Attribution(
+        agent.wrapperBranch, agent.createdAt, agent.removedAt);
   }
 
   /**

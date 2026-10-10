@@ -198,6 +198,19 @@ public interface CredentialCommissioner {
    * Delete a workspace token: the container it belonged to is gone. Best-effort by contract, as
    * {@link #decommission} is, for the same reason; what a failure leaves is the reconcile's.
    */
+  /**
+   * An <b>agent's</b> credential (qits-1152, D3, D18): a token of the workspace kind for {@code
+   * admin}, context id {@link #AGENT_CONTEXT_PREFIX}{@code <agentId>}, scoped to the project and
+   * stating the agent's own Git refs. Empty when no issuer is wired.
+   */
+  default Optional<WorkspaceToken> commissionAgentToken(
+      String agentId, String projectId, List<String> gitRefs, boolean admin) {
+    return Optional.empty();
+  }
+
+  /** What an agent token's context id starts with; a workspace token's is the bare row id. */
+  String AGENT_CONTEXT_PREFIX = "agent-";
+
   void deleteToken(String tokenId);
 
   /**

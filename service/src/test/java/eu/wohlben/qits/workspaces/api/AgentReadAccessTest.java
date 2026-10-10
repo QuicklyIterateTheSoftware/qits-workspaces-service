@@ -38,6 +38,9 @@ class AgentReadAccessTest {
 
   private static final String NO_ROW = "999999999";
 
+  /** An agent id nobody holds: past the role gate it is a 404. */
+  private static final String NO_AGENT = "00000000-0000-4000-8000-00000000dead";
+
   @TestHTTPResource("/")
   URI base;
 
@@ -79,8 +82,8 @@ class AgentReadAccessTest {
         .statusCode(admitted());
     asAgent()
         .contentType(ContentType.JSON)
-        .body(Map.of("repositoryId", "no-such", "workspaceId", "x"))
-        .post("/workspaces/api/workspaces")
+        .body(Map.of("repositoryId", "no-such", "workId", "w-x"))
+        .post("/workspaces/api/agents")
         .then()
         .statusCode(403);
   }
@@ -111,13 +114,13 @@ class AgentReadAccessTest {
   @Test
   void thePromptDraftReadIsOpenAndItsWriteIsNot() {
     asAgent()
-        .get("/workspaces/api/workspaces/" + NO_ROW + "/prompt-draft")
+        .get("/workspaces/api/agents/" + NO_AGENT + "/prompt-draft")
         .then()
         .statusCode(admitted());
     asAgent()
         .contentType(ContentType.JSON)
         .body(Map.of("content", "x"))
-        .put("/workspaces/api/workspaces/" + NO_ROW + "/prompt-draft")
+        .put("/workspaces/api/agents/" + NO_AGENT + "/prompt-draft")
         .then()
         .statusCode(403);
   }
@@ -125,15 +128,15 @@ class AgentReadAccessTest {
   @Test
   void thePromptAttachmentReadsAreOpenAndItsDeleteIsNot() {
     asAgent()
-        .get("/workspaces/api/workspaces/" + NO_ROW + "/prompt-attachments")
+        .get("/workspaces/api/agents/" + NO_AGENT + "/prompt-attachments")
         .then()
         .statusCode(admitted());
     asAgent()
-        .get("/workspaces/api/workspaces/" + NO_ROW + "/prompt-attachments/some-id/content")
+        .get("/workspaces/api/agents/" + NO_AGENT + "/prompt-attachments/some-id/content")
         .then()
         .statusCode(admitted());
     asAgent()
-        .delete("/workspaces/api/workspaces/" + NO_ROW + "/prompt-attachments/some-id")
+        .delete("/workspaces/api/agents/" + NO_AGENT + "/prompt-attachments/some-id")
         .then()
         .statusCode(403);
   }
@@ -159,7 +162,7 @@ class AgentReadAccessTest {
         .statusCode(200);
     asAgent()
         .contentType(ContentType.JSON)
-        .body(Map.of("repositoryId", "no-such", "branch", "ticket/x", "instruction", "go"))
+        .body(Map.of("repositoryId", "no-such", "wrapperBranch", "ticket/x", "workId", "w-x", "instruction", "go"))
         .post("/workspaces/api/agent-dispatches")
         .then()
         .statusCode(403);

@@ -28,6 +28,9 @@ public class WorkItemWorkspacesController {
 
   @Inject WorkspaceService workspaces;
 
+  /** Since qits-1152 the agents are what binds a work item to a workspace. */
+  @Inject eu.wohlben.qits.workspaces.control.AgentService agents;
+
   /**
    * The answer of both reads: one entry per workspace. The entry has a name of its own, so the
    * OpenAPI document does not renumber the other doors' {@code Entry} schemas.
@@ -50,7 +53,10 @@ public class WorkItemWorkspacesController {
   @Path("/workspaces")
   @Operation(operationId = "listOpenWorkspaces")
   public WorkItemWorkspaces open() {
-    return WorkItemWorkspaces.of(workspaces.openWorkspaces());
+    // The agents' entries, then any old-model workspace still bound to an item (the drain, D20).
+    java.util.List<WorkItemWorkspaceDto> rows = new java.util.ArrayList<>(agents.openWorkItemViews());
+    rows.addAll(workspaces.openWorkspaces());
+    return WorkItemWorkspaces.of(rows);
   }
 
   /**
@@ -65,6 +71,9 @@ public class WorkItemWorkspacesController {
   @Path("/{workRef}/workspaces")
   @Operation(operationId = "listWorkItemWorkspaces")
   public WorkItemWorkspaces ofWorkItem(@PathParam("workRef") String workRef) {
-    return WorkItemWorkspaces.of(workspaces.workItemWorkspaces(workRef));
+    java.util.List<WorkItemWorkspaceDto> rows =
+        new java.util.ArrayList<>(agents.workItemViews(workRef));
+    rows.addAll(workspaces.workItemWorkspaces(workRef));
+    return WorkItemWorkspaces.of(rows);
   }
 }

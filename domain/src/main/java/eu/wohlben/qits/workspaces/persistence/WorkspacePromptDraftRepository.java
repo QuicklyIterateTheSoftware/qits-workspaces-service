@@ -9,8 +9,8 @@ import java.util.Optional;
 public class WorkspacePromptDraftRepository implements PanacheRepository<WorkspacePromptDraft> {
 
   /** The draft for a workspace, keyed by the workspace's {@code id} (the draft's shared PK/FK). */
-  public Optional<WorkspacePromptDraft> findByWorkspaceId(Long workspaceId) {
-    return findByIdOptional(workspaceId);
+  public Optional<WorkspacePromptDraft> findByAgentId(java.util.UUID agentId) {
+    return find("agentId", agentId).firstResultOptional();
   }
 
   /**
@@ -26,20 +26,20 @@ public class WorkspacePromptDraftRepository implements PanacheRepository<Workspa
    * … on conflict … do update} is the same statement in the dialect that has it. Nothing about the
    * atomicity argument above changed with the spelling.
    */
-  public void upsert(Long workspaceId, String content, String serializedPrompt) {
+  public void upsert(java.util.UUID agentId, String content, String serializedPrompt) {
     // The update arm lists only content/serialized_prompt/updated_at, so the other columns
     // (prompt_version, last_run_*) are left untouched; on insert they take their DDL defaults
     // (prompt_version 0, last_run_* null).
     getEntityManager()
         .createNativeQuery(
-            "insert into workspace_prompt_draft"
-                + " (workspace_id_fk, content, serialized_prompt, updated_at)"
+            "insert into agent_prompt_draft"
+                + " (agent_id, content, serialized_prompt, updated_at)"
                 + " values (?1, ?2, ?3, current_timestamp)"
-                + " on conflict (workspace_id_fk) do update set"
+                + " on conflict (agent_id) do update set"
                 + " content = excluded.content,"
                 + " serialized_prompt = excluded.serialized_prompt,"
                 + " updated_at = excluded.updated_at")
-        .setParameter(1, workspaceId)
+        .setParameter(1, agentId)
         .setParameter(2, content)
         .setParameter(3, serializedPrompt)
         .executeUpdate();
@@ -48,9 +48,9 @@ public class WorkspacePromptDraftRepository implements PanacheRepository<Workspa
     // avoid a self-referencing subquery inside the upsert.
     getEntityManager()
         .createNativeQuery(
-            "update workspace_prompt_draft set prompt_version = prompt_version + 1"
-                + " where workspace_id_fk = ?1")
-        .setParameter(1, workspaceId)
+            "update agent_prompt_draft set prompt_version = prompt_version + 1"
+                + " where agent_id = ?1")
+        .setParameter(1, agentId)
         .executeUpdate();
   }
 
@@ -59,19 +59,19 @@ public class WorkspacePromptDraftRepository implements PanacheRepository<Workspa
    * last_run_at}, copies the live {@code prompt_version} into {@code last_run_prompt_version}, and
    * records the launched command id. Idempotent no-op when the workspace has no draft row.
    */
-  public void recordRun(Long workspaceId, String commandId) {
+  public void recordRun(java.util.UUID agentId, String commandId) {
     getEntityManager()
         .createNativeQuery(
-            "update workspace_prompt_draft set last_run_at = current_timestamp,"
+            "update agent_prompt_draft set last_run_at = current_timestamp,"
                 + " last_run_prompt_version = prompt_version, last_run_command_id = ?2"
-                + " where workspace_id_fk = ?1")
-        .setParameter(1, workspaceId)
+                + " where agent_id = ?1")
+        .setParameter(1, agentId)
         .setParameter(2, commandId)
         .executeUpdate();
   }
 
   /** Removes a workspace's draft if present — idempotent (no-op when absent). */
-  public void deleteByWorkspaceId(Long workspaceId) {
-    delete("workspaceId", workspaceId);
+  public void deleteByAgentId(java.util.UUID agentId) {
+    delete("agentId", agentId);
   }
 }

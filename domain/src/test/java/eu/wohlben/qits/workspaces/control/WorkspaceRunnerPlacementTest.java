@@ -48,7 +48,6 @@ public class WorkspaceRunnerPlacementTest {
   private static final long AWAIT_MILLIS = 15_000;
 
   @Inject WorkspaceService workspaceService;
-  @Inject DispatchService dispatchService;
   @Inject WorkspaceRunners runners;
   @Inject WorkspaceRunnerRepository runnerRepository;
   @Inject WorkspaceRepository workspaceRepository;
@@ -201,97 +200,6 @@ public class WorkspaceRunnerPlacementTest {
   }
 
   // --- create starts (qits-853) -------------------------------------------------------------------
-
-  /**
-   * The create door's RUNNER row: queued by the create itself, no process answered, and a following
-   * ensure-container is a no-op that queues nothing a second time.
-   */
-  @Test
-  public void creatingARunnerWorkspaceQueuesItAndAnEnsureAfterIsANoOp() throws Exception {
-    eligibleRunner();
-    String repoId = repo();
-
-    WorkspaceService.CreatedWorkspace created =
-        createAndStart(repoId, "made", WorkspacePlacement.RUNNER);
-
-    Long id = created.workspace().id;
-    Workspace row = read(id);
-    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
-    assertNotNull(row.queuedAt);
-    assertNull(created.startError());
-    assertNull(created.technicalProcessId(), "the row's status is its progress");
-    assertEquals(List.of("backlog:" + id), placement.calls());
-
-    workspaceService.beginEnsureContainer(id);
-    assertEquals(List.of("backlog:" + id), placement.calls(), "the second call queued nothing");
-    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(id).runtimeStatus);
-    assertEquals(row.queuedAt, read(id).queuedAt);
-  }
-
-  /**
-   * Creating a DIRECT workspace — an admin one, the only kind the create door still places DIRECT
-   * (qits-774) — starts the ladder on the platform host: one {@code run}, however soon an
-   * ensure-container follows — mid-start it joins the start's process, after it a no-op.
-   */
-  @Test
-  public void creatingADirectWorkspaceStartsItOnce() throws Exception {
-    String repoId = repo();
-    String container = containers.containerName("made-direct", repoId);
-
-    WorkspaceService.CreatedWorkspace created =
-        workspaceService.createAndStartWorkspace(
-            repoId,
-            "made-direct",
-            "master",
-            "made-direct",
-            null,
-            false,
-            false,
-            true,
-            WorkspaceSubject.none(),
-            null,
-            null);
-    rows.add(created.workspace().id);
-    assertEquals(WorkspacePlacement.DIRECT, created.workspace().placement);
-
-    Long id = created.workspace().id;
-    assertNull(created.startError());
-    assertNotNull(created.technicalProcessId());
-    assertEquals(
-        created.technicalProcessId(),
-        workspaceService.beginEnsureContainer(id),
-        "an ensure-container while the start runs joins it");
-
-    awaitRunning(repoId, id);
-    awaitTerminal(created.technicalProcessId());
-    String again = workspaceService.beginEnsureContainer(id);
-    awaitTerminal(again);
-
-    assertEquals(1, containers.runCount(container), "provisioned exactly once");
-    assertTrue(containers.isRunning(container));
-    assertEquals(List.of(), placement.calls(), "a DIRECT row never reaches RunnerPlacement");
-    containers.rm(container);
-  }
-
-  /**
-   * The backlog signal is a nudge, never the record: one that cannot be sent is logged, and the
-   * create and its queued row stand.
-   */
-  @Test
-  public void aBacklogSignalThatFailsKeepsTheQueuedRow() throws Exception {
-    eligibleRunner();
-    String repoId = repo();
-    placement.failBacklog(new IllegalStateException("the backlog is unreachable"));
-
-    WorkspaceService.CreatedWorkspace created =
-        createAndStart(repoId, "kept", WorkspacePlacement.RUNNER);
-
-    assertNull(created.startError());
-    Workspace row = read(created.workspace().id);
-    assertEquals(WorkspaceStatus.ACTIVE, row.status, "the create stands");
-    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
-    assertTrue(workspaceService.branchExists(repoId, "kept"));
-  }
 
   // --- start --------------------------------------------------------------------------------------
 
@@ -823,131 +731,6 @@ public class WorkspaceRunnerPlacementTest {
 
   // --- dispatch -----------------------------------------------------------------------------------
 
-  /**
-   * A dispatch onto a STOPPED RUNNER row is qits-624's start — the row is QUEUED, the answer is
-   * {@code SCHEDULED} with {@code runtimeStatus: QUEUED} and the start's process — and the launch is
-   * parked until a runner takes it (qits-626). A re-press parks nothing more and starts nothing more;
-   * a stop while queued drops the parked launch and releases its claim.
-   */
-  @Test
-  public void aDispatchOntoAStoppedRunnerRowQueuesItAndParksTheLaunch() throws Exception {
-    eligibleRunner();
-    String repoId = repo();
-    Workspace created = stoppedRunnerRow(repoId, "dispatched");
-
-    DispatchService.Dispatch answer =
-        dispatchService.dispatch(repoId, "dispatched", false, null, WorkspaceSubject.none(), "go");
-
-    assertEquals(DispatchService.AgentLaunch.SCHEDULED, answer.agentLaunch());
-    assertEquals(WorkspaceRuntimeStatus.QUEUED, answer.workspace().runtimeStatus());
-    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(created.id).runtimeStatus);
-    assertNotNull(answer.technicalProcessId(), "the start that queued it");
-    assertEquals(
-        claims.trackedStart(created.id).orElseThrow().id(), answer.technicalProcessId());
-    assertTrue(dispatchService.isParked(created.id), "the launch waits for a runner");
-    assertTrue(dispatchService.isHeld(created.id), "and is stored, so a restart keeps it");
-    assertEquals(1, placement.calls().stream().filter(c -> c.startsWith("backlog:")).count());
-
-    DispatchService.Dispatch again =
-        dispatchService.dispatch(repoId, "dispatched", false, null, WorkspaceSubject.none(), "go");
-
-    assertEquals(DispatchService.AgentLaunch.SCHEDULED, again.agentLaunch());
-    assertEquals(answer.technicalProcessId(), again.technicalProcessId(), "the same start");
-    assertEquals(
-        1,
-        placement.calls().stream().filter(c -> c.startsWith("backlog:")).count(),
-        "a re-press onto a queued row starts nothing more");
-    assertTrue(dispatchService.isParked(created.id));
-
-    workspaceService.stopContainer(created.id);
-
-    assertFalse(dispatchService.isParked(created.id), "the stop dropped the parked launch");
-    assertFalse(dispatchService.isPending(created.id), "and released its claim");
-    assertFalse(dispatchService.isHeld(created.id), "and deleted it from the table");
-  }
-
-  /** A resolution deletes the launch a queued row holds, in the resolving transaction (qits-1064). */
-  @Test
-  public void aResolutionDeletesTheHeldLaunch() throws Exception {
-    eligibleRunner();
-    String repoId = repo();
-    Workspace created = stoppedRunnerRow(repoId, "held-resolved");
-    dispatchService.dispatch(repoId, "held-resolved", false, null, WorkspaceSubject.none(), "go");
-    assertTrue(dispatchService.isHeld(created.id));
-
-    workspaceService.discardWorkspace(created.id, null, true);
-
-    assertFalse(dispatchService.isHeld(created.id));
-    assertFalse(dispatchService.isParked(created.id));
-  }
-
-  /** A row whose runner is offline past the grace is refused loudly, naming the runner. */
-  @Test
-  public void aDispatchOntoAnUnavailableRowIs409NamingTheRunner() throws Exception {
-    WorkspaceRunner runner = eligibleRunner();
-    String repoId = repo();
-    Workspace created = stoppedRunnerRow(repoId, "offline-dispatch");
-    update(created.id, w -> w.runnerId = runner.id);
-
-    ConflictException refused =
-        assertThrows(
-            ConflictException.class,
-            () ->
-                dispatchService.dispatch(
-                    repoId, "offline-dispatch", false, null, WorkspaceSubject.none(), "go"));
-    assertEquals(RunnerRefusals.RUNNER_UNAVAILABLE, refused.code());
-    assertTrue(refused.getMessage().contains(runner.name), refused.getMessage());
-    assertEquals(WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus);
-    assertFalse(dispatchService.isPending(created.id), "nothing was scheduled");
-  }
-
-  /**
-   * A delivery onto a STOPPED RUNNER row queues it as a dispatch does and parks the delivery; a
-   * delete-container while queued drops it.
-   */
-  @Test
-  public void aDeliveryOntoARunnerRowQueuesItAndParks() throws Exception {
-    eligibleRunner();
-    String repoId = repo();
-    Workspace created = stoppedRunnerRow(repoId, "delivered");
-
-    DispatchService.Delivery answer =
-        dispatchService.deliver(repoId, "delivered", "next phase", false);
-
-    assertEquals(created.id, answer.workspaceId());
-    assertFalse(answer.delivered());
-    assertFalse(answer.launched());
-    assertTrue(answer.detail().contains("queued"), answer.detail());
-    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(created.id).runtimeStatus);
-    assertTrue(dispatchService.isParked(created.id));
-
-    assertTrue(dispatchService.isHeld(created.id));
-
-    workspaceService.deleteContainer(created.id);
-
-    assertFalse(dispatchService.isParked(created.id));
-    assertFalse(dispatchService.isPending(created.id));
-    assertFalse(dispatchService.isHeld(created.id));
-  }
-
-  /** A delivery onto an UNAVAILABLE row: 409, naming the runner, and nothing queued. */
-  @Test
-  public void aDeliveryOntoAnUnavailableRowIs409() throws Exception {
-    WorkspaceRunner runner = eligibleRunner();
-    String repoId = repo();
-    Workspace created = stoppedRunnerRow(repoId, "offline-delivery");
-    update(created.id, w -> w.runnerId = runner.id);
-
-    ConflictException refused =
-        assertThrows(
-            ConflictException.class,
-            () -> dispatchService.deliver(repoId, "offline-delivery", "next phase", false));
-    assertEquals(RunnerRefusals.RUNNER_UNAVAILABLE, refused.code());
-    assertTrue(refused.getMessage().contains(runner.name), refused.getMessage());
-    assertEquals(
-        WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus, "nothing was queued");
-  }
-
   // --- the seam -----------------------------------------------------------------------------------
 
   /**
@@ -1107,25 +890,6 @@ public class WorkspaceRunnerPlacementTest {
             null,
             WorkspacePlacement.RUNNER);
     rows.add(created.id);
-    return created;
-  }
-
-  private WorkspaceService.CreatedWorkspace createAndStart(
-      String repoId, String label, WorkspacePlacement placed) {
-    WorkspaceService.CreatedWorkspace created =
-        workspaceService.createAndStartWorkspace(
-            repoId,
-            label,
-            "master",
-            label,
-            null,
-            false,
-            false,
-            false,
-            WorkspaceSubject.none(),
-            null,
-            placed);
-    rows.add(created.workspace().id);
     return created;
   }
 

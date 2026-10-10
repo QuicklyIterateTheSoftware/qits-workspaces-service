@@ -1,0 +1,7 @@
+{
+  "agentId": "00000000-0000-4000-8000-0000000000a1",
+  "delivered": false,
+  "launched": true,
+  "resumed": false,
+  "detail": "The agent starts with this as its turn once its workspace's daemon answers."
+}

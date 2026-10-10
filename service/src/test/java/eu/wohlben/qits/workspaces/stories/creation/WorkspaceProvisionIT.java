@@ -41,12 +41,13 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.TestMethodOrder;
 
 /**
- * <b>A workspace, provisioned end to end</b> — a branch created on the git host, a credential
- * commissioned for the container, the container asked for, and the daemon inside it dialling home
- * to say the checkout is populated.
+ * <b>A workspace, provisioned end to end for an agent</b> (qits-1152) — a person asks for an admin
+ * agent on a work item, the scheduler makes it a workspace slot, a credential is commissioned for the
+ * container, the container is asked for, and the daemon inside it dials home to say the clone is
+ * populated.
  *
  * <p>It is the widest diagram in the catalogue and the only one with four planes on it at once:
- * HTTP in from an operator, HTTP out to three peers, git out to the host, and a <b>socket</b> the
+ * HTTP in from an operator, HTTP out to three peers, git reads from the host, and a <b>socket</b> the
  * far side dialled — because the whole design of the control plane is that a container dials
  * <b>out</b>. qits-workspaces never dials in, which is why a workspace container needs no inbound
  * route, no address and no port of its own.
@@ -86,7 +87,7 @@ public class WorkspaceProvisionIT {
 
   static final String CATEGORY_SLUG = Slugs.slug(CATEGORY);
 
-  static final String PROVISIONED = "A workspace is provisioned for a branch";
+  static final String PROVISIONED = "A workspace is provisioned for an agent";
 
   static final String PROVISIONED_SLUG = Slugs.slug(PROVISIONED);
 
@@ -115,34 +116,28 @@ public class WorkspaceProvisionIT {
   @UserStory(value = PROVISIONED, category = CATEGORY)
   @UserStoryDescription(
       """
-      Somebody wants to work on something. They name a repository, a parent branch and a label, and
-      what comes back is a place to work in: a branch of their own on the git host, a container with
-      the toolchain in it, and a checkout of that branch inside the container.
+      Somebody wants an agent on a work item. They name the wrapper repository and the item, and
+      what comes back is the agent — and, behind it, a place for it to work in: a workspace slot,
+      a container with the toolchain in it, and a clone of the wrapper inside the container.
 
-      This is the direct path, and since qits-774 only an admin workspace (and the editor) takes it:
-      a regular workspace always goes to a workspace runner, and with none it waits QUEUED. The
-      operator here asks for an admin workspace, so the container is put on the platform host.
+      This is the direct path, and since qits-774 only an ADMIN workspace takes it: the person asks
+      for an admin agent, which runs only in an admin workspace (qits-1152, D10), so the scheduler
+      makes it one on the platform host. A regular agent waits for a runner slot instead.
 
-      The branch comes first, and it is created by a PUSH like every other ref this service moves —
-      `push refs/heads/<parent>:refs/heads/<new>`, an ordinary one, carrying no push option. It used
-      to be a filesystem write into the served bare, which fired no post-receive and is why no
-      workspace anybody ever created produced a CI run.
+      Nothing is pushed up front (D9): the agent's branches are created by the daemon inside the
+      container, locally, and only the pushes it makes reach the git host.
 
       Then the container, in the same request — nobody asks twice. This process holds no docker
-      socket: it asks qits-containers to put a
-      container at a place, under a spec it composes — the pinned workspace image, the volumes, the
-      network, and the environment the daemon inside will read. Two things in that environment are
-      the point. `QITS_WORKSPACE_DAEMON_URL` is the address the daemon dials back on, which is why
-      the container needs no inbound route. And `QITS_COMMISSIONED_CLIENT_ID`/`_SECRET` are an idp
-      client of the container's OWN, commissioned for this workspace a moment earlier — the credential
-      that later lets an agent inside it drive the release door. It lives as long as the container,
-      not as long as a token, and it is handed back at teardown.
+      socket: it asks qits-containers to put a container at a place, under a spec it composes — the
+      pinned workspace image, the volumes, the network, and the environment the daemon inside will
+      read. `QITS_WORKSPACE_DAEMON_URL` is the address the daemon dials back on, which is why the
+      container needs no inbound route. And `QITS_COMMISSIONED_CLIENT_ID`/`_SECRET` are an idp
+      client of the container's OWN, commissioned for this workspace a moment earlier.
 
       Then the host WAITS. A container that started is not a workspace: the daemon inside has to
-      clone the branch, and only it knows when that is done. So the provision is not complete until
-      the daemon dials the control socket, says Hello, and reports Provisioned with the head it
-      checked out. Until then the workspace is PROVISIONING, and a daemon that never arrives fails
-      the launch rather than leaving a container nobody can use.
+      clone the wrapper, and only it knows when that is done. So the provision is not complete until
+      the daemon dials the control socket, says Hello, and reports Provisioned. Until then the
+      workspace is PROVISIONING, and a daemon that never arrives fails the launch.
       """)
   @UserflowRunsAfter(TokenValidationBootstrapIT.class)
   @Order(1)
@@ -163,48 +158,33 @@ public class WorkspaceProvisionIT {
             .contentType(ContentType.JSON)
             .body(createBody())
             .when()
-            .post(StoryTarget.WORKSPACES_PATH)
+            .post(StoryTarget.AGENTS_PATH)
             .then()
             .statusCode(200)
-            .body("workspace.workspaceId", equalTo(StoryTarget.WORKSPACE_LABEL))
-            .body("workspace.status", equalTo("ACTIVE"))
-            // The create answers a THIN view: `branch`, the ahead/behind counts, the daemon fields
-            // and the repository's default branch are all computed rather than stored, and none of
-            // them is knowable at the instant a row is written. The full shape is the read below.
-            .body("workspace.branch", org.hamcrest.Matchers.nullValue())
-            // Creating a workspace starts it (qits-853): the same answer carries the technical
-            // process the start streams over, so there is no second call to make.
-            .body("technicalProcessId", notNullValue())
-            .body("startError", org.hamcrest.Matchers.nullValue())
+            .body("fresh", equalTo(true))
+            .body("agentLaunch", equalTo("SCHEDULED"))
+            .body("agent.workId", equalTo(StoryTarget.WORK_ID))
+            .body("agent.admin", equalTo(true))
+            .body("agent.runState", equalTo("RUNNING"))
             .extract()
             .jsonPath();
-    long rowId = created.getLong("workspace.id");
+    long rowId = created.getLong("agent.workspaceRowId");
     story
         .note(
-            "the operator names a repository, a parent and a label; the workspace comes back ACTIVE"
-                + " with an id of its own — not the label, which is only unique per repository and"
-                + " is reusable once a workspace resolves — and as a THIN view, because everything"
-                + " else on a workspace row is computed and none of it is knowable yet")
-        .as("workspace-created");
+            "the operator names a wrapper repository and a work item and asks for an admin agent;"
+                + " it comes back holding a workspace slot of its own — an admin workspace, made for"
+                + " it because none was free")
+        .as("agent-created");
 
     assertEquals(
         trunk,
-        StoryGitHost.shaOf(
-            StoryTarget.PROJECT, StoryTarget.WORKSPACE_REPO, StoryTarget.WORKSPACE_LABEL),
-        "the workspace's branch is not at the parent's tip on the git host");
-    assertEquals(
-        List.of(),
-        StoryGitHost.pushOptionsFor(
-            StoryTarget.PROJECT,
-            StoryTarget.WORKSPACE_REPO,
-            "refs/heads/" + StoryTarget.WORKSPACE_LABEL),
-        "the branch create was not an ordinary push");
+        StoryGitHost.shaOf(StoryTarget.PROJECT, StoryTarget.WORKSPACE_REPO, StoryTarget.MAIN),
+        "nothing may have moved on the git host");
     story
         .note(
-            "the branch exists on the git host at the parent's tip, and it got there by an"
-                + " ordinary PUSH — CI is gated only by release requests now, so there is nothing"
-                + " left for a push to suppress")
-        .as("branch-pushed");
+            "nothing was pushed: the agent's wrapper branch is the daemon's to create, locally, and"
+                + " only what the agent pushes ever reaches the git host")
+        .as("nothing-pushed");
 
     // The container. Nothing more is asked for: the create started it, and its answer already
     // carried the technical process id — the work is a pull, a start and a clone, which is minutes
@@ -219,6 +199,7 @@ public class WorkspaceProvisionIT {
     // What qits-containers was asked for. The story learns this from the far side's own recording:
     // nothing in this JVM is on that path, and asking the launched process would only get its own
     // account of what it did.
+    assertEquals("ws-" + rowId, StoryTarget.WORKSPACE_LABEL, "the slot is the database's first row");
     assertTrue(
         StoryPeers.awaitCall(
             "PUT " + StoryPeers.containerPath(StoryTarget.CONTAINER_NAME), PATIENCE),
@@ -250,13 +231,13 @@ public class WorkspaceProvisionIT {
         StoryIdentities.machineToken("workspace-" + rowId, StoryIdentities.SYSTEM_ROLE);
     MINTED.add(daemonBearer);
     try (StoryDaemon daemon = StoryDaemon.dial(baseUrl, rowId, daemonBearer)) {
-      daemon.hello(StoryTarget.WORKSPACE_LABEL, StoryTarget.WORKSPACE_REPO_ID,
-          StoryTarget.WORKSPACE_LABEL);
+      // A slot names no branch; a daemon at capability 10 always says null here.
+      daemon.hello(StoryTarget.WORKSPACE_LABEL, StoryTarget.WORKSPACE_REPO_ID, null);
       assertNotNull(daemon.awaitAck(), "the host did not acknowledge the daemon's Hello");
       story
           .note(
               "the daemon dials the control socket with a qits:system bearer of its own, names"
-                  + " itself and its branch, and the host acknowledges — the socket is the only"
+                  + " itself, and the host acknowledges — the socket is the only"
                   + " thing that makes a container reachable, and the container opened it")
           .as("daemon-dialled-home");
 
@@ -297,8 +278,8 @@ public class WorkspaceProvisionIT {
     ReportAssertions.assertComplete(CATEGORY_SLUG, PROVISIONED_SLUG, UserflowReport.PASSED);
     for (String step :
         List.of(
-            "workspace-created",
-            "branch-pushed",
+            "agent-created",
+            "nothing-pushed",
             "provision-started",
             "container-requested",
             "daemon-dialled-home",
@@ -310,8 +291,8 @@ public class WorkspaceProvisionIT {
     // What the operator sent. The polling loop is many requests and ONE arrow: the row id is a bare
     // number and the label is templated, so what the diagram says is that a provision is watched
     // over this route rather than how impatient the watching was.
-    // ONE door starts it: the create (qits-853). There is no ensure-container arrow any more.
-    from(StoryIdentities.OPERATOR, NetworkEdge.HTTP, "POST " + StoryTarget.WORKSPACES_PATH + " -> 200");
+    // ONE door starts it: the person's agent door (qits-1152). There is no ensure-container arrow.
+    from(StoryIdentities.OPERATOR, NetworkEdge.HTTP, "POST " + StoryTarget.AGENTS_PATH + " -> 200");
     from(
         StoryIdentities.OPERATOR,
         NetworkEdge.HTTP,
@@ -324,14 +305,12 @@ public class WorkspaceProvisionIT {
     // here, so unlike the release stories' uuid it survives into the label verbatim.
     to(StoryPeers.PROJECTS, StoryPeers.repositoryRead(StoryTarget.WORKSPACE_REPO_ID));
 
-    // The git host: the mirror's advertisement and pack read, and the branch create as a push.
+    // The git host: the mirror's advertisement and pack read behind the workspace read. Nothing is
+    // written: no branch is created up front any more.
     to(
         StoryGitHost.SERVICE_NAME,
         StoryGitHost.advertisement(StoryTarget.PROJECT, StoryTarget.WORKSPACE_REPO));
     to(StoryGitHost.SERVICE_NAME, StoryGitHost.read(StoryTarget.PROJECT, StoryTarget.WORKSPACE_REPO));
-    to(
-        StoryGitHost.SERVICE_NAME,
-        StoryGitHost.written(StoryTarget.PROJECT, StoryTarget.WORKSPACE_REPO));
 
     // The credential this workspace's container was given, minted at qits-platform-idp for it alone.
     to(StoryPeers.IDP, StoryPeers.posted(StoryPeers.CLIENTS_PATH, 201));
@@ -379,12 +358,12 @@ public class WorkspaceProvisionIT {
         StoryIdentities.DAEMON,
         "ack");
 
-    // SEVENTEEN across four planes: three doors, one registry read, three git calls, one commission,
+    // SIXTEEN across four planes: three doors, one registry read, two git reads, one commission,
     // one token, three container calls, one dial and four frames. The count is what would notice a
     // peer call creeping into a path that is supposed to be finished — a status poll after the
     // ensure, say, which the design deliberately does not make because the wait is on the socket
     // instead.
-    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, PROVISIONED_SLUG, 17);
+    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, PROVISIONED_SLUG, 16);
     ReportAssertions.assertOnlyEdgesFrom(
         CATEGORY_SLUG,
         PROVISIONED_SLUG,
@@ -450,20 +429,15 @@ public class WorkspaceProvisionIT {
   }
 
   /**
-   * The create request, as the workspaces client sends it — for an ADMIN workspace, because since
-   * qits-774 that (and the editor) is the only kind still provisioned DIRECT through qits-containers;
-   * a regular workspace is written RUNNER and waits for a workspace runner instead.
+   * A person's agent door, for an ADMIN agent: since qits-774 only an admin workspace is still
+   * provisioned DIRECT through qits-containers, and an admin agent runs only in one (D10).
    */
   private static String createBody() {
     return "{\"repositoryId\":\""
         + StoryTarget.WORKSPACE_REPO_ID
-        + "\",\"id\":\""
-        + StoryTarget.WORKSPACE_LABEL
-        + "\",\"parent\":\""
-        + StoryTarget.MAIN
-        + "\",\"branch\":\""
-        + StoryTarget.WORKSPACE_LABEL
-        + "\",\"preamble\":null,\"adoptExisting\":false,\"branchTree\":false,\"admin\":true}";
+        + "\",\"workId\":\""
+        + StoryTarget.WORK_ID
+        + "\",\"entityId\":\"qits-1\",\"admin\":true,\"instruction\":\"Work the item.\"}";
   }
 
   private static void from(String actor, String kind, String label) {

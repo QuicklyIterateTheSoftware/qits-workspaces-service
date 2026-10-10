@@ -29,11 +29,81 @@ components:
       - BUSY
       - WAITING
       - ENDED
+    AgentDto:
+      type: object
+      properties:
+        agentId:
+          type: string
+        workspaceRowId:
+          type: integer
+          format: int64
+        repositoryId:
+          type: string
+        workId:
+          type: string
+        entityId:
+          type: string
+        ticketId:
+          type: string
+        epicId:
+          type: string
+        wrapperBranch:
+          type: string
+        branches:
+          type: array
+          items:
+            $ref: "#/components/schemas/Branch"
+        state:
+          $ref: "#/components/schemas/AgentState"
+        runState:
+          $ref: "#/components/schemas/AgentRunState"
+        admin:
+          type: boolean
+        harness:
+          $ref: "#/components/schemas/AgentHarness"
+        sessionId:
+          type: string
+        entityTitle:
+          type: string
+        entityStatus:
+          type: string
+        entityBlocked:
+          type: boolean
+        activity:
+          $ref: "#/components/schemas/AgentActivityState"
+        waitingSince:
+          $ref: "#/components/schemas/Instant"
+        lastActivityAt:
+          $ref: "#/components/schemas/Instant"
+        createdAt:
+          $ref: "#/components/schemas/Instant"
+        obsoleteAt:
+          $ref: "#/components/schemas/Instant"
+        removedAt:
+          $ref: "#/components/schemas/Instant"
+    AgentHarness:
+      type: string
+      enum:
+      - CLAUDE
+      - KIMI
     AgentLaunch:
       type: string
       enum:
       - SCHEDULED
       - SKIPPED_RUNNING
+      - QUEUED
+    AgentRunState:
+      type: string
+      enum:
+      - QUEUED
+      - RUNNING
+      - YIELDED
+    AgentState:
+      type: string
+      enum:
+      - ACTIVE
+      - OBSOLETE
+      - REMOVED
     ApiError:
       type: object
       description: "The error envelope: a message, plus a reason or a code on a 409."
@@ -97,22 +167,17 @@ components:
         messageCount:
           type: integer
           format: int32
-    BlockedMark:
+    Branch:
       type: object
       properties:
-        workspaceId:
-          type: integer
-          format: int64
-        applied:
-          type: boolean
-    BranchResolution:
-      type: object
-      properties:
-        resolved:
-          type: boolean
-        workspaceId:
-          type: integer
-          format: int64
+        repositoryId:
+          type: string
+        branch:
+          type: string
+        sha:
+          type: string
+        pushedAt:
+          $ref: "#/components/schemas/Instant"
     BranchSweepReport:
       type: object
       properties:
@@ -162,6 +227,30 @@ components:
           pattern: \S
         result:
           type: string
+    CreateAgentRequest:
+      type: object
+      required:
+      - repositoryId
+      - workId
+      properties:
+        repositoryId:
+          type: string
+          pattern: \S
+        workId:
+          type: string
+          pattern: \S
+        entityId:
+          type: string
+        kind:
+          type: string
+        wrapperBranch:
+          type: string
+        admin:
+          type: boolean
+        harness:
+          $ref: "#/components/schemas/AgentHarness"
+        instruction:
+          type: string
     CreateRunnerRequest:
       type: object
       required:
@@ -189,43 +278,13 @@ components:
             \ at least workspaceMemoryLimit, which it needs; or -1 for unlimited swap.\
             \ Absent or blank is workspaceMemoryLimit when that is set (no swap),\
             \ else the platform default"
-    CreateWorkspaceRequest:
-      type: object
-      required:
-      - repositoryId
-      - id
-      properties:
-        repositoryId:
-          type: string
-          pattern: \S
-        id:
-          type: string
-          pattern: \S
-        parent:
-          type: string
-        branch:
-          type: string
-        preamble:
-          type: string
-        adoptExisting:
-          type: boolean
-        branchTree:
-          type: boolean
-        admin:
-          type: boolean
-        placement:
-          $ref: "#/components/schemas/WorkspacePlacement"
     DeliverTurnRequest:
       type: object
       required:
-      - repositoryId
-      - branch
+      - workId
       - text
       properties:
-        repositoryId:
-          type: string
-          pattern: \S
-        branch:
+        workId:
           type: string
           pattern: \S
         text:
@@ -233,20 +292,24 @@ components:
           pattern: \S
         compactFirst:
           type: boolean
-        workId:
-          type: string
     Delivery:
       type: object
       properties:
-        workspaceId:
-          type: integer
-          format: int64
+        agentId:
+          type: string
         delivered:
           type: boolean
         launched:
           type: boolean
+        resumed:
+          type: boolean
         detail:
           type: string
+    DiscardAgentRequest:
+      type: object
+      properties:
+        force:
+          type: boolean
     DiscardWorkspaceRequest:
       type: object
       properties:
@@ -255,36 +318,30 @@ components:
     Dispatch:
       type: object
       properties:
-        workspace:
-          $ref: "#/components/schemas/WorkspaceDto"
+        agent:
+          $ref: "#/components/schemas/AgentDto"
         fresh:
           type: boolean
         agentLaunch:
           $ref: "#/components/schemas/AgentLaunch"
-        technicalProcessId:
-          type: string
         agentIdentity:
           type: string
     DispatchAgentRequest:
       type: object
       required:
       - repositoryId
-      - branch
+      - wrapperBranch
+      - workId
       properties:
         repositoryId:
           type: string
           pattern: \S
-        branch:
+        wrapperBranch:
           type: string
           pattern: \S
-        branchTree:
-          type: boolean
-        preamble:
+        workId:
           type: string
-        ticketId:
-          type: string
-        epicId:
-          type: string
+          pattern: \S
         entityId:
           type: string
         entityTitle:
@@ -293,19 +350,28 @@ components:
           type: string
         entityBlocked:
           type: boolean
+        ticketId:
+          type: string
+        epicId:
+          type: string
+        admin:
+          type: boolean
+        harness:
+          $ref: "#/components/schemas/AgentHarness"
         instruction:
           type: string
-        gitRefs:
-          type: array
-          items:
-            type: string
-        workId:
+    EntityMark:
+      type: object
+      properties:
+        agentId:
           type: string
+        applied:
+          type: boolean
     Entry:
       type: object
       properties:
-        workspace:
-          $ref: "#/components/schemas/WorkspaceSubjectRefDto"
+        agent:
+          $ref: "#/components/schemas/AgentDto"
     Entry1:
       type: object
       properties:
@@ -428,30 +494,22 @@ components:
     MarkBlockedRequest:
       type: object
       required:
-      - repositoryId
-      - branch
+      - workId
       properties:
-        repositoryId:
-          type: string
-          pattern: \S
-        branch:
+        workId:
           type: string
           pattern: \S
         blocked:
           type: boolean
-        workId:
+        blockSource:
           type: string
     MarkEntityRequest:
       type: object
       required:
-      - repositoryId
-      - branch
+      - workId
       - blocked
       properties:
-        repositoryId:
-          type: string
-          pattern: \S
-        branch:
+        workId:
           type: string
           pattern: \S
         title:
@@ -460,8 +518,6 @@ components:
           type: string
         blocked:
           type: boolean
-        workId:
-          type: string
         blockSource:
           type: string
     MergeBranchRequest:
@@ -531,6 +587,15 @@ components:
           type: string
         socketUrl:
           type: string
+    Resolution:
+      type: object
+      properties:
+        resolved:
+          type: boolean
+        agentIds:
+          type: array
+          items:
+            type: string
     ResolveReleasedBranchRequest:
       type: object
       required:
@@ -548,21 +613,17 @@ components:
     Response:
       type: object
       properties:
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentDto"
+    Response1:
+      type: object
+      properties:
         entries:
           type: array
           items:
             $ref: "#/components/schemas/Entry"
-    Response1:
-      type: object
-      properties:
-        commitHash:
-          type: string
-        hasConflicts:
-          type: boolean
-        output:
-          type: string
-        cleanedUp:
-          type: boolean
     Response10:
       type: object
       properties:
@@ -627,48 +688,50 @@ components:
     Response2:
       type: object
       properties:
-        success:
+        commitHash:
+          type: string
+        hasConflicts:
+          type: boolean
+        output:
+          type: string
+        cleanedUp:
           type: boolean
     Response3:
+      type: object
+      properties:
+        success:
+          type: boolean
+    Response4:
       type: object
       properties:
         workspace:
           $ref: "#/components/schemas/WorkspaceDto"
         technicalProcessId:
           type: string
-    Response4:
+    Response5:
       type: object
       properties:
         entries:
           type: array
           items:
             $ref: "#/components/schemas/Entry1"
-    Response5:
-      type: object
-      properties:
-        workspace:
-          $ref: "#/components/schemas/WorkspaceDto"
     Response6:
       type: object
       properties:
         workspace:
           $ref: "#/components/schemas/WorkspaceDto"
-        technicalProcessId:
-          type: string
     Response7:
-      type: object
-      properties:
-        success:
-          type: boolean
-    Response8:
       type: object
       properties:
         workspace:
           $ref: "#/components/schemas/WorkspaceDto"
         technicalProcessId:
           type: string
-        startError:
-          type: string
+    Response8:
+      type: object
+      properties:
+        success:
+          type: boolean
     Response9:
       type: object
       properties:
@@ -1070,30 +1133,6 @@ components:
       - ACTIVE
       - INTEGRATED
       - ABANDONED
-    WorkspaceSubjectRefDto:
-      type: object
-      properties:
-        workspaceRowId:
-          type: integer
-          format: int64
-        repositoryId:
-          type: string
-        workspaceId:
-          type: string
-        branch:
-          type: string
-        ticketId:
-          type: string
-        epicId:
-          type: string
-        status:
-          type: string
-        resolvedAt:
-          $ref: "#/components/schemas/Instant"
-        workId:
-          type: string
-        entityId:
-          type: string
   securitySchemes:
     SecurityScheme:
       type: openIdConnect
@@ -1111,40 +1150,26 @@ paths:
         required: true
       responses:
         "200":
-          description: "Dispatched. `fresh:false` means the branch already had a workspace\
-            \ and it was answered instead — the ordinary case on a re-press, and not\
-            \ an error. `agentIdentity` is the principal the dispatched agent's own\
-            \ calls carry (the workspace token's subject when its container holds\
-            \ a token, the commissioned client id otherwise); null until the container\
-            \ is commissioned, never a secret. A workspace on a workspace runner may\
-            \ answer `workspace.runtimeStatus: QUEUED` with `agentLaunch: SCHEDULED`:\
-            \ it is waiting for a runner slot, `technicalProcessId` is the start that\
-            \ queued it, and the agent is launched once a runner takes it and its\
-            \ daemon answers. A re-press while it is queued schedules nothing more."
+          description: "Dispatched. `fresh:false` means the work item already had\
+            \ an ACTIVE agent and it was answered — a re-press, not an error. `agentLaunch`\
+            \ is SCHEDULED (the agent has a workspace and starts, or hears the instruction,\
+            \ once its daemon answers), SKIPPED_RUNNING (it was already running; the\
+            \ instruction was not sent) or QUEUED (no workspace slot is free; `agent.workspaceRowId`\
+            \ is null until one is). `agentIdentity` is the subject of the agent's\
+            \ own credential; null while it holds none."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Dispatch"
         "400":
-          description: "A blank repository or branch, a branch name git will not take,\
-            \ or a `gitRefs` list that breaks the rules (every entry under `refs/heads/`,\
-            \ `*` only as a trailing `/*`, at most 500 entries of at most 255 characters,\
-            \ no duplicates)."
+          description: "A blank repository, wrapper branch or work item, or a branch\
+            \ git will not take."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: No such repository. Nothing was created.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "409":
-          description: "RUNNER_UNAVAILABLE: the workspace already on that branch is\
-            \ on a workspace runner that is offline past its reconnect grace; the\
-            \ message names the runner. Nothing was started or queued: the workspace\
-            \ is the runner's alone, so a dispatch fails rather than wait for it."
           content:
             application/json:
               schema:
@@ -1172,17 +1197,15 @@ paths:
         required: true
       responses:
         "200":
-          description: "Answered. `workspaceId: null` means no workspace stands on\
-            \ that branch; `applied: false` with a non-null `workspaceId` means the\
-            \ daemon was not reachable or did not take the marker. Neither is an error\
-            \ — this door never creates a workspace, ensures a container or starts\
-            \ an agent."
+          description: "Answered. `agentId: null` means no agent works on the item;\
+            \ `applied` says whether the running harness took the marker live. Never\
+            \ creates or starts anything."
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BlockedMark"
+                $ref: "#/components/schemas/EntityMark"
         "400":
-          description: A blank repository or branch.
+          description: A blank work item.
           content:
             application/json:
               schema:
@@ -1210,25 +1233,17 @@ paths:
         required: true
       responses:
         "200":
-          description: "Answered. `workspaceId: null` means no workspace stands on\
-            \ that branch — nothing was said and nothing was created, which is a normal\
-            \ outcome and not an error. A workspace queued for a workspace runner\
-            \ answers both flags false: the text waits until a runner takes it and\
-            \ its daemon answers."
+          description: "Answered. `agentId: null` means no agent works on the item:\
+            \ nothing was said and nothing created — a normal outcome. Otherwise one\
+            \ of `delivered` (said at the running agent's next turn boundary), `launched`\
+            \ (its first turn, once it starts) or `resumed` (a yielded agent resumes\
+            \ to hear it)."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Delivery"
         "400":
-          description: "A blank repository, branch or text."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "409":
-          description: "RUNNER_UNAVAILABLE: the workspace on that branch is on a workspace\
-            \ runner that is offline past its reconnect grace; the message names the\
-            \ runner. Nothing was said, started or queued."
+          description: A blank work item or text.
           content:
             application/json:
               schema:
@@ -1256,17 +1271,16 @@ paths:
         required: true
       responses:
         "200":
-          description: "Answered. `workspaceId: null` means no workspace stands on\
-            \ that branch and nothing was stored; otherwise the facts are stored on\
-            \ the workspace, and `applied` says whether its daemon also took them\
-            \ live. Never creates a workspace, ensures a container or starts an agent."
+          description: "Answered. `agentId: null` means no agent works on the item\
+            \ and nothing was stored; otherwise the facts are stored on the agent\
+            \ (the cleanup sweep reads the status), and `applied` says whether its\
+            \ running harness took them live."
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BlockedMark"
+                $ref: "#/components/schemas/EntityMark"
         "400":
-          description: "A blank repository or branch, or a missing or non-boolean\
-            \ `blocked`."
+          description: "A blank work item, or a missing or non-boolean `blocked`."
           content:
             application/json:
               schema:
@@ -1311,7 +1325,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response"
+                $ref: "#/components/schemas/Response1"
         "401":
           description: Not Authorized
         "403":
@@ -1325,6 +1339,474 @@ paths:
         - qits:admin-agent
         - qits:system
         - qits:agent
+  /workspaces/api/agents:
+    get:
+      summary: "Agents, newest first, each filter optional"
+      operationId: listAgents
+      parameters:
+      - name: state
+        in: query
+        schema:
+          $ref: "#/components/schemas/AgentState"
+      - name: workId
+        in: query
+        schema:
+          type: string
+      - name: workspaceId
+        in: query
+        schema:
+          type: integer
+          format: int64
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Agent Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:system
+        - qits:agent
+    post:
+      operationId: createAgent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentRequest"
+        required: true
+      responses:
+        "200":
+          description: "The agent: created, or the item's ACTIVE agent (`fresh:false`).\
+            \ Same answer as the dispatch door."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dispatch"
+        "400":
+          description: "No work item, or a wrapper branch git will not take."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No such repository.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Create
+      tags:
+      - Agent Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+  /workspaces/api/agents/{id}:
+    get:
+      operationId: getAgent
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: "The agent, in any state."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDto"
+        "404":
+          description: No such agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Get
+      tags:
+      - Agent Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:system
+        - qits:agent
+  /workspaces/api/agents/{id}/discard:
+    post:
+      operationId: discardAgent
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiscardAgentRequest"
+        required: true
+      responses:
+        "200":
+          description: "Removed: worktrees, credential and draft gone."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDto"
+        "409":
+          description: "AGENT_HAS_LEFTOVER_WORK (uncommitted or unpushed work, named)\
+            \ or AGENT_DAEMON_UNREACHABLE; nothing was removed. Send `force: true`\
+            \ to remove anyway."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "400":
+          description: Bad Request
+      summary: Discard
+      tags:
+      - Agent Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+  /workspaces/api/agents/{id}/prompt-attachments:
+    get:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: "The attachments, oldest first."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response16"
+        "404":
+          description: No such ACTIVE workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: List
+      tags:
+      - Workspace Prompt Attachment Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:agent
+    post:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddAttachmentRequest"
+        required: true
+      responses:
+        "201":
+          description: Attached; the row without its bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response15"
+        "400":
+          description: "Not valid base64, not a PNG or JPEG, or an unknown source."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No such ACTIVE workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: The image exceeds the configured per-image byte cap.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Add
+      tags:
+      - Workspace Prompt Attachment Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+  /workspaces/api/agents/{id}/prompt-attachments/{attachmentId}:
+    put:
+      parameters:
+      - name: attachmentId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddAttachmentRequest"
+        required: true
+      responses:
+        "200":
+          description: Updated; the same row id is preserved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response15"
+        "400":
+          description: "Not valid base64, not a PNG or JPEG, or an unknown source."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: "No such ACTIVE workspace, or no such attachment on it."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: The image exceeds the configured limit.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Update
+      tags:
+      - Workspace Prompt Attachment Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+    delete:
+      parameters:
+      - name: attachmentId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: Removed.
+        "404":
+          description: "No such ACTIVE workspace, or no such attachment on it."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Delete
+      tags:
+      - Workspace Prompt Attachment Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+  /workspaces/api/agents/{id}/prompt-attachments/{attachmentId}/content:
+    get:
+      parameters:
+      - name: attachmentId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: The stored PNG or JPEG bytes.
+          content:
+            image/png: {}
+            image/jpeg: {}
+        "404":
+          description: "No such ACTIVE workspace, or no such attachment on it."
+          content:
+            image/png:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+            image/jpeg:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Content
+      tags:
+      - Workspace Prompt Attachment Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:agent
+  /workspaces/api/agents/{id}/prompt-draft:
+    put:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SavePromptDraftRequest"
+        required: true
+      responses:
+        "200":
+          description: "The persisted draft, with its fresh updatedAt."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response17"
+        "400":
+          description: The content is not a well-formed JSON document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No such ACTIVE workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: The draft exceeds the configured byte cap.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Save
+      tags:
+      - Workspace Prompt Draft Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+    get:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: The saved draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response18"
+        "404":
+          description: "No such ACTIVE workspace, or it has no saved draft."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Get
+      tags:
+      - Workspace Prompt Draft Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:agent
+    delete:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: There is no draft for this workspace.
+        "404":
+          description: No such ACTIVE workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Delete
+      tags:
+      - Workspace Prompt Draft Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
   /workspaces/api/branches/cleanup:
     post:
       parameters:
@@ -1344,7 +1826,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response2"
+                $ref: "#/components/schemas/Response3"
         "400":
           description: "The branch is not eligible: uncommitted changes, unmerged\
             \ commits, or dependents."
@@ -1388,7 +1870,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response1"
+                $ref: "#/components/schemas/Response2"
         "400":
           description: "A blank, dash-leading or self-referential branch name."
           content:
@@ -1436,16 +1918,16 @@ paths:
         required: true
       responses:
         "200":
-          description: "Resolved, or `resolved:false` when no active workspace stood\
-            \ on the branch — the ordinary case, and what a repeated call answers."
+          description: "Resolved, or `resolved:false` when nothing owned the branch\
+            \ — the ordinary case, and what a repeated call answers. `agentIds` are\
+            \ the agents marked OBSOLETE."
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BranchResolution"
+                $ref: "#/components/schemas/Resolution"
         "400":
-          description: "A blank branch, or the repository's main workspace — refused\
-            \ on both belts: the row has no parent, or the branch is the repository's\
-            \ default branch."
+          description: "A blank branch, or an old-model main workspace (refused on\
+            \ both belts: no parent, or the repository's default branch)."
           content:
             application/json:
               schema:
@@ -2133,7 +2615,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response4"
+                $ref: "#/components/schemas/Response5"
         "401":
           description: Not Authorized
         "403":
@@ -2146,34 +2628,6 @@ paths:
         - qits:admin
         - qits:admin-agent
         - qits:agent
-    post:
-      operationId: createWorkspace
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateWorkspaceRequest"
-        required: true
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Response8"
-        "401":
-          description: Not Authorized
-        "403":
-          description: Not Allowed
-        "400":
-          description: Bad Request
-      summary: Create
-      tags:
-      - Workspace Controller
-      security:
-      - SecurityScheme:
-        - qits:admin
-        - qits:admin-agent
   /workspaces/api/workspaces/{id}:
     get:
       parameters:
@@ -2189,7 +2643,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response5"
+                $ref: "#/components/schemas/Response6"
         "404":
           description: No such ACTIVE workspace.
           content:
@@ -2289,7 +2743,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response7"
+                $ref: "#/components/schemas/Response8"
         "401":
           description: Not Authorized
         "403":
@@ -2318,7 +2772,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response6"
+                $ref: "#/components/schemas/Response7"
         "409":
           description: The workspace was stopped while it was starting and that start's
             process is still open. `code` is WORKSPACE_STOPPED_DURING_START and the
@@ -2338,328 +2792,6 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
-  /workspaces/api/workspaces/{id}/prompt-attachments:
-    get:
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      responses:
-        "200":
-          description: "The attachments, oldest first."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Response16"
-        "404":
-          description: No such ACTIVE workspace.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "401":
-          description: Not Authorized
-        "403":
-          description: Not Allowed
-      summary: List
-      tags:
-      - Workspace Prompt Attachment Controller
-      security:
-      - SecurityScheme:
-        - qits:admin
-        - qits:admin-agent
-        - qits:agent
-    post:
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AddAttachmentRequest"
-        required: true
-      responses:
-        "201":
-          description: Attached; the row without its bytes.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Response15"
-        "400":
-          description: "Not valid base64, not a PNG or JPEG, or an unknown source."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "404":
-          description: No such ACTIVE workspace.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "413":
-          description: The image exceeds the configured per-image byte cap.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "401":
-          description: Not Authorized
-        "403":
-          description: Not Allowed
-      summary: Add
-      tags:
-      - Workspace Prompt Attachment Controller
-      security:
-      - SecurityScheme:
-        - qits:admin
-        - qits:admin-agent
-  /workspaces/api/workspaces/{id}/prompt-attachments/{attachmentId}:
-    put:
-      parameters:
-      - name: attachmentId
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AddAttachmentRequest"
-        required: true
-      responses:
-        "200":
-          description: Updated; the same row id is preserved.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Response15"
-        "400":
-          description: "Not valid base64, not a PNG or JPEG, or an unknown source."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "404":
-          description: "No such ACTIVE workspace, or no such attachment on it."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "413":
-          description: The image exceeds the configured limit.
-        "401":
-          description: Not Authorized
-        "403":
-          description: Not Allowed
-      summary: Update
-      tags:
-      - Workspace Prompt Attachment Controller
-      security:
-      - SecurityScheme:
-        - qits:admin
-        - qits:admin-agent
-    delete:
-      parameters:
-      - name: attachmentId
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      responses:
-        "204":
-          description: Removed.
-        "404":
-          description: "No such ACTIVE workspace, or no such attachment on it."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "401":
-          description: Not Authorized
-        "403":
-          description: Not Allowed
-      summary: Delete
-      tags:
-      - Workspace Prompt Attachment Controller
-      security:
-      - SecurityScheme:
-        - qits:admin
-        - qits:admin-agent
-  /workspaces/api/workspaces/{id}/prompt-attachments/{attachmentId}/content:
-    get:
-      parameters:
-      - name: attachmentId
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      responses:
-        "200":
-          description: The stored PNG or JPEG bytes.
-          content:
-            image/png: {}
-            image/jpeg: {}
-        "404":
-          description: "No such ACTIVE workspace, or no such attachment on it."
-          content:
-            image/png:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-            image/jpeg:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "401":
-          description: Not Authorized
-        "403":
-          description: Not Allowed
-      summary: Content
-      tags:
-      - Workspace Prompt Attachment Controller
-      security:
-      - SecurityScheme:
-        - qits:admin
-        - qits:admin-agent
-        - qits:agent
-  /workspaces/api/workspaces/{id}/prompt-draft:
-    put:
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SavePromptDraftRequest"
-        required: true
-      responses:
-        "200":
-          description: "The persisted draft, with its fresh updatedAt."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Response17"
-        "400":
-          description: The content is not a well-formed JSON document.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "404":
-          description: No such ACTIVE workspace.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "413":
-          description: The draft exceeds the configured byte cap.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "401":
-          description: Not Authorized
-        "403":
-          description: Not Allowed
-      summary: Save
-      tags:
-      - Workspace Prompt Draft Controller
-      security:
-      - SecurityScheme:
-        - qits:admin
-        - qits:admin-agent
-    get:
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      responses:
-        "200":
-          description: The saved draft.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Response18"
-        "404":
-          description: "No such ACTIVE workspace, or it has no saved draft."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "401":
-          description: Not Authorized
-        "403":
-          description: Not Allowed
-      summary: Get
-      tags:
-      - Workspace Prompt Draft Controller
-      security:
-      - SecurityScheme:
-        - qits:admin
-        - qits:admin-agent
-        - qits:agent
-    delete:
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      responses:
-        "204":
-          description: There is no draft for this workspace.
-        "404":
-          description: No such ACTIVE workspace.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "401":
-          description: Not Authorized
-        "403":
-          description: Not Allowed
-      summary: Delete
-      tags:
-      - Workspace Prompt Draft Controller
-      security:
-      - SecurityScheme:
-        - qits:admin
-        - qits:admin-agent
   /workspaces/api/workspaces/{id}/recreate-container:
     post:
       parameters:
@@ -2675,7 +2807,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response3"
+                $ref: "#/components/schemas/Response4"
         "401":
           description: Not Authorized
         "403":

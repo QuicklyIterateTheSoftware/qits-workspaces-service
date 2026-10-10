@@ -171,19 +171,6 @@ class CaptureGoalRendererTest {
     assertEquals(1, fencedBodies(goal).size());
   }
 
-  @Test
-  void branchNameShapes() {
-    Instant instant = Instant.parse("2026-07-14T12:00:11Z");
-    assertEquals("feature/2026-07-14-1200", CaptureService.branchNameFor("feature/", instant, 1));
-    assertEquals("feature/2026-07-14-1200-2", CaptureService.branchNameFor("feature/", instant, 2));
-    // The dash fallback shape for repos whose bare `feature` branch blocks feature/* refs.
-    assertEquals("feature-2026-07-14-1200", CaptureService.branchNameFor("feature-", instant, 1));
-    // A non-UTC wall clock must not leak in: 23:30Z stays 2330, same date.
-    assertEquals(
-        "feature/2026-07-14-2330",
-        CaptureService.branchNameFor("feature/", Instant.parse("2026-07-14T23:30:00Z"), 1));
-  }
-
   /** Extracts fenced code-block bodies, asserting each opener has a matching same-length closer. */
   private static List<String> fencedBodies(String markdown) {
     Pattern opener = Pattern.compile("(?m)^(`{3,})(\\w*)$");

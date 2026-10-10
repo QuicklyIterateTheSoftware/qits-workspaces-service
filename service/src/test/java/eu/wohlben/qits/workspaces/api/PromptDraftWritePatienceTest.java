@@ -4,6 +4,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import eu.wohlben.qits.workspaces.control.AgentService;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
@@ -76,8 +77,8 @@ public class PromptDraftWritePatienceTest {
     }
 
     @Override
-    public void upsert(Long workspaceId, String content, String serializedPrompt) {
-      super.upsert(workspaceId, content, serializedPrompt);
+    public void upsert(java.util.UUID agentId, String content, String serializedPrompt) {
+      super.upsert(agentId, content, serializedPrompt);
       upserts.incrementAndGet();
       if (severed.getAndUpdate(left -> left > 0 ? left - 1 : 0) > 0) {
         // The shape a cutover actually arrives in: Hibernate's JDBCConnectionException over a
@@ -102,7 +103,7 @@ public class PromptDraftWritePatienceTest {
 
   @Inject WorkspaceIds workspaceIds;
 
-  @Inject WorkspaceService workspaceService;
+  @Inject AgentService agentService;
 
   @BeforeEach
   void installTheWoundedRepository() {
@@ -111,20 +112,29 @@ public class PromptDraftWritePatienceTest {
         new FlakyDraftRepository(), WorkspacePromptDraftRepository.class);
   }
 
-  private Long workspace(String label) throws Exception {
+  /**
+   * An agent for a fresh work item (qits-1152): the draft is the agent's. No runner, so it waits
+   * QUEUED, which is all a draft needs.
+   */
+  private String workspace(String label) throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createWorkspace(repoId, label, "master", label);
-    return workspaceIds.of(repoId, label);
+    return agentService
+        .dispatch(
+            new AgentService.AgentRequest(
+                repoId, "ticket/" + label, label + "-" + java.util.UUID.randomUUID(), null, null,
+                null, false, null, null, null))
+        .agent()
+        .agentId();
   }
 
-  private static String base(Long id) {
-    return "/workspaces/api/workspaces/" + id + "/prompt-draft";
+  private static String base(String id) {
+    return "/workspaces/api/agents/" + id + "/prompt-draft";
   }
 
   @Test
   public void aConnectionLostMidSaveIsRetriedAndTheDraftIsWrittenOnce() throws Exception {
-    Long id = workspace("draft-patience");
+    String id = workspace("draft-patience");
 
     // The cutover lands after the upsert's statements have run and before the transaction commits.
     FlakyDraftRepository.loseTheConnection(1);
@@ -154,7 +164,7 @@ public class PromptDraftWritePatienceTest {
 
   @Test
   public void aConstraintViolationIsNotRetried() throws Exception {
-    Long id = workspace("draft-refusal");
+    String id = workspace("draft-refusal");
 
     FlakyDraftRepository.violateAConstraint(1);
 

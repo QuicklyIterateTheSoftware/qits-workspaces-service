@@ -3,6 +3,7 @@ package eu.wohlben.qits.workspaces.wiring;
 import eu.wohlben.qits.workspaces.control.CredentialCommissioner;
 import eu.wohlben.qits.workspaces.control.GitRefScopes;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
+import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -14,6 +15,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -78,6 +80,9 @@ public class CommissionReconciler {
 
   @Inject WorkspaceRepository workspaces;
 
+  /** The agents, whose own tokens are claimed while they are not REMOVED (qits-1152). */
+  @Inject AgentWorktreeRepository agentRows;
+
   /** Sends the Git ref narrowings whose first update did not reach qits-idp. */
   @Inject GitRefScopes gitRefScopes;
 
@@ -122,6 +127,8 @@ public class CommissionReconciler {
 
   /** The {@code workspace} arm of the token listing; see the class javadoc. */
   int reapWorkspaceTokens(Instant now) {
+    // An agent's token (context agent-<id>) is of the workspace kind too, and claimed by its agent
+    // row while that is not REMOVED: see claimedTokenIds.
     try {
       List<CredentialCommissioner.TokenCommission> held =
           commissioner.get().listTokens().stream()
@@ -287,8 +294,17 @@ public class CommissionReconciler {
     return QuarkusTransaction.requiringNew().call(workspaces::liveCommissionedClientIds);
   }
 
-  /** The workspace token ids ACTIVE rows hold, in a transaction of its own, as above. */
+  /**
+   * The workspace token ids ACTIVE rows hold, and the agent token ids ACTIVE and OBSOLETE agents
+   * hold (qits-1152), in a transaction of its own, as above.
+   */
   List<String> claimedTokenIds() {
-    return QuarkusTransaction.requiringNew().call(workspaces::liveCommissionedTokenIds);
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              List<String> claimed = new ArrayList<>(workspaces.liveCommissionedTokenIds());
+              claimed.addAll(agentRows.liveCommissionedTokenIds());
+              return claimed;
+            });
   }
 }

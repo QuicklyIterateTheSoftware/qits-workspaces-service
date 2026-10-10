@@ -34,9 +34,8 @@ class AgentDispatchDoorRolesTest {
   private static Map<String, Object> aDispatch() {
     return Map.of(
         "repositoryId", "no-such-repository",
-        "branch", "ticket/whatever",
-        "branchTree", Boolean.FALSE,
-        "preamble", "the goal",
+        "wrapperBranch", "ticket/whatever",
+        "workId", "w-whatever",
         "instruction", "go");
   }
 
@@ -66,7 +65,7 @@ class AgentDispatchDoorRolesTest {
         .statusCode(404);
   }
 
-  /** A person may still press it — the same operator who creates workspaces by hand. */
+  /** A person may still press it. */
   @Test
   void theAdminRoleIsAdmitted() {
     given()

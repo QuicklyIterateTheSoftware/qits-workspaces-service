@@ -6,7 +6,7 @@ import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.error.PayloadTooLargeException;
 import eu.wohlben.qits.workspaces.dto.WorkspacePromptAttachmentDataDto;
 import eu.wohlben.qits.workspaces.entity.PromptAttachmentSource;
-import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.entity.WorkspacePromptAttachment;
 import eu.wohlben.qits.workspaces.persistence.WorkspacePromptAttachmentRepository;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -34,7 +34,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 @ApplicationScoped
 public class WorkspacePromptAttachmentService {
 
-  @Inject WorkspaceResolver workspaceResolver;
+  @Inject AgentResolver agentResolver;
 
   @Inject WorkspacePromptAttachmentRepository attachmentRepository;
 
@@ -59,7 +59,7 @@ public class WorkspacePromptAttachmentService {
    * the commit round trip, and {@code inNewTx} reports that rather than repeating it.
    */
   public WorkspacePromptAttachment addAttachment(
-      Long id,
+      java.util.UUID id,
       String claimedMimeType,
       String label,
       String source,
@@ -91,22 +91,22 @@ public class WorkspacePromptAttachmentService {
     // Outside the retried unit — the body is database-only by rule. Fires the attachments-only SSE
     // topic (not prompt-draft) so another open view refreshes its GET-list without every
     // prompt-text autosave re-downloading the image payloads.
-    changePublisher.fire(attached.repositoryId(), id, WorkspaceChangeHint.Topic.PROMPT_ATTACHMENTS);
+    changePublisher.fire(attached.repositoryId(), null, WorkspaceChangeHint.Topic.PROMPT_ATTACHMENTS);
     return attached.attachment();
   }
 
   /** One attempt of {@link #addAttachment}'s database work: resolve, insert, flush. */
   private Attached insertAttachment(
-      Long id,
+      java.util.UUID id,
       String attachmentId,
       String mimeType,
       String label,
       PromptAttachmentSource source,
       byte[] bytes) {
-    Workspace workspace = workspaceResolver.resolveActive(id);
+    AgentWorktree agent = agentResolver.resolveLive(id);
     WorkspacePromptAttachment attachment = new WorkspacePromptAttachment();
     attachment.id = attachmentId;
-    attachment.workspaceId = workspace.id;
+    attachment.agentId = agent.id;
     attachment.mimeType = mimeType;
     attachment.label = label;
     attachment.source = source;
@@ -116,7 +116,7 @@ public class WorkspacePromptAttachmentService {
     // insert out of the commit round trip (undecidable, reported) into the statement phase
     // (certainly not committed, retried). It also stamps createdAt, which the caller returns.
     attachmentRepository.flush();
-    return new Attached(attachment, workspace.repositoryId);
+    return new Attached(attachment, agent.repositoryId);
   }
 
   /**
@@ -132,11 +132,10 @@ public class WorkspacePromptAttachmentService {
    * has none.
    */
   @Transactional
-  public List<WorkspacePromptAttachmentDataDto> listAttachments(Long id) {
-    Workspace workspace = workspaceResolver.resolveActive(id);
-    String repoId = workspace.repositoryId;
-    String workspaceId = workspace.workspaceId;
-    return attachmentRepository.listByWorkspaceId(workspace.id).stream()
+  public List<WorkspacePromptAttachmentDataDto> listAttachments(java.util.UUID id) {
+    AgentWorktree agent = agentResolver.resolveLive(id);
+    String repoId = agent.repositoryId;
+    return attachmentRepository.listByAgentId(agent.id).stream()
         .map(
             a ->
                 new WorkspacePromptAttachmentDataDto(
@@ -151,17 +150,17 @@ public class WorkspacePromptAttachmentService {
 
   /** Returns one attachment scoped to its active workspace, including its raw image bytes. */
   @Transactional
-  public WorkspacePromptAttachment getAttachment(Long id, String attachmentId) {
-    Workspace workspace = workspaceResolver.resolveActive(id);
+  public WorkspacePromptAttachment getAttachment(java.util.UUID id, String attachmentId) {
+    AgentWorktree agent = agentResolver.resolveLive(id);
     return attachmentRepository
-        .findByWorkspaceIdAndId(workspace.id, attachmentId)
+        .findByAgentIdAndId(agent.id, attachmentId)
         .orElseThrow(() -> new NotFoundException("Attachment not found: " + attachmentId));
   }
 
   /** Replaces an attachment's image in place, preserving the id used by durable document URLs. */
   @Transactional
   public WorkspacePromptAttachment updateAttachment(
-      Long id,
+      java.util.UUID id,
       String attachmentId,
       String claimedMimeType,
       String label,
@@ -169,30 +168,29 @@ public class WorkspacePromptAttachmentService {
       String dataBase64) {
     PromptAttachmentSource parsedSource = parseSource(source);
     byte[] bytes = decodeAndValidate(dataBase64);
-    Workspace workspace = workspaceResolver.resolveActive(id);
+    AgentWorktree agent = agentResolver.resolveLive(id);
     WorkspacePromptAttachment attachment =
         attachmentRepository
-            .findByWorkspaceIdAndId(workspace.id, attachmentId)
+            .findByAgentIdAndId(agent.id, attachmentId)
             .orElseThrow(() -> new NotFoundException("Attachment not found: " + attachmentId));
     attachment.mimeType = sniffImageType(bytes);
     attachment.label = label;
     attachment.source = parsedSource;
     attachment.bytes = bytes;
     changePublisher.fire(
-        workspace.repositoryId, workspace.id, WorkspaceChangeHint.Topic.PROMPT_ATTACHMENTS);
+        agent.repositoryId, agent.workspaceId, WorkspaceChangeHint.Topic.PROMPT_ATTACHMENTS);
     return attachment;
   }
 
   /** Removes one attachment scoped to its workspace; 404 if the workspace or the row is unknown. */
   @Transactional
-  public void deleteAttachment(Long id, String attachmentId) {
-    Workspace workspace = workspaceResolver.resolveActive(id);
-    String repoId = workspace.repositoryId;
-    String workspaceId = workspace.workspaceId;
-    if (!attachmentRepository.deleteByWorkspaceIdAndId(workspace.id, attachmentId)) {
+  public void deleteAttachment(java.util.UUID id, String attachmentId) {
+    AgentWorktree agent = agentResolver.resolveLive(id);
+    String repoId = agent.repositoryId;
+    if (!attachmentRepository.deleteByAgentIdAndId(agent.id, attachmentId)) {
       throw new NotFoundException("Attachment not found: " + attachmentId);
     }
-    changePublisher.fire(repoId, workspace.id, WorkspaceChangeHint.Topic.PROMPT_ATTACHMENTS);
+    changePublisher.fire(repoId, agent.workspaceId, WorkspaceChangeHint.Topic.PROMPT_ATTACHMENTS);
   }
 
   private static PromptAttachmentSource parseSource(String source) {

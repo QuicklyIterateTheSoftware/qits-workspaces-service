@@ -305,6 +305,24 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
   @Override
   public Optional<WorkspaceToken> commissionToken(
       long rowId, String projectId, List<String> gitRefs, boolean admin) {
+    return mint(Long.toString(rowId), "workspace " + rowId, projectId, gitRefs, admin);
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The same mint as a workspace's, with the context id {@code agent-<id>}: the kind stays the
+   * workspace's ({@code workspace} or {@code workspace-admin}), so qits-idp issues the same roles,
+   * and the id says whose it is.
+   */
+  @Override
+  public Optional<WorkspaceToken> commissionAgentToken(
+      String agentId, String projectId, List<String> gitRefs, boolean admin) {
+    return mint(AGENT_CONTEXT_PREFIX + agentId, "agent " + agentId, projectId, gitRefs, admin);
+  }
+
+  private Optional<WorkspaceToken> mint(
+      String contextId, String whose, String projectId, List<String> gitRefs, boolean admin) {
     String authorization = authorization();
     if (authorization == null) {
       return Optional.empty();
@@ -312,14 +330,14 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
     IdpTokens.TokenRequest[] request = {
       new IdpTokens.TokenRequest(
           CredentialCommissioner.contextKindFor(admin),
-          Long.toString(rowId),
+          contextId,
           claims(projectId),
           gitRefs == null ? null : List.copyOf(gitRefs))
     };
     return Optional.of(
         patiently(
             patience,
-            "a token for workspace " + rowId,
+            "a token for " + whose,
             () -> {
               IdpTokens.TokenResponse issued = tokens.commission(authorization, request[0]);
               if (issued == null
@@ -327,8 +345,8 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
                   || blank(issued.token())
                   || blank(issued.subject())) {
                 throw new IllegalStateException(
-                    "qits-idp answered a token commission for workspace "
-                        + rowId
+                    "qits-idp answered a token commission for "
+                        + whose
                         + " with no usable token in it");
               }
               return new WorkspaceToken(issued.tokenId(), issued.token(), issued.subject());
@@ -340,12 +358,12 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
                 return false;
               }
               LOG.error(
-                  "qits-idp refused the Git refs of workspace "
-                      + rowId
+                  "qits-idp refused the Git refs of "
+                      + whose
                       + " ("
                       + reasonOf(failure)
-                      + "). Minting its token with gitRefs [] instead: its container may push"
-                      + " nothing until the list is one qits-idp accepts.");
+                      + "). Minting its token with gitRefs [] instead: it may push nothing until"
+                      + " the list is one qits-idp accepts.");
               request[0] = request[0].pushingNothing();
               return true;
             }));

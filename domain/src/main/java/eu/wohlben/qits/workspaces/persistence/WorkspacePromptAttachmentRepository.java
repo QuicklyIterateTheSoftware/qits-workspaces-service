@@ -11,22 +11,22 @@ public class WorkspacePromptAttachmentRepository
     implements PanacheRepository<WorkspacePromptAttachment> {
 
   /** A workspace's attachments, oldest first (the order they were attached). */
-  public List<WorkspacePromptAttachment> listByWorkspaceId(Long workspaceId) {
-    return list("workspaceId = ?1 order by createdAt", workspaceId);
+  public List<WorkspacePromptAttachment> listByAgentId(java.util.UUID agentId) {
+    return list("agentId = ?1 order by createdAt", agentId);
   }
 
   /** One attachment, only if it belongs to the given workspace (guards cross-workspace access). */
-  public Optional<WorkspacePromptAttachment> findByWorkspaceIdAndId(Long workspaceId, String id) {
-    return find("workspaceId = ?1 and id = ?2", workspaceId, id).firstResultOptional();
+  public Optional<WorkspacePromptAttachment> findByAgentIdAndId(java.util.UUID agentId, String id) {
+    return find("agentId = ?1 and id = ?2", agentId, id).firstResultOptional();
   }
 
   /** Removes one attachment scoped to its workspace — returns true if a row was deleted. */
-  public boolean deleteByWorkspaceIdAndId(Long workspaceId, String id) {
-    return delete("workspaceId = ?1 and id = ?2", workspaceId, id) > 0;
+  public boolean deleteByAgentIdAndId(java.util.UUID agentId, String id) {
+    return delete("agentId = ?1 and id = ?2", agentId, id) > 0;
   }
 
   /** Removes all of a workspace's attachments — idempotent (no-op when none exist). */
-  public void deleteByWorkspaceId(Long workspaceId) {
-    delete("workspaceId", workspaceId);
+  public void deleteByAgentId(java.util.UUID agentId) {
+    delete("agentId", agentId);
   }
 }

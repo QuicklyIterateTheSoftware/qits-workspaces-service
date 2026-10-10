@@ -7,8 +7,8 @@ package eu.wohlben.qits.workspaces.control;
  * <p>The fact itself is the workspace-daemon's: at capability 8 every agent-activity frame carries
  * {@code awaitingInput}, true when the agent's turn ended with nothing in flight, on a permission
  * prompt, or with the session over. This service only knows <em>which</em> agent the frame is about
- * — the one whose command {@code Workspace.dispatchCommandId} names — and which work item the row is
- * bound to, so the relay is here and the decision about what a waiting agent means is there.
+ * — the frame's {@code agentId} (capability 10, qits-1152) — and which work item that agent works
+ * on, so the relay is here and the decision about what a waiting agent means is there.
  *
  * <p>A port, for the reason every other context's call is one: the transport is qits-projects' REST
  * door and lives in {@code service}. Injected as {@code Instance<>}; absent means nothing is

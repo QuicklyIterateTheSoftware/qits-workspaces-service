@@ -7,6 +7,7 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import eu.wohlben.qits.workspaces.control.AgentService;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
@@ -39,22 +40,31 @@ public class WorkspacePromptDraftControllerTest {
 
   @Inject WorkspaceIds workspaceIds;
 
-  @Inject WorkspaceService workspaceService;
+  @Inject AgentService agentService;
 
-  private Long workspace(String label) throws Exception {
+  /**
+   * An agent for a fresh work item (qits-1152): the draft is the agent's. No runner, so it waits
+   * QUEUED, which is all a draft needs.
+   */
+  private String workspace(String label) throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
-    workspaceService.createWorkspace(repoId, label, "master", label);
-    return workspaceIds.of(repoId, label);
+    return agentService
+        .dispatch(
+            new AgentService.AgentRequest(
+                repoId, "ticket/" + label, label + "-" + java.util.UUID.randomUUID(), null, null,
+                null, false, null, null, null))
+        .agent()
+        .agentId();
   }
 
-  private static String base(Long id) {
-    return "/workspaces/api/workspaces/" + id + "/prompt-draft";
+  private static String base(String id) {
+    return "/workspaces/api/agents/" + id + "/prompt-draft";
   }
 
   @Test
   public void anUnsavedDraftIs404AndASavedOneComesBackWithItsVersion() throws Exception {
-    Long id = workspace("draft-roundtrip");
+    String id = workspace("draft-roundtrip");
 
     // Not an empty draft: "nothing composed here" and "composed and cleared" are the same state to
     // the server, and inventing a row for either hands the client an updatedAt no save produced.
@@ -85,7 +95,7 @@ public class WorkspacePromptDraftControllerTest {
 
   @Test
   public void theReturnedUpdatedAtIsTheOneALaterReadServes() throws Exception {
-    Long id = workspace("draft-echo");
+    String id = workspace("draft-echo");
 
     String written =
         given()
@@ -107,7 +117,7 @@ public class WorkspacePromptDraftControllerTest {
 
   @Test
   public void malformedContentIs400AndNothingIsWritten() throws Exception {
-    Long id = workspace("draft-malformed");
+    String id = workspace("draft-malformed");
 
     for (String bad : List.of("", "   ", "{", "{\"a\":1} trailing", "not json at all")) {
       given()
@@ -125,7 +135,7 @@ public class WorkspacePromptDraftControllerTest {
 
   @Test
   public void anOversizedDraftIs413() throws Exception {
-    Long id = workspace("draft-oversized");
+    String id = workspace("draft-oversized");
 
     // The cap is on content + serializedPrompt combined, since both are unbounded @Lobs.
     String huge = "\"" + "x".repeat(2 * 1024 * 1024) + "\"";
@@ -141,8 +151,8 @@ public class WorkspacePromptDraftControllerTest {
 
   @Test
   public void deleteIsIdempotentAndTakesTheAttachmentsWithIt() throws Exception {
-    Long id = workspace("draft-delete");
-    String attachments = "/workspaces/api/workspaces/" + id + "/prompt-attachments";
+    String id = workspace("draft-delete");
+    String attachments = "/workspaces/api/agents/" + id + "/prompt-attachments";
 
     given()
         .contentType(ContentType.JSON)
@@ -170,14 +180,14 @@ public class WorkspacePromptDraftControllerTest {
 
   @Test
   public void anUnknownWorkspaceIs404OnEveryVerb() throws Exception {
-    given().get(base(999_999L)).then().statusCode(404);
+    given().get(base("00000000-0000-4000-8000-00000000dead")).then().statusCode(404);
     given()
         .contentType(ContentType.JSON)
         .body(new WorkspacePromptDraftController.SavePromptDraftRequest("{}", null))
-        .put(base(999_999L))
+        .put(base("00000000-0000-4000-8000-00000000dead"))
         .then()
         .statusCode(404);
-    given().delete(base(999_999L)).then().statusCode(404);
+    given().delete(base("00000000-0000-4000-8000-00000000dead")).then().statusCode(404);
   }
 
   /**
@@ -192,7 +202,7 @@ public class WorkspacePromptDraftControllerTest {
    */
   @Test
   public void concurrentFirstSavesAllSucceedRatherThanCollidingOnTheSharedKey() throws Exception {
-    Long id = workspace("draft-race");
+    String id = workspace("draft-race");
     int writers = 8;
 
     ExecutorService pool = Executors.newFixedThreadPool(writers);

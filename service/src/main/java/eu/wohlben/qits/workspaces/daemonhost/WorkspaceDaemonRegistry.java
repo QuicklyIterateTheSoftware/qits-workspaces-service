@@ -3,8 +3,8 @@ package eu.wohlben.qits.workspaces.daemonhost;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import eu.wohlben.qits.workspaces.control.AgentActivityState;
 import eu.wohlben.qits.workspaces.control.AgentKills;
-import eu.wohlben.qits.workspaces.control.AgentLaunched;
-import eu.wohlben.qits.workspaces.control.AgentWaitingReporter;
+import eu.wohlben.qits.workspaces.control.AgentActivityView;
+import eu.wohlben.qits.workspaces.control.AgentService;
 import eu.wohlben.qits.workspaces.control.AgentSessionReporter;
 import eu.wohlben.qits.workspaces.control.ProvisionResult;
 import eu.wohlben.qits.workspaces.control.QitsConfig;
@@ -16,12 +16,11 @@ import eu.wohlben.qits.workspaces.control.WorkspaceDaemonLiveness;
 import eu.wohlben.qits.workspaces.control.WorkspaceDaemonProvisioner;
 import eu.wohlben.qits.workspaces.control.WorkspaceGitStatus;
 import eu.wohlben.qits.workspaces.control.WorkspaceGitSync;
-import eu.wohlben.qits.workspaces.control.WorkspaceResolved;
 import eu.wohlben.qits.workspaces.control.WorkspaceChangeHint;
 import eu.wohlben.qits.workspaces.control.WorkspaceChangePublisher;
-import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspacedaemon.protocol.Ack;
 import eu.wohlben.qits.workspacedaemon.protocol.AgentActivity;
+import eu.wohlben.qits.workspacedaemon.protocol.AgentBranchPushed;
 import eu.wohlben.qits.workspacedaemon.protocol.CommandChunk;
 import eu.wohlben.qits.workspacedaemon.protocol.CommandExit;
 import eu.wohlben.qits.workspacedaemon.protocol.ConfigView;
@@ -42,16 +41,13 @@ import eu.wohlben.qits.workspacedaemon.protocol.Stream;
 import eu.wohlben.qits.workspacedaemon.protocol.StreamTarget;
 import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceChanged;
 import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceInfo;
-import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.scheduler.Scheduled;
 import io.quarkus.websockets.next.WebSocketConnection;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.event.Observes;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -62,7 +58,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -97,7 +92,8 @@ public class WorkspaceDaemonRegistry
         WorkspaceGitStatus,
         WorkspaceAgentActivity,
         WorkspaceDaemonInfo,
-        WorkspaceGitSync {
+        WorkspaceGitSync,
+        AgentActivityView {
 
   private static final Logger LOG = Logger.getLogger(WorkspaceDaemonRegistry.class);
 
@@ -117,6 +113,16 @@ public class WorkspaceDaemonRegistry
   @Inject Instance<AgentSessionReporter> agentSessions;
 
   /**
+   * The agents (qits-1152): an agent's activity, waiting state and session, its pushes, and the
+   * daemon's coming and going (after which every agent is started again — its credential lives in
+   * the daemon's memory only). Every call runs on {@link #sinkDispatch}, never on a socket thread.
+   */
+  @Inject AgentService agentService;
+
+  /** The last activity state per agent id, while its daemon's socket is up ({@link AgentActivityView}). */
+  private final ConcurrentHashMap<String, ActivityEntry> agentActivityById = new ConcurrentHashMap<>();
+
+  /**
    * The reverse tunnel's host end. An {@code Instance<>} to break the cycle — {@link
    * WorkspaceTunnels} asks this registry which daemons can serve a stream, and this registry tells
    * it when one goes away.
@@ -128,52 +134,6 @@ public class WorkspaceDaemonRegistry
    * {@link #onAgentKill}.
    */
   @Inject AgentKills agentKills;
-
-  /**
-   * Where the dispatched agent's waiting state goes — qits-projects, which derives a work item's
-   * BLOCKED from it (qits-895). Optional like every other context's port: absent, nothing is
-   * relayed. See {@link #onAgentWaiting}.
-   */
-  @Inject Instance<AgentWaitingReporter> waitingReporter;
-
-  /** The row facts {@link #onAgentWaiting} needs, read on {@link #sinkDispatch} and cached. */
-  @Inject WorkspaceRepository workspaceRepository;
-
-  /**
-   * The dispatched agent's command and the row's work item, per workspace row id — what decides
-   * whether an {@code awaitingInput} frame is relayed at all. Read from the row once, on the first
-   * such frame, and replaced by {@link #onAgentLaunched} rather than re-read: a frame naming some
-   * other command is a person's own session, and it must cost no database read to ignore it. A row
-   * with nothing to relay is cached too, as {@link DispatchedAgent#NONE}. Touched only on {@link
-   * #sinkDispatch}, so its readers and writers are in arrival order.
-   */
-  private final ConcurrentHashMap<Long, DispatchedAgent> dispatchedAgents =
-      new ConcurrentHashMap<>();
-
-  /**
-   * The waiting state last relayed per workspace row id, so only a flip is sent. <b>Not dropped on
-   * {@link #unregister}</b>, unlike everything else per workspace here: a reconnecting daemon
-   * replays its sessions' state, and resending what qits-projects already holds is exactly what
-   * this is for. Forgotten when the dispatched command changes ({@link #onAgentLaunched}) and when
-   * the row resolves. Touched only on {@link #sinkDispatch}.
-   */
-  private final ConcurrentHashMap<Long, Boolean> relayedWaiting = new ConcurrentHashMap<>();
-
-  /**
-   * The row facts behind {@link #dispatchedAgents}.
-   *
-   * @param commandId the row's {@code dispatchCommandId}, or null when no launch ever named one
-   * @param workId the row's work item, or null when no dispatch bound it
-   */
-  private record DispatchedAgent(String commandId, String workId) {
-
-    /** A row with nothing to relay: gone, resolved, never launched on, or bound to no item. */
-    static final DispatchedAgent NONE = new DispatchedAgent(null, null);
-
-    boolean relays(String frameCommandId) {
-      return commandId != null && workId != null && commandId.equals(frameCommandId);
-    }
-  }
 
   /**
    * The {@code hookEvent} of the {@code ENDED} frame a daemon at capability 7 sends itself for an
@@ -303,6 +263,8 @@ public class WorkspaceDaemonRegistry
     gitHead.remove(workspaceId);
     // Likewise drop every tracked agent activity for this workspace (re-reported on reconnect).
     agentActivity.values().removeIf(entry -> entry.workspaceId().equals(workspaceId));
+    agentActivityById.values().removeIf(entry -> entry.workspaceId().equals(workspaceId));
+    sinkDispatch.execute(() -> agentService.onDaemonConnection(workspaceId));
     // Pending tunnel nonces are waiting on a daemon that is no longer there; live tunnels are NOT
     // torn down, deliberately — each stream is its own TCP connection, so an open terminal survives
     // a control-socket reconnect, which is the whole reason these calls do not ride that socket.
@@ -377,6 +339,8 @@ public class WorkspaceDaemonRegistry
           client.capabilityVersion = hello.capabilityVersion();
         }
         connection.sendTextAndAwait(codec.encode(new Ack()));
+        // A daemon that (re)connected knows no agent until each is started again.
+        sinkDispatch.execute(() -> agentService.onDaemonConnection(workspaceId));
       }
       case Heartbeat ignored -> {
         /* liveness only — the open socket is the signal */
@@ -411,6 +375,7 @@ public class WorkspaceDaemonRegistry
           completeProvision(workspaceId, ProvisionResult.failed(failed.message()));
       case GitStatus status -> onGitStatus(workspaceId, client, status);
       case AgentActivity activity -> onAgentActivity(workspaceId, client, activity);
+      case AgentBranchPushed pushed -> onBranchPushed(workspaceId, pushed);
       case WorkspaceChanged changed -> onWorkspaceChanged(workspaceId, client, changed);
       // Everything else is ignored: qits -> workspace-daemon requests are never received here, and
       // a pre-qits-947 daemon's service frames (ServiceTransition, and its `service:` output
@@ -513,7 +478,7 @@ public class WorkspaceDaemonRegistry
             activity.commandId(), e.getMessage());
       }
     }
-    onAgentWaiting(workspaceId, activity);
+    onAgentFrame(workspaceId, activity);
     AgentActivityState state = parseState(activity.state());
     if (state == null) {
       return; // unknown state string — lineage above still ran; nothing to cache/flip
@@ -524,6 +489,9 @@ public class WorkspaceDaemonRegistry
     // a no-op entirely while nothing is idle-stopped.
     AgentActivityState before = rollup(workspaceId, now);
     agentActivity.put(activity.commandId(), new ActivityEntry(workspaceId, state, now));
+    if (activity.agentId() != null) {
+      agentActivityById.put(activity.agentId(), new ActivityEntry(workspaceId, state, now));
+    }
     if (before != rollup(workspaceId, now)) {
       fireActivityFlip(repoId, workspaceId);
     }
@@ -547,6 +515,51 @@ public class WorkspaceDaemonRegistry
    * arrival order — a kill and the relaunch's first {@code BUSY} cannot swap. A failure is logged and
    * dropped, as every sink here is: it must not close the control socket.
    */
+  /**
+   * An agent's frame (qits-1152): its activity time, waiting flip and session go to its row, on
+   * {@link #sinkDispatch}. A frame naming no agent is a person's own session and relays nothing.
+   */
+  private void onAgentFrame(Long workspaceId, AgentActivity activity) {
+    if (activity.agentId() == null || activity.agentId().isBlank()) {
+      return;
+    }
+    sinkDispatch.execute(
+        () -> {
+          try {
+            agentService.onActivity(
+                activity.agentId(),
+                activity.awaitingInput(),
+                activity.sessionId(),
+                activity.hookEvent(),
+                activity.at());
+          } catch (RuntimeException e) {
+            LOG.warnf(e, "could not record agent %s's activity (workspace %s)", activity.agentId(), workspaceId);
+          }
+        });
+  }
+
+  /** A branch an agent pushed (D22), recorded on {@link #sinkDispatch}. */
+  private void onBranchPushed(Long workspaceId, AgentBranchPushed pushed) {
+    sinkDispatch.execute(
+        () -> {
+          try {
+            agentService.onBranchPushed(
+                pushed.agentId(), pushed.repository(), pushed.branch(), pushed.sha());
+          } catch (RuntimeException e) {
+            LOG.warnf(e, "could not record agent %s's push of %s (workspace %s)", pushed.agentId(), pushed.branch(), workspaceId);
+          }
+        });
+  }
+
+  @Override
+  public Optional<AgentActivityState> activityOf(String agentId) {
+    ActivityEntry entry = agentId == null ? null : agentActivityById.get(agentId);
+    if (entry == null || hasExpired(entry, System.currentTimeMillis())) {
+      return Optional.empty();
+    }
+    return Optional.of(entry.state());
+  }
+
   private void onAgentKill(Long workspaceId, AgentActivity activity, AgentActivityState state) {
     boolean oom = OOM_KILLED_EVENT.equals(activity.hookEvent());
     boolean killed =
@@ -570,107 +583,6 @@ public class WorkspaceDaemonRegistry
             LOG.warnf(
                 e, "could not update workspace %s's row for its agent's activity", workspaceId);
           }
-        });
-  }
-
-  /**
-   * Relay the dispatched agent's waiting state to qits-projects (qits-895), which derives the work
-   * item's BLOCKED from it.
-   *
-   * <p><b>The fact is the daemon's and this only picks the agent.</b> A daemon at capability 8 sets
-   * {@code awaitingInput} on every frame: true when the turn ended with nothing in flight, on a
-   * permission prompt, or with the session over (a kill included — its {@code hookEvent} names the
-   * kill, and goes out as the cause); false while the agent works or has background work in flight;
-   * null when it cannot tell, which is never relayed — and is every frame from an older daemon, so
-   * those cost nothing here, not even the hop to the sink thread. What this side adds is which
-   * agent: only a frame naming the row's {@code dispatchCommandId}, the command the last launch this
-   * service made started, is about the work item. A person's own chat in the same workspace going
-   * idle says nothing about the ticket, and is dropped.
-   *
-   * <p><b>Only a flip is sent</b>, per workspace ({@link #relayedWaiting}): the daemon reports every
-   * hook and replays its sessions on every reconnect, and qits-projects needs neither.
-   *
-   * <p>The row read and the HTTP call are on {@link #sinkDispatch}, in arrival order, as {@link
-   * #onAgentKill}'s writes are — never on the socket thread. A failure is logged and dropped and the
-   * last relayed value is left as it was, so the next frame in the same state tries again.
-   */
-  private void onAgentWaiting(Long workspaceId, AgentActivity activity) {
-    Boolean waiting = activity.awaitingInput();
-    if (waiting == null || workspaceId == null || activity.commandId() == null) {
-      return;
-    }
-    sinkDispatch.execute(
-        () -> {
-          try {
-            relayWaiting(workspaceId, activity, waiting.booleanValue());
-          } catch (RuntimeException e) {
-            LOG.warnf(
-                e,
-                "could not relay workspace %s's dispatched agent waiting=%s to qits-projects",
-                workspaceId,
-                waiting);
-          }
-        });
-  }
-
-  /** {@link #onAgentWaiting}'s body, on {@link #sinkDispatch}. */
-  private void relayWaiting(Long workspaceId, AgentActivity activity, boolean waiting) {
-    if (!waitingReporter.isResolvable()) {
-      return;
-    }
-    DispatchedAgent agent = dispatchedAgents.get(workspaceId);
-    if (agent == null) {
-      agent = readDispatchedAgent(workspaceId);
-      dispatchedAgents.put(workspaceId, agent);
-    }
-    if (!agent.relays(activity.commandId())) {
-      return;
-    }
-    if (Boolean.valueOf(waiting).equals(relayedWaiting.get(workspaceId))) {
-      return;
-    }
-    waitingReporter
-        .get()
-        .report(agent.workId(), waiting, activity.hookEvent(), activity.sessionId(), activity.at());
-    relayedWaiting.put(workspaceId, Boolean.valueOf(waiting));
-  }
-
-  /** The ACTIVE row's dispatched command and work item, or {@link DispatchedAgent#NONE}. */
-  private DispatchedAgent readDispatchedAgent(Long workspaceId) {
-    return QuarkusTransaction.requiringNew()
-        .call(
-            () ->
-                workspaceRepository
-                    .findActiveById(workspaceId)
-                    .map(row -> new DispatchedAgent(row.dispatchCommandId, row.workId))
-                    .orElse(DispatchedAgent.NONE));
-  }
-
-  /**
-   * A launch this service made started a new dispatched command: follow it, and forget what was
-   * last relayed about the old one — the new agent's first turn ending is news even if the old
-   * agent's last one ended the same way. Queued onto {@link #sinkDispatch} so it lands in order with
-   * the frames around it.
-   */
-  void onAgentLaunched(@Observes AgentLaunched launched) {
-    sinkDispatch.execute(
-        () -> {
-          dispatchedAgents.put(
-              launched.rowId(), new DispatchedAgent(launched.commandId(), launched.workId()));
-          relayedWaiting.remove(launched.rowId());
-        });
-  }
-
-  /** A resolved row relays nothing again; drop what was kept for it. */
-  void onWorkspaceResolved(@Observes WorkspaceResolved resolved) {
-    Long rowId = resolved.workspaceRowId();
-    if (rowId == null) {
-      return;
-    }
-    sinkDispatch.execute(
-        () -> {
-          dispatchedAgents.remove(rowId);
-          relayedWaiting.remove(rowId);
         });
   }
 
