@@ -493,6 +493,8 @@ components:
           type: boolean
         workId:
           type: string
+        blockSource:
+          type: string
     MergeBranchRequest:
       type: object
       required:
@@ -2936,4 +2938,4 @@ paths:
         - qits:admin-agent
 info:
   title: qits-workspaces API
-  version: 2026.1005.203201
+  version: 2026.1010.62416

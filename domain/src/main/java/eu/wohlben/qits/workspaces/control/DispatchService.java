@@ -928,19 +928,40 @@ public class DispatchService {
    *     nothing was stored), and whether the daemon took them live
    */
   public BlockedMark markEntity(String repositoryId, String branch, EntityFacts facts) {
-    return markEntity(repositoryId, null, branch, facts);
+    return markEntity(repositoryId, null, branch, facts, null);
   }
 
   /** {@link #markEntity(String, String, EntityFacts)}, finding the workspace by work id first. */
   public BlockedMark markEntity(
       String repositoryId, String workId, String branch, EntityFacts facts) {
+    return markEntity(repositoryId, workId, branch, facts, null);
+  }
+
+  /**
+   * {@link #markEntity(String, String, EntityFacts)}, carrying the effective block's SOURCE too
+   * (qits-895): qits-projects' {@code EntityBlockState}'s {@code "EXPLICIT"}, {@code
+   * "AGENT_WAITING"} or {@code "BOTH"}, or {@code null} when the caller does not know it.
+   *
+   * @param blockSource travels live only — see {@link WorkspaceAgentLauncher#setEntity(Long,
+   *     EntityFacts, String)}. It is never part of {@code facts} and {@link #storeFacts} never sees
+   *     it, so it reaches neither the row nor, through {@code WorkspaceContainerFactory}, the
+   *     container's environment: a derived block can flap on a debounce and a container is not
+   *     recreated over one.
+   */
+  public BlockedMark markEntity(String repositoryId, String branch, EntityFacts facts, String blockSource) {
+    return markEntity(repositoryId, null, branch, facts, blockSource);
+  }
+
+  /** {@link #markEntity(String, String, EntityFacts, String)}, finding the workspace by work id first. */
+  public BlockedMark markEntity(
+      String repositoryId, String workId, String branch, EntityFacts facts, String blockSource) {
     Long rowId = findOnly(repositoryId, workId, branch);
     if (rowId == null) {
       return new BlockedMark(null, false);
     }
     EntityFacts normalized = facts.normalized();
     storeFacts(rowId, normalized);
-    return new BlockedMark(rowId, setEntity(rowId, normalized));
+    return new BlockedMark(rowId, setEntity(rowId, normalized, blockSource));
   }
 
   /**
@@ -1838,14 +1859,14 @@ public class DispatchService {
     return applied;
   }
 
-  /** {@link #setBlocked}'s reading, for the whole set of facts. */
-  private boolean setEntity(Long rowId, EntityFacts facts) {
+  /** {@link #setBlocked}'s reading, for the whole set of facts, plus the block's source (qits-895). */
+  private boolean setEntity(Long rowId, EntityFacts facts, String blockSource) {
     boolean applied;
     if (!agents.isResolvable()) {
       applied = false;
     } else {
       try {
-        applied = agents.get().setEntity(rowId, facts);
+        applied = agents.get().setEntity(rowId, facts, blockSource);
       } catch (RuntimeException e) {
         LOG.debugf(e, "could not tell workspace %s's daemon its subject facts", rowId);
         applied = false;

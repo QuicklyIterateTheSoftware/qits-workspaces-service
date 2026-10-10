@@ -152,4 +152,20 @@ public interface WorkspaceAgentLauncher {
   default boolean setEntity(Long workspaceRowId, EntityFacts facts) {
     return setBlocked(workspaceRowId, facts.blocked());
   }
+
+  /**
+   * {@link #setEntity(Long, EntityFacts)}, carrying the effective block's SOURCE too (qits-895):
+   * qits-projects' {@code EntityBlockState}'s {@code "EXPLICIT"}, {@code "AGENT_WAITING"} or
+   * {@code "BOTH"}, or {@code null} when the caller does not know it. It travels live only — it is
+   * never part of {@link EntityFacts}, so it is never stored on {@code Workspace} and never reaches
+   * the container's environment, both of which {@link EntityFacts} is.
+   *
+   * <p>A {@code default} for {@link #setEntity(Long, EntityFacts)}'s own reason: a port written
+   * before this overload existed keeps compiling and keeps answering with the part it always could.
+   *
+   * @return whether the daemon took it, by either route
+   */
+  default boolean setEntity(Long workspaceRowId, EntityFacts facts, String blockSource) {
+    return setEntity(workspaceRowId, facts);
+  }
 }
