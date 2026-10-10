@@ -88,7 +88,7 @@ public class WorkspaceDaemonConsumerPactTest {
   public void deliverAgentWorktreeTurn() {
     run(
         AGENT_RUNNING,
-        "deliverAgentWorktreeTurn",
+        "deliverAgentTurn",
         Trigger.operation("deliverAgentTurn"),
         new PactDslJsonBody().stringType("text", "Carry on."),
         List.of(),
@@ -102,7 +102,7 @@ public class WorkspaceDaemonConsumerPactTest {
   public void setAgentWorktreeEntity() {
     run(
         AGENT_RUNNING,
-        "setAgentWorktreeEntity",
+        "setAgentEntity",
         Trigger.operation("markAgentDispatchEntity"),
         new PactDslJsonBody()
             .stringType("title", "Fix the login")
@@ -122,7 +122,7 @@ public class WorkspaceDaemonConsumerPactTest {
   public void checkAgentWorktree() {
     run(
         AGENT_RUNNING,
-        "checkAgentWorktree",
+        "agentCleanupCheck",
         Trigger.schedule("AgentService.cleanUp"),
         null,
         List.of("$.clean", "$.dirty", "$.unpushed"),
