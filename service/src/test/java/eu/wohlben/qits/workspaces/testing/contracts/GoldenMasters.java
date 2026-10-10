@@ -366,11 +366,16 @@ public final class GoldenMasters {
           http.state(state, new LinkedHashMap<String, Object>(op.params()));
           http.withRequest(
               request -> {
-                request
-                    .method(op.method())
-                    .path(
-                        Matchers.fromProviderState(
-                            pathOnly.expressionPath(), pathOnly.examplePath()));
+                request.method(op.method());
+                // A path with no state param gets no generator: pact-jvm reads an expression
+                // without ${...} as a param name, finds none and sends no path (qits-1153).
+                if (pathOnly.expressionPath().contains("${")) {
+                  request.path(
+                      Matchers.fromProviderState(
+                          pathOnly.expressionPath(), pathOnly.examplePath()));
+                } else {
+                  request.path(pathOnly.examplePath());
+                }
                 if (pathAndQuery.length > 1) {
                   for (String pair : pathAndQuery[1].split("&")) {
                     String[] kv = pair.split("=", 2);

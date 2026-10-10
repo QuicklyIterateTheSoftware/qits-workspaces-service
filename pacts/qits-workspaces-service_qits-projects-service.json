@@ -40,13 +40,6 @@
           "contentType": "application/json",
           "encoded": false
         },
-        "generators": {
-          "path": {
-            "dataType": "RAW",
-            "expression": "/projects/api/work",
-            "type": "ProviderState"
-          }
-        },
         "headers": {
           "content-type": [
             "application/json"
