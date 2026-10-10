@@ -65,7 +65,7 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1010.154553</qits.workspace-daemon-protocol.version>
+        <qits.workspace-daemon-protocol.version>2026.1010.203838</qits.workspace-daemon-protocol.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -83,13 +83,13 @@
              (qits-runner-protocol), and the install script template plus RunnerIdentity
              (qits-runner-toolkit). One release carries both, so one property pins both. -->
         <qits.runner.version>2026.1010.153003</qits.runner.version>
-        <qits.coding-agents.version>2026.1010.72418</qits.coding-agents.version>
+        <qits.coding-agents.version>2026.1010.201800</qits.coding-agents.version>
         <qits.eventstream.version>2026.1010.165955</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
         <qits.arch-rules.version>2026.1002.70617</qits.arch-rules.version>
         <qits.auth-core.version>2026.1002.70617</qits.auth-core.version>
-        <qits.containers-client.version>2026.1009.103217</qits.containers-client.version>
+        <qits.containers-client.version>2026.1010.173216</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
@@ -109,7 +109,7 @@
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1010.101501</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1010.192712</qits.projects-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
              and ConsumerPactVerificationTest verifies consumers' pacts against this service.
