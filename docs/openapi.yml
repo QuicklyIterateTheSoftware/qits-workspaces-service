@@ -6,10 +6,6 @@ components:
   schemas:
     AddAttachmentRequest:
       type: object
-      required:
-      - label
-      - source
-      - dataBase64
       properties:
         mimeType:
           type: string
@@ -22,6 +18,10 @@ components:
         dataBase64:
           type: string
           pattern: \S
+      required:
+      - label
+      - source
+      - dataBase64
     AgentActivityState:
       type: string
       enum:
@@ -114,18 +114,18 @@ components:
       - TIMED_OUT
       - CANCELLED
     ApiError:
-      type: object
       description: "The error envelope: a message, plus a reason or a code on a 409."
+      type: object
       properties:
         message:
           type: string
           description: "What went wrong, in words. Always present."
         reason:
           $ref: "#/components/schemas/Reason"
-          type: string
           description: "Which refusal this is. Present on the 409s the release and\
             \ integrate flows raise, absent on every other error. A value a client\
             \ does not recognise is shown as the message verbatim."
+          type: string
         conflicts:
           type: array
           items:
@@ -289,8 +289,6 @@ components:
             \ else the platform default"
     CreateWaitRequest:
       type: object
-      required:
-      - selection
       properties:
         label:
           type: string
@@ -301,6 +299,8 @@ components:
           type: string
           examples:
           - PT2H
+      required:
+      - selection
     DeliverTurnRequest:
       type: object
       required:
@@ -406,12 +406,12 @@ components:
         workspace:
           $ref: "#/components/schemas/WorkspaceHistoryDto"
     EventSelection:
-      type: object
-      required:
-      - event
       description: "qits-eventstream's EventSelection: the event name, matched exactly,\
         \ and `when` groups (ORed) of conditions (ANDed). Empty `when` = every event\
         \ of that name."
+      type: object
+      required:
+      - event
       properties:
         event:
           type: string
@@ -439,9 +439,9 @@ components:
           - prefix
           - exists
         value:
-          type: string
           description: A string for exact and prefix; true or false for exists (false
             = absent)
+          type: string
     Health:
       type: object
       properties:
@@ -631,9 +631,9 @@ components:
       properties:
         capabilities:
           $ref: "#/components/schemas/JsonNode"
-          type: array
           description: "What the runner says about itself — a JSON object, at most\
             \ 16 KiB"
+          type: array
     RegisteredRunner:
       type: object
       properties:
@@ -834,8 +834,6 @@ components:
           type: string
     SweepBranchesRequest:
       type: object
-      required:
-      - repositories
       properties:
         dryRun:
           type: boolean
@@ -847,6 +845,8 @@ components:
           type: array
           items:
             type: string
+      required:
+      - repositories
     SweepError:
       type: object
       properties:
@@ -3083,4 +3083,4 @@ paths:
         - qits:admin-agent
 info:
   title: qits-workspaces API
-  version: 2026.1010.113552
+  version: 2026.1010.163357
