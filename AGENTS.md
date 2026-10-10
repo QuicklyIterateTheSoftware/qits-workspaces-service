@@ -971,8 +971,9 @@ makes every daemon call, one pass at a time, kicked after each door and every
 3. **Yield** — a RUNNING agent waiting for input longer than `qits.workspace.agent.yield-after` (30 s)
    yields when another agent wants its slot (D14, D16).
 4. **Drive** — a RUNNING agent whose daemon answers is started with `POST agent-worktrees` (its
-   instruction, session, entity facts and credential), and its pending turn is said at a turn
-   boundary (`/turn`; BUSY waits up to the launch window). The daemon keeps the agent credential in
+   instruction, session, entity facts and credential; `mode: INTERACTIVE`, the harness's TUI in a
+   terminal), and its pending turn is said at a turn boundary (`/turn`; BUSY waits up to the launch
+   window). The daemon holds a turn until the harness has started and types it on one line. The daemon keeps the agent credential in
    memory only, so every agent is started again after its daemon connects (`onDaemonConnection`).
 5. **Clean up** (D4, D5, D7) — an OBSOLETE agent whose item is VERIFIED (the status the entity door
    stores) and that has been idle for `qits.workspace.agent.cleanup-idle` (30 s) is checked

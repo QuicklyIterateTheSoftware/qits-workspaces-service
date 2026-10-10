@@ -53,7 +53,7 @@ public class WorkspaceDaemonConsumerPactTest {
             .stringType("wrapperBranch", "ticket/contract-00000001-10")
             .stringValue("harness", "CLAUDE")
             .stringValue("surface", "ticket.dispatch")
-            .stringValue("mode", "CHAT")
+            .stringValue("mode", "INTERACTIVE")
             .stringType("instruction", "Work the ticket.");
     body.object("env").closeObject();
     run(

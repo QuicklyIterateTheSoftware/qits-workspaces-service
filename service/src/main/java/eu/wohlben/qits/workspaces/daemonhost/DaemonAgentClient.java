@@ -51,8 +51,12 @@ public class DaemonAgentClient implements AgentDaemon {
    */
   static final String SURFACE = "ticket.dispatch";
 
-  /** Chat mode: the stream-json conversation, which is what a headless start can drive. */
-  static final String MODE = "CHAT";
+  /**
+   * Interactive mode: the harness's own TUI in a terminal, which a person can watch and type into.
+   * The daemon holds a turn until the harness has started, and types it on one line (qits-1152).
+   * The daemon still takes {@code CHAT}, the stream-json conversation.
+   */
+  static final String MODE = "INTERACTIVE";
 
   static final String BASE = "agent-worktrees";
 
