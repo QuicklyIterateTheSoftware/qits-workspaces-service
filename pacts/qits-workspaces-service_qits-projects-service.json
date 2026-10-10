@@ -141,13 +141,14 @@
         }
       },
       "description": "captureWork: getRepository",
-      "key": "23888fb2",
+      "key": "8fd05999",
       "pending": false,
       "providerStates": [
         {
           "name": "a repository exists",
           "params": {
             "projectId": "00000000-0000-4000-8000-000000000001",
+            "repoName": "contract-service",
             "repositoryId": "00000000-0000-4000-8000-000000000002"
           }
         }
@@ -258,13 +259,14 @@
         }
       },
       "description": "createAgent: getRepository",
-      "key": "30b9178c",
+      "key": "9d00e173",
       "pending": false,
       "providerStates": [
         {
           "name": "a repository exists",
           "params": {
             "projectId": "00000000-0000-4000-8000-000000000001",
+            "repoName": "contract-service",
             "repositoryId": "00000000-0000-4000-8000-000000000002"
           }
         }
@@ -375,13 +377,14 @@
         }
       },
       "description": "dispatchAgent: getRepository",
-      "key": "1327c4f6",
+      "key": "7f6f8edd",
       "pending": false,
       "providerStates": [
         {
           "name": "a repository exists",
           "params": {
             "projectId": "00000000-0000-4000-8000-000000000001",
+            "repoName": "contract-service",
             "repositoryId": "00000000-0000-4000-8000-000000000002"
           }
         }
@@ -533,13 +536,14 @@
         }
       },
       "description": "workspace-daemon:agent-branch-pushed: getRepository",
-      "key": "3d764c85",
+      "key": "a9be166c",
       "pending": false,
       "providerStates": [
         {
           "name": "a repository exists",
           "params": {
             "projectId": "00000000-0000-4000-8000-000000000001",
+            "repoName": "contract-service",
             "repositoryId": "00000000-0000-4000-8000-000000000002"
           }
         }
