@@ -163,7 +163,7 @@ class WorkspaceRunnerControllerTest {
   }
 
   @Test
-  void theSystemRolePatchesRotatesAndDeletesAndCannotGreenlight() {
+  void theSystemRolePatchesRotatesAndDeletes() {
     String id = create("qits:system", "cellar", 1).getString("runner.id");
     rows.track(UUID.fromString(id));
 
@@ -189,7 +189,6 @@ class WorkspaceRunnerControllerTest {
     assertTrue(rotated.getString("installLine").contains("'qits_tok_second'"));
     assertTrue(idp.lines("DELETE").contains("DELETE /api/tokens/t-1"), idp.lines().toString());
 
-    as("qits:system").when().post(RUNNERS + "/" + id + "/greenlight").then().statusCode(403);
     // The health check is open to the system role (qits-850): past the gate, 409 for no socket.
     as("qits:system")
         .when()
@@ -345,6 +344,21 @@ class WorkspaceRunnerControllerTest {
     as("qits:agent").when().delete(RUNNERS + "/" + runner.id).then().statusCode(403);
     as("qits:agent").when().post(RUNNERS + "/" + runner.id + "/greenlight").then().statusCode(403);
     as("qits:agent").when().post(RUNNERS + "/" + runner.id + "/login-check").then().statusCode(403);
+  }
+
+  /** The cold bootstrap greenlights its own runner with a system credential (qits-1149). */
+  @Test
+  void theSystemRoleGreenlightsAQuarantinedRunner() {
+    WorkspaceRunner runner = rows.registered("wr-system-greenlit", 1);
+    assertTrue(runner.quarantined());
+
+    as("qits:system")
+        .when()
+        .post(RUNNERS + "/" + runner.id + "/greenlight")
+        .then()
+        .statusCode(200)
+        .body("quarantined", is(false))
+        .body("eligible", is(true));
   }
 
   @Test

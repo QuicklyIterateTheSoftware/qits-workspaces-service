@@ -64,6 +64,9 @@ class GoldenMasterRecordingTest {
    *     freezing: values a dependency bump moves (an image version), which would otherwise change
    *     the recording on every bump, and names a test fake makes up. Listed in {@code
    *     frozen.strings}
+   * @param callerRole the one role the call is made with, as the edge asserts it in {@code
+   *     X-Qits-Roles}; null calls as the {@code %test} dev user (admin and system at once). Recorded
+   *     into the index as {@code callerRole}
    */
   record Interaction(
       String state,
@@ -73,15 +76,16 @@ class GoldenMasterRecordingTest {
       int status,
       String listFilteredTo,
       String requestBody,
-      Map<String, String> fixedStrings) {
+      Map<String, String> fixedStrings,
+      String callerRole) {
 
     static Interaction read(String state, String operationId, String path, String listFilteredTo) {
-      return new Interaction(state, operationId, "GET", path, 200, listFilteredTo, null, Map.of());
+      return new Interaction(state, operationId, "GET", path, 200, listFilteredTo, null, Map.of(), null);
     }
 
     static Interaction write(
         String state, String operationId, String path, int status, String requestBody) {
-      return new Interaction(state, operationId, "POST", path, status, null, requestBody, Map.of());
+      return new Interaction(state, operationId, "POST", path, status, null, requestBody, Map.of(), null);
     }
 
     /** This interaction, with the version at {@code path} recorded as {@link #FIXED_VERSION}. */
@@ -94,7 +98,14 @@ class GoldenMasterRecordingTest {
       Map<String, String> fixed = new TreeMap<>(fixedStrings);
       fixed.put(path, value);
       return new Interaction(
-          state, operationId, method, this.path, status, listFilteredTo, requestBody, fixed);
+          state, operationId, method, this.path, status, listFilteredTo, requestBody, fixed,
+          callerRole);
+    }
+
+    /** This interaction, called with {@code role} alone. */
+    Interaction as(String role) {
+      return new Interaction(
+          state, operationId, method, path, status, listFilteredTo, requestBody, fixedStrings, role);
     }
   }
 
@@ -188,7 +199,8 @@ class GoldenMasterRecordingTest {
               200,
               null,
               null,
-              Map.of("$.pins[*].version", FIXED_VERSION)),
+              Map.of("$.pins[*].version", FIXED_VERSION),
+              null),
           Interaction.write(
               ProviderStates.NO_RUNNERS,
               "createRunner",
@@ -215,7 +227,8 @@ class GoldenMasterRecordingTest {
               WORKSPACES + "/runners/{runnerId}/greenlight",
               200,
               null)
-              .fixing("$.pinnedVersion"));
+              .fixing("$.pinnedVersion")
+              .as("qits:system"));
 
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final Pattern TEMPLATE_PARAM = Pattern.compile("\\{([^}]+)}");
@@ -279,6 +292,9 @@ class GoldenMasterRecordingTest {
       }
       if (interaction.requestBody() != null) {
         operation.set("body", JSON.readTree(interaction.requestBody()));
+      }
+      if (interaction.callerRole() != null) {
+        operation.put("callerRole", interaction.callerRole());
       }
       operation.put("status", interaction.status());
       operation.put("file", file);
@@ -350,6 +366,12 @@ class GoldenMasterRecordingTest {
     Response response;
     try {
       var request = given();
+      if (interaction.callerRole() != null) {
+        request =
+            request
+                .header("X-Qits-User", "contract-caller")
+                .header("X-Qits-Roles", interaction.callerRole());
+      }
       if (interaction.requestBody() != null) {
         request =
             request

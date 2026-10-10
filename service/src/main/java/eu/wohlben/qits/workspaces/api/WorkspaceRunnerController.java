@@ -431,10 +431,13 @@ public class WorkspaceRunnerController {
   /**
    * Lift a runner's quarantine: it takes workspaces again up to its slots. A runner in service is
    * answered as it is — the door states an outcome, so pressing it twice is the same as once.
+   *
+   * <p>Open to {@code qits:system} beside the admin (qits-1149, the owner's decision): the cold
+   * bootstrap greenlights the runner it declared, with a system credential.
    */
   @POST
   @Path("/{id}/greenlight")
-  @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE})
+  @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE})
   @Operation(operationId = "greenlightRunner", summary = "Lift a workspace runner's quarantine")
   @APIResponse(responseCode = "200", description = "The runner as it now is")
   @APIResponse(responseCode = "404", description = "No such runner")

@@ -1972,6 +1972,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:system
   /workspaces/api/runners/{id}/health:
     get:
       summary: "A workspace runner's newest health check, every check's data included"

@@ -161,6 +161,7 @@
           "operationId": "greenlightRunner",
           "method": "POST",
           "path": "/workspaces/api/runners/{runnerId}/greenlight",
+          "callerRole": "qits:system",
           "status": 200,
           "file": "a-quarantined-runner/greenlightRunner.json",
           "frozen": {
