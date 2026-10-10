@@ -10,7 +10,6 @@ import au.com.dius.pact.consumer.dsl.PactDslJsonBody;
 import au.com.dius.pact.core.model.PactSpecVersion;
 import au.com.dius.pact.core.model.V4Pact;
 import com.fasterxml.jackson.databind.JsonNode;
-import eu.wohlben.qits.workspaces.control.AgentWaitingReporter;
 import eu.wohlben.qits.workspaces.control.RepositoryLookup;
 import eu.wohlben.qits.workspaces.control.WorkFiler;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
@@ -42,10 +41,6 @@ import java.util.Map;
  *   <li>{@code captureWork} — {@code POST /workspaces/api/capture} (hidden from openapi.yml):
  *       {@code CaptureService.capture} → {@code require(repoId)} for the project, then {@code
  *       createWork} files the ticket (D25).
- *   <li>{@code workspace-daemon:agent-waiting} — the daemon reports that the agent waits, and
- *       {@link HttpAgentWaitingReporter} relays it with {@code reportWorkAgentWaiting}. The answer
- *       is read by its status alone. {@code waitingOn} is sent only with cause {@code Wait}
- *       (qits-1153, W5).
  * </ul>
  */
 final class ProjectsContract {
@@ -79,11 +74,8 @@ final class ProjectsContract {
   static final String NO_WORK = "a project with no work";
   static final String CREATE_WORK = "createWork";
 
-  static final String DISPATCHED_TICKET = "a ticket with a dispatched agent";
-  static final String REPORT_AGENT_WAITING = "reportWorkAgentWaiting";
-
   /** The clients a row drives, each built against the row's mock server. */
-  record Clients(RepositoryLookup lookup, WorkFiler filer, AgentWaitingReporter reporter) {}
+  record Clients(RepositoryLookup lookup, WorkFiler filer) {}
 
   /** What the consumer does with the clients for one row, asserting what that code path reads. */
   @FunctionalInterface
@@ -160,13 +152,6 @@ final class ProjectsContract {
         assertTrue(filed.id() != null && !filed.id().isBlank(), "the ticket is named");
       };
 
-  /** The relay of a declared wait. The mock server checks the request; the answer is read by status. */
-  private static final Call REPORT =
-      (clients, params) ->
-          clients
-              .reporter()
-              .report(params.get("ticketId"), true, "Wait", "release-request 42", "s-1", 1234L);
-
   static final List<Case> CASES =
       List.of(
           new Case(
@@ -218,19 +203,7 @@ final class ProjectsContract {
                   .stringType("impetus", "# Captured page")
                   .stringValue("ticketType", "IMPROVEMENT"),
               List.of("$.id", "$.qualifiedId"),
-              FILE),
-          new Case(
-              Trigger.event("workspace-daemon:agent-waiting"),
-              DISPATCHED_TICKET,
-              REPORT_AGENT_WAITING,
-              new PactDslJsonBody()
-                  .booleanType("waiting", true)
-                  .stringType("cause", "Wait")
-                  .stringType("sessionId", "s-1")
-                  .integerType("at", 1234L)
-                  .stringType("waitingOn", "release-request 42"),
-              READS_NOTHING,
-              REPORT));
+              FILE));
 
   private ProjectsContract() {}
 

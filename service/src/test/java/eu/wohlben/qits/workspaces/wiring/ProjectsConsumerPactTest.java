@@ -52,8 +52,7 @@ public class ProjectsConsumerPactTest {
                     .run(
                         new ProjectsContract.Clients(
                             HttpRepositoryLookupTest.lookupAgainst(mockServer.getUrl()),
-                            filerAgainst(mockServer.getUrl()),
-                            reporterAgainst(mockServer.getUrl())),
+                            filerAgainst(mockServer.getUrl())),
                         GoldenMasters.params(row.state()));
                 return null;
               });
@@ -81,23 +80,6 @@ public class ProjectsConsumerPactTest {
             .baseUri(java.net.URI.create(baseUrl))
             .build(ProjectsWork.class);
     return filer;
-  }
-
-  /** The shipped {@link HttpAgentWaitingReporter} with the real generated client, and no bearer. */
-  static HttpAgentWaitingReporter reporterAgainst(String baseUrl) {
-    HttpAgentWaitingReporter reporter = new HttpAgentWaitingReporter();
-    reporter.projectsBearer =
-        new IdpProjectsBearer() {
-          @Override
-          public java.util.Optional<String> authorization() {
-            return java.util.Optional.empty();
-          }
-        };
-    reporter.door =
-        io.quarkus.rest.client.reactive.QuarkusRestClientBuilder.newBuilder()
-            .baseUri(java.net.URI.create(baseUrl))
-            .build(ProjectsAgentWaiting.class);
-    return reporter;
   }
 
   private static String describe(PactVerificationResult result) {

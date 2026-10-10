@@ -141,14 +141,13 @@
         }
       },
       "description": "captureWork: getRepository",
-      "key": "8fd05999",
+      "key": "23888fb2",
       "pending": false,
       "providerStates": [
         {
           "name": "a repository exists",
           "params": {
             "projectId": "00000000-0000-4000-8000-000000000001",
-            "repoName": "contract-service",
             "repositoryId": "00000000-0000-4000-8000-000000000002"
           }
         }
@@ -259,14 +258,13 @@
         }
       },
       "description": "createAgent: getRepository",
-      "key": "9d00e173",
+      "key": "30b9178c",
       "pending": false,
       "providerStates": [
         {
           "name": "a repository exists",
           "params": {
             "projectId": "00000000-0000-4000-8000-000000000001",
-            "repoName": "contract-service",
             "repositoryId": "00000000-0000-4000-8000-000000000002"
           }
         }
@@ -377,14 +375,13 @@
         }
       },
       "description": "dispatchAgent: getRepository",
-      "key": "7f6f8edd",
+      "key": "1327c4f6",
       "pending": false,
       "providerStates": [
         {
           "name": "a repository exists",
           "params": {
             "projectId": "00000000-0000-4000-8000-000000000001",
-            "repoName": "contract-service",
             "repositoryId": "00000000-0000-4000-8000-000000000002"
           }
         }
@@ -536,14 +533,13 @@
         }
       },
       "description": "workspace-daemon:agent-branch-pushed: getRepository",
-      "key": "a9be166c",
+      "key": "3d764c85",
       "pending": false,
       "providerStates": [
         {
           "name": "a repository exists",
           "params": {
             "projectId": "00000000-0000-4000-8000-000000000001",
-            "repoName": "contract-service",
             "repositoryId": "00000000-0000-4000-8000-000000000002"
           }
         }
@@ -793,109 +789,6 @@
           }
         },
         "status": 200
-      },
-      "type": "Synchronous/HTTP"
-    },
-    {
-      "comments": {
-        "references": {
-          "qits-call": {
-            "app": "qits-projects-service",
-            "operationId": "reportWorkAgentWaiting"
-          },
-          "qits-trigger": {
-            "app": "qits-workspaces-service",
-            "event": "workspace-daemon:agent-waiting",
-            "kind": "event"
-          }
-        }
-      },
-      "description": "workspace-daemon:agent-waiting: reportWorkAgentWaiting",
-      "key": "e2391cf5",
-      "pending": false,
-      "providerStates": [
-        {
-          "name": "a ticket with a dispatched agent",
-          "params": {
-            "projectId": "00000000-0000-4000-8000-000000000001",
-            "qualifiedId": "contract-00000001-1",
-            "ticketId": "00000000-0000-4000-8000-000000000002"
-          }
-        }
-      ],
-      "request": {
-        "body": {
-          "content": {
-            "at": 1234,
-            "cause": "Wait",
-            "sessionId": "s-1",
-            "waiting": true,
-            "waitingOn": "release-request 42"
-          },
-          "contentType": "application/json",
-          "encoded": false
-        },
-        "generators": {
-          "path": {
-            "dataType": "RAW",
-            "expression": "/projects/api/work/${ticketId}/agent-waiting",
-            "type": "ProviderState"
-          }
-        },
-        "headers": {
-          "content-type": [
-            "application/json"
-          ]
-        },
-        "matchingRules": {
-          "body": {
-            "$.at": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "integer"
-                }
-              ]
-            },
-            "$.cause": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.sessionId": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.waiting": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.waitingOn": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            }
-          }
-        },
-        "method": "POST",
-        "path": "/projects/api/work/00000000-0000-4000-8000-000000000002/agent-waiting"
-      },
-      "response": {
-        "status": 204
       },
       "type": "Synchronous/HTTP"
     }
