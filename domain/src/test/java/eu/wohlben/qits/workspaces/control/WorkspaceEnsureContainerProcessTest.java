@@ -309,54 +309,6 @@ public class WorkspaceEnsureContainerProcessTest {
     assertEquals(0, callsOn("rm", container));
   }
 
-  /**
-   * The bootstrap window (qits-1076): the clone is done and the row RUNNING, but the start's process
-   * stays open until the bootstrap chain settles. A stop there ends it too, so the next
-   * ensure-container starts the container under a new process rather than answering the old id.
-   */
-  @Test
-  public void aStopInTheBootstrapWindowEndsTheStartAndTheNextEnsureStartsAgain() throws Exception {
-    Path release = Files.createTempDirectory("qits-1076-bootstrap").resolve("release");
-    String repoId = TestOrigin.create(dataDir);
-    repositories.register(repoId);
-    commitBootstrapChain(
-        repoId,
-        "version: 1\nbootstrap:\n  - name: 'hold'\n    execute: 'while [ ! -e "
-            + release
-            + " ]; do sleep 0.1; done'\n");
-    workspaceService.createWorkspace(
-        repoId, "boot-stop", "master", "boot-stop", null, false, false, true);
-    Long id = workspaceIds.of(repoId, "boot-stop");
-    try {
-      String first = workspaceService.beginEnsureContainer(id);
-      await(
-          () -> persisted(id).runtimeStatus == WorkspaceRuntimeStatus.RUNNING,
-          "the clone never finished");
-      await(
-          () ->
-              replayOf(registry.find(first).orElseThrow()).frames.stream()
-                  .anyMatch(f -> f.segment() != null && f.segment().startsWith("bootstrap")),
-          "the bootstrap chain never began");
-      assertFalse(registry.find(first).orElseThrow().isTerminal(), "the chain holds the start open");
-      assertEquals(first, registry.activeFor(id).orElseThrow());
-
-      workspaceService.stopContainer(id);
-
-      TechnicalProcess ended = registry.find(first).orElseThrow();
-      assertTrue(ended.isTerminal(), "the stop ends a start past its provision phase too");
-      assertEquals("failed", doneFrame(replayOf(ended)).status());
-      assertTrue(registry.activeFor(id).isEmpty());
-      assertEquals(WorkspaceRuntimeStatus.STOPPED, persisted(id).runtimeStatus);
-
-      String second = workspaceService.beginEnsureContainer(id);
-      assertNotEquals(first, second, "the ensure must not answer the old start's id");
-      assertEquals("ok", doneFrame(replayOf(awaitTerminal(second))).status());
-      assertEquals(WorkspaceRuntimeStatus.RUNNING, persisted(id).runtimeStatus);
-    } finally {
-      Files.createFile(release); // drain the held step, so no host loop outlives the test
-    }
-  }
-
   /** Commit {@code yaml} as {@code .qits-config.yml} on the origin's master, before any fork. */
   private void commitBootstrapChain(String repoId, String yaml) throws Exception {
     Path origin = Path.of(dataDir, repoId, "origin");

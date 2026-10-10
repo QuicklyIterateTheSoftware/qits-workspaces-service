@@ -84,7 +84,7 @@ public class BranchControllerTest {
         .post("/workspaces/api/branches/merge?repositoryId=" + repoId)
         .then()
         .statusCode(Response.Status.CONFLICT.getStatusCode())
-        .body("message", containsString("/integrate"));
+        .body("message", containsString("release request"));
 
     given()
         .contentType(ContentType.JSON)
@@ -93,7 +93,7 @@ public class BranchControllerTest {
         .post("/workspaces/api/branches/merge?repositoryId=" + repoId)
         .then()
         .statusCode(Response.Status.CONFLICT.getStatusCode())
-        .body("message", containsString("/integrate"));
+        .body("message", containsString("release request"));
   }
 
   /** Every other target is untouched: merging into a parent branch is what stacking is. */
@@ -240,7 +240,7 @@ public class BranchControllerTest {
         .post("/workspaces/api/branches/merge?repositoryId=" + repoId)
         .then()
         .statusCode(Response.Status.CONFLICT.getStatusCode())
-        .body("message", containsString("/integrate"));
+        .body("message", containsString("release request"));
 
     // The monorepo asserted branch existence through GET /branches, which is a repositories-context
     // route and not in this jar; the origin's ref namespace is the same fact one layer down.

@@ -9,7 +9,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 /**
  * The configured {@link WorkspaceAddressPlane}: {@code qits.workspace.domain} ({@code QITS_DOMAIN})
  * and the hosts this deployment spells its own registry by — the registry host of {@code
- * qits.workspace.image-repo} and of {@code qits.editor.image-repo}, and {@code
+ * qits.workspace.image-repo}, and {@code
  * registry.<env>.localhost:8080}, the machine spelling the estate's committed files use. Read at
  * the moment of asking, so the RUNNER start's check and the claim's composition see one answer.
  *
@@ -38,11 +38,8 @@ public class WorkspaceAddressPlanes {
   @ConfigProperty(name = "qits.workspace.image-repo")
   Optional<String> imageRepo;
 
-  @ConfigProperty(name = "qits.editor.image-repo")
-  Optional<String> editorImageRepo;
-
   /**
-   * The plane a RUNNER workspace is composed from, and a DIRECT admin or editor row that holds a
+   * The plane a RUNNER workspace is composed from, and a DIRECT admin row that holds a
    * workspace token is addressed through (qits-1084).
    *
    * @throws EdgePlaneUnconfigured when the domain is no public domain
@@ -56,7 +53,6 @@ public class WorkspaceAddressPlanes {
   List<String> registrySpellings() {
     List<String> spellings = new ArrayList<>();
     spellings.add(registryOf(imageRepo == null ? null : imageRepo.orElse(null)));
-    spellings.add(registryOf(editorImageRepo == null ? null : editorImageRepo.orElse(null)));
     spellings.add("registry." + environment + ".localhost:" + LOCAL_EDGE_PORT);
     return spellings;
   }

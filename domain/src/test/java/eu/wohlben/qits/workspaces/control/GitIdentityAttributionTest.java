@@ -48,26 +48,6 @@ public class GitIdentityAttributionTest {
         .trim();
   }
 
-  @Test
-  public void hostSideMergeCommitsAsTheConfiguredIdentity() throws Exception {
-    String repoId = clonedRepo();
-    // The seed shape: fork off the fixture's 'feature' branch and integrate it into master via
-    // the host-side merge (no container involved) — the path that used to depend on ambient
-    // ~/.gitconfig and failed with "Committer identity unknown" in identity-less environments.
-    // master is an ordinary branch here, not this repository's default one: the default branch
-    // is written by integrate alone now, and its 409 would stand in front of what this test is
-    // about. Repointing main is one line and leaves the merge under test byte-for-byte the same.
-    repositories.setMainBranch(repoId, "feature");
-    workspaceService.createWorkspace(repoId, "feeder", "feature", "feeder", null);
-
-    workspaceService.mergeWorkspace(workspaceIds.of(repoId, "feeder"), "master");
-
-    assertEquals(
-        IDENTITY + "|" + IDENTITY,
-        tipAttribution(repoId, "refs/heads/master"),
-        "the host-side synthetic merge is authored and committed by the configured identity");
-  }
-
   // MOVED: containerMergeCommitsAsTheConfiguredIdentityEvenOverStaleCloneConfig.
   // It asserted that the container-side merge commit carries the configured GIT_* identity
   // rather than a stale user.* left in the clone's .git/config -- an upgrade-path regression

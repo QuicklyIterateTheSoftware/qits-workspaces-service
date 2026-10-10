@@ -95,7 +95,6 @@ class WorkspaceAddressPlaneTest {
   void theConfiguredPlaneKnowsBothImageRepositoriesAndTheLocalSpelling() {
     WorkspaceAddressPlanes planes = new WorkspaceAddressPlanes();
     planes.imageRepo = Optional.of("registry.a.example:1/qits/workspace");
-    planes.editorImageRepo = Optional.of("registry.b.example:2/qits/workspace-editor");
     planes.environment = "dev";
     planes.domain = Optional.of("wohlben.eu");
 
@@ -103,7 +102,7 @@ class WorkspaceAddressPlaneTest {
 
     assertEquals(
         Arrays.asList(
-            "registry.a.example:1", "registry.b.example:2", "registry.dev.localhost:8080"),
+            "registry.a.example:1", "registry.dev.localhost:8080"),
         plane.registrySpellings());
 
     planes.domain = Optional.empty();

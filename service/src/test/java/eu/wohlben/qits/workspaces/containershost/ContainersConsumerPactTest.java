@@ -229,7 +229,6 @@ class ContainersConsumerPactTest {
     WorkspaceContainers containers = new WorkspaceContainers();
     containers.containerFactory = TestWorkspaceContainerFactory.persistent();
     containers.owner = params.get("owner");
-    containers.editorIdleStopAfter = Optional.empty();
     containers.launchPatience = Duration.ofSeconds(1);
     containers.containers =
         new ContainersClient(url, Duration.ofSeconds(5), Duration.ofSeconds(5), Optional::empty);

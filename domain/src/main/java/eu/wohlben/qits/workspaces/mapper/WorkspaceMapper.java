@@ -25,6 +25,5 @@ public interface WorkspaceMapper {
   // The runner's name is another table's; this thin view carries none. A row is never placed on a
   // runner at create anyway: a runner takes it later, from the queue.
   @Mapping(target = "runner", ignore = true)
-  // `editor` is the row's own column and maps by name.
   WorkspaceDto toDto(Workspace entity);
 }

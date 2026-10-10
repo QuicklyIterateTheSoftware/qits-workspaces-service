@@ -110,18 +110,6 @@ public class WorkspaceRelativeDataDirTest {
             "entries.find { it.workspace.workspaceId == 'rel-01' }.workspace.branch",
             equalTo("rel-branch"));
 
-    // merge + discard must also find the workspace on disk. The target is "feature" rather than
-    // "master": master is this repository's default branch, and the merge endpoint refuses that
-    // one now (integrate is the only door). What is under test here is the on-disk path, which is
-    // the same either way.
-    given()
-        .contentType(ContentType.JSON)
-        .body(new WorkspaceController.MergeWorkspaceRequest("feature"))
-        .when()
-        .post("/workspaces/api/workspaces/" + workspaceIds.of(repoId, "rel-01") + "/merge")
-        .then()
-        .statusCode(Response.Status.OK.getStatusCode())
-        .body("hasConflicts", equalTo(false));
 
     given()
         .contentType(ContentType.JSON)

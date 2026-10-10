@@ -1,7 +1,6 @@
 package eu.wohlben.qits.workspaces.control;
 
 import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceImage;
-import eu.wohlben.qits.workspaceeditor.WorkspaceEditorImage;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -96,45 +95,8 @@ public class WorkspaceContainerFactory {
   @ConfigProperty(name = "qits.workspace.image-version-override")
   Optional<String> imageVersionOverride;
 
-  /**
-   * The registry host and path of the <b>editor</b> image — {@code qits/workspace-editor}, the
-   * workspace image with openvscode-server laid on top. Everything {@link #imageRepo}'s comment says
-   * about fully qualifying the reference applies here unchanged; the reasoning for both halves lives
-   * in {@code META-INF/microprofile-config.properties}.
-   *
-   * <p>It is a <b>second pair of keys and not a suffix on the first</b>, because the two images are
-   * released by two repositories on two calvers: qits-workspace-daemon publishes {@code
-   * qits/workspace} and qits-workspace-editor-oci follows it one hop later with its own version. A
-   * derived name would tie them into one string and be wrong the moment either train ran alone.
-   */
-  @ConfigProperty(name = "qits.editor.image-repo")
-  String editorImageRepo;
 
-  /**
-   * The released calver the editor image is pinned to — {@link WorkspaceEditorImage#VERSION}, with
-   * config as an explicit override. Everything {@link #imageVersionOverride}'s javadoc says applies
-   * here verbatim, against {@code eu.wohlben.qits:qits-workspace-editor-image} and {@code
-   * QITS_EDITOR_IMAGE_VERSION}.
-   *
-   * <p>One difference worth stating: nothing tests this pair the way {@code WorkspaceDaemonPinIT}
-   * tests the workspace one, and nothing can from here. The editor image is the workspace image plus
-   * a directory, and what would be under test is whether openvscode-server is where the daemon
-   * expects it — which is a question about the image's contents, and this service cannot run an
-   * image (no docker in a CI step container). What the dependency buys here is the other half, and
-   * it is the half that broke: the version <b>resolves</b>, so it names something that was really
-   * published, and it moves through a reviewed release rather than underneath one.
-   */
-  @ConfigProperty(name = "qits.editor.image-version-override")
-  Optional<String> editorImageVersionOverride;
 
-  /**
-   * The loopback port the in-container editor listens on, forwarded to the daemon as {@code
-   * QITS_WORKSPACE_DAEMON_EDITOR_PORT}. Spelled once here because the host's editor proxy has to
-   * dial the same number the daemon was told to serve on; the daemon's own default is the same
-   * 13339, so the two agree even for a container launched before this key existed.
-   */
-  @ConfigProperty(name = "qits.editor.port", defaultValue = "13339")
-  int editorPort;
 
   /**
    * The shared Docker network every workspace container joins (and qits is on), so qits reaches a
@@ -182,7 +144,7 @@ public class WorkspaceContainerFactory {
    *
    * <p>Unset or blank injects nothing, and the image falls back to the platform's own domain.
    *
-   * <p><b>It rides the spec, so it obeys the spec-hash rule</b> the editor and credential blocks
+   * <p><b>It rides the spec, so it obeys the spec-hash rule</b> the credential block
    * carry: environment is part of the spec, and a spec that differs from the running container's
    * is a {@code Recreate.ifChanged} REPLACEMENT. The value is therefore a CONSTANT off config,
    * never derived per call.
@@ -270,13 +232,6 @@ public class WorkspaceContainerFactory {
   @ConfigProperty(name = "qits.workspace.oom-score-adj", defaultValue = "600")
   Integer oomScoreAdj;
 
-  /**
-   * The provision-time bootstrap kill switch, forwarded to the in-container daemon (which self-runs
-   * the chain on boot — docs/epics/qits-workspace-daemon/ Part 3). Mirrors the host-side {@code
-   * qits.bootstrap.autorun-enabled} default; when false the daemon skips the chain.
-   */
-  @ConfigProperty(name = "qits.bootstrap.autorun-enabled", defaultValue = "true")
-  boolean bootstrapAutorunEnabled;
 
   /**
    * The auto-push kill switch, forwarded to the in-container daemon which pushes committed work to
@@ -334,20 +289,7 @@ public class WorkspaceContainerFactory {
    */
   @Inject Instance<WorkspacePostures> postures;
 
-  /**
-   * The wrappers the one shared editor clones side by side, asked only while an EDITOR spec is being
-   * built. An {@code Instance<>} for the reason every port here is one — the hand-built unit-test
-   * factory wires no database — and absent reads as an empty list, which is the same answer a
-   * platform with no workspaces in it yet gives.
-   */
-  @Inject Instance<EditorProjects> editorProjects;
 
-  /**
-   * The dispatched subject's title, status word and blocked flag, read off the row at every ensure
-   * (qits-617). A lookup rather than an argument, for {@link WorkspacePostures}'s reason, and
-   * optional for the reason every port here is: absent omits the three keys.
-   */
-  @Inject Instance<WorkspaceEntityFacts> entityFacts;
 
   /** The repo's project-scoped name, from an override resolver or the repository registry. */
   private Optional<RepositoryAddressResolver.ProjectScopedName> scopedName(String repoId) {
@@ -404,76 +346,8 @@ public class WorkspaceContainerFactory {
     }
   }
 
-  /**
-   * Whether this workspace is <b>the editor</b> — the one shared editor container the platform
-   * opens. <b>Every failure direction is false</b>, exactly as above, and here it means something
-   * different from a lost privilege: a false answer for the row that really is the editor describes
-   * a plain-image container, and a spec that differs from what is running is a {@code
-   * Recreate.ifChanged} replacement. That is why the shipped posture reads a column
-   * ({@code PersistedWorkspacePostures}) — a local read that gives the same answer at every ensure,
-   * so the falling below is the last resort rather than the ordinary path.
-   */
-  private boolean editorWorkspace(Long rowId) {
-    if (rowId == null || !postures.isResolvable()) {
-      return false;
-    }
-    try {
-      return postures.get().isEditor(rowId);
-    } catch (RuntimeException e) {
-      LOG.warnf(
-          e,
-          "could not read the posture of workspace %s; launching it as an ordinary workspace with no"
-              + " editor",
-          rowId);
-      return false;
-    }
-  }
 
-  /**
-   * The composed projects list for the editor's spec, or the empty string when the port is
-   * unsatisfied or could not compose one.
-   *
-   * <p><b>Blank rather than a failure</b>, following the same rule as every other registry read in
-   * this class: an ensure that threw here would take the editor away from everybody on the platform
-   * because qits-projects blinked. What a blank buys is a daemon that finds nothing to clone and
-   * says so inside a container that is up, which is the recoverable half of the trade —
-   * {@link EditorProjects} carries the reasoning and the churn it costs.
-   */
-  private String editorProjects() {
-    if (!editorProjects.isResolvable()) {
-      return "";
-    }
-    try {
-      return editorProjects.get().composed();
-    } catch (RuntimeException e) {
-      LOG.warn(
-          "could not compose the editor's project list; its container is launched with none and"
-              + " will clone nothing until the next ensure that can read the registry",
-          e);
-      return "";
-    }
-  }
 
-  /**
-   * The row's subject facts, or none. A read that stumbles costs the session name its title and
-   * status, never the container — the credential's reading, and the same one {@link #projectIdFor}
-   * makes: these are enrichment, not a provisioning gate.
-   */
-  private Optional<EntityFacts> entityFacts(Long rowId) {
-    if (rowId == null || !entityFacts.isResolvable()) {
-      return Optional.empty();
-    }
-    try {
-      return entityFacts.get().forWorkspace(rowId);
-    } catch (RuntimeException e) {
-      LOG.warnf(
-          e,
-          "could not read the subject facts of workspace %s; launching it without a title, status"
-              + " or blocked flag",
-          rowId);
-      return Optional.empty();
-    }
-  }
 
   /**
    * The row's workspace token, or none (qits-1084). A lookup failure costs the token and falls to
@@ -619,14 +493,6 @@ public class WorkspaceContainerFactory {
     return imageRepo + ":" + imageVersion();
   }
 
-  /**
-   * The fully qualified, version-pinned <b>editor</b> image reference: {@code <repo>:<version>},
-   * composed for the reason {@link #image()} is composed. It is what the one editor workspace runs
-   * and what every other workspace does not — see {@link #editorWorkspace}.
-   */
-  public String editorImage() {
-    return editorImageRepo + ":" + editorImageVersion();
-  }
 
   /**
    * The two halves of the workspace reference, readable apart from the reference {@link #image()}
@@ -654,17 +520,7 @@ public class WorkspaceContainerFactory {
     return imageVersionOverride.filter(value -> !value.isBlank()).orElse(WorkspaceImage.VERSION);
   }
 
-  /** The editor image's registry host and path; see {@link #imageRepo()}. */
-  public String editorImageRepo() {
-    return editorImageRepo;
-  }
 
-  /** The editor image's calver tag; see {@link #imageVersion()}, which it mirrors exactly. */
-  public String editorImageVersion() {
-    return editorImageVersionOverride
-        .filter(value -> !value.isBlank())
-        .orElse(WorkspaceEditorImage.VERSION);
-  }
 
   /**
    * The shared credential volume name (blank when the mount is disabled). The orchestrator creates
@@ -776,31 +632,11 @@ public class WorkspaceContainerFactory {
   }
 
   /**
-   * {@link #forWorkspace(String, String, Long, String, String)} carrying the row's subject entity
-   * id (qits-projects' qualified id, e.g. {@code qits-614} — {@code Workspace.entityId}, {@code V8})
-   * as {@code QITS_WORKSPACE_DAEMON_ENTITY_ID} — the daemon names its agent sessions
-   * {@code [❗]<status square> <entityId> <title>} from it and the row's subject facts (see {@link
-   * #entityFacts}), and it is a column rather than a one-time launch
-   * argument because the orchestrator has no start verb: a value missing on the resume path would
-   * make every resume a spec change.
-   *
-   * <p><b>Omitted, not blank, when there is none — and that is deliberately the opposite of {@code
-   * QITS_WORKSPACE_DAEMON_BRANCH}'s own absence.</b> {@code BRANCH} is written on every row because
-   * every ordinary workspace already has one; this field is new, so the overwhelming majority of
-   * rows alive today — every ad-hoc workspace, the editor, and every row that predates {@code V8} —
-   * have none. Writing the key with an empty value anyway would add it to the environment of every
-   * one of those specs, and environment is part of the spec: the orchestrator resumes a stopped
-   * container by presenting its spec again under {@code Recreate.ifChanged}, so that would REPLACE
-   * every stopped workspace's container once, on its next start, for a key that says nothing.
-   * Omitting the key entirely keeps a row with no entity id byte-identical to the spec it had before
-   * this field existed.
+   * {@link #forWorkspace(String, String, Long, String, String)}, with the row's entity id, which is
+   * no longer written (qits-1152: a workspace names no work item; its agents do).
    */
   public WorkspaceContainer forWorkspace(
       String repoId, String workspaceId, Long rowId, String branch, String parent, String entityId) {
-    // Asked ONCE, at the top, and carried on the description: it decides the image, two environment
-    // variables and — through WorkspaceContainer.editor — the lifetime policy the adapter asks for.
-    // Three consequences of one fact, so one read of it.
-    boolean editor = editorWorkspace(rowId);
     WorkspaceContainer container =
         new WorkspaceContainer()
             .name(containerName(workspaceId, repoId))
@@ -876,8 +712,7 @@ public class WorkspaceContainerFactory {
     // The identity and behaviour half of the environment, shared with the runner spec
     // (RunnerWorkspaceSpecs) so the two cannot drift. Written in place, in this order: env order is
     // part of the spec, and WorkspaceContainerFactoryGoldenSpecTest pins it.
-    identityEnv(
-        repoId, workspaceId, rowId, branch, parent, entityId, editor, container::env, container::label);
+    identityEnv(repoId, workspaceId, container::env, container::label);
     // The bearer the daemon's HTTP API requires. Without it WorkspaceApi does not bind at all —
     // fail-closed, because an omitted env is indistinguishable from a misconfiguration and serving
     // an untrusted checkout anonymously across the docker network would be silent. That is why this
@@ -923,47 +758,6 @@ public class WorkspaceContainerFactory {
                 container.env("QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL", tokenUrl(idpUrl));
                 container.env("QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE", CONTAINER_TOKEN_AUDIENCE);
               });
-    }
-    // THE WEB EDITOR, and only for the one row that IS it. The daemon supervises
-    // openvscode-server when it is told to; every other workspace is told nothing and behaves
-    // exactly as it did before an editor existed — which is also the daemon's own shipped default,
-    // so the absence is not a second way of saying the same thing.
-    //
-    // Both vars or neither, the same rule the credential block above follows and for a related
-    // reason: `enabled` without a port would leave the daemon and the host's proxy free to pick
-    // different numbers, and a port without `enabled` would name a listener nothing starts. They are
-    // written together or not at all.
-    //
-    // IT RIDES THE SPEC, so it obeys the spec-hash rule: environment is part of the spec, a changed
-    // spec is a Recreate.ifChanged REPLACEMENT, and a resume presents the spec again. That is why
-    // both values are stable lookups — the posture off the row's own column, the port off config —
-    // and never something a caller passed in. See WorkspacePostures.
-    if (editor) {
-      container.env("QITS_WORKSPACE_DAEMON_EDITOR_ENABLED", "true");
-      container.env("QITS_WORKSPACE_DAEMON_EDITOR_PORT", Integer.toString(editorPort));
-      // EVERY PROJECT'S WRAPPER, side by side, as <projectId>/<repoName> — the two halves the
-      // daemon already builds a clone url from, so each lands at /workspace/<repoName>. This is the
-      // other half of the blank repository id above: a container with no repository of its own and
-      // a list SKIPS the root clone, which is how one container holds the whole estate. On the
-      // editor only — an ordinary workspace carries no list at all, the same both-or-neither shape
-      // the two lines above and the credential block follow.
-      //
-      // IT RIDES THE SPEC, so EditorProjects sorts: a list that reshuffled between two ensures
-      // would be a changed spec, and a changed spec is a Recreate.ifChanged REPLACEMENT of the
-      // container somebody is working in. See that class for what a registry outage does instead,
-      // and for why the list is derived rather than asked for through a door of its own.
-      //
-      // THE KEY IS ALWAYS WRITTEN, EVEN EMPTY, and that is a decision rather than string formatting
-      // falling out a particular way. An empty value is what a registry outage and a platform with
-      // no workspaces in it yet both compose, and the alternative — omitting the key — would make
-      // the SPEC differ between those states and the ordinary one, so the editor's container would
-      // be REPLACED each time the registry came back. Present-with-a-varying-value churns on the
-      // value alone; present-or-absent churns on both, and is strictly worse. It also keeps this
-      // side deterministic about a question the daemon owns: whether an empty list reads as "has a
-      // list" (an editor that comes up with nothing cloned) or as none (a container that refuses to
-      // provision beside a blank repository id) is that repository's to answer, and either answer is
-      // loud, recoverable and visible. What must not happen is this service picking one accidentally.
-      container.env(EditorProjects.ENV, editorProjects());
     }
     // Resource limits (opt-out): without a memory cap, every JVM in the container sizes its heap
     // against the whole host's RAM and a dev server can OOM the host. Blank config disables a cap.
@@ -1046,14 +840,7 @@ public class WorkspaceContainerFactory {
     // daemon
     // holds the socket open and is otherwise idle in Part 1. `init` is a spec field now rather
     // than a run flag, and it is what keeps a long-lived daemon from collecting its children.
-    //
-    // THE IMAGE IS THE LAST THING DECIDED AND THE FIRST THING THE ORCHESTRATOR READS. The editor's
-    // is a child of this one — `qits/workspace-editor` is FROM `qits/workspace` plus one directory —
-    // so the editor is an ordinary workspace container that happens to carry
-    // openvscode-server, and everything above it is identical. Which one a container runs is
-    // answered before it exists rather than by a flag inside it, which is why the editor is a second
-    // image at all.
-    return container.editor(editor).image(editor ? editorImage() : image());
+    return container.image(image());
   }
 
   /**
@@ -1130,121 +917,28 @@ public class WorkspaceContainerFactory {
   }
 
   /**
-   * The identity and behaviour environment of a workspace container — who it is ({@code
-   * QITS_WORKSPACE_DAEMON_WORKSPACE_ID}/{@code _REPOSITORY_ID}/{@code _BRANCH}/{@code _PARENT}/{@code
-   * _PROJECT_ID}/{@code _REPO_NAME}/{@code _ENTITY_*}) and how its daemon behaves (the bootstrap and
-   * auto-push knobs) — plus the {@code qits.project} label resolved on the way.
-   *
-   * <p><b>Shared by the DIRECT spec and the runner spec</b> ({@link RunnerWorkspaceSpecs}, qits-851),
-   * so the two cannot drift: the runner spec is composed from the same row facts and must tell the
-   * daemon the same things. It is a move out of {@link #forWorkspace}, written through {@code env}
-   * and {@code label} in exactly the order it was written there; {@code
-   * WorkspaceContainerFactoryGoldenSpecTest} pins that order, because environment order is part of a
-   * spec the orchestrator compares.
-   *
-   * <p>What is deliberately NOT here is every address and credential: the dial-home URL, the MCP
-   * addresses, the git base, the proxy paths, the daemon API token and the commissioned pair. Those
-   * are the DIRECT spec's own, and a runner-placed workspace gets them only with qits-625.
+   * The workspace's identity in its daemon's environment: its label, its wrapper repository, the
+   * project and the repository name the daemon clones by. Since qits-1152 a workspace names no
+   * branch, parent or work item — those belong to its agents, and reach the daemon per agent in
+   * {@code POST agent-worktrees}.
    */
   public void identityEnv(
       String repoId,
       String workspaceId,
-      Long rowId,
-      String branch,
-      String parent,
-      String entityId,
-      boolean editor,
       BiConsumer<String, String> env,
       BiConsumer<String, String> label) {
     env.accept("QITS_WORKSPACE_DAEMON_WORKSPACE_ID", workspaceId);
-    // THE EDITOR BELONGS TO NO REPOSITORY, so it is told about none. Every name below is what the
-    // in-container daemon self-clones from — repository id, project-scoped name, branch, parent —
-    // and the editor's row carries a SENTINEL repository id (EditorWorkspace.REPOSITORY_ID) and no
-    // branch at all. Handing the daemon that sentinel would send it to clone `/git/editor`, which is
-    // nothing, and the failure would be a provision that never completes rather than a container
-    // with an empty /workspace. So the five names are written BLANK, which is the same value a
-    // repository the registry could not resolve already produces, and the two lookups behind them
-    // are not made: there is nothing to resolve and the sentinel would cost a round trip per ensure
-    // to learn that.
-    //
-    // WHAT THIS ONE CONTAINER NOW REACHES IS AN ACCEPTED CONSEQUENCE, decided deliberately by the
-    // epic and recorded here because it is the kind of thing that must not be rediscovered. It holds
-    // an ordinary `qits:agent` workspace credential — the same one every workspace container gets,
-    // no new client and no new audience — but it is no longer one project's container: everybody
-    // opens THIS one, so an unattended agent inside it acts on the whole platform rather than on the
-    // project whose page somebody came in through. Its commission is unscoped for the same reason
-    // the blanks above are blank (no repository ⇒ no project claim), so it READS every project.
-    //
-    // WHAT IT CLONES INSTEAD IS THE PROJECTS LIST, injected a few lines below: the daemon skips the
-    // root clone exactly when a container has no repository of its own AND carries a list, which is
-    // this container and only this container. An ordinary workspace is told no list and still fails
-    // loudly without a repository, which is the property that keeps the two cases apart.
-    env.accept("QITS_WORKSPACE_DAEMON_REPOSITORY_ID", editor ? "" : repoId);
-    env.accept("QITS_WORKSPACE_DAEMON_BRANCH", editor || branch == null ? "" : branch);
-    env.accept("QITS_WORKSPACE_DAEMON_PARENT", editor || parent == null ? "" : parent);
-    // The subject's qualified id (Workspace.entityId, V8). The daemon names its agent sessions
-    // `[❗]<status square> <entityId> <title>` from it and the facts below — a column rather than a one-time launch argument, for
-    // BRANCH's own reason. UNLIKE BRANCH, this key is OMITTED rather than written blank when there
-    // is none (the editor, an ad-hoc workspace, or any row that predates V8): BRANCH is on every
-    // spec already, but this field is new, so writing it blank would add a key to the environment
-    // of every workspace alive today, and environment is part of the spec a stopped container is
-    // resumed by re-presenting under Recreate.ifChanged — adding even a blank key there replaces
-    // every one of their containers once, on its next start, for a value that says nothing.
-    if (!editor && entityId != null && !entityId.isBlank()) {
-      env.accept("QITS_WORKSPACE_DAEMON_ENTITY_ID", entityId);
-    }
-    // The same subject's title, status word and blocked flag (Workspace.entityTitle/-Status/
-    // -Blocked, V9, qits-617): the daemon names its sessions `[❗]<status square> <id> <title>` from
-    // them. Read off the ROW, which every relayed change updates, so a container that was stopped
-    // while the subject moved comes back up saying what is true now — and that is also their cost:
-    // environment is part of the spec, so the first resume of a STOPPED container after a change is
-    // a Recreate.ifChanged replacement (a RUNNING one is never re-specced; ensureContainer
-    // short-circuits it, and the live rename goes through POST /agents/entity instead). Each key is
-    // omitted when there is no value, ENTITY_ID's rule for ENTITY_ID's reason, and BLOCKED is
-    // written only as "true" — RefinementContainerFactory's spelling — so an unblocked subject's
-    // spec carries no key for it at all.
-    if (!editor) {
-      entityFacts(rowId)
-          .ifPresent(
-              facts -> {
-                if (facts.title() != null && !facts.title().isBlank()) {
-                  env.accept("QITS_WORKSPACE_DAEMON_ENTITY_TITLE", facts.title());
-                }
-                if (facts.status() != null && !facts.status().isBlank()) {
-                  env.accept("QITS_WORKSPACE_DAEMON_ENTITY_STATUS", facts.status());
-                }
-                if (facts.blocked()) {
-                  env.accept("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED", "true");
-                }
-              });
-    }
-    // The project-scoped name the daemon self-clones under (/git/<projectId>/<name>), so committed
-    // relative submodule urls resolve natively in-container. Blank when the repo has no project —
-    // the
-    // daemon then id-addresses (/git/<repositoryId>), mirroring cloneUrl's fallback.
-    Optional<RepositoryAddressResolver.ProjectScopedName> scopedName =
-        editor ? Optional.empty() : scopedName(repoId);
-    // The owning project id, also as a label so it mirrors the per-workspace volume's qits.project
-    // (the volume labels carry it for dangling-volume reconcile; the container carries it for
-    // symmetry). Resolved through projectIdFor — the RepositoryLookup fallback is what stopped
-    // this env var from shipping empty (D2). Blank only when no registry answers — and for the
-    // editor, which owns no project the way it owns no repository.
+    env.accept("QITS_WORKSPACE_DAEMON_REPOSITORY_ID", repoId);
+    Optional<RepositoryAddressResolver.ProjectScopedName> scopedName = scopedName(repoId);
     String projectId =
-        editor
-            ? ""
-            : scopedName
-                .map(RepositoryAddressResolver.ProjectScopedName::projectId)
-                .orElseGet(() -> projectIdFor(repoId));
+        scopedName
+            .map(RepositoryAddressResolver.ProjectScopedName::projectId)
+            .orElseGet(() -> projectIdFor(repoId));
     label.accept("qits.project", projectId);
     env.accept("QITS_WORKSPACE_DAEMON_PROJECT_ID", projectId);
     env.accept(
         "QITS_WORKSPACE_DAEMON_REPO_NAME",
         scopedName.map(RepositoryAddressResolver.ProjectScopedName::name).orElse(""));
-    // The bootstrap kill switch the daemon honours when it self-runs the chain on boot (Part 3).
-    env.accept(
-        "QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN", String.valueOf(bootstrapAutorunEnabled));
-    // The auto-push kill switch the daemon honours when it pushes committed work on its own
-    // (docs/epics/qits-workspace-daemon/ bidirectional auto-sync).
     env.accept("QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED", String.valueOf(autoPushEnabled));
   }
 

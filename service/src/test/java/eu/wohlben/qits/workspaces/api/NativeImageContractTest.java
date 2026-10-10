@@ -121,29 +121,6 @@ public class NativeImageContractTest {
   }
 
   /**
-   * The editor door's answer rides a bare {@code jakarta.ws.rs.core.Response} too — {@code fresh()}
-   * decides 201 vs 200, so the record never appears on a signature Quarkus can index. Unregistered,
-   * the deployed binary answered every {@code /editor/ensure} with a 500 "No serializer found"
-   * while the whole JVM suite stayed green — measured on dev, 2026-08-31, the day it shipped.
-   */
-  @Test
-  public void everyEditorDoorRecordIsRegisteredForReflection() {
-    Set<Class<?>> registered =
-        Set.of(EditorController.class.getAnnotation(RegisterForReflection.class).targets());
-    List<String> missing =
-        Stream.concat(
-                Stream.of(EditorController.EditorSessionResponse.class),
-                Arrays.stream(EditorController.EditorSessionResponse.class.getDeclaredClasses()))
-            .filter(Class::isRecord)
-            .filter(c -> !registered.contains(c))
-            .map(Class::getSimpleName)
-            .toList();
-    assertTrue(
-        missing.isEmpty(),
-        "editor records not in EditorController's @RegisterForReflection(targets): " + missing);
-  }
-
-  /**
    * The runner create, health check and health report answer through a bare {@code Response}, so
    * their records and the runner view they carry are on no signature the native build indexes — the
    * editor door's defect, one door over.

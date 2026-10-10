@@ -434,34 +434,6 @@ public class WorkspaceRunnersTest {
   }
 
   @Test
-  public void anAdminOrEditorRowIsNeverPlacedOnARunner() {
-    RuntimeException admin =
-        assertThrows(
-            RuntimeException.class,
-            () ->
-                insert(
-                    w -> {
-                      w.placement = WorkspacePlacement.RUNNER;
-                      w.admin = true;
-                    }));
-    assertTrue(names(admin, "ck_workspace_runner_posture"), messages(admin));
-
-    RuntimeException editor =
-        assertThrows(
-            RuntimeException.class,
-            () ->
-                insert(
-                    w -> {
-                      w.placement = WorkspacePlacement.RUNNER;
-                      w.editor = true;
-                    }));
-    assertTrue(names(editor, "ck_workspace_runner_posture"), messages(editor));
-
-    // A RUNNER row with neither is fine.
-    assertDoesNotThrow(() -> insert(w -> w.placement = WorkspacePlacement.RUNNER));
-  }
-
-  @Test
   public void onlyARunnerRowNamesARunner() {
     RuntimeException refused =
         assertThrows(
@@ -476,14 +448,14 @@ public class WorkspaceRunnersTest {
   }
 
   /**
-   * V15 (qits-780): the direct path is admin and editor only, as the schema keeps it. An ACTIVE
+   * V15 (qits-780), V20 (qits-1152): the direct path is admin only, as the schema keeps it. An ACTIVE
    * regular row may not be DIRECT; an admin one may, a RUNNER one may, and a resolved regular row
    * keeps whatever placement it had as history.
    */
   @Test
   public void anActiveRegularRowIsNeverDirect() {
     RuntimeException refused = assertThrows(RuntimeException.class, () -> insert(w -> {}));
-    assertTrue(names(refused, "ck_workspace_direct_only_admin_editor"), messages(refused));
+    assertTrue(names(refused, "ck_workspace_direct_only_admin"), messages(refused));
 
     assertDoesNotThrow(() -> insert(w -> w.admin = true));
     assertDoesNotThrow(() -> insert(w -> w.placement = WorkspacePlacement.RUNNER));

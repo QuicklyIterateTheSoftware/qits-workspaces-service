@@ -78,7 +78,7 @@ public class DirectOnlyMigrationTest {
   private static void runAndAssert(Connection connection, String statement, String tag)
       throws SQLException {
     try (Statement ddl = connection.createStatement()) {
-      ddl.execute("alter table workspace drop constraint ck_workspace_direct_only_admin_editor");
+      ddl.execute("alter table workspace drop constraint ck_workspace_direct_only_admin");
     }
     long directMain = insert(connection, tag + "-dm", "DIRECT", false, null);
     long runnerMain = insert(connection, tag + "-rm", "RUNNER", false, "");

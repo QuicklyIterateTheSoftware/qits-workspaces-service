@@ -32,20 +32,6 @@ public final class TestWorkspaceContainerFactory {
   /** The composed reference, {@code <repo>:<version>} — what a spec carries. */
   public static final String IMAGE = IMAGE_REPO + ":" + IMAGE_VERSION;
 
-  /**
-   * The editor image, on its own repo and its own calver — deliberately a different version from
-   * {@link #IMAGE_VERSION}, because the two images are released by two repositories on two trains
-   * and a fixture that shared a number could not tell a derived reference from a configured one.
-   */
-  public static final String EDITOR_IMAGE_REPO = "localhost:8081/qits/workspace-editor";
-
-  public static final String EDITOR_IMAGE_VERSION = "2026.202.2";
-
-  public static final String EDITOR_IMAGE = EDITOR_IMAGE_REPO + ":" + EDITOR_IMAGE_VERSION;
-
-  /** The loopback port the fixture's editor is told to serve on — the shipped default. */
-  public static final int EDITOR_PORT = 13339;
-
   private TestWorkspaceContainerFactory() {}
 
   /** A factory with the per-workspace {@code /workspace} volume on — the shipped default. */
@@ -122,9 +108,6 @@ public final class TestWorkspaceContainerFactory {
     // assignment can replace. The two versions below stay invented and stay different from each
     // other, for the reason the constants' javadoc gives.
     f.imageVersionOverride = Optional.of(IMAGE_VERSION);
-    f.editorImageRepo = EDITOR_IMAGE_REPO;
-    f.editorImageVersionOverride = Optional.of(EDITOR_IMAGE_VERSION);
-    f.editorPort = EDITOR_PORT;
     f.projectsUrl = "http://qits-projects:8080";
     f.observabilityUrl = "http://dev-qits-observability:8080";
     f.platformMcpUrl = "http://dev-qits-platform-access-mcp-service:8080";
@@ -152,7 +135,6 @@ public final class TestWorkspaceContainerFactory {
     f.containerGitUrl = "http://qits-platform-edge:8080";
     f.idpUrl = "http://qits-idp:8080/idp";
     f.daemonApiToken = "qits-workspace-daemon";
-    f.bootstrapAutorunEnabled = true;
     f.autoPushEnabled = true;
     f.nameResolver =
         StubInstance.of(
@@ -164,12 +146,6 @@ public final class TestWorkspaceContainerFactory {
     // No posture lookup — an ordinary workspace, which is what every workspace is unless somebody
     // asked otherwise at creation. `admin()` below is the other one.
     f.postures = StubInstance.empty();
-    // No projects list either — the port a spec builder needs only for the EDITOR, and absent is
-    // what a platform with no workspaces in it yet answers. An ordinary workspace is told nothing
-    // regardless, so this is invisible to every case but the editor's.
-    f.editorProjects = StubInstance.empty();
-    // No subject facts — a workspace nobody dispatched, so none of the three keys is written.
-    f.entityFacts = StubInstance.empty();
     return f;
   }
 
@@ -182,43 +158,6 @@ public final class TestWorkspaceContainerFactory {
     WorkspaceContainerFactory f = build(true);
     f.postures = StubInstance.of(rowId -> true);
     return f;
-  }
-
-  /**
-   * A factory whose workspaces are THE EDITOR — the posture that picks the editor image and hands
-   * the daemon its editor environment. Its own builder for the reason {@link #admin()} has one: the
-   * adapter's test asserts the whole spec twice, and the difference between the two is the claim.
-   *
-   * <p>An explicit implementation rather than a lambda, because {@code isEditor} is a {@code
-   * default} method — a lambda would set the admin answer and leave this one false.
-   */
-  public static WorkspaceContainerFactory editor() {
-    WorkspaceContainerFactory f = build(true);
-    f.postures = StubInstance.of(editorRow());
-    // ARMED, and with more than one project: the editor's whole reason for having no repository is
-    // that it clones every project's wrapper instead, so a fixture whose list was empty would let
-    // the adapter's spec comparison pass against a factory that never wrote the key.
-    f.editorProjects = StubInstance.of(() -> EDITOR_PROJECTS);
-    return f;
-  }
-
-  /** The wrappers the fixture's editor is told to clone. Invented, like every other address here. */
-  public static final java.util.List<String> EDITOR_PROJECTS =
-      java.util.List.of("alpha/alpha-alpha", "beta/beta-beta");
-
-  /** A posture port that answers "this is the editor" and "not admin". */
-  static WorkspacePostures editorRow() {
-    return new WorkspacePostures() {
-      @Override
-      public boolean isAdmin(Long rowId) {
-        return false;
-      }
-
-      @Override
-      public boolean isEditor(Long rowId) {
-        return true;
-      }
-    };
   }
 
   private static GitIdentity identity() {

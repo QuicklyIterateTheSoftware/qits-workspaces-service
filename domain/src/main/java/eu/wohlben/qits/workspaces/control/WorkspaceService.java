@@ -455,22 +455,8 @@ public class WorkspaceService {
    */
   @Inject GitMirrorRegistry mirrors;
 
-  /** How long an integrate waits for a busy repository before refusing — see {@link #acquireIntegrateLease}. */
-  @ConfigProperty(name = "qits.workspace.integrate.lease-wait-ms", defaultValue = "60000")
-  long integrateLeaseWaitMs;
-
   @Inject GitIdentity gitIdentity;
 
-  /** The git half of {@link #integrateWorkspace}: worktree, merge, commit, push. */
-  @Inject BranchIntegrator integrator;
-
-  /**
-   * The repository-scoped mutex integrate serializes on. The concrete registry rather than the
-   * {@link WorkspaceProcessTracker} port, because what integrate wants is the port's
-   * <em>lightweight</em> half — a reservation, not a streamed process with an SSE channel nobody
-   * subscribes to. It is a bean of this module, so it is always present.
-   */
-  @Inject TechnicalProcessRegistry processRegistry;
 
   /**
    * Creates {@code branch} from {@code parentBranch} — <b>as a push</b>, through the git host.
@@ -672,28 +658,14 @@ public class WorkspaceService {
       return;
     }
     decommissionFor(rowId);
-    // THE EDITOR NAMES NO REPOSITORY, so none is asked for. Its row carries a sentinel id, and this
-    // lookup is an HTTP call to qits-projects that could only ever answer "no such repository" for
-    // it — once per provision, in a WARN-shaped log line, to learn what the row already says. What
-    // it costs the editor is what an unresolvable repository costs any workspace and no more: the
-    // `project` claim is absent, which is the credential's own documented "unscoped" answer.
-    //
-    // That absence is the accepted consequence the epic decided: ONE container, holding an ordinary
-    // `qits:agent` workspace credential scoped to no project, now reaches every project on the
-    // platform — see WorkspaceContainerFactory's editor block, which records the same decision from
-    // the container's side.
-    boolean editor =
-        QuarkusTransaction.requiringNew()
-            .call(() -> workspaceRepository.findActiveById(rowId).map(wt -> wt.editor).orElse(false));
     // AN ADMIN ROW COMMISSIONS ITS OWN KIND (qits-628 follow-up): workspace-admin, which qits-idp
     // issues qits:agent and qits:admin-agent — the container holds the host's docker socket, so its
-    // agent is admitted wherever qits:admin is. Every other row, the editor included, stays
-    // `workspace`. The kind is the issuer's record and never the container's environment, so the
+    // agent is admitted wherever qits:admin is. Every other row stays `workspace`. The kind is the issuer's record and never the container's environment, so the
     // spec is unchanged by it.
     boolean admin =
         QuarkusTransaction.requiringNew()
             .call(() -> workspaceRepository.findActiveById(rowId).map(wt -> wt.admin).orElse(false));
-    RepositoryLookup.RepositoryView repository = editor ? null : repositoryOf(repoId);
+    RepositoryLookup.RepositoryView repository = repositoryOf(repoId);
     // The default branch, read the way a create reads it. An agent never pushes it, so it leaves
     // every list below. A registry that did not answer drops nothing: like the project scope, it
     // costs the scope and not the launch.
@@ -1109,8 +1081,7 @@ public class WorkspaceService {
                   wt.admin,
                   wt.placement,
                   runnerRef(wt.runnerId, runnerNames),
-                  wt.queuedAt,
-                  wt.editor);
+                  wt.queuedAt);
             })
         .toList();
   }
@@ -1227,102 +1198,13 @@ public class WorkspaceService {
     return info.buildTime().isBefore(latest.buildTime()) ? Boolean.TRUE : null;
   }
 
-  /**
-   * A single active workspace's current DTO (runtime status computed live), or 404.
-   *
-   * <p><b>The editor is read directly and every other workspace through its repository's listing</b>,
-   * which is not an optimisation but the only way the editor is readable at all. The listing is the
-   * older path and stays exactly as it was: it opens with {@code repositories.require(repoId)} and
-   * refreshes a git mirror, because ahead/behind against a parent branch is most of what it answers.
-   * The editor's row belongs to no repository — it carries a sentinel id ({@code
-   * EditorWorkspace.REPOSITORY_ID}) precisely because the column is not nullable — so that first
-   * line could only ever 404, and a read that 404s for a row which exists is a defect rather than a
-   * limitation. This is the regression the singleton editor introduced: the editor used to be a
-   * per-project workspace the listing covered, and the same listing now misses it.
-   *
-   * <p><b>The difference is what cannot be known rather than what is skipped.</b> An editor has no
-   * branch, no parent and no repository, so {@code ahead}, {@code behind} and the repository's main
-   * branch are null and {@code conflictsWithParent} is false — not because they were too expensive
-   * to compute, but because there is nothing to compute them against. Everything keyed by the row
-   * itself is answered exactly as the listing answers it: the live container check, clean/dirty,
-   * agent activity and the daemon's identity, all of them known only while the daemon's socket is
-   * live — RUNNING here, since the editor is always DIRECT and never reads the listing's UNAVAILABLE
-   * overlay.
-   *
-   * <p>Five endpoints reach this method — the by-id read and the four container verbs that return
-   * the refreshed workspace — so fixing it here is what makes all five answer for the editor rather
-   * than each of them growing a special case.
-   */
+  /** A single active workspace's current DTO (runtime status computed live), or 404. */
   public WorkspaceDto getWorkspace(Long id) {
     Workspace workspace = requireActive(id);
-    if (workspace.editor) {
-      return describeEditor(workspace);
-    }
     return listWorkspaces(workspace.repositoryId).stream()
         .filter(w -> id.equals(w.id()))
         .findFirst()
         .orElseThrow(() -> new NotFoundException("Workspace not found: " + id));
-  }
-
-  /**
-   * The editor row as a {@link WorkspaceDto}, built without touching a repository or a git mirror.
-   *
-   * <p>The live half is read the same way {@link #listWorkspaces} reads it and from the same ports,
-   * so the two agree about a workspace that is up: the container is asked for BY NAME rather than by
-   * listing a repository's containers, which is the one substitution the sentinel forces and the
-   * same composition {@code EditorKeepalive} and the editor proxy already make.
-   */
-  private WorkspaceDto describeEditor(Workspace workspace) {
-    WorkspacePlacements.requireDirectAllowed(workspace);
-    WorkspaceRuntimeStatus runtime =
-        containers.isRunning(containers.containerName(workspace.workspaceId, workspace.repositoryId))
-            ? WorkspaceRuntimeStatus.RUNNING
-            : workspace.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
-                ? WorkspaceRuntimeStatus.STOPPED
-                : workspace.runtimeStatus;
-    boolean live = runtime == WorkspaceRuntimeStatus.RUNNING;
-    Boolean clean =
-        live && gitStatus.isResolvable() ? gitStatus.get().isClean(workspace.id).orElse(null) : null;
-    AgentActivityState activity =
-        live && agentActivity.isResolvable()
-            ? agentActivity.get().activityFor(workspace.id).orElse(null)
-            : null;
-    WorkspaceDaemonInfo.Info info =
-        live && daemonInfo.isResolvable() ? daemonInfo.get().lookup(workspace.id).orElse(null) : null;
-    WorkspaceDaemonInfo.Info latestDaemon =
-        daemonInfo.isResolvable() ? latestDaemon(daemonInfo.get().all()) : null;
-    return new WorkspaceDto(
-        workspace.id,
-        workspace.workspaceId,
-        workspace.parent,
-        workspace.branch,
-        // No repository ⇒ no main branch to be ahead of, and no parent to conflict with. Null is the
-        // honest answer here, and the same one every other unknown on this DTO uses.
-        null,
-        null,
-        null,
-        false,
-        workspace.status,
-        runtime,
-        workspace.runtimeError,
-        clean,
-        activity,
-        workspace.preamble,
-        workspace.ticketId,
-        workspace.epicId,
-        workspace.result,
-        workspace.createdAt,
-        workspace.resolvedAt,
-        info != null ? info.connectedAt() : null,
-        info != null ? info.version() : null,
-        info != null ? info.buildTime() : null,
-        daemonOutdated(info, latestDaemon),
-        workspace.admin,
-        workspace.placement,
-        // The editor is always DIRECT (ck_workspace_runner_posture), so it is on no runner.
-        null,
-        workspace.queuedAt,
-        true);
   }
 
   /**
@@ -1517,8 +1399,7 @@ public class WorkspaceService {
   }
 
   /**
-   * Pre-flight guard shared by branch integration ({@link #mergeBranch}) and workspace integration
-   * ({@link #mergeWorkspace}) — and therefore by the MCP {@code integrateBranch} tool, which routes
+   * Pre-flight guard of branch integration ({@link #mergeBranch}) — and therefore of the MCP {@code integrateBranch} tool, which routes
    * through {@code mergeBranch}. Integration merges the source branch's <em>origin</em> ref (inside
    * the target's workspace), so before that ref is read this makes it faithful to the live source
    * workspace:
@@ -1765,7 +1646,7 @@ public class WorkspaceService {
     // with none, the RUNNER row simply waits QUEUED. A stated placement that contradicts the rule is
     // refused before the branch is pushed, so it costs nothing. The editor is written by its own door.
     refuseUnplaceable(placement, admin);
-    WorkspacePlacement placed = WorkspacePlacements.forNewRow(admin, false);
+    WorkspacePlacement placed = WorkspacePlacements.forNewRow(admin);
     LOG.infof("Workspace %s/%s placement=%s", repoId, workspaceId, placed);
 
     RepoMirror mirror = mirrors.of(repoId);
@@ -2473,65 +2354,6 @@ public class WorkspaceService {
       """;
 
   /**
-   * Find or write <b>the</b> editor workspace — the single row the platform's one shared editor
-   * container runs as. Idempotent, and the second caller gets the first caller's row.
-   *
-   * <p><b>A row and not a derivation, and that is the whole of what changed.</b> The editor used to
-   * be a project's wrapper repository's main workspace: one per project, found by recognising the
-   * wrapper among the repositories somebody had opened a main workspace for, and launched from the
-   * editor image because of what that workspace <em>was</em>. There is one editor now, for the whole
-   * platform, so there is no project to derive it from — and what is left is a decision, which is a
-   * column ({@code Workspace.editor}, {@code V7}).
-   *
-   * <p>What that row deliberately does not have: <b>no branch and no parent</b>, because the editor
-   * checks nothing out of its own; and a <b>sentinel repository id</b> ({@link
-   * EditorWorkspace#REPOSITORY_ID}), because the column is not nullable and the shared editor belongs
-   * to no repository. Every path that would resolve that id — the container factory's project and
-   * name lookups, {@link #ensureContainer}'s branch-still-exists check, the mirror — is skipped for
-   * an editor row rather than asked and failed. The credential is the ordinary one: nothing here
-   * commissions anything, {@link #provisionContainer} does it for every workspace alike, and an
-   * unresolvable repository costs the {@code project} scope exactly as an unreachable registry does
-   * for any other workspace.
-   *
-   * <p><b>No lock, and the race is settled by the index.</b> Two callers can find nothing at the same
-   * moment and both try to write; {@code uq_workspace_active_editor} makes the loser's insert fail
-   * rather than making a second editor, which is the arrangement every create has with {@code
-   * uq_workspace_active_branch} and for the same reason — a constraint holds under a race and an
-   * agreement does not. The loser's caller retries by polling the door, which it is doing anyway.
-   *
-   * <p>It writes the same {@code CREATED} history entry every other creation writes, because the one
-   * thing this row shares with every workspace is that somebody asked for it and it now exists.
-   */
-  @Transactional
-  public Workspace createEditorWorkspace() {
-    Optional<Workspace> existing = workspaceRepository.findActiveEditor();
-    if (existing.isPresent()) {
-      return existing.get();
-    }
-
-    Workspace workspace = new Workspace();
-    workspace.workspaceId = EditorWorkspace.WORKSPACE_ID;
-    workspace.repositoryId = EditorWorkspace.REPOSITORY_ID;
-    workspace.parent = null;
-    workspace.branch = null; // nothing is checked out: the editor is not a place work lands
-    workspace.status = WorkspaceStatus.ACTIVE;
-    workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
-    workspace.editor = true;
-    // The editor never consults a runner: stated explicitly rather than left to the entity's own
-    // DIRECT default, so this stays true even if that default ever changes (qits-837).
-    workspace.placement = WorkspacePlacement.DIRECT;
-    // The editor pushes nothing today. It has no branch of its own to push, and the repositories it
-    // will one day hold side by side are not cloned into it yet — so the honest list is the empty
-    // one, which is also what GitRefs.effective would answer for a branchless row. Widening it is
-    // part of the task that clones those repositories, not of this one.
-    workspace.gitRefs = GitRefs.write(List.of());
-    workspaceRepository.persist(workspace);
-    recordEvent(workspace, WorkspaceEventType.CREATED, null, null, null);
-
-    return workspace;
-  }
-
-  /**
    * Sanitizes a branch name into a workspace-id slug ([A-Za-z0-9_-], ≤64 chars, not dash-leading).
    * Public because the capture ingest derives workspace ids from its generated branch names through
    * the same rule.
@@ -2565,7 +2387,7 @@ public class WorkspaceService {
    * resume path exactly as {@code branch}/{@code parent} already are. See {@link
    * #ensureContainer(String, String, Long, WorkspaceProcessTracker.Handle)}.
    */
-  private record BranchParent(String branch, String parent, boolean editor, String entityId) {}
+  private record BranchParent(String branch, String parent, String entityId) {}
 
   /**
    * Guarantees a running container for an ACTIVE workspace whose branch still exists, provisioning
@@ -2863,7 +2685,7 @@ public class WorkspaceService {
                   if (containers.isRunning(container)) {
                     return null; // already running — nothing to provision
                   }
-                  return new BranchParent(wt.branch, wt.parent, wt.editor, wt.entityId);
+                  return new BranchParent(wt.branch, wt.parent, wt.entityId);
                 });
     if (snapshot == null) {
       // The RUNNING stamp is written here rather than in the snapshot, so it is checked against a
@@ -2936,16 +2758,9 @@ public class WorkspaceService {
       }
     }
 
-    // THE EDITOR IS EXEMPT, and it is the branchless case rather than an exception to the rule. The
-    // abandonment below fires when a workspace's durable branch has gone — the ref it exists to hold
-    // a checkout of was deleted, so the workspace is genuine dead weight. The editor's row claims no
-    // branch and never did: there is nothing to have lost, no repository to ask, and asking anyway
-    // would put a wire read against a sentinel id in front of every editor ensure. Falling through
-    // to the branch check would abandon the editor on its first launch.
-    if (!snapshot.editor()
-        && (snapshot.branch() == null
-            || snapshot.branch().isBlank()
-            || !branchExists(repoId, snapshot.branch()))) {
+    if (snapshot.branch() == null
+        || snapshot.branch().isBlank()
+        || !branchExists(repoId, snapshot.branch())) {
       // The durable branch is gone: this is genuine death, so abandon (persisted before we throw).
       QuarkusTransaction.requiringNew()
           .run(
@@ -3213,189 +3028,6 @@ public class WorkspaceService {
     workspace.runtimeError = null;
   }
 
-  @Transactional
-  public MergeResult mergeWorkspace(Long id, String target) {
-    Workspace workspace = requireActive(id);
-    String repoId = workspace.repositoryId;
-    var repo = repositories.require(repoId);
-
-    String resolvedTarget = (target == null || target.isBlank()) ? defaultMainBranch(repo) : target;
-
-    // `target` names a BRANCH. It is still accepted as a workspace label, because that is what the
-    // branch-tree UI has always sent and the two coincide for an ordinary workspace; the lookup is
-    // a convenience, not an identity claim. It is unambiguous now in a way it was not before: at
-    // most one ACTIVE workspace owns a branch, so at most one row can answer.
-    Workspace targetWorkspace =
-        workspaceRepository
-            .findActiveByRepositoryAndWorkspaceId(repoId, resolvedTarget)
-            .orElse(null);
-    if (targetWorkspace != null && targetWorkspace.branch != null) {
-      resolvedTarget = targetWorkspace.branch;
-    }
-
-    refuseMainAsMergeTarget(repo, resolvedTarget, workspace.id);
-
-    String currentBranch = workspace.branch;
-    // Same pre-integration guard as branch integration: refuse a dirty working tree and push the
-    // container's unpushed commits so the origin ref this merge reads is complete (a swallowed push
-    // would silently integrate a stale ref). Pass the workspace resolved by id (not its branch) so
-    // the guard acts on exactly this container. A stopped/absent container is a no-op.
-    requireSyncedSourceForIntegration(repoId, workspace);
-    MergeResult result = mergeIntoTarget(repoId, currentBranch, resolvedTarget);
-    if (!result.hasConflicts()) {
-      recordEvent(
-          workspace, WorkspaceEventType.MERGED, currentBranch, resolvedTarget, result.commitHash());
-      // The merge advanced the target's origin ref; if a live workspace owns it, pull it in now.
-      notifyIncomingMerge(repoId, resolvedTarget);
-    }
-    return result;
-  }
-
-  /**
-   * The workspace door into git, and it never reaches the default branch: merge this workspace's
-   * branch into <b>its parent</b> — a {@code task/…} landing on the {@code epic/…} it forked from —
-   * as a single pushed commit that stamps nothing.
-   *
-   * <p><b>It is not a release and there is no longer a door here that is.</b> A release is a release
-   * request in qits-projects: the sources are octopus-merged on a backing branch through
-   * qits-githost, the version stamp and the manifest bump happen there, the tag is what a release
-   * <em>is</em>, and {@code main} is merged only after the deployment. A workspace whose parent
-   * <em>is</em> the default branch is therefore refused here and sent to that flow, rather than
-   * quietly writing the one branch this service does not own.
-   *
-   * <p>The work is in the parent afterwards, so the workspace resolves: the container, the volume,
-   * the branch and the ACTIVE row all go.
-   *
-   * @throws eu.wohlben.qits.workspaces.error.IntegrateConflictException for every refusal the caller
-   *     can act on
-   */
-  public IntegrateResult integrateWorkspace(Long id, String summary) {
-    BranchIntegrator.Landed landed = landWorkspace(id, summary);
-    return new IntegrateResult(landed.commitSha(), landed.branch(), landed.targetBranch());
-  }
-
-  /**
-   * The body of {@link #integrateWorkspace}: the guards, the lease, the git flow and the
-   * resolution.
-   */
-  private BranchIntegrator.Landed landWorkspace(Long id, String summary) {
-    // Deliberately NOT one @Transactional. Between the guards and the row work sit two waits a
-    // transaction has no business holding open: the repository lease (up to a minute) and the push
-    // (up to two). Narayana's default transaction timeout is shorter than their sum, so a busy
-    // repository would fail as a transaction timeout rather than as anything a caller could read.
-    // The class already answers this the same way everywhere else — read in one short transaction,
-    // do the slow thing outside, write in another (see beginEnsureContainer and its siblings).
-    Workspace workspace = QuarkusTransaction.requiringNew().call(() -> requireActive(id));
-    String repoId = workspace.repositoryId;
-    var repo = repositories.require(repoId);
-    String mainBranch = defaultMainBranch(repo);
-    // An integrate lands on the branch this workspace forked from — and on the default branch
-    // never, which is the next guard.
-    String target = parentBranchOf(workspace, mainBranch);
-    String source = workspace.branch;
-
-    if (summary == null || summary.isBlank()) {
-      throw new BadRequestException("An integrate needs a summary for its commit");
-    }
-    if (source == null || source.isBlank() || source.startsWith("-")) {
-      throw new BadRequestException(
-          "Workspace '" + workspace.workspaceId + "' has no branch to integrate");
-    }
-    // The rule that keeps this door off the one branch this service does not write. A workspace
-    // forked straight off the default branch has nothing to integrate into: its parent IS that
-    // branch, and only a release request lands there.
-    refuseMainAsMergeTarget(repo, target, workspace.id);
-    if (source.equals(target)) {
-      throw new BadRequestException(
-          "Workspace '"
-              + workspace.workspaceId
-              + "' is on '"
-              + target
-              + "', which is already the branch it would land on");
-    }
-    // The source's container may hold uncommitted work the origin-side merge would silently leave
-    // behind. Same guard the merge endpoints open with, for the same reason.
-    requireSyncedSourceForIntegration(repoId, workspace);
-
-    BranchIntegrator.Landed landed = landOnBranch(repo, source, target, summary);
-
-    String subject = "integrate(" + source + "): " + summary;
-    QuarkusTransaction.requiringNew()
-        .run(
-            () -> {
-              // The push advanced the target's origin ref; if a live workspace owns it, pull it in.
-              notifyIncomingMerge(repoId, target);
-              // The work is in the target branch, so the workspace resolves: container and volume
-              // gone, branch deleted, row INTEGRATED, WorkspaceEventType.INTEGRATED recorded — the
-              // same mechanics branch cleanup has always used, now carrying this flow's own target
-              // and sha. Re-read inside this transaction: the row above is detached, and
-              // WorkspaceResolved observers join here.
-              doDiscard(
-                  repoId,
-                  requireActive(id),
-                  WorkspaceStatus.INTEGRATED,
-                  subject,
-                  target,
-                  landed.commitSha());
-            });
-    return landed;
-  }
-
-  /** The git half, under the repository lease, once the source and the target are known. */
-  private BranchIntegrator.Landed landOnBranch(
-      RepositoryLookup.RepositoryView repo, String source, String target, String summary) {
-    String repoId = repo.id();
-    String leaseToken = acquireIntegrateLease(repoId);
-    try {
-      return integrator.land(new BranchIntegrator.Run(repoId, source, target, summary));
-    } finally {
-      processRegistry.releaseRepository(repoId, leaseToken);
-    }
-  }
-
-  /** The branch a workspace forked from; the default branch for one that records none. */
-  private static String parentBranchOf(Workspace workspace, String mainBranch) {
-    return (workspace.parent == null || workspace.parent.isBlank())
-        ? mainBranch
-        : workspace.parent;
-  }
-
-  /**
-   * The repository lease integrate serializes on.
-   *
-   * <p><b>Not a correctness requirement.</b> The push is a compare-and-swap and git settles a
-   * genuine race by rejecting the loser, so two integrates are already safe without this. What the
-   * lease buys is that the common case — two workspaces of one repository integrated seconds apart —
-   * is <b>one waits</b> rather than <b>one fails</b>, and that two flows never build worktrees in one
-   * bare origin at the same time.
-   *
-   * <p>The registry's reservation is fail-fast by design (its other users, a pull and an interactive
-   * sign-in, want an immediate answer), so the waiting is here: a short poll under a hard cap. The
-   * cap is what keeps this from being the unbounded wait the push timeout exists to forbid — past it
-   * the caller is told the repository is busy, which is a sentence a person can act on.
-   */
-  private String acquireIntegrateLease(String repoId) {
-    long deadline = System.currentTimeMillis() + integrateLeaseWaitMs;
-    String lastKind = null;
-    while (true) {
-      RepoReservation lease = processRegistry.reserveRepository(repoId, "integrate");
-      if (lease instanceof RepoReservation.Acquired acquired) {
-        return acquired.token();
-      }
-      lastKind = ((RepoReservation.Conflict) lease).runningKind();
-      if (System.currentTimeMillis() >= deadline) {
-        throw new ConflictException(
-            "Repository is busy with '" + lastKind + "'; nothing landed — try again.");
-      }
-      try {
-        Thread.sleep(100);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new ConflictException("Interrupted while waiting for the repository to be free");
-      }
-    }
-  }
-
   /**
    * The rule that makes "this service does not write the default branch" true in the API and not
    * only at the git host.
@@ -3417,17 +3049,13 @@ public class WorkspaceService {
     if (!defaultMainBranch(repo).equals(resolvedTarget)) {
       return;
     }
-    String id = workspaceId == null ? "{id}" : String.valueOf(workspaceId);
     throw new IntegrateConflictException(
         IntegrateConflictException.Reason.RELEASE_REQUIRED,
         "'"
             + resolvedTarget
             + "' is the repository's default branch and is written by the release flow alone. Ask"
             + " qits-projects for a release request naming this branch; it lands the release as a"
-            + " tag and merges the default branch once the deployment is live. POST"
-            + " /workspaces/api/workspaces/"
-            + id
-            + "/integrate merges into this branch's parent instead.");
+            + " tag and merges the default branch once the deployment is live.");
   }
 
   /** The id of the ACTIVE workspace owning {@code branch}, or null — for an error message only. */
@@ -3669,7 +3297,7 @@ public class WorkspaceService {
               "Merge " + sourceBranch + " into " + resolvedTarget,
               gitIdentity.forMirror());
       if (!merged.clean()) {
-        // Answered rather than thrown, which is this surface's whole difference from /integrate.
+        // Answered rather than thrown: a conflict is an outcome of a merge, not an error.
         return new MergeResult(null, true, merged.output(), false);
       }
       String commitHash = worktree.headSha();
@@ -4466,12 +4094,4 @@ public class WorkspaceService {
 
   public record MergeResult(
       String commitHash, boolean hasConflicts, String output, boolean cleanedUp) {}
-
-  /**
-   * What a successful integrate answers: the merge commit, the source branch — which the merge's
-   * parents record as a sha but never as a name — and the target it landed on. <b>No version</b>,
-   * because this service mints none: a version belongs to a release, and a release is a release
-   * request in qits-projects.
-   */
-  public record IntegrateResult(String commitSha, String branch, String targetBranch) {}
 }

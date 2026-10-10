@@ -66,8 +66,7 @@ public class PinsController {
    *
    * @param image the registry-relative repository, host segment stripped
    * @param version the calver tag this process resolved at boot
-   * @param launches what starting it would be — {@code workspace}, {@code editor} or {@code
-   *     runner}
+   * @param launches what starting it would be — {@code workspace} or {@code runner}
    */
   public record LaunchPin(String image, String version, String launches) {}
 
@@ -87,8 +86,6 @@ public class PinsController {
         pins(
             containerFactory.imageRepo(),
             containerFactory.imageVersion(),
-            containerFactory.editorImageRepo(),
-            containerFactory.editorImageVersion(),
             runnerPins.version()));
   }
 
@@ -97,21 +94,14 @@ public class PinsController {
    * diffs one run's answer against the next, and package-private because the omission rules are
    * worth proving without a config profile per case.
    */
-  static List<LaunchPin> pins(
-      String imageRepo, String imageVersion, String editorImageRepo, String editorImageVersion) {
-    return pins(imageRepo, imageVersion, editorImageRepo, editorImageVersion, null);
+  static List<LaunchPin> pins(String imageRepo, String imageVersion) {
+    return pins(imageRepo, imageVersion, null);
   }
 
-  /** {@link #pins(String, String, String, String)} with the workspace runner's image beside them. */
-  static List<LaunchPin> pins(
-      String imageRepo,
-      String imageVersion,
-      String editorImageRepo,
-      String editorImageVersion,
-      String runnerVersion) {
+  /** {@link #pins(String, String)} with the workspace runner's image beside it. */
+  static List<LaunchPin> pins(String imageRepo, String imageVersion, String runnerVersion) {
     return Stream.of(
             pin(imageRepo, imageVersion, "workspace"),
-            pin(editorImageRepo, editorImageVersion, "editor"),
             pin(WorkspaceRunnerPins.IMAGE_REPOSITORY, runnerVersion, "runner"))
         .flatMap(Optional::stream)
         .sorted(Comparator.comparing(LaunchPin::image).thenComparing(LaunchPin::launches))

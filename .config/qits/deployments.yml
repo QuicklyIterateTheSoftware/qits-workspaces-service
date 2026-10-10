@@ -54,18 +54,8 @@ application: qits-workspaces
 # line each. The order is stated in integers rather than left to the edge's position-then-label
 # tie-break so that renaming a row cannot silently reorder the group.
 #
-# EDITOR IS A PROJECT ROW AND NEVER A REPOSITORY ONE: `=editor` is the SPA's own bare `editor`
-# route, which takes no repository segment because a project has ONE editor and it rides the
-# aggregate workspace — the wrapper's. It sits directly under Workspaces because it is the same
-# workspace, opened another way.
-#
-# TWO ROWS IN ONE SLOT WAS A REFUSAL until 2026-08-31: the deployer's DeploymentSpecParser, the
-# edge's EdgeRoutes AND the edge_navigation_entry primary key all admitted one entry per slot per
-# application, and this line made the whole spec unreadable — the deployment FAILED while CI stayed
-# green. All three key the claim on (slot, label) now, and the ui-components shell renders two
-# same-application rows correctly since 2026.831.134647 (row keys carry the label; the page goes to
-# the longest matching subpath). This entry therefore requires those releases deployed underneath it.
-navigation-entries: services.details.Workspaces:8, daemons.details.Workspaces:8, libs.details.Workspaces:8, apps.details.Workspaces:8, frontends.details.Workspaces:8, cli.details.Workspaces:8, images.details.Workspaces:8, project.detail.Workspaces:3, project.detail.Editor:4=editor
+# THE EDITOR ROW WENT WITH THE EDITOR (qits-1152; rethought in epic qits-1150).
+navigation-entries: services.details.Workspaces:8, daemons.details.Workspaces:8, libs.details.Workspaces:8, apps.details.Workspaces:8, frontends.details.Workspaces:8, cli.details.Workspaces:8, images.details.Workspaces:8, project.detail.Workspaces:3
 
 # ONE KEY, AND IT ASKS FOR TWO DATABASES, because two jars in this deployable each own one.
 #

@@ -1,23 +1,19 @@
 package eu.wohlben.qits.workspaces.daemonhost;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import eu.wohlben.qits.workspaces.containershost.EditorKeepalive;
 import eu.wohlben.qits.workspaces.control.AgentActivityState;
 import eu.wohlben.qits.workspaces.control.AgentKills;
 import eu.wohlben.qits.workspaces.control.AgentLaunched;
 import eu.wohlben.qits.workspaces.control.AgentWaitingReporter;
 import eu.wohlben.qits.workspaces.control.AgentSessionReporter;
-import eu.wohlben.qits.workspaces.control.EditorLifecycle;
 import eu.wohlben.qits.workspaces.control.ProvisionResult;
 import eu.wohlben.qits.workspaces.control.QitsConfig;
 import eu.wohlben.qits.workspaces.control.WorkspaceAgentActivity;
-import eu.wohlben.qits.workspaces.control.WorkspaceBootstrapDriver;
 import eu.wohlben.qits.workspaces.control.WorkspaceConfigReader;
 import eu.wohlben.qits.workspaces.control.WorkspaceConfigView;
 import eu.wohlben.qits.workspaces.control.WorkspaceDaemonInfo;
 import eu.wohlben.qits.workspaces.control.WorkspaceDaemonLiveness;
 import eu.wohlben.qits.workspaces.control.WorkspaceDaemonProvisioner;
-import eu.wohlben.qits.workspaces.control.WorkspaceEditorState;
 import eu.wohlben.qits.workspaces.control.WorkspaceGitStatus;
 import eu.wohlben.qits.workspaces.control.WorkspaceGitSync;
 import eu.wohlben.qits.workspaces.control.WorkspaceResolved;
@@ -26,9 +22,6 @@ import eu.wohlben.qits.workspaces.control.WorkspaceChangePublisher;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspacedaemon.protocol.Ack;
 import eu.wohlben.qits.workspacedaemon.protocol.AgentActivity;
-import eu.wohlben.qits.workspacedaemon.protocol.BootstrapOutcome;
-import eu.wohlben.qits.workspacedaemon.protocol.BootstrapStep;
-import eu.wohlben.qits.workspacedaemon.protocol.Bootstrapped;
 import eu.wohlben.qits.workspacedaemon.protocol.CommandChunk;
 import eu.wohlben.qits.workspacedaemon.protocol.CommandExit;
 import eu.wohlben.qits.workspacedaemon.protocol.ConfigView;
@@ -37,7 +30,6 @@ import eu.wohlben.qits.workspacedaemon.protocol.DaemonMessage;
 import eu.wohlben.qits.workspacedaemon.protocol.DaemonProtocol;
 import eu.wohlben.qits.workspacedaemon.protocol.Describe;
 import eu.wohlben.qits.workspacedaemon.protocol.DescribeConfig;
-import eu.wohlben.qits.workspacedaemon.protocol.EditorState;
 import eu.wohlben.qits.workspacedaemon.protocol.GitStatus;
 import eu.wohlben.qits.workspacedaemon.protocol.Heartbeat;
 import eu.wohlben.qits.workspacedaemon.protocol.Hello;
@@ -45,7 +37,6 @@ import eu.wohlben.qits.workspacedaemon.protocol.ProvisionFailed;
 import eu.wohlben.qits.workspacedaemon.protocol.Provisioned;
 import eu.wohlben.qits.workspacedaemon.protocol.OpenStream;
 import eu.wohlben.qits.workspacedaemon.protocol.PullBranch;
-import eu.wohlben.qits.workspacedaemon.protocol.RunBootstrap;
 import eu.wohlben.qits.workspacedaemon.protocol.RunCommand;
 import eu.wohlben.qits.workspacedaemon.protocol.Stream;
 import eu.wohlben.qits.workspacedaemon.protocol.StreamTarget;
@@ -103,10 +94,8 @@ public class WorkspaceDaemonRegistry
     implements WorkspaceDaemonLiveness,
         WorkspaceDaemonProvisioner,
         WorkspaceConfigReader,
-        WorkspaceBootstrapDriver,
         WorkspaceGitStatus,
         WorkspaceAgentActivity,
-        WorkspaceEditorState,
         WorkspaceDaemonInfo,
         WorkspaceGitSync {
 
@@ -133,18 +122,6 @@ public class WorkspaceDaemonRegistry
    * it when one goes away.
    */
   @Inject Instance<WorkspaceTunnels> tunnels;
-
-  /**
-   * The editor's keepalive. A coding agent working in a workspace is that workspace being used, and
-   * the editor's container is the one with an idle-stop lifetime — so an unattended agent session
-   * must hold it open exactly as a person's open tab does. Reporting here rather than from a timer
-   * is what makes that true of the agent's OWN activity instead of of the socket merely being open:
-   * a daemon that has connected and is doing nothing is idle, which is what the sweep is for.
-   *
-   * <p>It is debounced on its own side and it does nothing at all while the idle-stop switch is
-   * unset, so this call costs one map operation on the socket thread in the shipped configuration.
-   */
-  @Inject EditorKeepalive editorKeepalive;
 
   /**
    * Where a killed agent is written onto the workspace row, and taken back off it (qits-951). See
@@ -241,22 +218,6 @@ public class WorkspaceDaemonRegistry
   private final ConcurrentHashMap<String, ActivityEntry> agentActivity = new ConcurrentHashMap<>();
 
   /**
-   * Last web-editor state each live daemon reported ({@link EditorState}), per workspace row id.
-   * The same lifetime and the same eviction as {@link #gitClean}: in-memory only, populated while
-   * the daemon is connected, dropped on {@link #unregister}, re-reported on reconnect. Surfaced
-   * through {@link WorkspaceEditorState#editorStateFor}, which {@code EditorService} and {@code
-   * EditorProxyRoute} both gate on.
-   *
-   * <p><b>An absent entry is "nothing reported", never "no editor".</b> The daemon sends the frame
-   * only where it supervises an editor at all, so absence covers a plain workspace, a container
-   * that is not up, and an editor whose first frame has not arrived — three cases a caller turns
-   * into the same "not ready", which is the answer each of them deserves. That is also why {@code
-   * ENDED} is <em>kept</em> rather than evicted, unlike the way agent activity used to treat its
-   * own terminal: ENDED is what lets a splash stop waiting and say so.
-   */
-  private final ConcurrentHashMap<Long, EditorLifecycle> editorStates = new ConcurrentHashMap<>();
-
-  /**
    * One tracked agent command's activity, plus the workspace it belongs to (for the rollup) and
    * when it was recorded (only {@code ENDED} expires, but every entry carries the stamp so the
    * check needs no second map).
@@ -291,26 +252,6 @@ public class WorkspaceDaemonRegistry
    * #unregister}.
    */
   private final ConcurrentHashMap<Long, PendingProvision> provisions = new ConcurrentHashMap<>();
-
-  /**
-   * In-flight bootstrap chains, keyed by {@code workspaceId} — like {@link #provisions}, on the
-   * registry (a chain, a long {@code mvn install}, outlives a socket bounce). Unlike provisioning,
-   * the boot-time chain is <b>autonomous</b>: the daemon runs it right after the self-clone, so it
-   * can begin — and a fast/empty chain can finish — before the host's async observer registers its
-   * await. So a {@link PendingBootstrap} buffers step events until a sink registers, and {@link
-   * #completeBootstrap} retains the terminal (creating the slot if absent) rather than dropping it.
-   * {@link #awaitProvision} clears any stale slot at the start of each provision cycle so a boot
-   * awaiter never picks up a previous cycle's retained terminal.
-   */
-  private final ConcurrentHashMap<Long, PendingBootstrap> bootstraps = new ConcurrentHashMap<>();
-
-  /**
-   * Persistent bootstrap-outcome recorders ({@link WorkspaceBootstrapDriver#subscribe}), fed every
-   * {@link BootstrapOutcome} frame — awaited or not. This is how a chain the daemon ran on its own
-   * (its HTTP run verb, through the container proxy) still writes host rows.
-   */
-  private final CopyOnWriteArrayList<WorkspaceBootstrapDriver.OutcomeSink> outcomeSinks =
-      new CopyOnWriteArrayList<>();
 
   /**
    * One ordered thread for everything fanned out to subscribed sinks — today the bootstrap-outcome
@@ -362,10 +303,6 @@ public class WorkspaceDaemonRegistry
     gitHead.remove(workspaceId);
     // Likewise drop every tracked agent activity for this workspace (re-reported on reconnect).
     agentActivity.values().removeIf(entry -> entry.workspaceId().equals(workspaceId));
-    // And the editor's state. A disconnect means NOTHING IS KNOWN — not that the editor ended: the
-    // daemon re-reports on every connect, and a retained RUNNING would send the proxy at a listener
-    // whose container may have gone away underneath it.
-    editorStates.remove(workspaceId);
     // Pending tunnel nonces are waiting on a daemon that is no longer there; live tunnels are NOT
     // torn down, deliberately — each stream is its own TCP connection, so an open terminal survives
     // a control-socket reconnect, which is the whole reason these calls do not ride that socket.
@@ -449,9 +386,6 @@ public class WorkspaceDaemonRegistry
       case CommandChunk chunk -> {
         if (DaemonProtocol.PROVISION_CORRELATION_ID.equals(chunk.correlationId())) {
           streamProvisionOutput(workspaceId, chunk);
-        } else if (chunk.correlationId() != null
-            && chunk.correlationId().startsWith(DaemonProtocol.BOOTSTRAP_CORRELATION_PREFIX)) {
-          streamBootstrapOutput(workspaceId, chunk);
         } else if (client != null) {
           client.appendChunk(chunk);
         }
@@ -475,12 +409,8 @@ public class WorkspaceDaemonRegistry
           completeProvision(workspaceId, ProvisionResult.ok(provisioned.head()));
       case ProvisionFailed failed ->
           completeProvision(workspaceId, ProvisionResult.failed(failed.message()));
-      case BootstrapStep step -> routeBootstrapStep(workspaceId, step);
-      case BootstrapOutcome outcome -> routeBootstrapOutcome(workspaceId, outcome);
-      case Bootstrapped done -> completeBootstrap(workspaceId, done.ok());
       case GitStatus status -> onGitStatus(workspaceId, client, status);
       case AgentActivity activity -> onAgentActivity(workspaceId, client, activity);
-      case EditorState state -> onEditorState(workspaceId, state);
       case WorkspaceChanged changed -> onWorkspaceChanged(workspaceId, client, changed);
       // Everything else is ignored: qits -> workspace-daemon requests are never received here, and
       // a pre-qits-947 daemon's service frames (ServiceTransition, and its `service:` output
@@ -535,34 +465,6 @@ public class WorkspaceDaemonRegistry
     if (previous == null || previous != status.clean()) {
       changePublisher.fire(repoId, null, WorkspaceChangeHint.Topic.GIT_STATUS);
     }
-  }
-
-  /**
-   * Cache one web-editor state report. The daemon sends the current state once per control-socket
-   * connect and then one frame per transition, so this is the whole of the host's knowledge.
-   *
-   * <p><b>A state this host cannot name drops the entry rather than keeping the last one.</b>
-   * {@link EditorLifecycle#parse} answers null for anything outside the three values, and "nothing
-   * reported" is the honest reading of a frame this backend does not understand — the protocol
-   * module carries the state as a plain String precisely so a newer daemon can say something new
-   * without failing a frame. Keeping the previous value instead would let a stale {@code RUNNING}
-   * outlive a transition that said otherwise, which is the one direction that costs a reader a
-   * splash they should have seen.
-   */
-  private void onEditorState(Long workspaceId, EditorState reported) {
-    EditorLifecycle state = EditorLifecycle.parse(reported.state());
-    if (state == null) {
-      editorStates.remove(workspaceId);
-      return;
-    }
-    editorStates.put(workspaceId, state);
-  }
-
-  @Override
-  public Optional<EditorLifecycle> editorStateFor(Long workspaceRowId) {
-    return workspaceRowId == null
-        ? Optional.empty()
-        : Optional.ofNullable(editorStates.get(workspaceRowId));
   }
 
   @Override
@@ -620,7 +522,6 @@ public class WorkspaceDaemonRegistry
     long now = System.currentTimeMillis();
     // An agent that is working is the workspace being used. Debounced on the keepalive's side, and
     // a no-op entirely while nothing is idle-stopped.
-    editorKeepalive.touched(workspaceId);
     AgentActivityState before = rollup(workspaceId, now);
     agentActivity.put(activity.commandId(), new ActivityEntry(workspaceId, state, now));
     if (before != rollup(workspaceId, now)) {
@@ -997,74 +898,6 @@ public class WorkspaceDaemonRegistry
     }
   }
 
-  /** Route one bootstrap step's phase change to the awaiting sink (buffered until it registers). */
-  private void routeBootstrapStep(Long workspaceId, BootstrapStep step) {
-    bootstraps
-        .computeIfAbsent(workspaceId, id -> new PendingBootstrap())
-        .deliver(sink -> sink.onStep(step.name(), step.phase()));
-  }
-
-  /**
-   * Route one bootstrap step's terminal outcome to the awaiting sink (buffered until it registers)
-   * — and, independently, to every persistent {@link WorkspaceBootstrapDriver.OutcomeSink}. The
-   * persistent fan-out is what records rows for a chain the host never awaited (the daemon's HTTP
-   * run verb); it hops to {@link #sinkDispatch} because the recorder writes the database, and a DB
-   * write on the socket thread parks the connection's serialized inbound pipeline.
-   */
-  private void routeBootstrapOutcome(Long workspaceId, BootstrapOutcome outcome) {
-    bootstraps
-        .computeIfAbsent(workspaceId, id -> new PendingBootstrap())
-        .deliver(sink -> sink.onOutcome(outcome.name(), outcome.outcome(), outcome.exitCode()));
-    if (outcomeSinks.isEmpty()) {
-      return;
-    }
-    DaemonConnection client = clients.get(workspaceId);
-    String repoId = client != null ? client.repoId : null;
-    String label = labelOf(client);
-    sinkDispatch.execute(
-        () -> {
-          for (WorkspaceBootstrapDriver.OutcomeSink sink : outcomeSinks) {
-            try {
-              sink.onOutcome(
-                  repoId, label, workspaceId, outcome.name(), outcome.outcome(), outcome.exitCode());
-            } catch (RuntimeException e) {
-              LOG.debugf("bootstrap outcome sink failed (dropped): %s", e.getMessage());
-            }
-          }
-        });
-  }
-
-  @Override
-  public void subscribe(WorkspaceBootstrapDriver.OutcomeSink sink) {
-    outcomeSinks.add(sink);
-  }
-
-  /** Feed a bootstrap step's streamed output (correlation {@code bootstrap:<name>}) to the sink. */
-  private void streamBootstrapOutput(Long workspaceId, CommandChunk chunk) {
-    String name =
-        chunk.correlationId().substring(DaemonProtocol.BOOTSTRAP_CORRELATION_PREFIX.length());
-    PendingBootstrap pending =
-        bootstraps.computeIfAbsent(workspaceId, id -> new PendingBootstrap());
-    for (String line : chunk.text().split("\n", -1)) {
-      if (!line.isEmpty()) {
-        pending.deliver(sink -> sink.onLine(name, line));
-      }
-    }
-  }
-
-  /**
-   * Complete the workspace's bootstrap chain — <b>complete-or-retain</b>: unlike {@link
-   * #completeProvision}, the autonomous boot chain can finish before the host's async observer
-   * registers its await, so a terminal with no slot creates one (retaining the result) rather than
-   * dropping it. The awaiter (or {@link #awaitProvision}'s next-cycle clear) removes it.
-   */
-  private void completeBootstrap(Long workspaceId, boolean ok) {
-    bootstraps
-        .computeIfAbsent(workspaceId, id -> new PendingBootstrap())
-        .future
-        .complete(new Result(ok));
-  }
-
   /**
    * Send a {@link RunCommand} to the workspace's client and complete when its {@link CommandExit}
    * arrives, with the accumulated output. Fails fast if no client is connected. Part-1
@@ -1159,11 +992,6 @@ public class WorkspaceDaemonRegistry
       Duration provisionTimeout,
       Consumer<String> onLine,
       BooleanSupplier abandoned) {
-    // A new provision cycle: drop any stale bootstrap slot from a previous cycle (e.g. a
-    // kill-switch
-    // run whose retained terminal was never awaited), so this cycle's boot awaiter can't pick it
-    // up.
-    bootstraps.remove(workspaceId);
     // Register the pending slot BEFORE waiting, so streamed chunks and the terminal event that
     // arrive during the wait land on it (and survive a socket reconnect — the slot lives on the
     // registry, not the connection).
@@ -1233,68 +1061,6 @@ public class WorkspaceDaemonRegistry
   boolean isAwaitingProvision(Long workspaceId) {
     PendingProvision pending = provisions.get(workspaceId);
     return pending != null && pending.onLine != null;
-  }
-
-  /**
-   * Test hook: whether a {@link PendingBootstrap} slot exists for {@code workspaceId} — lets a test
-   * confirm the daemon's autonomous chain events have landed on the registry before it registers
-   * its await (the retain/buffer race the autonomous model must survive).
-   */
-  boolean isBootstrapPending(Long workspaceId) {
-    return bootstraps.containsKey(workspaceId);
-  }
-
-  @Override
-  public Optional<Result> awaitBootstrap(
-      Long workspaceId, StepSink sink, Duration connectTimeout, Duration chainTimeout) {
-    // Register the sink so buffered events (steps that beat this await, since the daemon runs the
-    // chain autonomously) replay onto it, and a terminal that already arrived is picked up.
-    PendingBootstrap pending =
-        bootstraps.computeIfAbsent(workspaceId, id -> new PendingBootstrap());
-    pending.setSink(sink);
-    return awaitBootstrapFuture(workspaceId, pending, connectTimeout, chainTimeout);
-  }
-
-  @Override
-  public Optional<Result> runBootstrap(
-      Long workspaceId, String name, StepSink sink, Duration chainTimeout) {
-    DaemonConnection client = clients.get(workspaceId);
-    if (client == null || !client.connection.isOpen()) {
-      return Optional.empty(); // no daemon live to run it
-    }
-    // A manual re-run only starts when the daemon receives RunBootstrap, so the awaiter always
-    // registers first: replace any stale slot with a fresh one, set the sink, then send.
-    PendingBootstrap pending = new PendingBootstrap();
-    pending.setSink(sink);
-    bootstraps.put(workspaceId, pending);
-    String correlationId = UUID.randomUUID().toString();
-    client.connection.sendTextAndAwait(codec.encode(new RunBootstrap(correlationId, name)));
-    // The daemon is already live (we just sent to it), so no connect wait.
-    return awaitBootstrapFuture(workspaceId, pending, Duration.ZERO, chainTimeout);
-  }
-
-  private Optional<Result> awaitBootstrapFuture(
-      Long workspaceId,
-      PendingBootstrap pending,
-      Duration connectTimeout,
-      Duration chainTimeout) {
-    try {
-      if (!pending.future.isDone()
-          && !connectTimeout.isZero()
-          && !awaitLive(workspaceId, connectTimeout)) {
-        return Optional.empty(); // no daemon became live — the chain never ran
-      }
-      return Optional.of(pending.future.get(chainTimeout.toMillis(), TimeUnit.MILLISECONDS));
-    } catch (TimeoutException e) {
-      return Optional.of(new Result(false)); // live but silent past the deadline ⇒ treat as failed
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return Optional.of(new Result(false));
-    } catch (ExecutionException e) {
-      return Optional.of(new Result(false));
-    } finally {
-      bootstraps.remove(workspaceId, pending);
-    }
   }
 
   /** {@link #awaitLive(Long, Duration, CompletableFuture, BooleanSupplier)} with no early exit. */
@@ -1443,49 +1209,4 @@ public class WorkspaceDaemonRegistry
     private volatile Consumer<String> onLine;
   }
 
-  /**
-   * One in-flight bootstrap chain: the future the awaiting host blocks on, plus a buffer of step
-   * events delivered before a sink registered (the autonomous boot chain can start streaming before
-   * the host's async observer awaits). {@link #setSink} replays the buffer and thereafter delivers
-   * live; {@link #deliver} buffers until then. Keyed by {@code workspaceId} so it survives a socket
-   * reconnect mid-chain.
-   */
-  private static final class PendingBootstrap {
-    private final CompletableFuture<WorkspaceBootstrapDriver.Result> future =
-        new CompletableFuture<>();
-    private final List<Consumer<WorkspaceBootstrapDriver.StepSink>> buffered = new ArrayList<>();
-    private WorkspaceBootstrapDriver.StepSink sink;
-
-    synchronized void setSink(WorkspaceBootstrapDriver.StepSink sink) {
-      this.sink = sink;
-      for (Consumer<WorkspaceBootstrapDriver.StepSink> event : buffered) {
-        dispatch(event);
-      }
-      buffered.clear();
-    }
-
-    synchronized void deliver(Consumer<WorkspaceBootstrapDriver.StepSink> event) {
-      if (sink != null) {
-        dispatch(event);
-      } else {
-        buffered.add(event);
-      }
-    }
-
-    /**
-     * Run a sink callback, swallowing any exception. The callbacks run on the websockets-next
-     * onMessage thread (which does not guard the dispatch), and the host sink writes to the DB
-     * (e.g. {@code recordOutcome} throws {@code NotFoundException} for a workspace deleted
-     * mid-chain) — an escape would close the control socket, so the daemon's terminal {@code
-     * Bootstrapped} never arrives and the host await hangs to timeout. A dropped per-step callback
-     * is harmless; {@link #completeBootstrap} resolves the future directly, not through the sink.
-     */
-    private void dispatch(Consumer<WorkspaceBootstrapDriver.StepSink> event) {
-      try {
-        event.accept(sink);
-      } catch (RuntimeException e) {
-        LOG.debugf("workspace-daemon bootstrap sink callback failed (dropped): %s", e.getMessage());
-      }
-    }
-  }
 }

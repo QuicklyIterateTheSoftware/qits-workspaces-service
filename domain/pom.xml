@@ -48,12 +48,6 @@
             <artifactId>qits-workspace-daemon-protocol</artifactId>
         </dependency>
         <dependency>
-            <!-- …and which EDITOR image, from the repository that publishes it. One class, no
-                 transitive dependencies at all. -->
-            <groupId>eu.wohlben.qits</groupId>
-            <artifactId>qits-workspace-editor-image</artifactId>
-        </dependency>
-        <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
         </dependency>

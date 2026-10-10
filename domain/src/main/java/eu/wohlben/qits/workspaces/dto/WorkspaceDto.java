@@ -90,13 +90,11 @@ import java.time.Instant;
  *     posture exists to keep answerable
  * @param placement where the workspace's container runs: {@code DIRECT} on the platform host, or
  *     {@code RUNNER} on a workspace runner's node. Decided at create and never changed: DIRECT for
- *     admin and editor workspaces only, RUNNER for every regular one (qits-780)
+ *     admin workspaces only, RUNNER for every regular one (qits-780)
  * @param runner the runner a RUNNER workspace is placed on, with its name; null for every DIRECT
  *     workspace and for a RUNNER workspace no runner has taken yet
  * @param queuedAt when a RUNNER workspace was last asked to start, while it waits for a slot
  *     ({@code runtimeStatus} {@code QUEUED}); null otherwise
- * @param editor whether this is the platform's one web-editor workspace (it has no branch and no
- *     repository); a client tells it apart from an admin DIRECT row by this flag
  */
 public record WorkspaceDto(
     Long id,
@@ -125,5 +123,4 @@ public record WorkspaceDto(
     boolean admin,
     WorkspacePlacement placement,
     WorkspaceRunnerRefDto runner,
-    Instant queuedAt,
-    boolean editor) {}
+    Instant queuedAt) {}

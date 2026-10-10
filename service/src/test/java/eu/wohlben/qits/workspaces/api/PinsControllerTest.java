@@ -6,7 +6,6 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 
 import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceImage;
-import eu.wohlben.qits.workspaceeditor.WorkspaceEditorImage;
 import eu.wohlben.qits.workspacesrunner.protocol.WorkspacesRunnerBinary;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.path.json.JsonPath;
@@ -35,8 +34,6 @@ public class PinsControllerTest {
 
   private static final String workspaceImageVersion = WorkspaceImage.VERSION;
 
-  private static final String editorImageVersion = WorkspaceEditorImage.VERSION;
-
   private static final String runnerVersion = WorkspacesRunnerBinary.VERSION;
 
   @Test
@@ -49,29 +46,24 @@ public class PinsControllerTest {
     // and the registry host the launch reference carries is not the registry's own name for it.
     assertThat(
         answer.getList("pins.image", String.class),
-        is(List.of("qits/qits-workspaces-runner", "qits/workspace", "qits/workspace-editor")));
+        is(List.of("qits/qits-workspaces-runner", "qits/workspace")));
     assertThat(
         answer.getList("pins.launches", String.class),
-        is(List.of("runner", "workspace", "editor")));
+        is(List.of("runner", "workspace")));
     // The runner's is the protocol jar's version: what an install script and an upgrade name.
     assertThat(answer.getString("pins[0].version"), is(runnerVersion));
     assertThat(answer.getString("pins[1].version"), is(workspaceImageVersion));
-    assertThat(answer.getString("pins[2].version"), is(editorImageVersion));
   }
 
   /** A half-composed reference names nothing, so the row is left out rather than half-answered. */
   @Test
   public void aBlankVersionOmitsTheRowAndAnEmptyAnswerIsValid() {
     List<PinsController.LaunchPin> oneBlank =
-        PinsController.pins(
-            "registry.dev.localhost:8080/qits/workspace",
-            "2026.904.160522",
-            "registry.dev.localhost:8080/qits/workspace-editor",
-            "  ");
+        PinsController.pins("registry.dev.localhost:8080/qits/workspace", "  ", "2026.904.160522");
     assertThat(oneBlank.size(), is(1));
-    assertThat(oneBlank.get(0).launches(), is("workspace"));
+    assertThat(oneBlank.get(0).launches(), is("runner"));
 
-    assertThat(PinsController.pins("qits/workspace", null, "", ""), is(List.of()));
+    assertThat(PinsController.pins("qits/workspace", null), is(List.of()));
   }
 
   /**

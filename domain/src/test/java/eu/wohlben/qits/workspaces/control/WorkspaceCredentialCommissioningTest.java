@@ -109,22 +109,6 @@ public class WorkspaceCredentialCommissioningTest {
   }
 
   @Test
-  public void theEditorCommissionsTheWorkspaceKind() {
-    // The editor is the one DIRECT row that is not admin (V15 admits no other): its one container
-    // holds an ordinary qits:agent credential, and qits-628's admin kind does not reach it. A
-    // RUNNER row holds a token instead, always of kind `workspace`.
-    Long rowId = workspaceService.createEditorWorkspace().id;
-    // The editor is a singleton: an earlier test in the suite may have left it with a running
-    // container, which an ensure would leave alone without commissioning anything. Remove it so this
-    // ensure provisions, and so commissions, afresh.
-    workspaceService.deleteContainer(rowId);
-
-    workspaceService.ensureContainer(rowId);
-
-    assertEquals(CredentialCommissioner.CONTEXT_KIND, commissioner.contextKindFor(rowId));
-  }
-
-  @Test
   public void aStoppedContainerThatIsStartedAgainKeepsItsCredential() throws Exception {
     String repoId = clonedRepo();
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);

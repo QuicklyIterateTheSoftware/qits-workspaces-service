@@ -92,15 +92,6 @@ public class DirectWorkspaceTokenTest {
     return workspaceIds.of(repoId, "feat");
   }
 
-  /** The editor, its container removed so the next ensure provisions — and so commissions — afresh. */
-  private Long freshEditor() {
-    Long rowId = workspaceService.createEditorWorkspace().id;
-    workspaceService.deleteContainer(rowId);
-    commissioner.reset();
-    commissioner.wire();
-    return rowId;
-  }
-
   private Workspace read(Long rowId) {
     return QuarkusTransaction.requiringNew().call(() -> workspaceRepository.findById(rowId));
   }
@@ -132,31 +123,6 @@ public class DirectWorkspaceTokenTest {
     // The lookup the container factory composes the spec from answers the token, and no pair.
     assertEquals(minted.token(), credentials.tokenFor(rowId).orElseThrow());
     assertTrue(credentials.forWorkspace(rowId).isEmpty());
-  }
-
-  @Test
-  public void theEditorIsMintedAnUnscopedWorkspaceTokenWithThePairsGitRefs() {
-    // The pair first, with no edge plane: what the editor's commission states today.
-    noEdgePlane();
-    Long rowId = freshEditor();
-    workspaceService.ensureContainer(rowId);
-    List<String> pairRefs = commissioner.gitRefsFor(rowId);
-    assertEquals(CredentialCommissioner.CONTEXT_KIND, commissioner.contextKindFor(rowId));
-    assertEquals(List.of(), commissioner.tokensMinted(), "no plane, no token");
-
-    // Then an edge: the next container holds a token of the editor's kind, stating the same refs.
-    anEdgePlane();
-    workspaceService.deleteContainer(rowId);
-    workspaceService.ensureContainer(rowId);
-
-    assertEquals(1, commissioner.tokensMinted().size());
-    FakeCredentialCommissioner.MintedToken minted = commissioner.tokensMinted().get(0);
-    assertEquals(CredentialCommissioner.CONTEXT_KIND, minted.contextKind(), "never the admin kind");
-    assertNull(minted.projectId(), "the editor names no repository, so no project: unscoped");
-    assertEquals(pairRefs, minted.gitRefs(), "the same Git refs the editor's pair stated");
-    Workspace row = read(rowId);
-    assertEquals(minted.token().tokenId(), row.commissionedTokenId);
-    assertNull(row.commissionedClientId, "the pair went back with its container");
   }
 
   @Test

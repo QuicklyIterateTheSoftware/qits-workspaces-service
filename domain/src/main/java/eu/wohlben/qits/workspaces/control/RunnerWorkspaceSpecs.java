@@ -100,16 +100,7 @@ public class RunnerWorkspaceSpecs {
     // The path base the DIRECT spec writes here, the same value: the daemon is told which leading
     // part of a proxied path is its own address.
     env.put("QITS_WORKSPACE_DAEMON_API_BASE_PATH", ContainerProxyPath.base(row.id));
-    factory.identityEnv(
-        row.repositoryId,
-        row.workspaceId,
-        row.id,
-        row.branch,
-        row.parent,
-        row.entityId,
-        row.editor,
-        env::put,
-        labels::put);
+    factory.identityEnv(row.repositoryId, row.workspaceId, env::put, labels::put);
     // The host->daemon handshake constant, as the DIRECT spec writes it: the bearer the daemon's
     // HTTP API requires, which only ever travels the tunnel. Without it the API does not bind.
     env.put("QITS_WORKSPACE_DAEMON_API_TOKEN", factory.daemonApiToken());

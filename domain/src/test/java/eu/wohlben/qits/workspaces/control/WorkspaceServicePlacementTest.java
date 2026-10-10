@@ -288,16 +288,6 @@ public class WorkspaceServicePlacementTest {
     assertEquals(WorkspacePlacement.DIRECT, read(created.id).placement);
   }
 
-  @Test
-  public void theEditorIsDirect() {
-    Workspace editor = workspaceService.createEditorWorkspace();
-    try {
-      assertEquals(WorkspacePlacement.DIRECT, read(editor.id).placement);
-    } finally {
-      rows.add(editor.id);
-    }
-  }
-
   /** A regular create stating RUNNER states what happens anyway: no runner at all, still RUNNER. */
   @Test
   public void aRegularCreateStatingRunnerWithNoRunnerAtAllIsRunner() throws Exception {

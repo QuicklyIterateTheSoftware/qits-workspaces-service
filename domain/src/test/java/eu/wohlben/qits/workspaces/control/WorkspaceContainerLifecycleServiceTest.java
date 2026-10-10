@@ -146,33 +146,6 @@ public class WorkspaceContainerLifecycleServiceTest {
   }
 
   @Test
-  public void mergeWorkspaceSucceedsWithoutASourceContainer() throws Exception {
-    String repoId = clonedRepo();
-    // The seed path: fork off the fixture's 'feature' branch (which carries a commit master
-    // lacks) and merge it into master — all host-side, the workspace never provisioned.
-    // master is an ordinary branch here, not this repository's default one: the default branch
-    // is written by integrate alone now, and its 409 would stand in front of what this test is
-    // about. Repointing main is one line and leaves the merge under test byte-for-byte the same.
-    repositories.setMainBranch(repoId, "feature");
-    workspaceService.createWorkspace(
-        repoId, "feeder", "feature", "feeder", null, false, false, true);
-    Path originPath = Path.of(dataDir, repoId, "origin");
-    String masterBefore =
-        TestGit.exec(originPath.toFile(), "git", "rev-parse", "refs/heads/master").trim();
-
-    var result = workspaceService.mergeWorkspace(workspaceIds.of(repoId, "feeder"), "master");
-
-    assertFalse(result.hasConflicts(), "the host-side merge succeeds without a container");
-    assertNotEquals(
-        masterBefore,
-        TestGit.exec(originPath.toFile(), "git", "rev-parse", "refs/heads/master").trim(),
-        "origin's target ref advanced");
-    assertFalse(
-        containers.exists(containers.containerName("feeder", repoId)),
-        "merging never provisioned a container");
-  }
-
-  @Test
   public void aNeverProvisionedWorkspaceIsCleanable() throws Exception {
     String repoId = clonedRepo();
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
@@ -386,48 +359,6 @@ public class WorkspaceContainerLifecycleServiceTest {
         head,
         containerHead(container),
         "an unpushed commit survives an unexpected container death on the persistent volume");
-  }
-
-  @Test
-  public void anIdleStoppedEditorWorkspaceResumesInPlaceWithItsVolume() throws Exception {
-    // THE REOPEN PATH, and the whole reason it needs no code. qits-containers' IdleSweep STOPS an
-    // idle-stopped place — it does not delete it — so what the editor comes back to is the ladder's
-    // second rung, which every workspace has always had: the container is present but not running,
-    // and ensureContainer starts it back up where it stands rather than re-cloning. The daemon then
-    // finds a populated /workspace and clones nothing.
-    //
-    // The workspace here is THE EDITOR'S, because that is the only workspace an idle-stop policy is
-    // ever asked for — see WorkspaceContainers.lifetime. It is one row for the whole platform now,
-    // so it is created by its own verb and belongs to no repository: its container carries whatever
-    // its /workspace volume holds and nothing was cloned into it.
-    Long rowId = workspaceService.createEditorWorkspace().id;
-    workspaceService.ensureContainer(rowId);
-    String container =
-        containers.containerName(EditorWorkspace.WORKSPACE_ID, EditorWorkspace.REPOSITORY_ID);
-    // What survives is the VOLUME's contents, and for the editor that is not a checkout: it clones
-    // nothing (it belongs to no repository), so what a reader loses if the resume re-provisions is
-    // whatever they left in /workspace. A file is therefore the honest witness here, where an
-    // ordinary workspace's is an unpushed commit.
-    containers.exec(
-        container, "/workspace", Map.of(), "bash", "-lc", "echo hi > editor-scratch.txt");
-
-    // What the sweep does: a stop, in place. The container and its volume are both still there.
-    ((FakeContainerRuntime) containers).markExited(container);
-    assertFalse(containers.isRunning(container));
-    assertTrue(containers.exists(container), "an idle stop leaves the container present");
-    assertTrue(
-        workspaceVolumeExists(EditorWorkspace.WORKSPACE_ID), "and its /workspace volume");
-
-    // Reopening the editor is one ensure — the same call the door makes.
-    workspaceService.ensureContainer(rowId);
-    assertTrue(containers.isRunning(container), "the stopped editor is started back up");
-    assertEquals(
-        "hi",
-        containers
-            .exec(container, "/workspace", Map.of(), "cat", "editor-scratch.txt")
-            .output()
-            .trim(),
-        "with what was in /workspace still in it");
   }
 
   @Test

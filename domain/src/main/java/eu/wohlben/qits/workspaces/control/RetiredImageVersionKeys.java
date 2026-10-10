@@ -1,7 +1,6 @@
 package eu.wohlben.qits.workspaces.control;
 
 import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceImage;
-import eu.wohlben.qits.workspaceeditor.WorkspaceEditorImage;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -57,13 +56,8 @@ public class RetiredImageVersionKeys {
   @ConfigProperty(name = "qits.workspace.image-version")
   Optional<String> retiredWorkspaceKey;
 
-  /** …and for the editor image. */
-  @ConfigProperty(name = "qits.editor.image-version")
-  Optional<String> retiredEditorKey;
-
   void onStart(@Observes StartupEvent startup) {
     warnIfSet("qits.workspace.image-version", retiredWorkspaceKey, WorkspaceImage.VERSION);
-    warnIfSet("qits.editor.image-version", retiredEditorKey, WorkspaceEditorImage.VERSION);
   }
 
   /**

@@ -66,7 +66,6 @@
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
         <qits.workspace-daemon-protocol.version>2026.1010.110036</qits.workspace-daemon-protocol.version>
-        <qits.workspace-editor-image.version>2026.1010.110746</qits.workspace-editor-image.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -274,16 +273,6 @@
                 <groupId>eu.wohlben.qits</groupId>
                 <artifactId>qits-workspace-daemon-protocol</artifactId>
                 <version>${qits.workspace-daemon-protocol.version}</version>
-            </dependency>
-            <!-- The editor image's version, from the repository that publishes the image. One class
-                 and no types: there is no protocol to share with an image the daemon merely starts a
-                 process out of. A SECOND coordinate rather than a suffix on the first, for the
-                 reason the two image-repo keys are two keys — the images are released by two
-                 repositories on two calvers and either train can run alone. -->
-            <dependency>
-                <groupId>eu.wohlben.qits</groupId>
-                <artifactId>qits-workspace-editor-image</artifactId>
-                <version>${qits.workspace-editor-image.version}</version>
             </dependency>
             <!-- The workspaces runner's frames and its binary's version. Its one dependency is
                  qits-runner-protocol, declared below at the same release it was built against. -->

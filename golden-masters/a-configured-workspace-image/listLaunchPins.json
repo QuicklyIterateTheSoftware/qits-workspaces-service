@@ -10,11 +10,6 @@
       "image": "qits/workspace",
       "version": "2026.101.120000",
       "launches": "workspace"
-    },
-    {
-      "image": "qits/workspace-editor",
-      "version": "2026.101.120000",
-      "launches": "editor"
     }
   ]
 }

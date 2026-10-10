@@ -121,13 +121,6 @@ public class WorkspaceContainers implements ContainerRuntime {
   @ConfigProperty(name = "qits.workspace.containers.launch-patience")
   Duration launchPatience;
 
-  /**
-   * How long the EDITOR's container may sit idle before qits-containers' own {@code IdleSweep} stops
-   * it. Blank — the shipped value — leaves every workspace on the EXPLICIT lifetime it has always
-   * had, so this key is a switch that is off rather than a default. See {@link #lifetime}.
-   */
-  @ConfigProperty(name = "qits.editor.idle-stop-after")
-  Optional<Duration> editorIdleStopAfter;
 
   // --- naming -----------------------------------------------------------------------------------
 
@@ -422,36 +415,9 @@ public class WorkspaceContainers implements ContainerRuntime {
     return new EnsureRequest(spec, lifetime(described), Recreate.ifChanged);
   }
 
-  /**
-   * How long this container is allowed to sit there.
-   *
-   * <p><b>EXPLICIT for every workspace, and IDLE_STOP for the editor's — when a deployment asks for
-   * it.</b> The two are not the same statement about a container. A workspace is somewhere a person
-   * works and a coding agent runs unattended, so nothing but a person may end it; the editor's
-   * workspace is the one that is opened, read and left, and a browser tab closed at the end of a day
-   * would otherwise hold a multi-gigabyte container for the week.
-   *
-   * <p><b>Stopping is not losing.</b> An idle-stopped place is <em>stopped</em>, not deleted: the
-   * container keeps its id and its writable layer, {@code /workspace} is a volume of its own, and
-   * the ensure ladder's second rung starts it back up where it stands. The daemon then finds a
-   * checkout already there and clones nothing. So the reopen path needs no code at all, which is
-   * what makes this switch cheap enough to have.
-   *
-   * <p><b>Unset is today's behaviour, and it ships unset.</b> {@code qits.editor.idle-stop-after}
-   * blank means every workspace keeps the EXPLICIT lifetime it has always had — a kill switch that
-   * is off, not a default that has to be argued with.
-   *
-   * <p>It rides the POLICY and not the spec, which is why turning it on does not replace anything:
-   * {@code Recreate.ifChanged} compares the spec, and the policy is not part of it.
-   */
+  /** Every workspace container lives until a person or the service ends it. */
   private Policy lifetime(WorkspaceContainer described) {
-    if (!described.editor()) {
-      return Policy.explicitLifetime();
-    }
-    return editorIdleStopAfter
-        .filter(idle -> !idle.isZero() && !idle.isNegative())
-        .map(idle -> Policy.idleStop(idle.toSeconds()))
-        .orElseGet(Policy::explicitLifetime);
+    return Policy.explicitLifetime();
   }
 
   /** The platform's shared volumes, as this service names them. Blank means the mount is disabled. */

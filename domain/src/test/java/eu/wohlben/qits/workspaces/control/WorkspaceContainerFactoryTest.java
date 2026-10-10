@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceImage;
-import eu.wohlben.qits.workspaceeditor.WorkspaceEditorImage;
 import jakarta.enterprise.inject.Instance;
 import org.eclipse.microprofile.config.ConfigProvider;
 import java.time.ZoneId;
@@ -49,14 +48,6 @@ class WorkspaceContainerFactoryTest {
 
   private static final String IMAGE = IMAGE_REPO + ":" + IMAGE_VERSION;
 
-  /** The editor image's registry host and path, for {@link #IMAGE_REPO}'s reason. */
-  private static final String EDITOR_IMAGE_REPO =
-      ConfigProvider.getConfig().getValue("qits.editor.image-repo", String.class);
-
-  /** The editor pin, for {@link #IMAGE_VERSION}'s reason. */
-  private static final String EDITOR_IMAGE_VERSION = WorkspaceEditorImage.VERSION;
-
-  private static final String EDITOR_IMAGE = EDITOR_IMAGE_REPO + ":" + EDITOR_IMAGE_VERSION;
 
   private WorkspaceContainerFactory factory() {
     WorkspaceContainerFactory f = new WorkspaceContainerFactory();
@@ -65,9 +56,6 @@ class WorkspaceContainerFactoryTest {
     // the config key is only an override. A fixture that set it would test the override on every
     // case and never the shipped path.
     f.imageVersionOverride = Optional.empty();
-    f.editorImageRepo = EDITOR_IMAGE_REPO;
-    f.editorImageVersionOverride = Optional.empty();
-    f.editorPort = 13339;
     f.projectsUrl = "http://qits-projects:8080/";
     f.observabilityUrl = "http://dev-qits-observability:8080/";
     f.platformMcpUrl = "http://dev-qits-platform-access-mcp-service:8080/";
@@ -94,8 +82,6 @@ class WorkspaceContainerFactoryTest {
     f.qitsPort = "8080";
     f.containerGitUrl = "http://qits-platform-edge:8080";
     f.idpUrl = "http://qits-idp:8080/idp";
-    // Mirrors the shipped default (qits.bootstrap.autorun-enabled): the daemon self-runs bootstrap.
-    f.bootstrapAutorunEnabled = true;
     // A live project scope, so the daemon self-clones name-addressed. Stubbed (the real resolver
     // needs a tx + DB); the no-scope fallback has its own test.
     f.nameResolver =
@@ -109,13 +95,6 @@ class WorkspaceContainerFactoryTest {
     // No posture lookup either, which is the "port not installed" answer and must read as no admin
     // workspace exists — the socket is the one thing an absence may never grant.
     f.postures = StubInstance.empty();
-    // No projects list either — the port a spec builder needs only for the EDITOR, and absent is
-    // what a platform with no workspaces in it yet answers. An ordinary workspace is told nothing
-    // regardless, so this is invisible to every case but the editor's.
-    f.editorProjects = StubInstance.empty();
-    // No subject facts either — every workspace nobody dispatched, and every test written before
-    // qits-617. The cases that carry some set this themselves.
-    f.entityFacts = StubInstance.empty();
     return f;
   }
 
@@ -196,15 +175,11 @@ class WorkspaceContainerFactoryTest {
     assertEnv(c, "QITS_WORKSPACE_DAEMON_API_BASE_PATH", "/workspaces/container/1/");
     assertEnv(c, "QITS_WORKSPACE_DAEMON_WORKSPACE_ID", "work");
     assertEnv(c, "QITS_WORKSPACE_DAEMON_REPOSITORY_ID", "repo12345678abc");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_BRANCH", "main");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_PARENT", "0parent");
     // The project-scoped name the daemon self-clones under (/git/<projectId>/<repoName>), so
     // committed relative submodule urls resolve natively (docs/epics/qits-workspace-daemon/ Part
     // 1).
     assertEnv(c, "QITS_WORKSPACE_DAEMON_PROJECT_ID", "proj-1");
     assertEnv(c, "QITS_WORKSPACE_DAEMON_REPO_NAME", "my-repo");
-    // The bootstrap kill switch the daemon honours when it self-runs the chain on boot (Part 3).
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN", "true");
     // Workspace services are gone (qits-947), and the image's daemon has no switch left to set.
     assertFalse(
         c.env().keySet().stream().anyMatch(k -> k.startsWith("QITS_WORKSPACE_DAEMON_SERVICE")),
@@ -713,401 +688,25 @@ class WorkspaceContainerFactoryTest {
     assertEquals("registry.dev.localhost:8080/qits/workspace:" + WorkspaceImage.VERSION, blank.image());
   }
 
-  // --- the editor posture -----------------------------------------------------------------------
-
-  /** A posture port answering "this is the editor" and nothing else. */
-  private static WorkspacePostures editorRow(boolean answer) {
-    return new WorkspacePostures() {
-      @Override
-      public boolean isAdmin(Long rowId) {
-        return false;
-      }
-
-      @Override
-      public boolean isEditor(Long rowId) {
-        return answer;
-      }
-    };
-  }
+  // --- a workspace is a slot (qits-1152) -------------------------------------------------------
 
   @Test
-  void theEditorRowRunsTheEditorImageAndIsToldSo() {
-    WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(editorRow(true));
+  void aWorkspaceIsToldNoBranchParentOrWorkItem() {
+    WorkspaceContainer c = factory().forWorkspace("repo-1", "ws-1", 7L, "feature/x", "main", "qits-614");
 
-    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null);
-
-    assertEquals(EDITOR_IMAGE, c.image());
-    assertTrue(c.editor(), "the description carries the decision, so the adapter reads it once");
-    // Both vars or neither: `enabled` alone would leave the daemon and the host's proxy free to
-    // pick different ports, and a port alone would name a listener nothing starts.
-    assertEquals("true", c.env().get("QITS_WORKSPACE_DAEMON_EDITOR_ENABLED"));
-    assertEquals("13339", c.env().get("QITS_WORKSPACE_DAEMON_EDITOR_PORT"));
-  }
-
-  @Test
-  void theEditorIsToldAboutNoRepositoryAtALL() {
-    // THE ONE THING THE EDITOR'S CONTAINER MUST NOT BE HANDED. Its row belongs to no repository — it
-    // carries a SENTINEL id, because the column is not nullable — and the five names below are
-    // exactly what the in-container daemon self-clones from. Given the sentinel it would try to
-    // clone `/git/editor`, which is not a repository anywhere. Blank is what the daemon reads as
-    // "nothing to clone", and it is the same value an unresolvable repository already produces.
-    //
-    // Both resolvers are made to ANSWER here, and generously: the point is that neither is asked.
-    java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
-    WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(editorRow(true));
-    f.nameResolver =
-        StubInstance.of(
-            repoId -> {
-              asked.incrementAndGet();
-              return Optional.of(
-                  new RepositoryAddressResolver.ProjectScopedName("proj-1", "my-repo"));
-            });
-    f.repositories =
-        StubInstance.of(
-            repoId -> {
-              asked.incrementAndGet();
-              return Optional.of(
-                  new RepositoryLookup.RepositoryView(repoId, "my-repo", "proj-1", "main"));
-            });
-
-    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null);
-
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_REPOSITORY_ID", "");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_REPO_NAME", "");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_PROJECT_ID", "");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_BRANCH", "");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_PARENT", "");
-    assertLabel(c, "qits.project", "");
-    assertEquals(0, asked.get(), "nothing is looked up about a repository that is not one");
-    // What the container IS still told: itself. The workspace id is the label its container name,
-    // its volume name and its proxy paths are all composed from.
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_WORKSPACE_ID", "editor");
-  }
-
-  @Test
-  void theEditorIsToldEveryPROJECTSWrapperInstead() {
-    // THE OTHER HALF OF THE BLANK REPOSITORY ID ABOVE. The editor clones no repository of its own
-    // and every project's wrapper side by side instead, so what replaces the five blanks is one
-    // list — <projectId>/<repoName>, the same two halves a clone url is built from, which is what
-    // puts each wrapper at /workspace/<repoName>. More than one project deliberately: a list that
-    // only ever held one entry would pass with a composer that ignored everything but the first.
-    WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(editorRow(true));
-    f.editorProjects =
-        StubInstance.of(() -> List.of("alpha/alpha-alpha", "beta/beta-beta", "gamma/gamma-gamma"));
-
-    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null);
-
-    assertEnv(
-        c,
-        "QITS_WORKSPACE_DAEMON_PROJECTS",
-        "alpha/alpha-alpha,beta/beta-beta,gamma/gamma-gamma");
-  }
-
-  @Test
-  void theProjectsListIsTHESAMESTRINGOnEveryEnsure() {
-    // THE SPEC-HASH RULE, aimed at the one value here that is a collection. Environment is part of
-    // the spec, the orchestrator resumes a container by presenting its spec AGAIN under
-    // Recreate.ifChanged, and this door is polled every two seconds — so a list that reshuffled
-    // between two builds would REPLACE the container somebody is working in, over and over. The
-    // port is handed the entries in a deliberately unsorted order to prove the composer does not
-    // merely inherit one that happened to be sorted upstream.
-    WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(editorRow(true));
-    f.editorProjects = StubInstance.of(() -> List.of("gamma/gamma-gamma", "alpha/alpha-alpha"));
-
-    String first = f.forWorkspace("editor", "editor", 7L, null, null).env().get("QITS_WORKSPACE_DAEMON_PROJECTS");
-    String second = f.forWorkspace("editor", "editor", 7L, null, null).env().get("QITS_WORKSPACE_DAEMON_PROJECTS");
-
-    assertEquals(first, second, "two ensures of one estate describe one container");
-  }
-
-  @Test
-  void aListNOBODYCouldComposeIsStillWrittenAsAKey() {
-    // THE DECISION ABOUT EMPTY, pinned so it cannot fall out of string formatting later. A registry
-    // outage and a platform with no workspaces in it yet both compose nothing, and the key is
-    // written anyway — because OMITTING it would make the spec differ between those states and the
-    // ordinary one, so the editor's container would be REPLACED every time the registry came back.
-    // Present-with-a-varying-value churns on the value; present-or-absent churns on both.
-    WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(editorRow(true));
-    f.editorProjects = StubInstance.of(List::of);
-
-    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null);
-
-    assertTrue(
-        c.env().containsKey("QITS_WORKSPACE_DAEMON_PROJECTS"),
-        "the key is present even when there is nothing to put in it");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_PROJECTS", "");
-  }
-
-  @Test
-  void aPortThatCannotAnswerCostsTheLISTAndNeverTheCONTAINER() {
-    // The standing reading everywhere this class touches a registry: a lookup that throws costs a
-    // label, never a workspace. Here it costs the clones — which is recoverable by pressing the
-    // door again — where throwing would take the editor away from everybody on the platform
-    // because qits-projects blinked.
-    WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(editorRow(true));
-    f.editorProjects =
-        StubInstance.of(
-            () -> {
-              throw new IllegalStateException("qits-projects unreachable");
-            });
-
-    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null);
-
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_PROJECTS", "");
-    assertEquals(EDITOR_IMAGE, c.image(), "the container is still the editor's");
-  }
-
-  @Test
-  void anOrdinaryWorkspaceIsUntouchedByTheEditor() {
-    // The claim that matters for every workspace that is not the editor: the plain image, and
-    // NOTHING said about an editor. Silence is what the daemon's own default reads as
-    // "no editor", so an explicitly-false pair here would be a second way of saying the same thing.
-    WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(editorRow(false));
-
-    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main");
-
-    assertEquals(IMAGE, c.image());
-    assertFalse(c.editor());
-    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_EDITOR_ENABLED"));
-    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_EDITOR_PORT"));
-    // AND NO PROJECTS LIST, which is load-bearing rather than tidy: the daemon skips the root clone
-    // exactly when a container has no repository AND carries a list, and an ordinary workspace is
-    // meant to fail loudly without a repository. A list here would make that failure silent.
-    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_PROJECTS"));
-  }
-
-  @Test
-  void anOrdinaryWorkspaceIsToldNoListEvenWhereOneCouldBeComposed() {
-    // The same claim with the port ARMED, which is the arrangement that can actually fail: the test
-    // above would pass against a factory that wrote the list unconditionally out of an unsatisfied
-    // port. Here the port answers, and the ordinary workspace must still be told nothing.
-    WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(editorRow(false));
-    f.editorProjects = StubInstance.of(() -> List.of("alpha/alpha-alpha", "beta/beta-beta"));
-
-    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main");
-
-    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_PROJECTS"));
-    // And it keeps the single-clone keys it has always had — the pair the daemon needs to clone the
-    // one repository this workspace IS.
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_REPOSITORY_ID", "repo12345678abc");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_BRANCH", "feature/x");
-  }
-
-  @Test
-  void theEntityIdRidesAsDaemonEnvBesideTheBranch() {
-    // The daemon names its agent sessions `[❗]<status square> <entityId> <title>` from this
-    // (Workspace.entityId, V8) — a column rather than a one-time launch argument, for
-    // QITS_WORKSPACE_DAEMON_BRANCH's own reason.
-    WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(editorRow(false));
-
-    WorkspaceContainer c =
-        f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main", "qits-614");
-
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_ID", "qits-614");
-  }
-
-  @Test
-  void theEntityIdKeyIsOmittedWhenTheRowHasNone() {
-    // The 5-argument overload is every existing caller, and omitted — not blank — is what "no
-    // entity id" has to mean here: this field is new, so the overwhelming majority of rows alive
-    // today have none, and writing the key blank anyway would add it to every one of their specs.
-    // Environment is part of the spec a stopped container resumes by re-presenting under
-    // Recreate.ifChanged, so that would replace every one of them once, for a key that says
-    // nothing — unlike QITS_WORKSPACE_DAEMON_BRANCH, which is written blank because every ordinary
-    // workspace already has one.
-    WorkspaceContainer c = factory().forWorkspace("repo12345678abc", "work", 1L, "main", "0parent");
-
-    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_ID"));
-  }
-
-  @Test
-  void theSubjectFactsRideAsDaemonEnvBesideTheEntityId() {
-    // qits-617: the title and status word the daemon names its sessions with, and the blocked flag
-    // as "true" — RefinementContainerFactory's spelling — read off the row at every ensure.
-    WorkspaceContainerFactory f = factory();
-    f.entityFacts =
-        StubInstance.of(
-            rowId -> Optional.of(new EntityFacts("Comments on every work entity", "REFINED", true)));
-
-    WorkspaceContainer c =
-        f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main", "qits-555");
-
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_ID", "qits-555");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_TITLE", "Comments on every work entity");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_STATUS", "REFINED");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED", "true");
-  }
-
-  @Test
-  void anUnblockedSubjectCarriesNoBlockedKeyAndAnUnknownFactNoKeyOfItsOwn() {
-    // Omitted rather than "false" or blank, ENTITY_ID's rule: an unblocked subject's spec, and one
-    // whose title or status the caller did not know, adds no key it has nothing to say with.
-    WorkspaceContainerFactory f = factory();
-    f.entityFacts = StubInstance.of(rowId -> Optional.of(new EntityFacts(null, "DONE", false)));
-
-    WorkspaceContainer c =
-        f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main", "qits-555");
-
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_ENTITY_STATUS", "DONE");
-    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_TITLE"));
-    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
-  }
-
-  @Test
-  void aRowWithNoSubjectFactsOrAFailingLookupCarriesNoneOfTheKeys() {
-    // Every ad-hoc workspace and every row older than V9: no key at all, so its spec is the one it
-    // had before the columns existed. A lookup that throws costs the name its facts, never the
-    // container.
-    for (Instance<WorkspaceEntityFacts> lookup :
-        List.<Instance<WorkspaceEntityFacts>>of(
-            StubInstance.empty(),
-            StubInstance.of(rowId -> Optional.empty()),
-            StubInstance.of(
-                rowId -> {
-                  throw new IllegalStateException("database blinked");
-                }))) {
-      WorkspaceContainerFactory f = factory();
-      f.entityFacts = lookup;
-
-      WorkspaceContainer c =
-          f.forWorkspace("repo12345678abc", "work", 7L, "feature/x", "main", "qits-555");
-
-      assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_TITLE"));
-      assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_STATUS"));
-      assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
+    for (String key :
+        List.of(
+            "QITS_WORKSPACE_DAEMON_BRANCH",
+            "QITS_WORKSPACE_DAEMON_PARENT",
+            "QITS_WORKSPACE_DAEMON_ENTITY_ID",
+            "QITS_WORKSPACE_DAEMON_ENTITY_TITLE",
+            "QITS_WORKSPACE_DAEMON_ENTITY_STATUS",
+            "QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED",
+            "QITS_WORKSPACE_DAEMON_BOOTSTRAP_AUTORUN",
+            "QITS_WORKSPACE_DAEMON_EDITOR_ENABLED",
+            "QITS_WORKSPACE_DAEMON_EDITOR_PORT",
+            "QITS_WORKSPACE_DAEMON_PROJECTS")) {
+      assertNull(c.env().get(key), key);
     }
-  }
-
-  @Test
-  void theSubjectFactsAreOmittedForTheEditor() {
-    // The editor belongs to no subject, ENTITY_ID's exemption — and the lookup is not even asked.
-    WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(editorRow(true));
-    f.entityFacts =
-        StubInstance.of(
-            rowId -> {
-              throw new AssertionError("the editor's subject facts must not be looked up");
-            });
-
-    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null, null);
-
-    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_TITLE"));
-    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
-  }
-
-  @Test
-  void theEntityIdKeyIsOmittedForTheEditor() {
-    // THE EDITOR IS EXEMPT, same as every other per-repository/per-branch fact: it belongs to no
-    // ticket and no epic, so the key is omitted rather than written blank, for the reason above.
-    WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(editorRow(true));
-
-    WorkspaceContainer c = f.forWorkspace("editor", "editor", 7L, null, null, "qits-614");
-
-    assertNull(c.env().get("QITS_WORKSPACE_DAEMON_ENTITY_ID"));
-  }
-
-  @Test
-  void thePostureIsReproducibleAcrossEnsures() {
-    // THE SPEC-HASH RULE, from the outside. The orchestrator has no start verb: a stopped container
-    // is resumed by presenting its spec AGAIN under Recreate.ifChanged, so a spec that differs is a
-    // REPLACEMENT. Two calls with the same arguments must therefore describe the same container —
-    // the image, the editor environment and the flag alike — which is what makes the posture a
-    // lookup rather than a parameter somebody could forget to pass on the resume path.
-    WorkspaceContainerFactory f = factory();
-    f.postures = StubInstance.of(editorRow(true));
-
-    WorkspaceContainer first = f.forWorkspace("editor", "editor", 7L, null, null);
-    WorkspaceContainer second = f.forWorkspace("editor", "editor", 7L, null, null);
-
-    assertEquals(first.image(), second.image());
-    assertEquals(first.env(), second.env());
-    assertEquals(first.editor(), second.editor());
-  }
-
-  @Test
-  void aPostureLookupThatFailsLeavesTheWorkspacePlain() {
-    // Both absences again, and both fall to the ordinary workspace. Absent means no editor exists,
-    // which is what every workspace was before one did; a read that threw must not be the thing
-    // that decides a container runs a different image.
-    WorkspaceContainerFactory absent = factory();
-    WorkspaceContainer plain = absent.forWorkspace("repo12345678abc", "main", 7L, "main", null);
-    assertEquals(IMAGE, plain.image());
-    assertFalse(plain.editor());
-
-    WorkspaceContainerFactory broken = factory();
-    broken.postures =
-        StubInstance.of(
-            new WorkspacePostures() {
-              @Override
-              public boolean isAdmin(Long rowId) {
-                return false;
-              }
-
-              @Override
-              public boolean isEditor(Long rowId) {
-                throw new IllegalStateException("the posture lookup blinked");
-              }
-            });
-    WorkspaceContainer degraded = broken.forWorkspace("repo12345678abc", "main", 7L, "main", null);
-    assertEquals(IMAGE, degraded.image());
-    assertNull(degraded.env().get("QITS_WORKSPACE_DAEMON_EDITOR_ENABLED"));
-  }
-
-  /**
-   * The editor's reference composes the same way, out of the committed repo and its own pin.
-   *
-   * <p>The literal this used to assert was worse than the workspace one: it named the calver of the
-   * {@code qits/workspace} release the editor's Dockerfile was pinned FROM, because
-   * qits-workspace-editor-oci had never been released and there was no real tag to name. A
-   * placeholder documented as a placeholder is still a value a launch composes an image reference
-   * out of. The version is the pinned dependency's now, so there is nothing left to stand in for.
-   */
-  @Test
-  void composesTheShippedEditorReference() {
-    assertEquals(
-        "registry.dev.localhost:8080/qits/workspace-editor:" + WorkspaceEditorImage.VERSION,
-        factory().editorImage(),
-        "repo and pinned version joined as <repo>:<version>, fully qualified");
-  }
-
-  /**
-   * THE RETIRED KEY IS NOT A FIELD ON THIS CLASS AT ALL, which is the whole of why the override was
-   * renamed.
-   *
-   * <p>`qits.workspace.image-version` is what qits-configuration's release listener wrote on every
-   * image release, and entries it already wrote are still in every deployment's environment —
-   * nothing deletes a configuration entry, and this service cannot. If that key were still the
-   * override, the residue would go on deciding the image for ever, which is exactly the state this
-   * ticket was sent back to REFINED for.
-   *
-   * <p>So there is no assertion to make here beyond the absence: the factory reads
-   * {@code …-version-override} and the retired name reaches it through nothing. What a value on the
-   * retired key DOES do is make {@link RetiredImageVersionKeys} warn at boot, which is that class's
-   * to prove.
-   */
-  /** The editor override behaves exactly as the workspace one does, blank included. */
-  @Test
-  void theEditorOverrideWinsAndABlankOneDoesNot() {
-    WorkspaceContainerFactory overridden = new WorkspaceContainerFactory();
-    overridden.editorImageRepo = "registry.dev.localhost:8080/qits/workspace-editor";
-    overridden.editorImageVersionOverride = Optional.of("2026.999.000000");
-    assertEquals(
-        "registry.dev.localhost:8080/qits/workspace-editor:2026.999.000000",
-        overridden.editorImage());
-
-    overridden.editorImageVersionOverride = Optional.of("");
-    assertEquals(
-        "registry.dev.localhost:8080/qits/workspace-editor:" + WorkspaceEditorImage.VERSION,
-        overridden.editorImage());
   }
 }

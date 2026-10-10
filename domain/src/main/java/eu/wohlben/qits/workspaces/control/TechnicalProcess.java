@@ -19,11 +19,9 @@ import java.util.function.Consumer;
  * everything buffered so far. The process is decoupled from any connection: listeners attach and
  * detach freely while the work keeps running.
  *
- * <p>Completion is a two-part predicate: the synchronous provision phase settles via {@link
- * #finishProvision}, and the asynchronous bootstrap phase (running on the CDI async observer
- * thread) reports via {@link #finishBootstrap} once the daemon's chain is over — passed through,
- * succeeded or failed. The terminal {@code done} frame fires once both parts are in — or
- * immediately on a provision failure. All mutation happens under the process monitor, so a freshly
+ * <p>Completion is the provision phase settling via {@link #finishProvision}: the terminal {@code
+ * done} frame fires then (the bootstrap phase that used to follow it went with the bootstrap chain,
+ * qits-1152). All mutation happens under the process monitor, so a freshly
  * attached listener never interleaves replayed and live frames (same trade-off as {@code
  * CommandSession}: a stuck listener briefly stalls the producer; dead listeners are pruned on the
  * next frame).
@@ -82,7 +80,6 @@ public final class TechnicalProcess implements WorkspaceProcessTracker.Handle {
   private final AtomicLong seq = new AtomicLong();
 
   private Boolean provisionOk; // null while the synchronous provision phase is still running
-  private boolean bootstrapFinished; // false until the asynchronous bootstrap phase reported
   private boolean terminal;
   private boolean doneOk;
 
@@ -233,10 +230,7 @@ public final class TechnicalProcess implements WorkspaceProcessTracker.Handle {
     maybeFinish();
   }
 
-  /**
-   * The synchronous provision phase is over. On failure the process ends immediately (the bootstrap
-   * phase never happens); on success it ends once {@link #finishBootstrap} reports too.
-   */
+  /** The provision phase is over, and with it the process. */
   public synchronized void finishProvision(boolean ok) {
     if (terminal || provisionOk != null) {
       return;
@@ -294,24 +288,8 @@ public final class TechnicalProcess implements WorkspaceProcessTracker.Handle {
   }
 
   /**
-   * The asynchronous bootstrap phase is over — the chain passed through (a plain restart, the kill
-   * switch, no daemon control plane), succeeded, failed, or was handed to a manual run that owns
-   * it. The verdict rides the {@code bootstrap:<name>} segments, not this call: it only says no
-   * further phase is coming, so {@code done} fires as soon as the provision phase has reported too.
-   * Every path through {@code WorkspaceBootstrapRunner} must call it, or the process stays open
-   * until the registry's idle reaper. Idempotent.
-   */
-  public synchronized void finishBootstrap() {
-    if (terminal || bootstrapFinished) {
-      return;
-    }
-    bootstrapFinished = true;
-    maybeFinish();
-  }
-
-  /**
    * Complete a process whose work turned out to be a no-op (e.g. the container was already
-   * running): one informational segment, no bootstrap phase, immediate {@code done ok}.
+   * running): one informational segment, immediate {@code done ok}.
    */
   public synchronized void completeNoOp(String segmentName, String note) {
     if (terminal) {
@@ -320,13 +298,12 @@ public final class TechnicalProcess implements WorkspaceProcessTracker.Handle {
     openSegment(segmentName);
     appendLine(segmentName, note);
     settleSegment(segmentName, true);
-    finishBootstrap();
     finishProvision(true);
   }
 
   /**
-   * Backstop for a process that never converges (e.g. a daemon that never reports its bootstrap
-   * chain): force the terminal {@code done failed} frame without settling the
+   * Backstop for a process that never converges (e.g. a daemon that never reports its provision):
+   * force the terminal {@code done failed} frame without settling the
    * still-open segments. No-op once terminal.
    */
   public synchronized void forceFinish() {
@@ -338,7 +315,7 @@ public final class TechnicalProcess implements WorkspaceProcessTracker.Handle {
   }
 
   private void maybeFinish() {
-    if (terminal || provisionOk == null || !provisionOk || !bootstrapFinished) {
+    if (terminal || provisionOk == null || !provisionOk) {
       return;
     }
     finish();

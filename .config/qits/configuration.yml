@@ -70,7 +70,7 @@ keys:
 
   env.QITS_CONTAINERS_URL:
     type: string
-    description: "Where qits-containers answers. Admin and editor workspace containers and volumes are started and removed there; regular workspaces run on workspace runners."
+    description: "Where qits-containers answers. Admin workspace containers and volumes are started and removed there; regular workspaces run on workspace runners."
 
   env.QITS_EVENTS_URL:
     type: string

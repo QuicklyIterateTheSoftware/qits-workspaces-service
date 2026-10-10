@@ -64,7 +64,6 @@ class TechnicalProcessTest {
     process.appendLine("clone", "done.");
     process.settleSegment("clone", true);
     process.finishProvision(true);
-    process.finishBootstrap();
 
     assertEquals(
         List.of(
@@ -80,64 +79,6 @@ class TechnicalProcessTest {
     assertTrue(late.done);
     assertEquals("ok", late.frames.get(late.frames.size() - 1).status());
     assertEquals(List.of("p-1"), completed.stream().map(TechnicalProcess::id).toList());
-  }
-
-  @Test
-  void doneWaitsForTheBootstrapPhaseAfterASuccessfulProvision() {
-    TechnicalProcess process = process();
-    RecordingListener listener = new RecordingListener();
-    process.attach(listener);
-    process.openSegment("container");
-    process.settleSegment("container", true);
-    process.finishProvision(true);
-    assertFalse(process.isTerminal(), "the bootstrap phase has not reported — must stay open");
-
-    process.finishBootstrap();
-
-    assertTrue(process.isTerminal(), "both phases in — done");
-    assertEquals("ok", listener.frames.get(listener.frames.size() - 1).status());
-  }
-
-  @Test
-  void theBootstrapPhaseMayReportBeforeTheProvisionDoes() {
-    TechnicalProcess process = process();
-    process.finishBootstrap();
-    assertFalse(process.isTerminal(), "the provision phase has not reported — must stay open");
-
-    process.finishProvision(true);
-
-    assertTrue(process.isTerminal());
-  }
-
-  @Test
-  void aFailedBootstrapSegmentYieldsDoneFailed() {
-    TechnicalProcess process = process();
-    RecordingListener listener = new RecordingListener();
-    process.attach(listener);
-    process.finishProvision(true);
-    process.openSegment(WorkspaceBootstrapRunner.bootstrapSegment("install"));
-    process.settleSegment(WorkspaceBootstrapRunner.bootstrapSegment("install"), false);
-    assertFalse(process.isTerminal(), "a settled segment alone does not end the process");
-
-    process.finishBootstrap();
-
-    assertTrue(process.isTerminal());
-    assertEquals("failed", listener.frames.get(listener.frames.size() - 1).status());
-  }
-
-  @Test
-  void finishBootstrapIsIdempotentAndANoOpOnceTerminal() {
-    TechnicalProcess process = process();
-    RecordingListener listener = new RecordingListener();
-    process.attach(listener);
-    process.finishProvision(true);
-    process.finishBootstrap();
-    int frames = listener.frames.size();
-
-    process.finishBootstrap();
-
-    assertEquals(frames, listener.frames.size(), "a second report emits nothing");
-    assertEquals(1, completed.size(), "onDone ran exactly once");
   }
 
   @Test

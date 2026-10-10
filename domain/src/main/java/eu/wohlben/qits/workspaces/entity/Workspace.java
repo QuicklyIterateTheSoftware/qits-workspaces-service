@@ -159,7 +159,7 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   /**
    * The workspace token minted for this row's <em>current container</em> (qits-625, {@code V13}):
    * qits-idp's id for it, the {@code sub} the edge stamps on its JWT, and the value. A RUNNER row's
-   * container always holds one; a DIRECT (admin or editor) row's holds one in place of the pair
+   * container always holds one; a DIRECT (admin) row's holds one in place of the pair
    * above whenever the deployment has an edge plane (qits-1084). All three null on a row whose
    * container holds no token, and never set beside the pair: every commission clears both first.
    *
@@ -216,35 +216,11 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public boolean admin = false;
 
   /**
-   * Whether this row <b>is the web editor</b> — the one shared editor container the whole platform
-   * opens, started from the editor image and told to supervise {@code openvscode-server}.
-   *
-   * <p><b>It is the editor's whole identity.</b> There is no project behind it, no repository whose
-   * archetype could say so and no branch that means anything: the editor used to be derived (a
-   * {@code PROJECT}-archetype repository's main workspace, one per project) and is now a single
-   * container for the platform, so the only thing that can say which row it is, is the row. Exactly
-   * one writer — {@code WorkspaceService.createEditorWorkspace} — and no verb that promotes an
-   * existing workspace, because that would swap a running workspace's image underneath somebody's
-   * checkout.
-   *
-   * <p><b>Read at container-spec time, so it must never change for a live row.</b> The orchestrator
-   * has no start verb: a stopped container is started by presenting its spec again under {@code
-   * Recreate.ifChanged}, and a spec that differs REPLACES the container, writable layer and all.
-   * This answer picks the image and two environment variables, so a row whose flag moved would lose
-   * its container on the next ensure — the same reasoning {@link #admin} and the commissioned
-   * credential pair carry, and the reason this is a column rather than something a caller passes in.
-   *
-   * <p><b>False for everything that did not ask</b>, and {@code uq_workspace_active_editor} ({@code
-   * V7}) makes "at most one ACTIVE editor row" structural rather than a thing the creator agrees to.
-   */
-  @Column(name = "editor", nullable = false)
-  public boolean editor = false;
-
-  /**
    * Where this workspace's container runs ({@code V12}): {@link WorkspacePlacement#DIRECT} on the
    * platform host through qits-containers, or {@link WorkspacePlacement#RUNNER} on a workspace
-   * runner's node. Decided at create and never changed, like {@link #admin} and {@link #editor}.
-   * Admin and editor rows are always DIRECT; {@code ck_workspace_runner_posture} keeps that.
+   * runner's node. Decided at create and never changed, like {@link #admin}. Admin rows are always
+   * DIRECT; {@code ck_workspace_runner_posture} keeps that. (The {@code editor} column of {@code V7}
+   * is unread since the editor was removed, qits-1152.)
    */
   @Enumerated(EnumType.STRING)
   @Column(name = "placement", nullable = false, length = 16)

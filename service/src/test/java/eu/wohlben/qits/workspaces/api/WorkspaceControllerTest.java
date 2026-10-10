@@ -82,18 +82,6 @@ public class WorkspaceControllerTest {
     awaitProvisioned(repoId, "step-01");
     deleteContainer(repoId, "step-01");
 
-    // merge the workspace's branch into its parent, "feature". NOT into master: master is this
-    // repository's default branch, which integrate alone writes now — that case is
-    // testMergeIntoTheDefaultBranchIsRefusedAndNamesIntegrate below.
-    given()
-        .contentType(ContentType.JSON)
-        .body(new WorkspaceController.MergeWorkspaceRequest("feature"))
-        .when()
-        .post("/workspaces/api/workspaces/" + workspaceIds.of(repoId, "step-01") + "/merge")
-        .then()
-        .statusCode(Response.Status.OK.getStatusCode())
-        .body("hasConflicts", equalTo(false));
-
     // discard — carrying ?ignore-changes=true, the UI's confirmed override. Here the tree is
     // clean, so this proves only the wiring: the parameter is accepted and the discard proceeds.
     // The semantics (a dirty tree refused plainly, discarded with force) are the domain suite's
@@ -413,45 +401,6 @@ public class WorkspaceControllerTest {
         guide.contains("a green gate turns it into a version **tag**"), guide);
   }
 
-  /**
-   * The rule that makes "integrate is the only flow into the default branch" true in the API and
-   * not only at the git host. Merge keeps every other target — merging into a parent branch is what
-   * stacked workspaces do all day — and it names the endpoint that does the refused thing properly,
-   * because a refusal a caller cannot act on is a worse bug than the merge would have been.
-   */
-  @Test
-  public void testMergeIntoTheDefaultBranchIsRefusedAndNamesIntegrate() {
-    String repoId = createProjectAndRepository();
-    createWorkspace(repoId, "into-main", "master", "into-main-b");
-    Long id = workspaceIds.of(repoId, "into-main");
-
-    given()
-        .contentType(ContentType.JSON)
-        .body(new WorkspaceController.MergeWorkspaceRequest("master"))
-        .when()
-        .post("/workspaces/api/workspaces/" + id + "/merge")
-        .then()
-        .statusCode(Response.Status.CONFLICT.getStatusCode())
-        .body("message", containsString("/integrate"))
-        .body("message", containsString(String.valueOf(id)));
-  }
-
-  /** And a blank target, which resolves to the default branch, is the same refusal. */
-  @Test
-  public void testMergeWithNoTargetIsRefusedBecauseItResolvesToTheDefaultBranch() {
-    String repoId = createProjectAndRepository();
-    createWorkspace(repoId, "blank-target", "master", "blank-target-b");
-
-    given()
-        .contentType(ContentType.JSON)
-        .body(new WorkspaceController.MergeWorkspaceRequest(null))
-        .when()
-        .post("/workspaces/api/workspaces/" + workspaceIds.of(repoId, "blank-target") + "/merge")
-        .then()
-        .statusCode(Response.Status.CONFLICT.getStatusCode())
-        .body("message", containsString("/integrate"));
-  }
-
   @Test
   public void testListWorkspacesReturnsCreatedWorkspaceWithBranch() {
     String repoId = createProjectAndRepository();
@@ -646,16 +595,6 @@ public class WorkspaceControllerTest {
    */
   private void createWorkspace(String repoId, String id, String parent, String branch) {
     workspaceService.createWorkspace(repoId, id, parent, branch, null, false, false, true);
-  }
-
-  private void mergeInto(String repoId, String workspaceId, String target) {
-    given()
-        .contentType(ContentType.JSON)
-        .body(new WorkspaceController.MergeWorkspaceRequest(target))
-        .when()
-        .post("/workspaces/api/workspaces/" + workspaceIds.of(repoId, workspaceId) + "/merge")
-        .then()
-        .statusCode(Response.Status.OK.getStatusCode());
   }
 
 

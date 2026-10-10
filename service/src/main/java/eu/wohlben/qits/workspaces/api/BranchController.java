@@ -92,8 +92,7 @@ public class BranchController {
    * Merge {@code source} into {@code target}, defaulting to the repo's main branch.
    *
    * <p>409 {@code RELEASE_REQUIRED} when the target resolves to that default branch: this service
-   * does not write it at all — a release request in qits-projects does — and {@code
-   * /workspaces/{id}/integrate} is the door for a plain merge into a parent.
+   * does not write it at all — a release request in qits-projects does.
    */
   @POST
   @Path("/merge")

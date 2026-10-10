@@ -139,14 +139,10 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
                   if (ws.placement == WorkspacePlacement.RUNNER) {
                     return RUNNER;
                   }
-                  if (ws.editor) {
-                    // THE EDITOR CLONES NOTHING, and the double has to say so or it would be
-                    // testing a container the service never asks for. The editor's row belongs to
-                    // no repository and claims no branch, so WorkspaceContainerFactory writes its
-                    // repository id, name, project, branch and parent BLANK — and a daemon told
-                    // nothing to clone starts its editor over an empty /workspace and reports
-                    // Provisioned. Falling through would clone the sentinel id, which is not a
-                    // repository anywhere.
+                  if (ws.branch == null || ws.branch.isBlank()) {
+                    // A WORKSPACE SLOT CLONES NOTHING HERE (qits-1152): it names no branch, so the
+                    // double has nothing to check out and reports Provisioned, as the daemon does
+                    // once its base clone is there.
                     return null;
                   }
                   String repoId = ws.repositoryId;
@@ -162,7 +158,7 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
       return runnerAnswer.apply(workspaceId);
     }
     if (target == null) {
-      return Optional.of(ProvisionResult.ok("")); // the editor: nothing to clone, nothing to report
+      return Optional.of(ProvisionResult.ok("")); // a slot: nothing to clone, nothing to report
     }
     if (holdDirect) {
       // The real registry's slot, minus the socket: registered first, then the abandoned question,

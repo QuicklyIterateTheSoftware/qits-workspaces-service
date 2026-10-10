@@ -1162,35 +1162,6 @@ public class AgentDispatchControllerTest {
   }
 
   /**
-   * The seam between the two halves, through the shipped beans: what the door stored is what the
-   * NEXT container spec for that row says — the persisted port read by the real factory — so a
-   * container started after the relay boots with the facts and the {@code ❗}.
-   */
-  @Test
-  public void theStoredFactsAreWhatTheNextContainerSpecCarries() throws Exception {
-    String repoId = seedRepository();
-    String label = "ticket-entity-spec";
-    String branch = "ticket/entity-spec";
-    workspaceService.createWorkspace(repoId, label, "master", branch, null, false, false, true);
-    Long rowId = workspaceIds.of(repoId, label);
-
-    entity(entityBody(repoId, branch, "Boots marked", "REFINED", true), 200);
-
-    WorkspaceContainer spec =
-        containerFactory.forWorkspace(repoId, label, rowId, branch, "master", "qits-617");
-    assertEquals("Boots marked", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_TITLE"));
-    assertEquals("REFINED", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_STATUS"));
-    assertEquals("true", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
-
-    entity(entityBody(repoId, branch, "Boots marked", "REFINED", false), 200);
-    assertNull(
-        containerFactory
-            .forWorkspace(repoId, label, rowId, branch, "master", "qits-617")
-            .env()
-            .get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
-  }
-
-  /**
    * The block's source (qits-895) rides the live call to a reachable daemon, beside the three facts
    * — and nothing else about this door changes: the row's three columns and the daemon's three keys
    * are exactly what {@link #markingTheEntityStoresTheFactsAndTellsAReachableDaemon} already pins.
@@ -1227,35 +1198,6 @@ public class AgentDispatchControllerTest {
     entity(entityBody(repoId, "ticket/no-bsource", "Plain", "REFINED", false), 200);
     told = entityCalls.get("/workspaces/container/" + rowId + "/agents/entity");
     assertFalse(told.containsKey("blockSource"), "an older caller sends none either: " + told);
-  }
-
-  /**
-   * <b>A derived block's source must never land on the row or in the container's environment</b> —
-   * only the three facts {@link #theStoredFactsAreWhatTheNextContainerSpecCarries} already pins do,
-   * because a derived block can flap on a debounce and a container is not recreated over one.
-   */
-  @Test
-  public void aBlockSourceNeverReachesTheRowOrTheContainerSpec() throws Exception {
-    String repoId = seedRepository();
-    String label = "ticket-block-source-spec";
-    String branch = "ticket/block-source-spec";
-    workspaceService.createWorkspace(repoId, label, "master", branch, null, false, false, true);
-    Long rowId = workspaceIds.of(repoId, label);
-
-    entity(entityBody(repoId, branch, "Boots marked", "REFINED", true, "BOTH"), 200);
-
-    Workspace row = storedRow(rowId);
-    assertThat(row.entityTitle, is("Boots marked"));
-    assertThat(row.entityStatus, is("REFINED"));
-    assertThat(row.entityBlocked, is(true));
-    WorkspaceContainer spec =
-        containerFactory.forWorkspace(repoId, label, rowId, branch, "master", "qits-617");
-    assertEquals("Boots marked", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_TITLE"));
-    assertEquals("REFINED", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_STATUS"));
-    assertEquals("true", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
-    assertTrue(
-        spec.env().keySet().stream().noneMatch(key -> key.contains("BLOCK_SOURCE")),
-        "no block-source key of any spelling belongs in the container spec: " + spec.env().keySet());
   }
 
   /**

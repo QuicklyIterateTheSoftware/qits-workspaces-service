@@ -279,7 +279,6 @@ public class WorkspaceTunnels {
   public static int capabilityFor(StreamTarget target) {
     return switch (target) {
       case API -> DaemonProtocol.TUNNEL_CAPABILITY_VERSION;
-      case EDITOR -> EDITOR_CAPABILITY_VERSION;
       default -> Integer.MAX_VALUE;
     };
   }
