@@ -61,10 +61,15 @@ import java.util.Map;
  *       argv</b> without a bearer to hang on {@code -c http.extraHeader}.
  *   <li><b>{@code qits.eventstream.enabled=true}</b> — the bus, which {@code %dev} and {@code %test}
  *       both keep dark. Nothing here publishes any more (the {@code SCMRelease} the release door
- *       announced left with the door), so what this proves is the boot: the jar's datasource, its
- *       Flyway lineage and its sweepers all start in a packaged process. It costs nothing in stray
- *       traffic — the stream subscriber logs "no listener wants a signature: not dialling the event
- *       stream" and never dials, and the outbox sweeper finds nothing due.
+ *       announced left with the door), but the service listens: {@code AgentWaitListener}
+ *       (qits-1153) is a durable listener for {@code "*"}, so at boot the subscriber dials {@code
+ *       /events/stream} and the catch-up sweep reads {@code /events/api/events}. The boot story
+ *       owns both calls.
+ *   <li><b>the redial backoff and the catch-up interval, both an hour</b> — the shipped values
+ *       (1 s to 30 s, and 30 s) would repeat those two calls through the whole run, and each repeat
+ *       is an edge in whichever story is running at that moment. With an hour, each call happens at
+ *       boot and not again during the run. The stand-in qits-events has no websocket, so the dial
+ *       is refused; the stream itself is the eventstream jar's own suite's question.
  *   <li><b>{@code qits.workspace.git.mirror-freshness-ms=0}</b> — the shipped 5 s window would make
  *       a story's fetch depend on how long the story before it took, which is an edge that comes and
  *       goes with the clock and a {@code networkHash} that never settles. Zero means every read
@@ -168,6 +173,10 @@ public class StoryProfile implements QuarkusTestProfile, NecessaryTestProfileDup
 
     // --- the bus, on, against a stub that accepts ----------------------------------------------------
     config.put("qits.eventstream.enabled", "true");
+    // Once at boot and not again during the run — see the class javadoc.
+    config.put("qits.eventstream.redial-initial-backoff", "PT1H");
+    config.put("qits.eventstream.redial-max-backoff", "PT1H");
+    config.put("qits.eventstream.catchup-interval", "PT1H");
 
     // --- this service's own tree, under target/ -------------------------------------------------------
     // Never the shipped ${user.home}/.qits: the CI step container's home is not this service's to

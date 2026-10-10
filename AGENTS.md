@@ -1599,7 +1599,7 @@ running.
 
 | class | category | what it is about |
 | --- | --- | --- |
-| `api.TokenValidationBootstrapIT` | authentication | the boot: the JWKS fetch, the commission reconcile, and a bearer cut for another audience |
+| `api.TokenValidationBootstrapIT` | authentication | the boot: the JWKS fetch, the commission reconcile, the event-bus listener's first calls, and a bearer cut for another audience |
 | `stories.creation.WorkspaceProvisionIT` | workspaces | a workspace provisioned end to end, daemon dial included |
 | `stories.operations.OperatorReadsIT` | operations | what a live read costs, and what a stored read does not |
 | `stories.refusals.MergeDoorRefusalIT` | refusals | four ways not to get through a door, told at `/branches/merge` |
@@ -1675,7 +1675,10 @@ socket by hand, because the framework ships no socket tap and a frame is not a r
 4. **Asynchronous far-side traffic is awaited before the story returns.** The commission reconcile
    runs from a `StartupEvent` observer on its own thread; the boot story polls `StoryPeers`'
    recording for its listing rather than hoping. An edge that lands after the drain is an edge in
-   the next story's diagram.
+   the next story's diagram. **Repeating** background traffic is the same problem with no end: the
+   event-stream redial and the catch-up sweep (qits-1153's `AgentWaitListener`) would land in
+   random stories at their shipped intervals, so `StoryProfile` sets both to an hour and the boot
+   story owns the one call of each.
 
 **`assertEdgeCount` is what every class ends with**, because a count is how an absence is asserted
 when the peer itself was legitimately reached — "the refused caller never reached the git host" is

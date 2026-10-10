@@ -118,6 +118,11 @@ public class TokenValidationBootstrapIT {
       A third question rides the same boot: a workspace runner's registration token is one more
       credential a crash can orphan, so the reconcile also lists every commissioned token this
       service holds and gives back the ones no runner row still names.
+
+      And it starts to listen. An agent may declare that it waits for a platform event, so at boot
+      this service dials qits-events' stream and reads the event log forward from where it last
+      stopped. Here the stand-in qits-events has no stream, so the dial is refused, and its log is
+      empty.
       """)
   @Order(1)
   void serviceBootFetchesJwksAndAcceptsPlatformTokens(Interactions story) {
@@ -189,6 +194,22 @@ public class TokenValidationBootstrapIT {
             "and it also asks which runner-registration tokens it still holds, so a crashed"
                 + " registration does not leave one behind forever")
         .as("tokens-reconciled");
+
+    // The bus's two boot calls (qits-1153: AgentWaitListener is a durable listener). Both run off
+    // the startup thread, so they are awaited here for the reason the reconcile is.
+    assertTrue(
+        StoryPeers.awaitCall(
+            "GET " + StoryPeers.EVENTS_READ_PATH + " ", java.time.Duration.ofSeconds(30)),
+        "the catch-up sweep never read the qits-events log");
+    assertTrue(
+        StoryPeers.awaitCall(
+            "GET " + StoryPeers.EVENTS_STREAM_PATH + " ", java.time.Duration.ofSeconds(30)),
+        "the event-stream subscriber never dialled qits-events");
+    story
+        .note(
+            "and it starts to listen for the events an agent can wait for: it dials qits-events'"
+                + " stream and reads the event log forward")
+        .as("events-heard");
   }
 
   @UserStory(value = "A bearer cut for another audience opens nothing here", category = CATEGORY)
@@ -264,12 +285,30 @@ public class TokenValidationBootstrapIT {
         MockIdp.SERVICE_NAME,
         StoryPeers.read(
             StoryPeers.TOKENS_PATH));
-    // FOUR: one door, and the three questions a fresh process asks the idp before anybody arrives.
-    ReportAssertions.assertEdgeCount(CATEGORY, ACCEPTED_SLUG, 4);
+    // …and the bus's two boot calls: the catch-up read of the log, and the stream dial, which the
+    // stand-in refuses because it cannot upgrade to a websocket.
+    ReportAssertions.assertEdge(
+        CATEGORY,
+        ACCEPTED_SLUG,
+        NetworkEdge.HTTP,
+        SERVICE,
+        StoryPeers.EVENTS,
+        StoryPeers.read(StoryPeers.EVENTS_READ_PATH));
+    ReportAssertions.assertEdge(
+        CATEGORY,
+        ACCEPTED_SLUG,
+        NetworkEdge.HTTP,
+        SERVICE,
+        StoryPeers.EVENTS,
+        StoryPeers.label("GET", StoryPeers.EVENTS_STREAM_PATH, 404));
+    // SIX: one door, the three questions a fresh process asks the idp before anybody arrives, and
+    // the two calls that start it listening to qits-events.
+    ReportAssertions.assertEdgeCount(CATEGORY, ACCEPTED_SLUG, 6);
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "jwks-fetched");
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "history-served");
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "commissions-reconciled");
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "tokens-reconciled");
+    ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "events-heard");
 
     ReportAssertions.assertComplete(CATEGORY, DENIED_SLUG, UserflowReport.PASSED);
     ReportAssertions.assertEdge(

@@ -37,7 +37,9 @@ import java.util.concurrent.Executors;
  * the container orchestrator  qits-containers       GET/PUT/DELETE /containers/api/containers/{owner}/workspace…
  * the identity provider       qits-platform-idp     POST /idp/token          (this service's own credentials)
  *                                                   POST /idp/api/clients    (a workspace's commissioned one)
- * the event log               qits-events           PUT  /events/api/events/{id}   (SCMRelease)
+ * the event log               qits-events           PUT  /events/api/events/{id}   (an event published)
+ *                                                   GET  /events/api/events        (the catch-up read)
+ *                                                   GET  /events/stream            (the websocket dial: 404)
  * </pre>
  *
  * <p><b>One process impersonates all four, and the diagram is drawn from the PATH.</b> They are four
@@ -131,6 +133,12 @@ public final class StoryPeers {
 
   /** {@code EventsPublisher.EVENTS_PATH} — one PUT per published event, keyed by its id. */
   public static final String EVENTS_PATH = "/events/api/events/";
+
+  /** {@code EventsQuery.EVENTS_PATH} — the catch-up sweep's read of the log. */
+  public static final String EVENTS_READ_PATH = "/events/api/events";
+
+  /** {@code EventStreamSubscriber.STREAM_PATH} — the websocket the subscriber dials. */
+  public static final String EVENTS_STREAM_PATH = "/events/stream";
 
   /**
    * The owner every container call is scoped by: {@code quarkus.oidc-client.qits.client-id}. The
@@ -360,6 +368,12 @@ public final class StoryPeers {
       append(EVENTS_LOG, request.replace("\n", " ") + "\n");
       return new Answer(201, "{\"accepted\":true}");
     }
+    if (EVENTS_READ_PATH.equals(path) && "GET".equals(method)) {
+      // The catch-up sweep's read. An empty log: no story opens a wait, so no event is one this
+      // service wants. A 404 here would read as an outage and leave the sweep failing.
+      return new Answer(200, "{\"events\":[],\"nextCursor\":null}");
+    }
+    // EVENTS_STREAM_PATH falls through to the 404 below: this stub cannot upgrade to a websocket.
     return new Answer(404, notFound("no such route"));
   }
 
