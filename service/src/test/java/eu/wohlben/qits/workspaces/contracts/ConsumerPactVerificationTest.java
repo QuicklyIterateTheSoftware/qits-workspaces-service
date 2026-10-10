@@ -104,4 +104,49 @@ class ConsumerPactVerificationTest {
   Map<String, String> noWorkItemHasAnOpenWorkspace() {
     return states.params(ProviderStates.NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE);
   }
+
+  @State(ProviderStates.A_REPOSITORY_WITH_A_BRANCH_FOR_A_TICKET)
+  Map<String, String> aRepositoryWithABranchForATicket() {
+    return states.params(ProviderStates.A_REPOSITORY_WITH_A_BRANCH_FOR_A_TICKET);
+  }
+
+  @State(ProviderStates.A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH)
+  Map<String, String> aWorkspaceStandingOnATicketsBranch() {
+    return states.params(ProviderStates.A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH);
+  }
+
+  @State(ProviderStates.A_WORKSPACE_STANDING_ON_A_RELEASED_BRANCH)
+  Map<String, String> aWorkspaceStandingOnAReleasedBranch() {
+    return states.params(ProviderStates.A_WORKSPACE_STANDING_ON_A_RELEASED_BRANCH);
+  }
+
+  @State(ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES)
+  Map<String, String> repositoriesWithMergedBranches() {
+    return states.params(ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES);
+  }
+
+  @State(ProviderStates.A_CONFIGURED_WORKSPACE_IMAGE)
+  Map<String, String> aConfiguredWorkspaceImage() {
+    return states.params(ProviderStates.A_CONFIGURED_WORKSPACE_IMAGE);
+  }
+
+  @State(ProviderStates.NO_RUNNERS)
+  Map<String, String> noRunners() {
+    return states.params(ProviderStates.NO_RUNNERS);
+  }
+
+  @State(ProviderStates.AN_UNREGISTERED_RUNNER)
+  Map<String, String> anUnregisteredRunner() {
+    return states.params(ProviderStates.AN_UNREGISTERED_RUNNER);
+  }
+
+  @State(ProviderStates.A_CONNECTED_RUNNER)
+  Map<String, String> aConnectedRunner() {
+    return states.params(ProviderStates.A_CONNECTED_RUNNER);
+  }
+
+  @State(ProviderStates.A_QUARANTINED_RUNNER)
+  Map<String, String> aQuarantinedRunner() {
+    return states.params(ProviderStates.A_QUARANTINED_RUNNER);
+  }
 }

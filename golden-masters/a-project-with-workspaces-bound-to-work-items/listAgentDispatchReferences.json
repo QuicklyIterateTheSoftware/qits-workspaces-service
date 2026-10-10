@@ -1,0 +1,46 @@
+{
+  "entries": [
+    {
+      "workspace": {
+        "workspaceRowId": 1,
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workspaceId": "ticket-invoice-totals-are-off-by-one-cent",
+        "branch": "ticket/invoice-totals-are-off-by-one-cent",
+        "ticketId": "00000000-0000-4000-8000-000000000001",
+        "epicId": null,
+        "status": "ABANDONED",
+        "resolvedAt": "2026-01-01T00:00:00Z",
+        "workId": "00000000-0000-4000-8000-000000000001",
+        "entityId": "contract-00000001-10"
+      }
+    },
+    {
+      "workspace": {
+        "workspaceRowId": 2,
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workspaceId": "ticket-invoice-totals-are-off-by-one-cent",
+        "branch": "ticket/invoice-totals-are-off-by-one-cent",
+        "ticketId": "00000000-0000-4000-8000-000000000001",
+        "epicId": null,
+        "status": "INTEGRATED",
+        "resolvedAt": "2026-01-01T00:00:00Z",
+        "workId": "00000000-0000-4000-8000-000000000001",
+        "entityId": "contract-00000001-10"
+      }
+    },
+    {
+      "workspace": {
+        "workspaceRowId": 6,
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "workspaceId": "ticket-invoice-totals-are-off-by-one-cent",
+        "branch": "ticket/invoice-totals-are-off-by-one-cent",
+        "ticketId": "00000000-0000-4000-8000-000000000001",
+        "epicId": null,
+        "status": "ACTIVE",
+        "resolvedAt": null,
+        "workId": "00000000-0000-4000-8000-000000000001",
+        "entityId": "contract-00000001-10"
+      }
+    }
+  ]
+}

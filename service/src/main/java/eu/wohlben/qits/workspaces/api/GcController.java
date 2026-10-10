@@ -11,6 +11,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import java.util.List;
 import java.util.Set;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 
 /**
  * The orchestrator's door into branch cleanup: {@code POST /workspaces/api/gc/branches} sweeps
@@ -46,6 +47,7 @@ public class GcController {
 
   @POST
   @Path("/branches")
+  @Operation(operationId = "sweepBranches")
   public WorkspaceService.BranchSweepReport sweepBranches(@Valid SweepBranchesRequest request) {
     Set<String> keep =
         request.keepPrefixes() == null ? Set.of() : Set.copyOf(request.keepPrefixes());

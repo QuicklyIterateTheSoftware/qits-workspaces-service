@@ -7,11 +7,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenFiles;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
 import jakarta.inject.Inject;
 import java.io.IOException;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -45,40 +48,174 @@ class GoldenMasterRecordingTest {
   static final String PROVIDER = "qits-workspaces";
 
   /**
-   * One recorded read.
+   * One recorded call.
    *
-   * @param listFilteredTo the array (a {@code $.a} path) reduced to the entries that mention one of
-   *     the state's params, or null. Other tests share the store, so an unfiltered list would hold
-   *     their rows too
+   * @param path the route, with {@code {param}} placeholders, and the query after a {@code ?}. The
+   *     index records the route as {@code path} and the query as its own {@code query} object
+   * @param status the status the call must answer
+   * @param listFilteredTo the array (a {@code $.a} path, or {@code $} for a root array) reduced to
+   *     the entries that mention one of the state's params, or null. Other tests share the store, so
+   *     an unfiltered list would hold their rows too
+   * @param requestBody the JSON a write sends, recorded into the index as the operation's {@code
+   *     body}; null for a read and for a write whose operation takes none (the served openapi says
+   *     which, and the recording fails on a mismatch). A string value that is exactly {@code
+   *     {param}} is expanded from the state's params for the call, and recorded unexpanded
+   * @param fixedStrings {@code $.a[*].b} paths, each with the value it is replaced by before
+   *     freezing: values a dependency bump moves (an image version), which would otherwise change
+   *     the recording on every bump, and names a test fake makes up. Listed in {@code
+   *     frozen.strings}
    */
   record Interaction(
       String state,
       String operationId,
+      String method,
       String path,
-      String listFilteredTo) {}
+      int status,
+      String listFilteredTo,
+      String requestBody,
+      Map<String, String> fixedStrings) {
+
+    static Interaction read(String state, String operationId, String path, String listFilteredTo) {
+      return new Interaction(state, operationId, "GET", path, 200, listFilteredTo, null, Map.of());
+    }
+
+    static Interaction write(
+        String state, String operationId, String path, int status, String requestBody) {
+      return new Interaction(state, operationId, "POST", path, status, null, requestBody, Map.of());
+    }
+
+    /** This interaction, with the version at {@code path} recorded as {@link #FIXED_VERSION}. */
+    Interaction fixing(String path) {
+      return fixing(path, FIXED_VERSION);
+    }
+
+    /** This interaction, with the string at {@code path} recorded as {@code value}. */
+    Interaction fixing(String path, String value) {
+      Map<String, String> fixed = new TreeMap<>(fixedStrings);
+      fixed.put(path, value);
+      return new Interaction(
+          state, operationId, method, this.path, status, listFilteredTo, requestBody, fixed);
+    }
+  }
+
+  /** What a version a bump moves is recorded as. */
+  static final String FIXED_VERSION = "2026.101.120000";
+
+  private static final String WORKSPACES = "/workspaces/api";
 
   static final List<Interaction> INTERACTIONS =
       List.of(
-          new Interaction(
+          Interaction.read(
               ProviderStates.A_PROJECT_WITH_WORKSPACES_BOUND_TO_WORK_ITEMS,
               "listOpenWorkspaces",
-              "/workspaces/api/work/workspaces",
+              WORKSPACES + "/work/workspaces",
               "$.entries"),
-          new Interaction(
+          Interaction.read(
               ProviderStates.A_PROJECT_WITH_WORKSPACES_BOUND_TO_WORK_ITEMS,
               "listWorkItemWorkspaces",
-              "/workspaces/api/work/{bugTicketId}/workspaces",
+              WORKSPACES + "/work/{bugTicketId}/workspaces",
               null),
-          new Interaction(
+          Interaction.read(
+              ProviderStates.A_PROJECT_WITH_WORKSPACES_BOUND_TO_WORK_ITEMS,
+              "listAgentDispatchReferences",
+              WORKSPACES + "/agent-dispatches/references?ticketId={bugTicketId}",
+              null),
+          Interaction.read(
               ProviderStates.A_WORK_ITEM_WITH_NO_WORKSPACES,
               "listWorkItemWorkspaces",
-              "/workspaces/api/work/{improvementTicketId}/workspaces",
+              WORKSPACES + "/work/{improvementTicketId}/workspaces",
               null),
-          new Interaction(
+          Interaction.read(
               ProviderStates.NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE,
               "listOpenWorkspaces",
-              "/workspaces/api/work/workspaces",
-              null));
+              WORKSPACES + "/work/workspaces",
+              null),
+          Interaction.write(
+              ProviderStates.A_REPOSITORY_WITH_A_BRANCH_FOR_A_TICKET,
+              "dispatchAgent",
+              WORKSPACES + "/agent-dispatches",
+              200,
+              "{\"repositoryId\":\"{repositoryId}\",\"branch\":\"{branch}\",\"branchTree\":false,"
+                  + "\"ticketId\":\"{ticketId}\",\"workId\":\"{ticketId}\","
+                  + "\"entityId\":\"{ticketQualifiedId}\","
+                  + "\"entityTitle\":\"Invoice totals are off by one cent\","
+                  + "\"entityStatus\":\"REFINED\",\"entityBlocked\":false,"
+                  + "\"instruction\":\"Fix contract-00000001-10.\"}")
+              .fixing("$.agentIdentity", "contract-workspace-token-subject"),
+          Interaction.write(
+              ProviderStates.A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH,
+              "markAgentDispatchEntity",
+              WORKSPACES + "/agent-dispatches/entity",
+              200,
+              "{\"repositoryId\":\"{repositoryId}\",\"branch\":\"{branch}\","
+                  + "\"title\":\"Invoice totals are off by one cent\",\"status\":\"IMPLEMENTING\","
+                  + "\"blocked\":false,\"workId\":\"{ticketId}\"}"),
+          Interaction.write(
+              ProviderStates.A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH,
+              "markAgentDispatchBlocked",
+              WORKSPACES + "/agent-dispatches/blocked",
+              200,
+              "{\"repositoryId\":\"{repositoryId}\",\"branch\":\"{branch}\",\"blocked\":true,"
+                  + "\"workId\":\"{ticketId}\"}"),
+          Interaction.write(
+              ProviderStates.A_WORKSPACE_STANDING_ON_A_TICKETS_BRANCH,
+              "deliverAgentTurn",
+              WORKSPACES + "/agent-dispatches/delivery",
+              200,
+              "{\"repositoryId\":\"{repositoryId}\",\"branch\":\"{branch}\","
+                  + "\"text\":\"The ticket moved to REVIEW.\",\"workId\":\"{ticketId}\","
+                  + "\"compactFirst\":false}"),
+          Interaction.write(
+              ProviderStates.A_WORKSPACE_STANDING_ON_A_RELEASED_BRANCH,
+              "resolveReleasedBranch",
+              WORKSPACES + "/branches/resolution?repositoryId={repositoryId}",
+              200,
+              "{\"branch\":\"{branch}\",\"target\":\"{version}\",\"commit\":\"{sha}\","
+                  + "\"result\":\"released as " + ProviderStates.RELEASED_VERSION + "\"}"),
+          Interaction.write(
+              ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES,
+              "sweepBranches",
+              WORKSPACES + "/gc/branches",
+              200,
+              "{\"dryRun\":false,\"repositories\":[{\"id\":\"{repositoryId}\","
+                  + "\"name\":\"{repositoryName}\",\"mainBranch\":\"master\"}],"
+                  + "\"keepPrefixes\":[]}"),
+          new Interaction(
+              ProviderStates.A_CONFIGURED_WORKSPACE_IMAGE,
+              "listLaunchPins",
+              "GET",
+              WORKSPACES + "/pins",
+              200,
+              null,
+              null,
+              Map.of("$.pins[*].version", FIXED_VERSION)),
+          Interaction.write(
+              ProviderStates.NO_RUNNERS,
+              "createRunner",
+              WORKSPACES + "/runners",
+              201,
+              "{\"name\":\"{runnerName}\",\"slots\":1}")
+              .fixing("$.runner.pinnedVersion"),
+          Interaction.read(
+                  ProviderStates.AN_UNREGISTERED_RUNNER, "listRunners", WORKSPACES + "/runners", "$")
+              .fixing("$[*].pinnedVersion"),
+          Interaction.write(
+              ProviderStates.AN_UNREGISTERED_RUNNER,
+              "rotateRunnerRegistrationToken",
+              WORKSPACES + "/runners/{runnerId}/registration-token",
+              200,
+              null)
+              .fixing("$.runner.pinnedVersion"),
+          Interaction.read(
+                  ProviderStates.A_CONNECTED_RUNNER, "listRunners", WORKSPACES + "/runners", "$")
+              .fixing("$[*].pinnedVersion"),
+          Interaction.write(
+              ProviderStates.A_QUARANTINED_RUNNER,
+              "greenlightRunner",
+              WORKSPACES + "/runners/{runnerId}/greenlight",
+              200,
+              null)
+              .fixing("$.pinnedVersion"));
 
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final Pattern TEMPLATE_PARAM = Pattern.compile("\\{([^}]+)}");
@@ -100,7 +237,15 @@ class GoldenMasterRecordingTest {
     Map<String, ObjectNode> indexStates = new TreeMap<>();
     Map<String, Map<String, ObjectNode>> indexOperations = new TreeMap<>();
 
+    Set<String> takesBody = operationsTakingABody();
     for (Interaction interaction : INTERACTIONS) {
+      if ((interaction.requestBody() != null) != takesBody.contains(interaction.operationId())) {
+        failures.add(
+            interaction.operationId()
+                + (interaction.requestBody() != null
+                    ? " takes no request body, but the recording sends one: record null."
+                    : " takes a request body, but the recording sends none."));
+      }
       Recorded recorded = record(interaction);
       String slug = slug(interaction.state());
       String file = slug + "/" + interaction.operationId() + ".json";
@@ -113,13 +258,29 @@ class GoldenMasterRecordingTest {
         state.set("params", recorded.params());
         state.set("dependsOn", JsonNodeFactory.instance.arrayNode());
         indexStates.put(slug, state);
+      } else if (!state.get("params").equals(recorded.params())) {
+        failures.add("State '" + interaction.state() + "' froze to different params per operation");
       }
 
       ObjectNode operation = JsonNodeFactory.instance.objectNode();
       operation.put("operationId", interaction.operationId());
-      operation.put("method", "GET");
-      operation.put("path", interaction.path());
-      operation.put("status", 200);
+      operation.put("method", interaction.method());
+      // The path is the route alone and the query its own object, as the consumers' pacts send it.
+      int at = interaction.path().indexOf('?');
+      operation.put("path", at < 0 ? interaction.path() : interaction.path().substring(0, at));
+      if (at >= 0) {
+        ObjectNode query = operation.putObject("query");
+        for (String pair : interaction.path().substring(at + 1).split("&")) {
+          int eq = pair.indexOf('=');
+          query.put(
+              URLDecoder.decode(eq < 0 ? pair : pair.substring(0, eq), StandardCharsets.UTF_8),
+              eq < 0 ? "" : URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8));
+        }
+      }
+      if (interaction.requestBody() != null) {
+        operation.set("body", JSON.readTree(interaction.requestBody()));
+      }
+      operation.put("status", interaction.status());
       operation.put("file", file);
       ObjectNode frozen = operation.putObject("frozen");
       frozen.set("ids", strings(recorded.freezer().idPaths()));
@@ -188,19 +349,32 @@ class GoldenMasterRecordingTest {
     Map<String, String> params = setup.params();
     Response response;
     try {
-      response = given().when().get(expand(interaction.path(), params));
+      var request = given();
+      if (interaction.requestBody() != null) {
+        request =
+            request
+                .contentType("application/json")
+                .body(JSON.writeValueAsString(expandBody(JSON.readTree(interaction.requestBody()), params)));
+      } else {
+        // As a browser sends a body-less call: RestAssured would otherwise add a form content type.
+        request = request.noContentType();
+      }
+      response = request.when().request(interaction.method(), expand(interaction.path(), params));
     } finally {
       states.cleanUp();
     }
     String raw = response.asString();
-    if (response.statusCode() != 200) {
+    if (response.statusCode() != interaction.status()) {
       throw new AssertionError(
-          "GET "
+          interaction.method()
+              + " "
               + interaction.path()
               + " in state '"
               + interaction.state()
               + "' answered "
               + response.statusCode()
+              + ", expected "
+              + interaction.status()
               + ": "
               + raw);
     }
@@ -209,17 +383,103 @@ class GoldenMasterRecordingTest {
       body = filtered(body, interaction.listFilteredTo(), params.values());
     }
     Freezer freezer = new Freezer().rowIds(setup.rowIds());
+    for (Map.Entry<String, String> fixed : interaction.fixedStrings().entrySet()) {
+      fix(body, fixed.getKey().substring(1), fixed.getValue());
+      freezer.markString(fixed.getKey());
+    }
     ObjectNode frozenParams = JsonNodeFactory.instance.objectNode();
     params.forEach((k, v) -> frozenParams.put(k, freezer.freezeParam(v)));
     return new Recorded(freezer.freeze(body), frozenParams, freezer);
+  }
+
+  /** Sets every string at {@code rest} (a {@code .a[*].b} path below {@code node}) to {@code value}. */
+  private static void fix(JsonNode node, String rest, String value) {
+    if (rest.isEmpty() || node == null) {
+      return;
+    }
+    if (rest.startsWith("[*]")) {
+      node.forEach(element -> fix(element, rest.substring(3), value));
+      return;
+    }
+    String tail = rest.substring(1);
+    int next = tail.length();
+    for (char stop : new char[] {'.', '['}) {
+      int at = tail.indexOf(stop);
+      if (at >= 0 && at < next) {
+        next = at;
+      }
+    }
+    String field = tail.substring(0, next);
+    String after = tail.substring(next);
+    if (!(node instanceof ObjectNode object) || !object.has(field)) {
+      return;
+    }
+    if (after.isEmpty()) {
+      if (object.get(field).isTextual()) {
+        object.put(field, value);
+      }
+    } else {
+      fix(object.get(field), after, value);
+    }
+  }
+
+  /** The body with every string that is exactly {@code {param}} replaced by that param's value. */
+  static JsonNode expandBody(JsonNode node, Map<String, String> params) {
+    if (node.isTextual()) {
+      String text = node.asText();
+      if (text.startsWith("{") && text.endsWith("}")) {
+        String value = params.get(text.substring(1, text.length() - 1));
+        if (value != null) {
+          return TextNode.valueOf(value);
+        }
+      }
+      return node;
+    }
+    if (node instanceof ObjectNode object) {
+      ObjectNode out = JsonNodeFactory.instance.objectNode();
+      object.fields().forEachRemaining(e -> out.set(e.getKey(), expandBody(e.getValue(), params)));
+      return out;
+    }
+    if (node instanceof ArrayNode array) {
+      ArrayNode out = JsonNodeFactory.instance.arrayNode();
+      array.forEach(element -> out.add(expandBody(element, params)));
+      return out;
+    }
+    return node;
+  }
+
+  /** The operationIds whose operation declares a request body, read off the served openapi. */
+  private static Set<String> operationsTakingABody() throws IOException {
+    JsonNode paths =
+        JSON.readTree(
+                given()
+                    .when()
+                    .get("/workspaces/q/openapi?format=json")
+                    .then()
+                    .statusCode(200)
+                    .extract()
+                    .asString())
+            .path("paths");
+    Set<String> ids = new TreeSet<>();
+    paths.forEach(
+        path ->
+            path.forEach(
+                operation -> {
+                  if (operation.has("operationId") && operation.has("requestBody")) {
+                    ids.add(operation.get("operationId").asText());
+                  }
+                }));
+    return ids;
   }
 
   /** The answer with the array at {@code path} reduced to entries mentioning a param value. */
   static JsonNode filtered(JsonNode body, String path, Collection<String> paramValues) {
     JsonNode out = body.deepCopy();
     JsonNode node = out;
-    for (String segment : path.substring(2).split("\\.")) {
-      node = node.path(segment);
+    if (!path.equals("$")) {
+      for (String segment : path.substring(2).split("\\.")) {
+        node = node.path(segment);
+      }
     }
     if (!(node instanceof ArrayNode list)) {
       throw new IllegalStateException(path + " is not an array in " + body);

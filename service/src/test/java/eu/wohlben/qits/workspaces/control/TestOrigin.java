@@ -47,7 +47,16 @@ public final class TestOrigin {
    * ({@code testing-repo-quarkus-angular.git}); here it is a flag.
    */
   public static String create(String dataDir, boolean withFeatureBranch) throws Exception {
-    String repoId = UUID.randomUUID().toString();
+    return create(dataDir, UUID.randomUUID().toString(), withFeatureBranch);
+  }
+
+  /**
+   * As {@link #create(String, boolean)}, under a repository id the caller chooses. An origin already
+   * there under that id is replaced. The contract states use it: their ids are frozen.
+   */
+  public static String create(String dataDir, String repoId, boolean withFeatureBranch)
+      throws Exception {
+    deleteRecursively(Path.of(dataDir, repoId).toAbsolutePath());
     // Absolute: dataDir is relative in tests (target/...), and `git remote add`
     // would otherwise resolve it against the throwaway work dir, not the module.
     Path origin = Path.of(dataDir, repoId, "origin").toAbsolutePath();
@@ -208,7 +217,7 @@ public final class TestOrigin {
     }
   }
 
-  private static void deleteRecursively(Path root) throws IOException {
+  public static void deleteRecursively(Path root) throws IOException {
     if (!Files.exists(root)) {
       return;
     }

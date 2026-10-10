@@ -1,0 +1,6 @@
+{
+  "workspaceId": 1,
+  "delivered": false,
+  "launched": false,
+  "detail": "this workspace is queued for a workspace runner; the text will be delivered, or launched with, once a runner takes it and its daemon answers"
+}

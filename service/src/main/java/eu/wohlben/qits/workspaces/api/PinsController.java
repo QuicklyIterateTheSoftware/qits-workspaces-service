@@ -77,7 +77,9 @@ public class PinsController {
   // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
   @RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system", "qits:agent"})
   @GET
-  @Operation(summary = "The container images a launch by this service would pull right now")
+  @Operation(
+      operationId = "listLaunchPins",
+      summary = "The container images a launch by this service would pull right now")
   @APIResponse(responseCode = "200", description = "The effective launch pins, image order")
   public LaunchPins pins() {
     return new LaunchPins(

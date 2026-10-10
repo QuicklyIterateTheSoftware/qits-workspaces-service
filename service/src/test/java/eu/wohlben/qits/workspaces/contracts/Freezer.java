@@ -26,9 +26,10 @@ import java.util.regex.Pattern;
  *       is: the states write qits-projects' frozen ids on purpose, so a consumer can join the two
  *       recordings. Any other UUID becomes {@code 00000000-0000-4000-8000-0000000001NN}, numbered by
  *       first appearance. Both are listed in {@link #idPaths}.
- *   <li><b>Row ids.</b> A workspace's generated row id (a number in a field named {@code id} or
- *       {@code workspaceRowId}) becomes its place in the state's write order, 1 for the first row
- *       written. Listed in {@link #numberPaths}.
+ *   <li><b>Row ids.</b> A workspace's generated row id (a number in a field named {@code id},
+ *       {@code workspaceRowId} or {@code workspaceId}) becomes its place in the state's write order,
+ *       1 for the first row written. A row the call itself made (a dispatch) takes the next number
+ *       at its first appearance. Listed in {@link #numberPaths}.
  *   <li><b>Instants.</b> Every ISO-8601 instant becomes {@value #FROZEN_INSTANT}.
  * </ul>
  */
@@ -45,7 +46,7 @@ public final class Freezer {
   static final String FROZEN_INSTANT = "2026-01-01T00:00:00Z";
 
   /** The fields that hold a workspace row id. */
-  static final Set<String> ROW_ID_FIELDS = Set.of("id", "workspaceRowId");
+  static final Set<String> ROW_ID_FIELDS = Set.of("id", "workspaceRowId", "workspaceId");
 
   private final Map<Long, Long> rowIds = new HashMap<>();
   private final Map<String, String> ids = new HashMap<>();
@@ -68,6 +69,11 @@ public final class Freezer {
 
   public String freezeParam(String value) {
     return freezeIds(value);
+  }
+
+  /** Records that the value at {@code path} was replaced by a fixed one before freezing. */
+  public void markString(String path) {
+    stringPaths.add(path);
   }
 
   public List<String> idPaths() {
@@ -94,11 +100,7 @@ public final class Freezer {
       return TextNode.valueOf(freezeText(node.asText(), path));
     }
     if (node.isIntegralNumber() && field != null && ROW_ID_FIELDS.contains(field)) {
-      Long frozen = rowIds.get(node.asLong());
-      if (frozen == null) {
-        throw new IllegalStateException(
-            "Row id " + node.asLong() + " at " + path + " was not written by the state");
-      }
+      Long frozen = rowIds.computeIfAbsent(node.asLong(), k -> (long) (rowIds.size() + 1));
       numberPaths.add(path);
       return LongNode.valueOf(frozen);
     }

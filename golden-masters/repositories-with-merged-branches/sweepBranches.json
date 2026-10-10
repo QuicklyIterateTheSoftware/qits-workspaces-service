@@ -1,0 +1,13 @@
+{
+  "dryRun": false,
+  "repositoriesExamined": 1,
+  "branchesExamined": 3,
+  "removed": [
+    {
+      "repositoryId": "00000000-0000-4000-8000-000000000016",
+      "repositoryName": "contract-service",
+      "branch": "merged-work"
+    }
+  ],
+  "errors": []
+}

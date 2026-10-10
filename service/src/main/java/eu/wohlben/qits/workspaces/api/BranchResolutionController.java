@@ -10,6 +10,7 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -91,6 +92,7 @@ public class BranchResolutionController {
       responseCode = "404",
       description = "No such repository.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "resolveReleasedBranch")
   public WorkspaceService.BranchResolution resolveReleasedBranch(
       @QueryParam("repositoryId") String repositoryId,
       @Valid ResolveReleasedBranchRequest request) {

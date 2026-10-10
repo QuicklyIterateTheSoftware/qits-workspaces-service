@@ -277,6 +277,7 @@ public class AgentDispatchController {
               + " offline past its reconnect grace; the message names the runner. Nothing was said,"
               + " started or queued.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "deliverAgentTurn")
   public DispatchService.Delivery deliver(@Valid DeliverTurnRequest request) {
     return dispatches.deliver(
         request.repositoryId(),
@@ -337,6 +338,7 @@ public class AgentDispatchController {
       responseCode = "400",
       description = "A blank repository or branch.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "markAgentDispatchBlocked")
   public DispatchService.BlockedMark blocked(@Valid MarkBlockedRequest request) {
     return dispatches.markBlocked(
         request.repositoryId(), request.workId(), request.branch(), request.blocked());
@@ -392,6 +394,7 @@ public class AgentDispatchController {
       responseCode = "400",
       description = "A blank repository or branch, or a missing or non-boolean `blocked`.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "markAgentDispatchEntity")
   public DispatchService.BlockedMark entity(@Valid MarkEntityRequest request) {
     return dispatches.markEntity(
         request.repositoryId(),
@@ -443,6 +446,7 @@ public class AgentDispatchController {
   @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system", "qits:agent"})
   @GET
   @Path("/references")
+  @Operation(operationId = "listAgentDispatchReferences")
   public ListSubjectRefsRequest.Response references(
       @QueryParam("ticketId") List<String> ticketIds,
       @QueryParam("epicId") List<String> epicIds,

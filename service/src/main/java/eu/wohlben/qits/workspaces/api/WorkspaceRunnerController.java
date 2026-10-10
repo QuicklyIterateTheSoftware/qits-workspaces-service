@@ -203,7 +203,9 @@ public class WorkspaceRunnerController {
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
   @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE})
-  @Operation(summary = "Declare a workspace runner; answers its install line, once")
+  @Operation(
+      operationId = "createRunner",
+      summary = "Declare a workspace runner; answers its install line, once")
   @APIResponse(
       responseCode = "201",
       description = "The runner, its registration token and the install line carrying it",
@@ -264,7 +266,9 @@ public class WorkspaceRunnerController {
 
   @GET
   @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE, AGENT_ROLE})
-  @Operation(summary = "Every workspace runner, by name, with its connection, counts and login")
+  @Operation(
+      operationId = "listRunners",
+      summary = "Every workspace runner, by name, with its connection, counts and login")
   @APIResponse(responseCode = "200", description = "Every runner, by name")
   public List<WorkspaceRunnerDto> list() {
     return views.views();
@@ -356,7 +360,9 @@ public class WorkspaceRunnerController {
   @POST
   @Path("/{id}/registration-token")
   @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE})
-  @Operation(summary = "Replace a workspace runner's registration token; answers a new install line")
+  @Operation(
+      operationId = "rotateRunnerRegistrationToken",
+      summary = "Replace a workspace runner's registration token; answers a new install line")
   @APIResponse(
       responseCode = "200",
       description = "The runner, its new registration token and the install line carrying it",
@@ -429,7 +435,7 @@ public class WorkspaceRunnerController {
   @POST
   @Path("/{id}/greenlight")
   @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE})
-  @Operation(summary = "Lift a workspace runner's quarantine")
+  @Operation(operationId = "greenlightRunner", summary = "Lift a workspace runner's quarantine")
   @APIResponse(responseCode = "200", description = "The runner as it now is")
   @APIResponse(responseCode = "404", description = "No such runner")
   public WorkspaceRunnerDto greenlight(@PathParam("id") String id) {

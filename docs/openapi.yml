@@ -1224,6 +1224,7 @@ paths:
         - qits:system
   /workspaces/api/agent-dispatches/blocked:
     post:
+      operationId: markAgentDispatchBlocked
       requestBody:
         content:
           application/json:
@@ -1261,6 +1262,7 @@ paths:
         - qits:system
   /workspaces/api/agent-dispatches/delivery:
     post:
+      operationId: deliverAgentTurn
       requestBody:
         content:
           application/json:
@@ -1306,6 +1308,7 @@ paths:
         - qits:system
   /workspaces/api/agent-dispatches/entity:
     post:
+      operationId: markAgentDispatchEntity
       requestBody:
         content:
           application/json:
@@ -1343,6 +1346,7 @@ paths:
         - qits:system
   /workspaces/api/agent-dispatches/references:
     get:
+      operationId: listAgentDispatchReferences
       parameters:
       - name: epicId
         in: query
@@ -1479,6 +1483,7 @@ paths:
         - qits:admin-agent
   /workspaces/api/branches/resolution:
     post:
+      operationId: resolveReleasedBranch
       parameters:
       - name: repositoryId
         in: query
@@ -1548,6 +1553,7 @@ paths:
         - qits:admin-agent
   /workspaces/api/gc/branches:
     post:
+      operationId: sweepBranches
       requestBody:
         content:
           application/json:
@@ -1725,6 +1731,7 @@ paths:
   /workspaces/api/pins:
     get:
       summary: The container images a launch by this service would pull right now
+      operationId: listLaunchPins
       responses:
         "200":
           description: "The effective launch pins, image order"
@@ -1747,6 +1754,7 @@ paths:
   /workspaces/api/runners:
     get:
       summary: "Every workspace runner, by name, with its connection, counts and login"
+      operationId: listRunners
       responses:
         "200":
           description: "Every runner, by name"
@@ -1770,6 +1778,7 @@ paths:
         - qits:agent
     post:
       summary: "Declare a workspace runner; answers its install line, once"
+      operationId: createRunner
       requestBody:
         content:
           application/json:
@@ -1937,6 +1946,7 @@ paths:
   /workspaces/api/runners/{id}/greenlight:
     post:
       summary: Lift a workspace runner's quarantine
+      operationId: greenlightRunner
       parameters:
       - name: id
         in: path
@@ -2106,6 +2116,7 @@ paths:
     post:
       summary: Replace a workspace runner's registration token; answers a new install
         line
+      operationId: rotateRunnerRegistrationToken
       parameters:
       - name: id
         in: path

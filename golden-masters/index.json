@@ -3,6 +3,66 @@
   "provider": "qits-workspaces",
   "states": [
     {
+      "name": "a configured workspace image",
+      "slug": "a-configured-workspace-image",
+      "params": {},
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listLaunchPins",
+          "method": "GET",
+          "path": "/workspaces/api/pins",
+          "status": 200,
+          "file": "a-configured-workspace-image/listLaunchPins.json",
+          "frozen": {
+            "ids": [],
+            "instants": [
+              "$.generatedAt"
+            ],
+            "strings": [
+              "$.pins[*].version"
+            ],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a connected runner",
+      "slug": "a-connected-runner",
+      "params": {
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listRunners",
+          "method": "GET",
+          "path": "/workspaces/api/runners",
+          "status": 200,
+          "file": "a-connected-runner/listRunners.json",
+          "frozen": {
+            "ids": [
+              "$[*].id"
+            ],
+            "instants": [
+              "$[*].registeredAt",
+              "$[*].lastSeenAt",
+              "$[*].createdAt",
+              "$[*].connectedSince"
+            ],
+            "strings": [
+              "$[*].pinnedVersion"
+            ],
+            "numbers": [],
+            "listFilteredTo": "$"
+          }
+        }
+      ]
+    },
+    {
       "name": "a project with workspaces bound to work items",
       "slug": "a-project-with-workspaces-bound-to-work-items",
       "params": {
@@ -18,6 +78,31 @@
       },
       "dependsOn": [],
       "operations": [
+        {
+          "operationId": "listAgentDispatchReferences",
+          "method": "GET",
+          "path": "/workspaces/api/agent-dispatches/references",
+          "query": {
+            "ticketId": "{bugTicketId}"
+          },
+          "status": 200,
+          "file": "a-project-with-workspaces-bound-to-work-items/listAgentDispatchReferences.json",
+          "frozen": {
+            "ids": [
+              "$.entries[*].workspace.repositoryId",
+              "$.entries[*].workspace.ticketId",
+              "$.entries[*].workspace.workId"
+            ],
+            "instants": [
+              "$.entries[*].workspace.resolvedAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.entries[*].workspace.workspaceRowId"
+            ],
+            "listFilteredTo": null
+          }
+        },
         {
           "operationId": "listOpenWorkspaces",
           "method": "GET",
@@ -64,6 +149,87 @@
       ]
     },
     {
+      "name": "a quarantined runner",
+      "slug": "a-quarantined-runner",
+      "params": {
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "greenlightRunner",
+          "method": "POST",
+          "path": "/workspaces/api/runners/{runnerId}/greenlight",
+          "status": 200,
+          "file": "a-quarantined-runner/greenlightRunner.json",
+          "frozen": {
+            "ids": [
+              "$.id"
+            ],
+            "instants": [
+              "$.registeredAt",
+              "$.lastSeenAt",
+              "$.createdAt"
+            ],
+            "strings": [
+              "$.pinnedVersion"
+            ],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a repository with a branch for a ticket",
+      "slug": "a-repository-with-a-branch-for-a-ticket",
+      "params": {
+        "branch": "ticket/invoice-totals-are-off-by-one-cent",
+        "repositoryId": "00000000-0000-4000-8000-000000000014",
+        "ticketId": "00000000-0000-4000-8000-000000000001",
+        "ticketQualifiedId": "contract-00000001-10"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "dispatchAgent",
+          "method": "POST",
+          "path": "/workspaces/api/agent-dispatches",
+          "body": {
+            "repositoryId": "{repositoryId}",
+            "branch": "{branch}",
+            "branchTree": false,
+            "ticketId": "{ticketId}",
+            "workId": "{ticketId}",
+            "entityId": "{ticketQualifiedId}",
+            "entityTitle": "Invoice totals are off by one cent",
+            "entityStatus": "REFINED",
+            "entityBlocked": false,
+            "instruction": "Fix contract-00000001-10."
+          },
+          "status": 200,
+          "file": "a-repository-with-a-branch-for-a-ticket/dispatchAgent.json",
+          "frozen": {
+            "ids": [
+              "$.workspace.ticketId"
+            ],
+            "instants": [
+              "$.workspace.createdAt",
+              "$.workspace.queuedAt"
+            ],
+            "strings": [
+              "$.agentIdentity"
+            ],
+            "numbers": [
+              "$.workspace.id"
+            ],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "a work item with no workspaces",
       "slug": "a-work-item-with-no-workspaces",
       "params": {
@@ -96,6 +262,213 @@
       ]
     },
     {
+      "name": "a workspace standing on a released branch",
+      "slug": "a-workspace-standing-on-a-released-branch",
+      "params": {
+        "branch": "ticket/invoice-totals-are-off-by-one-cent",
+        "repositoryId": "00000000-0000-4000-8000-000000000015",
+        "sha": "0123456789abcdef0123456789abcdef01234567",
+        "version": "2026.101.120000"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "resolveReleasedBranch",
+          "method": "POST",
+          "path": "/workspaces/api/branches/resolution",
+          "query": {
+            "repositoryId": "{repositoryId}"
+          },
+          "body": {
+            "branch": "{branch}",
+            "target": "{version}",
+            "commit": "{sha}",
+            "result": "released as 2026.101.120000"
+          },
+          "status": 200,
+          "file": "a-workspace-standing-on-a-released-branch/resolveReleasedBranch.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [
+              "$.workspaceId"
+            ],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a workspace standing on a ticket's branch",
+      "slug": "a-workspace-standing-on-a-ticket-s-branch",
+      "params": {
+        "branch": "ticket/invoice-totals-are-off-by-one-cent",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "ticketId": "00000000-0000-4000-8000-000000000001",
+        "ticketQualifiedId": "contract-00000001-10"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "deliverAgentTurn",
+          "method": "POST",
+          "path": "/workspaces/api/agent-dispatches/delivery",
+          "body": {
+            "repositoryId": "{repositoryId}",
+            "branch": "{branch}",
+            "text": "The ticket moved to REVIEW.",
+            "workId": "{ticketId}",
+            "compactFirst": false
+          },
+          "status": 200,
+          "file": "a-workspace-standing-on-a-ticket-s-branch/deliverAgentTurn.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [
+              "$.workspaceId"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "markAgentDispatchBlocked",
+          "method": "POST",
+          "path": "/workspaces/api/agent-dispatches/blocked",
+          "body": {
+            "repositoryId": "{repositoryId}",
+            "branch": "{branch}",
+            "blocked": true,
+            "workId": "{ticketId}"
+          },
+          "status": 200,
+          "file": "a-workspace-standing-on-a-ticket-s-branch/markAgentDispatchBlocked.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [
+              "$.workspaceId"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "markAgentDispatchEntity",
+          "method": "POST",
+          "path": "/workspaces/api/agent-dispatches/entity",
+          "body": {
+            "repositoryId": "{repositoryId}",
+            "branch": "{branch}",
+            "title": "Invoice totals are off by one cent",
+            "status": "IMPLEMENTING",
+            "blocked": false,
+            "workId": "{ticketId}"
+          },
+          "status": 200,
+          "file": "a-workspace-standing-on-a-ticket-s-branch/markAgentDispatchEntity.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [
+              "$.workspaceId"
+            ],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "an unregistered runner",
+      "slug": "an-unregistered-runner",
+      "params": {
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listRunners",
+          "method": "GET",
+          "path": "/workspaces/api/runners",
+          "status": 200,
+          "file": "an-unregistered-runner/listRunners.json",
+          "frozen": {
+            "ids": [
+              "$[*].id"
+            ],
+            "instants": [
+              "$[*].createdAt"
+            ],
+            "strings": [
+              "$[*].pinnedVersion"
+            ],
+            "numbers": [],
+            "listFilteredTo": "$"
+          }
+        },
+        {
+          "operationId": "rotateRunnerRegistrationToken",
+          "method": "POST",
+          "path": "/workspaces/api/runners/{runnerId}/registration-token",
+          "status": 200,
+          "file": "an-unregistered-runner/rotateRunnerRegistrationToken.json",
+          "frozen": {
+            "ids": [
+              "$.runner.id"
+            ],
+            "instants": [
+              "$.runner.createdAt"
+            ],
+            "strings": [
+              "$.runner.pinnedVersion"
+            ],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "no runners",
+      "slug": "no-runners",
+      "params": {
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "createRunner",
+          "method": "POST",
+          "path": "/workspaces/api/runners",
+          "body": {
+            "name": "{runnerName}",
+            "slots": 1
+          },
+          "status": 201,
+          "file": "no-runners/createRunner.json",
+          "frozen": {
+            "ids": [
+              "$.runner.id"
+            ],
+            "instants": [
+              "$.runner.createdAt"
+            ],
+            "strings": [
+              "$.runner.pinnedVersion",
+              "$.installLine"
+            ],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "no work item has an open workspace",
       "slug": "no-work-item-has-an-open-workspace",
       "params": {
@@ -119,6 +492,45 @@
           "file": "no-work-item-has-an-open-workspace/listOpenWorkspaces.json",
           "frozen": {
             "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "repositories with merged branches",
+      "slug": "repositories-with-merged-branches",
+      "params": {
+        "mergedBranch": "merged-work",
+        "repositoryId": "00000000-0000-4000-8000-000000000016",
+        "repositoryName": "contract-service"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "sweepBranches",
+          "method": "POST",
+          "path": "/workspaces/api/gc/branches",
+          "body": {
+            "dryRun": false,
+            "repositories": [
+              {
+                "id": "{repositoryId}",
+                "name": "{repositoryName}",
+                "mainBranch": "master"
+              }
+            ],
+            "keepPrefixes": []
+          },
+          "status": 200,
+          "file": "repositories-with-merged-branches/sweepBranches.json",
+          "frozen": {
+            "ids": [
+              "$.removed[*].repositoryId"
+            ],
             "instants": [],
             "strings": [],
             "numbers": [],
