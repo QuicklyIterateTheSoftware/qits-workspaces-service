@@ -108,9 +108,11 @@ public class ProjectsPactFileTest {
             () ->
                 GoldenMasters.interaction(
                     new PactBuilder(GoldenMasters.CONSUMER, GoldenMasters.PROVIDER, PactSpecVersion.V4),
+                    GoldenMasters.PROJECTS,
                     ProjectsContract.REPOSITORY_EXISTS,
                     ProjectsContract.GET_REPOSITORY,
-                    null));
+                    null,
+                    ProjectsContract.READS_REPOSITORY));
     assertTrue(refused.getMessage().startsWith("trigger"), refused.getMessage());
   }
 

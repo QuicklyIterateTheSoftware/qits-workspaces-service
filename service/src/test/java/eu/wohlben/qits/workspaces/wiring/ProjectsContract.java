@@ -62,14 +62,33 @@ final class ProjectsContract {
   static final String GET_REPOSITORY = "getRepository";
   static final String LIST_PROJECT_REPOSITORIES = "listProjectRepositories";
 
+  /**
+   * What {@link HttpRepositoryLookup} binds of a repository: {@code ProjectsRepositories.Repository}
+   * and nothing else. {@code cloneUrl}, {@code component}, {@code backupUrl} and {@code lastBackup}
+   * come back too and stay out of the pact, so qits-projects may change them.
+   */
+  private static final List<String> REPOSITORY_FIELDS =
+      List.of("id", "name", "mainBranch", "projectId", "archetype");
+
+  /** {@code getRepository}: the one repository's fields. */
+  static final List<String> READS_REPOSITORY =
+      REPOSITORY_FIELDS.stream().map(f -> "$.repository." + f).toList();
+
+  /** {@code listProjectRepositories}: the same fields of every entry; {@code wrapper} is not read. */
+  static final List<String> READS_ENTRIES =
+      REPOSITORY_FIELDS.stream().map(f -> "$.entries[*].repository." + f).toList();
+
+  /** A 404 is read by its status alone. */
+  static final List<String> READS_NOTHING = List.of();
+
   /** What the consumer does with the lookup for one row, asserting what that code path reads. */
   @FunctionalInterface
   interface Call {
     void run(RepositoryLookup lookup, Map<String, String> params);
   }
 
-  /** One (trigger, call). */
-  record Case(Trigger trigger, String state, String operationId, Call call) {
+  /** One (trigger, call), and the answer's body paths that call reads. */
+  record Case(Trigger trigger, String state, String operationId, List<String> consumes, Call call) {
     String description() {
       return GoldenMasters.description(operationId, trigger);
     }
@@ -114,21 +133,53 @@ final class ProjectsContract {
 
   static final List<Case> CASES =
       List.of(
-          new Case(Trigger.operation("dispatchAgent"), REPOSITORY_EXISTS, GET_REPOSITORY, REQUIRE),
-          new Case(Trigger.operation("dispatchAgent"), NO_REPOSITORY, GET_REPOSITORY, REQUIRE_UNKNOWN),
+          new Case(
+              Trigger.operation("dispatchAgent"),
+              REPOSITORY_EXISTS,
+              GET_REPOSITORY,
+              READS_REPOSITORY,
+              REQUIRE),
+          new Case(
+              Trigger.operation("dispatchAgent"),
+              NO_REPOSITORY,
+              GET_REPOSITORY,
+              READS_NOTHING,
+              REQUIRE_UNKNOWN),
           new Case(
               Trigger.operation("dispatchAgent"),
               PROJECT_WITH_REPOSITORIES,
               LIST_PROJECT_REPOSITORIES,
+              READS_ENTRIES,
               LIST),
-          new Case(Trigger.operation("captureWorkspace"), REPOSITORY_EXISTS, GET_REPOSITORY, REQUIRE),
-          new Case(Trigger.operation("mergeWorkspace"), REPOSITORY_EXISTS, GET_REPOSITORY, FIND),
-          new Case(Trigger.operation("createWorkspace"), REPOSITORY_EXISTS, GET_REPOSITORY, FIND),
-          new Case(Trigger.operation("ensureEditor"), REPOSITORY_EXISTS, GET_REPOSITORY, FIND),
+          new Case(
+              Trigger.operation("captureWorkspace"),
+              REPOSITORY_EXISTS,
+              GET_REPOSITORY,
+              READS_REPOSITORY,
+              REQUIRE),
+          new Case(
+              Trigger.operation("mergeWorkspace"),
+              REPOSITORY_EXISTS,
+              GET_REPOSITORY,
+              READS_REPOSITORY,
+              FIND),
+          new Case(
+              Trigger.operation("createWorkspace"),
+              REPOSITORY_EXISTS,
+              GET_REPOSITORY,
+              READS_REPOSITORY,
+              FIND),
+          new Case(
+              Trigger.operation("ensureEditor"),
+              REPOSITORY_EXISTS,
+              GET_REPOSITORY,
+              READS_REPOSITORY,
+              FIND),
           new Case(
               Trigger.operation("ensureEditor"),
               PROJECT_WITH_REPOSITORIES,
               LIST_PROJECT_REPOSITORIES,
+              READS_ENTRIES,
               LIST));
 
   private ProjectsContract() {}
@@ -143,7 +194,8 @@ final class ProjectsContract {
     PactBuilder builder =
         new PactBuilder(GoldenMasters.CONSUMER, GoldenMasters.PROVIDER, PactSpecVersion.V4);
     for (Case c : cases) {
-      GoldenMasters.interaction(builder, c.state(), c.operationId(), c.trigger());
+      GoldenMasters.interaction(
+          builder, GoldenMasters.PROJECTS, c.state(), c.operationId(), c.trigger(), c.consumes());
     }
     return builder.toPact();
   }

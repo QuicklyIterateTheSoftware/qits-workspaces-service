@@ -13,17 +13,23 @@ import au.com.dius.pact.core.model.matchingrules.TypeMatcher;
 import au.com.dius.pact.core.support.Json;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -63,20 +69,60 @@ import java.util.regex.Pattern;
  * recorded element: a leaf null in one element and a string in another becomes {@code type OR null}
  * (a V4 combined matcher), so a nullable field such as {@code component} matches in any position.
  * Unknown keys in {@code frozen} are tolerated.
+ *
+ * <p><b>A pact binds only what this service reads</b> (qits-1149). Each interaction names the body
+ * paths its consumer code reads ({@code consumes}); the recorded body is cut down to those paths
+ * before the matchers are built, and an interaction that reads nothing carries the status alone.
+ *
+ * <p><b>More than one provider.</b> Each provider publishes its tree at the same classpath root, so
+ * the index is chosen by its {@code provider} field, and its files are read next to that index. The
+ * one-argument methods are qits-projects'; the {@link Provider} overloads serve the others.
  */
 public final class GoldenMasters {
 
   /** The consumer, as the pact names it: the repository name, never the bare application name. */
   public static final String CONSUMER = "qits-workspaces-service";
 
+  /**
+   * One provider: its repository name (the pact's provider name) and its application name (what
+   * its golden-master index names, and the jar's prefix: {@code <application>-golden-masters}).
+   */
+  public record Provider(String repository, String application) {
+    public Provider {
+      Objects.requireNonNull(repository, "repository");
+      Objects.requireNonNull(application, "application");
+    }
+  }
+
+  /** qits-projects: the repository registry and the agent-waiting door. */
+  public static final Provider PROJECTS = new Provider("qits-projects-service", "qits-projects");
+
+  /** qits-idp: the commission doors for clients and tokens. */
+  public static final Provider IDP = new Provider("qits-idp-service", "qits-idp");
+
+  /** qits-containers: the place and volume doors behind {@code qits-containers-client}. */
+  public static final Provider CONTAINERS =
+      new Provider("qits-containers-service", "qits-containers");
+
+  /** qits-workspace-daemon: the agent surface every workspace container serves. */
+  public static final Provider WORKSPACE_DAEMON =
+      new Provider("qits-workspace-daemon", "qits-workspace-daemon");
+
   /** The provider, as the pact names it: the repository name, never the bare application name. */
-  public static final String PROVIDER = "qits-projects-service";
+  public static final String PROVIDER = PROJECTS.repository();
 
   /** The provider as the golden-master index names it: the application name. */
-  public static final String INDEX_PROVIDER = "qits-projects";
+  public static final String INDEX_PROVIDER = PROJECTS.application();
 
   /** Where the jar puts the tree on the classpath. */
   public static final String ROOT = "golden-masters/";
+
+  /**
+   * {@code consumes} for a call whose client parses the answer as a JSON object but whose code reads
+   * no field of it — {@code qits-containers-client} binds every 2xx body and refuses one that does
+   * not bind. The pact then holds an empty object: any object answers it.
+   */
+  public static final List<String> A_JSON_BODY = List.of("$");
 
   /** An ISO-8601 timestamp, any fraction length, Z or a numeric offset. */
   public static final String ISO_INSTANT =
@@ -89,7 +135,10 @@ public final class GoldenMasters {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
-  private static volatile JsonNode index;
+  /** One loaded index and where it was found, so its files resolve next to it. */
+  private record Index(JsonNode root, URL location) {}
+
+  private static final Map<String, Index> INDEXES = new ConcurrentHashMap<>();
 
   private GoldenMasters() {}
 
@@ -97,6 +146,7 @@ public final class GoldenMasters {
 
   /** One recorded (state, operation), as the index describes it. */
   public record Operation(
+      Provider provider,
       String state,
       Map<String, String> params,
       String operationId,
@@ -136,23 +186,37 @@ public final class GoldenMasters {
     }
   }
 
-  /** The provider state's frozen example params (e.g. {@code repositoryId}). */
+  /** qits-projects' {@link #params(Provider, String)}. */
   public static Map<String, String> params(String state) {
+    return params(PROJECTS, state);
+  }
+
+  /** The provider state's frozen example params (e.g. {@code repositoryId}). */
+  public static Map<String, String> params(Provider provider, String state) {
     Map<String, String> params = new LinkedHashMap<>();
-    stateNode(state).path("params").fields().forEachRemaining(e -> params.put(e.getKey(), e.getValue().asText()));
+    stateNode(provider, state)
+        .path("params")
+        .fields()
+        .forEachRemaining(e -> params.put(e.getKey(), e.getValue().asText()));
     return params;
   }
 
-  /** The index entry for one (state, operation); fails naming both when the index has none. */
+  /** qits-projects' {@link #operation(Provider, String, String)}. */
   public static Operation operation(String state, String operationId) {
-    JsonNode stateNode = stateNode(state);
+    return operation(PROJECTS, state, operationId);
+  }
+
+  /** The index entry for one (state, operation); fails naming both when the index has none. */
+  public static Operation operation(Provider provider, String state, String operationId) {
+    JsonNode stateNode = stateNode(provider, state);
     for (JsonNode op : stateNode.path("operations")) {
       if (operationId.equals(op.path("operationId").asText())) {
         JsonNode frozen = op.path("frozen");
         JsonNode filtered = frozen.path("listFilteredTo");
         return new Operation(
+            provider,
             state,
-            params(state),
+            params(provider, state),
             operationId,
             op.path("method").asText(),
             op.path("path").asText(),
@@ -165,19 +229,35 @@ public final class GoldenMasters {
       }
     }
     throw new IllegalArgumentException(
-        "qits-projects' golden masters record no operation " + operationId + " in state '" + state
-            + "'");
+        provider.application() + "'s golden masters record no operation " + operationId
+            + " in state '" + state + "'");
+  }
+
+  /** qits-projects' {@link #body(Provider, String, String)}. */
+  public static String body(String state, String operationId) {
+    return body(PROJECTS, state, operationId);
   }
 
   /** The recorded JSON for one (state, operation), byte for byte as the jar carries it. */
-  public static String body(String state, String operationId) {
-    return resource(ROOT + operation(state, operationId).file());
+  @SuppressWarnings("deprecation") // new URL(context, spec) is the one resolver jar: URLs have
+  public static String body(Provider provider, String state, String operationId) {
+    Operation op = operation(provider, state, operationId);
+    try {
+      return read(new URL(index(provider).location(), op.file()), op.file());
+    } catch (MalformedURLException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  /** qits-projects' {@link #json(Provider, String, String)}. */
+  public static JsonNode json(String state, String operationId) {
+    return json(PROJECTS, state, operationId);
   }
 
   /** {@link #body}, parsed — a fresh tree each call, so a caller may edit it. */
-  public static JsonNode json(String state, String operationId) {
+  public static JsonNode json(Provider provider, String state, String operationId) {
     try {
-      return MAPPER.readTree(body(state, operationId));
+      return MAPPER.readTree(body(provider, state, operationId));
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
@@ -237,24 +317,46 @@ public final class GoldenMasters {
   }
 
   /**
-   * Add the V4 HTTP interaction for one recorded (state, operation), reached from {@code trigger}.
+   * Add the V4 HTTP interaction for one recorded (state, operation) of {@code provider}, reached
+   * from {@code trigger}.
    *
    * <p>{@code given(state, params)}; the request path from the index template, each {@code
-   * {param}} as a provider-state expression with the frozen example; the status exact; the body
-   * from the recording with the matchers the class javadoc lists; and the per-interaction {@code
-   * comments.references} — {@code qits-call} (the provider operation) and {@code qits-trigger}.
+   * {param}} as a provider-state expression with the frozen example (a query in the template
+   * becomes exact query parameters); {@code requestBody} when the consumer sends one; the status
+   * exact; and the per-interaction {@code comments.references} — {@code qits-call} (the provider
+   * operation) and {@code qits-trigger}.
+   *
+   * <p><b>The response body is the recording cut down to {@code consumes}</b>, the JSON paths this
+   * service's code reads ({@code $.repository.id}, {@code $.entries[*].repository.name}, {@code
+   * $[*].clientId}), with the matchers the class javadoc lists. An empty {@code consumes} is a
+   * status-only interaction: no body and no content type, because nothing here reads either.
+   *
+   * <p>{@code requestBody} is this consumer's OWN expectation, never the recording's request: what
+   * this service sends is its half of the contract.
    *
    * @throws NullPointerException when {@code trigger} is null: an interaction nobody can attribute
    *     to an entry point is exactly what the references exist to prevent
    */
   public static PactBuilder interaction(
-      PactBuilder builder, String state, String operationId, Trigger trigger) {
+      PactBuilder builder,
+      Provider provider,
+      String state,
+      String operationId,
+      Trigger trigger,
+      DslPart requestBody,
+      List<String> consumes) {
     Objects.requireNonNull(trigger, "trigger: every interaction names the entry point that makes it");
-    Operation op = operation(state, operationId);
-    DslPart body = responseBody(op);
+    Objects.requireNonNull(consumes, "consumes: name what the consumer reads, or List.of()");
+    Operation op = operation(provider, state, operationId);
+    DslPart body = consumes.isEmpty() ? null : responseBody(op, consumes);
+    String[] pathAndQuery = op.path().split("\\?", 2);
+    Operation pathOnly =
+        new Operation(
+            op.provider(), op.state(), op.params(), op.operationId(), op.method(), pathAndQuery[0],
+            op.status(), op.file(), op.ids(), op.instants(), op.strings(), op.listFilteredTo());
     Map<String, Object> references = new LinkedHashMap<>();
     Map<String, String> call = new LinkedHashMap<>();
-    call.put("app", PROVIDER);
+    call.put("app", provider.repository());
     call.put("operationId", operationId);
     references.put("qits-call", call);
     references.put("qits-trigger", trigger.reference());
@@ -263,16 +365,31 @@ public final class GoldenMasters {
         http -> {
           http.state(state, new LinkedHashMap<String, Object>(op.params()));
           http.withRequest(
-              request ->
-                  request
-                      .method(op.method())
-                      .path(Matchers.fromProviderState(op.expressionPath(), op.examplePath())));
+              request -> {
+                request
+                    .method(op.method())
+                    .path(
+                        Matchers.fromProviderState(
+                            pathOnly.expressionPath(), pathOnly.examplePath()));
+                if (pathAndQuery.length > 1) {
+                  for (String pair : pathAndQuery[1].split("&")) {
+                    String[] kv = pair.split("=", 2);
+                    request.queryParameter(kv[0], kv.length > 1 ? kv[1] : "");
+                  }
+                }
+                return requestBody == null ? request : request.body(requestBody);
+              });
           http.willRespondWith(
-              response ->
-                  response
-                      .status(op.status())
-                      .header("Content-Type", Matchers.regexp("application/json.*", "application/json"))
-                      .body(body));
+              response -> {
+                response.status(op.status());
+                return body == null
+                    ? response
+                    : response
+                        .header(
+                            "Content-Type",
+                            Matchers.regexp("application/json.*", "application/json"))
+                        .body(body);
+              });
           // pact-jvm 4.6's DSL has no setter for an arbitrary comment group (only `comment(text)`
           // and the test name), but the V4 model's comments map is mutable and written verbatim.
           http.getInteraction().getComments().put("references", Json.toJson(references));
@@ -280,17 +397,207 @@ public final class GoldenMasters {
         });
   }
 
-  /** The recorded body with the index's matchers, built for {@link #interaction}. */
-  static DslPart responseBody(Operation op) {
-    JsonNode recorded = json(op.state(), op.operationId());
+  /** {@link #interaction(PactBuilder, Provider, String, String, Trigger, DslPart, List)} for a GET. */
+  public static PactBuilder interaction(
+      PactBuilder builder,
+      Provider provider,
+      String state,
+      String operationId,
+      Trigger trigger,
+      List<String> consumes) {
+    return interaction(builder, provider, state, operationId, trigger, null, consumes);
+  }
+
+  /** The recorded body cut to {@code consumes}, with the index's matchers. */
+  static DslPart responseBody(Operation op, List<String> consumes) {
+    JsonNode recorded = prune(json(op.provider(), op.state(), op.operationId()), consumes, op);
+    if (recorded.isArray()) {
+      return rootArray(Shape.of(recorded), op);
+    }
     if (!recorded.isObject()) {
       throw new IllegalStateException(
           "golden master " + op.state() + "/" + op.operationId()
-              + ": only an object body is supported, got " + recorded.getNodeType());
+              + ": only an object or array body is supported, got " + recorded.getNodeType());
     }
     PactDslJsonBody root = new PactDslJsonBody();
     fillObject(root, Shape.of(recorded), "$", op);
     return root;
+  }
+
+  /** A body that is an array of objects at the root, like qits-idp's listings. */
+  private static DslPart rootArray(Shape array, Operation op) {
+    int n = array.length;
+    if (n == 0) {
+      return new PactDslJsonArray();
+    }
+    if (array.element.kind != Shape.Kind.OBJECT) {
+      throw unsupported(op, "$[*]", "a root array of " + array.element.kind);
+    }
+    PactDslJsonBody template =
+        "$".equals(op.listFilteredTo())
+            ? PactDslJsonArray.arrayMinLike(n, n)
+            : PactDslJsonArray.arrayMinMaxLike(n, n, n);
+    fillObject(template, array.element, "$[*]", op);
+    return template.closeObject();
+  }
+
+  /**
+   * {@code json}, an object this service sends, as a request body matched exactly. For a body the
+   * consumer composes itself and captures off its own wire, where every value is its own.
+   */
+  public static DslPart exactBody(JsonNode json) {
+    if (!json.isObject()) {
+      throw new IllegalArgumentException("an exact request body is an object, got " + json.getNodeType());
+    }
+    PactDslJsonBody body = new PactDslJsonBody();
+    exactFields(body, json);
+    return body;
+  }
+
+  private static void exactFields(PactDslJsonBody target, JsonNode object) {
+    object
+        .fields()
+        .forEachRemaining(
+            field -> {
+              String name = field.getKey();
+              JsonNode value = field.getValue();
+              if (value.isNull()) {
+                target.nullValue(name);
+              } else if (value.isTextual()) {
+                target.stringValue(name, value.asText());
+              } else if (value.isBoolean()) {
+                target.booleanValue(name, value.asBoolean());
+              } else if (value.isNumber()) {
+                target.numberValue(name, value.numberValue());
+              } else if (value.isObject()) {
+                PactDslJsonBody nested = target.object(name);
+                exactFields(nested, value);
+                nested.closeObject();
+              } else {
+                PactDslJsonArray array = target.array(name);
+                exactElements(array, value);
+                array.closeArray();
+              }
+            });
+  }
+
+  private static void exactElements(PactDslJsonArray target, JsonNode array) {
+    for (JsonNode value : array) {
+      if (value.isNull()) {
+        target.nullValue();
+      } else if (value.isTextual()) {
+        target.stringValue(value.asText());
+      } else if (value.isBoolean()) {
+        target.booleanValue(value.asBoolean());
+      } else if (value.isNumber()) {
+        target.numberValue(value.numberValue());
+      } else if (value.isObject()) {
+        PactDslJsonBody nested = target.object();
+        exactFields(nested, value);
+        nested.closeObject();
+      } else {
+        PactDslJsonArray nested = target.array();
+        exactElements(nested, value);
+        nested.closeArray();
+      }
+    }
+  }
+
+  // --- cutting the recording to what is read ----------------------------------------------------
+
+  private static final Pattern SEGMENT = Pattern.compile("\\.([A-Za-z0-9_-]+)|\\[\\*]");
+
+  /**
+   * The recording holding only the {@code consumes} paths and their ancestors. A path that names an
+   * object or an array keeps the whole of it. A path the recording does not hold fails, naming it:
+   * a consumer cannot read what the provider never answered.
+   */
+  static JsonNode prune(JsonNode recorded, List<String> consumes, Operation op) {
+    JsonNode out = recorded.isArray() ? MAPPER.createArrayNode() : MAPPER.createObjectNode();
+    for (String path : consumes) {
+      if ("$".equals(path)) {
+        continue; // A_JSON_BODY: the container, and nothing in it
+      }
+      copy(recorded, out, segments(path), 0, path, op);
+    }
+    return out;
+  }
+
+  private static List<String> segments(String path) {
+    if (!path.startsWith("$")) {
+      throw new IllegalArgumentException("a consumed path starts with $: " + path);
+    }
+    List<String> out = new ArrayList<>();
+    Matcher m = SEGMENT.matcher(path);
+    int at = 1;
+    while (m.find()) {
+      if (m.start() != at) {
+        throw new IllegalArgumentException("cannot read consumed path " + path);
+      }
+      out.add(m.group(1) == null ? "[*]" : m.group(1));
+      at = m.end();
+    }
+    if (at != path.length()) {
+      throw new IllegalArgumentException("cannot read consumed path " + path);
+    }
+    return out;
+  }
+
+  private static void copy(
+      JsonNode src, JsonNode dst, List<String> segs, int i, String path, Operation op) {
+    String seg = segs.get(i);
+    boolean last = i == segs.size() - 1;
+    if ("[*]".equals(seg)) {
+      if (!src.isArray() || !(dst instanceof ArrayNode out)) {
+        throw notRecorded(op, path);
+      }
+      for (int e = 0; e < src.size(); e++) {
+        JsonNode element = src.get(e);
+        if (last) {
+          if (out.size() <= e) {
+            out.add(element.deepCopy());
+          } else {
+            out.set(e, element.deepCopy());
+          }
+          continue;
+        }
+        if (out.size() <= e) {
+          out.add(container(element));
+        }
+        if (element.isContainerNode()) {
+          copy(element, out.get(e), segs, i + 1, path, op);
+        }
+      }
+      return;
+    }
+    if (!src.isObject() || !src.has(seg) || !(dst instanceof ObjectNode out)) {
+      throw notRecorded(op, path);
+    }
+    JsonNode child = src.get(seg);
+    if (last || !child.isContainerNode()) {
+      out.set(seg, child.deepCopy());
+      return;
+    }
+    if (!out.has(seg)) {
+      out.set(seg, container(child));
+    }
+    copy(child, out.get(seg), segs, i + 1, path, op);
+  }
+
+  private static JsonNode container(JsonNode like) {
+    if (like.isArray()) {
+      return MAPPER.createArrayNode();
+    }
+    if (like.isObject()) {
+      return MAPPER.createObjectNode();
+    }
+    return like.deepCopy();
+  }
+
+  private static IllegalStateException notRecorded(Operation op, String path) {
+    return new IllegalStateException(
+        "golden master " + op.state() + "/" + op.operationId() + " holds nothing at consumed path "
+            + path);
   }
 
   // --- the body ---------------------------------------------------------------------------------
@@ -528,39 +835,50 @@ public final class GoldenMasters {
 
   // --- reading the jar --------------------------------------------------------------------------
 
-  private static JsonNode index() {
-    JsonNode loaded = index;
-    if (loaded == null) {
+  /**
+   * The index whose {@code provider} is {@code provider}'s application. Every provider's jar puts
+   * its tree at the same root, so the classpath may hold several {@code index.json}; the field is
+   * what tells them apart, never the order of the classpath.
+   */
+  private static Index index(Provider provider) {
+    return INDEXES.computeIfAbsent(provider.application(), app -> load(provider));
+  }
+
+  private static Index load(Provider provider) {
+    List<String> seen = new ArrayList<>();
+    for (URL url : resources(ROOT + "index.json")) {
+      JsonNode loaded;
       try {
-        loaded = MAPPER.readTree(resource(ROOT + "index.json"));
+        loaded = MAPPER.readTree(read(url, ROOT + "index.json"));
       } catch (IOException e) {
         throw new UncheckedIOException(e);
       }
+      String owner = loaded.path("provider").asText();
+      seen.add(owner);
+      if (!provider.application().equals(owner)) {
+        continue;
+      }
       if (loaded.path("formatVersion").asInt() != 1) {
         throw new IllegalStateException(
-            "golden-masters/index.json is formatVersion " + loaded.path("formatVersion")
+            owner + "'s golden-masters/index.json is formatVersion " + loaded.path("formatVersion")
                 + "; GoldenMasters reads formatVersion 1");
       }
-      if (!INDEX_PROVIDER.equals(loaded.path("provider").asText())) {
-        throw new IllegalStateException(
-            "golden-masters/index.json is "
-                + loaded.path("provider")
-                + "'s, not "
-                + INDEX_PROVIDER
-                + "'s");
-      }
-      index = loaded;
+      return new Index(loaded, url);
     }
-    return loaded;
+    throw new IllegalStateException(
+        "no golden-masters/index.json of " + provider.application() + " on the test classpath (found "
+            + seen + ") — is eu.wohlben.qits:" + provider.application()
+            + "-golden-masters a test dependency of this module?");
   }
 
-  private static JsonNode stateNode(String state) {
-    for (JsonNode node : index().path("states")) {
+  private static JsonNode stateNode(Provider provider, String state) {
+    for (JsonNode node : index(provider).root().path("states")) {
       if (state.equals(node.path("name").asText())) {
         return node;
       }
     }
-    throw new IllegalArgumentException("qits-projects' golden masters record no state '" + state + "'");
+    throw new IllegalArgumentException(
+        provider.application() + "'s golden masters record no state '" + state + "'");
   }
 
   private static Set<String> strings(JsonNode array) {
@@ -571,23 +889,40 @@ public final class GoldenMasters {
     return Set.copyOf(out);
   }
 
-  private static String resource(String name) {
+  /** Every copy of {@code name} on the classpath. */
+  private static List<URL> resources(String name) {
     // This class's own loader first: StoryPeers answers on stub threads whose context loader is
     // whatever thread started the stub, and the jar is on this class's test classpath regardless.
-    ClassLoader loader = GoldenMasters.class.getClassLoader();
-    InputStream found = loader == null ? null : loader.getResourceAsStream(name);
-    if (found == null && Thread.currentThread().getContextClassLoader() != null) {
-      found = Thread.currentThread().getContextClassLoader().getResourceAsStream(name);
-    }
-    try (InputStream in = found) {
-      if (in == null) {
-        throw new IllegalStateException(
-            name + " is not on the test classpath — is eu.wohlben.qits:qits-projects-golden-masters"
-                + " a test dependency of this module?");
+    List<URL> out = new ArrayList<>();
+    for (ClassLoader loader :
+        List.of(
+            Objects.requireNonNullElse(
+                GoldenMasters.class.getClassLoader(), ClassLoader.getSystemClassLoader()),
+            Objects.requireNonNullElse(
+                Thread.currentThread().getContextClassLoader(), ClassLoader.getSystemClassLoader()))) {
+      try {
+        Enumeration<URL> found = loader.getResources(name);
+        while (found.hasMoreElements()) {
+          URL url = found.nextElement();
+          if (out.stream().noneMatch(u -> u.toString().equals(url.toString()))) {
+            out.add(url);
+          }
+        }
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
       }
+      if (!out.isEmpty()) {
+        return out;
+      }
+    }
+    return out;
+  }
+
+  private static String read(URL url, String name) {
+    try (InputStream in = url.openStream()) {
       return new String(in.readAllBytes(), StandardCharsets.UTF_8);
     } catch (IOException e) {
-      throw new UncheckedIOException(e);
+      throw new UncheckedIOException("cannot read " + name + " at " + url, e);
     }
   }
 }

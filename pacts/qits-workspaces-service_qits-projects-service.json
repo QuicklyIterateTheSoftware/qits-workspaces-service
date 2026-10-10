@@ -45,11 +45,7 @@
           "content": {
             "repository": {
               "archetype": "SERVICE",
-              "backupUrl": null,
-              "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-service",
-              "component": "contract-service",
               "id": "00000000-0000-4000-8000-000000000002",
-              "lastBackup": null,
               "mainBranch": "main",
               "name": "contract-service",
               "projectId": "00000000-0000-4000-8000-000000000001"
@@ -66,22 +62,6 @@
         "matchingRules": {
           "body": {
             "$.repository.archetype": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.cloneUrl": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.component": {
               "combine": "AND",
               "matchers": [
                 {
@@ -182,11 +162,7 @@
           "content": {
             "repository": {
               "archetype": "SERVICE",
-              "backupUrl": null,
-              "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-service",
-              "component": "contract-service",
               "id": "00000000-0000-4000-8000-000000000002",
-              "lastBackup": null,
               "mainBranch": "main",
               "name": "contract-service",
               "projectId": "00000000-0000-4000-8000-000000000001"
@@ -203,22 +179,6 @@
         "matchingRules": {
           "body": {
             "$.repository.archetype": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.cloneUrl": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.component": {
               "combine": "AND",
               "matchers": [
                 {
@@ -319,11 +279,7 @@
           "content": {
             "repository": {
               "archetype": "SERVICE",
-              "backupUrl": null,
-              "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-service",
-              "component": "contract-service",
               "id": "00000000-0000-4000-8000-000000000002",
-              "lastBackup": null,
               "mainBranch": "main",
               "name": "contract-service",
               "projectId": "00000000-0000-4000-8000-000000000001"
@@ -340,22 +296,6 @@
         "matchingRules": {
           "body": {
             "$.repository.archetype": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.cloneUrl": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.component": {
               "combine": "AND",
               "matchers": [
                 {
@@ -451,41 +391,6 @@
         "path": "/projects/api/repositories/00000000-0000-4000-8000-000000000001"
       },
       "response": {
-        "body": {
-          "content": {
-            "message": "Repository not found: 00000000-0000-4000-8000-000000000001"
-          },
-          "contentType": "application/json",
-          "encoded": false
-        },
-        "headers": {
-          "Content-Type": [
-            "application/json"
-          ]
-        },
-        "matchingRules": {
-          "body": {
-            "$.message": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            }
-          },
-          "header": {
-            "Content-Type": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "application/json.*"
-                }
-              ]
-            }
-          }
-        },
         "status": 404
       },
       "type": "Synchronous/HTTP"
@@ -531,83 +436,42 @@
           "content": {
             "entries": [
               {
-                "declared": true,
                 "repository": {
                   "archetype": "PROJECT",
-                  "backupUrl": null,
-                  "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-00000001-contract-00000001",
-                  "component": "contract-daemon",
                   "id": "00000000-0000-4000-8000-000000000002",
-                  "lastBackup": null,
                   "mainBranch": "main",
                   "name": "contract-00000001-contract-00000001",
                   "projectId": "00000000-0000-4000-8000-000000000001"
                 }
               },
               {
-                "declared": true,
                 "repository": {
                   "archetype": "PROJECT",
-                  "backupUrl": null,
-                  "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-00000001-contract-00000001",
-                  "component": "contract-daemon",
                   "id": "00000000-0000-4000-8000-000000000002",
-                  "lastBackup": null,
                   "mainBranch": "main",
                   "name": "contract-00000001-contract-00000001",
                   "projectId": "00000000-0000-4000-8000-000000000001"
                 }
               },
               {
-                "declared": true,
                 "repository": {
                   "archetype": "PROJECT",
-                  "backupUrl": null,
-                  "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-00000001-contract-00000001",
-                  "component": "contract-daemon",
                   "id": "00000000-0000-4000-8000-000000000002",
-                  "lastBackup": null,
                   "mainBranch": "main",
                   "name": "contract-00000001-contract-00000001",
                   "projectId": "00000000-0000-4000-8000-000000000001"
                 }
               },
               {
-                "declared": true,
                 "repository": {
                   "archetype": "PROJECT",
-                  "backupUrl": null,
-                  "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-00000001-contract-00000001",
-                  "component": "contract-daemon",
                   "id": "00000000-0000-4000-8000-000000000002",
-                  "lastBackup": null,
                   "mainBranch": "main",
                   "name": "contract-00000001-contract-00000001",
                   "projectId": "00000000-0000-4000-8000-000000000001"
                 }
               }
-            ],
-            "wrapper": {
-              "branch": "main",
-              "entries": [
-                {
-                  "name": "contract-service",
-                  "path": "components/contract-service/contract-service",
-                  "repositoryId": "00000000-0000-4000-8000-000000000005"
-                },
-                {
-                  "name": "contract-service",
-                  "path": "components/contract-service/contract-service",
-                  "repositoryId": "00000000-0000-4000-8000-000000000005"
-                },
-                {
-                  "name": "contract-service",
-                  "path": "components/contract-service/contract-service",
-                  "repositoryId": "00000000-0000-4000-8000-000000000005"
-                }
-              ],
-              "repositoryId": "00000000-0000-4000-8000-000000000002"
-            }
+            ]
           },
           "contentType": "application/json",
           "encoded": false
@@ -629,38 +493,11 @@
                 }
               ]
             },
-            "$.entries[*].declared": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
             "$.entries[*].repository.archetype": {
               "combine": "AND",
               "matchers": [
                 {
                   "match": "type"
-                }
-              ]
-            },
-            "$.entries[*].repository.cloneUrl": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.entries[*].repository.component": {
-              "combine": "OR",
-              "matchers": [
-                {
-                  "match": "type"
-                },
-                {
-                  "match": "null"
                 }
               ]
             },
@@ -690,58 +527,6 @@
               ]
             },
             "$.entries[*].repository.projectId": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                }
-              ]
-            },
-            "$.wrapper.branch": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.wrapper.entries": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type",
-                  "max": 3,
-                  "min": 3
-                }
-              ]
-            },
-            "$.wrapper.entries[*].name": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.wrapper.entries[*].path": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.wrapper.entries[*].repositoryId": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                }
-              ]
-            },
-            "$.wrapper.repositoryId": {
               "combine": "AND",
               "matchers": [
                 {
@@ -809,11 +594,7 @@
           "content": {
             "repository": {
               "archetype": "SERVICE",
-              "backupUrl": null,
-              "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-service",
-              "component": "contract-service",
               "id": "00000000-0000-4000-8000-000000000002",
-              "lastBackup": null,
               "mainBranch": "main",
               "name": "contract-service",
               "projectId": "00000000-0000-4000-8000-000000000001"
@@ -830,22 +611,6 @@
         "matchingRules": {
           "body": {
             "$.repository.archetype": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.cloneUrl": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.component": {
               "combine": "AND",
               "matchers": [
                 {
@@ -945,83 +710,42 @@
           "content": {
             "entries": [
               {
-                "declared": true,
                 "repository": {
                   "archetype": "PROJECT",
-                  "backupUrl": null,
-                  "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-00000001-contract-00000001",
-                  "component": "contract-daemon",
                   "id": "00000000-0000-4000-8000-000000000002",
-                  "lastBackup": null,
                   "mainBranch": "main",
                   "name": "contract-00000001-contract-00000001",
                   "projectId": "00000000-0000-4000-8000-000000000001"
                 }
               },
               {
-                "declared": true,
                 "repository": {
                   "archetype": "PROJECT",
-                  "backupUrl": null,
-                  "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-00000001-contract-00000001",
-                  "component": "contract-daemon",
                   "id": "00000000-0000-4000-8000-000000000002",
-                  "lastBackup": null,
                   "mainBranch": "main",
                   "name": "contract-00000001-contract-00000001",
                   "projectId": "00000000-0000-4000-8000-000000000001"
                 }
               },
               {
-                "declared": true,
                 "repository": {
                   "archetype": "PROJECT",
-                  "backupUrl": null,
-                  "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-00000001-contract-00000001",
-                  "component": "contract-daemon",
                   "id": "00000000-0000-4000-8000-000000000002",
-                  "lastBackup": null,
                   "mainBranch": "main",
                   "name": "contract-00000001-contract-00000001",
                   "projectId": "00000000-0000-4000-8000-000000000001"
                 }
               },
               {
-                "declared": true,
                 "repository": {
                   "archetype": "PROJECT",
-                  "backupUrl": null,
-                  "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-00000001-contract-00000001",
-                  "component": "contract-daemon",
                   "id": "00000000-0000-4000-8000-000000000002",
-                  "lastBackup": null,
                   "mainBranch": "main",
                   "name": "contract-00000001-contract-00000001",
                   "projectId": "00000000-0000-4000-8000-000000000001"
                 }
               }
-            ],
-            "wrapper": {
-              "branch": "main",
-              "entries": [
-                {
-                  "name": "contract-service",
-                  "path": "components/contract-service/contract-service",
-                  "repositoryId": "00000000-0000-4000-8000-000000000005"
-                },
-                {
-                  "name": "contract-service",
-                  "path": "components/contract-service/contract-service",
-                  "repositoryId": "00000000-0000-4000-8000-000000000005"
-                },
-                {
-                  "name": "contract-service",
-                  "path": "components/contract-service/contract-service",
-                  "repositoryId": "00000000-0000-4000-8000-000000000005"
-                }
-              ],
-              "repositoryId": "00000000-0000-4000-8000-000000000002"
-            }
+            ]
           },
           "contentType": "application/json",
           "encoded": false
@@ -1043,38 +767,11 @@
                 }
               ]
             },
-            "$.entries[*].declared": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
             "$.entries[*].repository.archetype": {
               "combine": "AND",
               "matchers": [
                 {
                   "match": "type"
-                }
-              ]
-            },
-            "$.entries[*].repository.cloneUrl": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.entries[*].repository.component": {
-              "combine": "OR",
-              "matchers": [
-                {
-                  "match": "type"
-                },
-                {
-                  "match": "null"
                 }
               ]
             },
@@ -1104,58 +801,6 @@
               ]
             },
             "$.entries[*].repository.projectId": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                }
-              ]
-            },
-            "$.wrapper.branch": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.wrapper.entries": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type",
-                  "max": 3,
-                  "min": 3
-                }
-              ]
-            },
-            "$.wrapper.entries[*].name": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.wrapper.entries[*].path": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.wrapper.entries[*].repositoryId": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                }
-              ]
-            },
-            "$.wrapper.repositoryId": {
               "combine": "AND",
               "matchers": [
                 {
@@ -1223,11 +868,7 @@
           "content": {
             "repository": {
               "archetype": "SERVICE",
-              "backupUrl": null,
-              "cloneUrl": "https://githost.example.test/git/contract-00000001/contract-service",
-              "component": "contract-service",
               "id": "00000000-0000-4000-8000-000000000002",
-              "lastBackup": null,
               "mainBranch": "main",
               "name": "contract-service",
               "projectId": "00000000-0000-4000-8000-000000000001"
@@ -1244,22 +885,6 @@
         "matchingRules": {
           "body": {
             "$.repository.archetype": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.cloneUrl": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.repository.component": {
               "combine": "AND",
               "matchers": [
                 {
