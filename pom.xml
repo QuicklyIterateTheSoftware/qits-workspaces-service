@@ -31,7 +31,7 @@
          and the mandatory -Dqits.variant=oauth|forwardauth|local auth profiles. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-workspaces</artifactId>
-    <version>2026.1010.113552</version>
+    <version>2026.1010.163357</version>
     <packaging>pom</packaging>
     <name>qits-workspaces</name>
 
@@ -65,7 +65,7 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1010.110036</qits.workspace-daemon-protocol.version>
+        <qits.workspace-daemon-protocol.version>2026.1010.154553</qits.workspace-daemon-protocol.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -78,11 +78,11 @@
              the qits/qits-workspaces-runner image every runner is told to upgrade to, so the frames
              this service speaks and the binary it hands out are one release. Moved by
              qits-maintenance on maintenance/dependencies, gated here; never by hand. -->
-        <qits.workspaces-runner-protocol.version>2026.1009.185511</qits.workspaces-runner-protocol.version>
+        <qits.workspaces-runner-protocol.version>2026.1010.154224</qits.workspaces-runner-protocol.version>
         <!-- qits-runner-javalib (qits-771): the lifecycle frames and their codec
              (qits-runner-protocol), and the install script template plus RunnerIdentity
              (qits-runner-toolkit). One release carries both, so one property pins both. -->
-        <qits.runner.version>2026.1009.184810</qits.runner.version>
+        <qits.runner.version>2026.1010.153003</qits.runner.version>
         <qits.coding-agents.version>2026.1010.72418</qits.coding-agents.version>
         <qits.eventstream.version>2026.1010.165955</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
@@ -114,7 +114,7 @@
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
              and ConsumerPactVerificationTest verifies consumers' pacts against this service.
              An external library, so it moves by hand, not by a maintenance bump. -->
-        <pact-jvm.version>4.6.21</pact-jvm.version>
+        <pact-jvm.version>4.7.5</pact-jvm.version>
         <!-- THE CONSUMER PACTS this provider verifies (epic qits-546): one jar per consumer, each
              carrying `pacts/<consumer>_qits-workspaces-service.json`, and
              ConsumerPactVerificationTest loads every such resource off the test classpath. Test
@@ -132,7 +132,7 @@
 
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.34.6</quarkus.platform.version>
+        <quarkus.platform.version>3.40.1</quarkus.platform.version>
 
         <!-- The suites need a real PostgreSQL, because the store IS PostgreSQL now — and the first
              rule here is that a clone tests green with NO DOCKER, which rules out Testcontainers
@@ -146,13 +146,13 @@
              binaries are per-arch artifacts, and a missing one fails in the middle of a suite rather
              than during resolution. -->
         <zonky.embedded-postgres.version>2.2.2</zonky.embedded-postgres.version>
-        <zonky.postgres-binaries.version>18.4.0</zonky.postgres-binaries.version>
+        <zonky.postgres-binaries.version>18.6.0</zonky.postgres-binaries.version>
 
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
         <failsafe-plugin.version>3.5.4</failsafe-plugin.version>
         <jandex-plugin.version>3.4.0</jandex-plugin.version>
-        <lombok.version>1.18.38</lombok.version>
+        <lombok.version>1.18.48</lombok.version>
         <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
         <mapstruct.version>1.6.3</mapstruct.version>
         <!-- Quinoa is a quarkiverse extension and is NOT in quarkus-bom, so unlike every io.quarkus
@@ -162,7 +162,7 @@
              same version every other Quinoa-serving service here pins (qits-ci's root pom records
              the identical reasoning), and the point is that they move together rather than each
              proving a version for itself. -->
-        <quinoa.version>2.8.2</quinoa.version>
+        <quinoa.version>2.9.2</quinoa.version>
 
         <!-- The container ITs need docker, a pulled qits/workspace image (the published, layered
              one — see AGENTS.md) and the daemon native binary, none of which a fresh clone has.
