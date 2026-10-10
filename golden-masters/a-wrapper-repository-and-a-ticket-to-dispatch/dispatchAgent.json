@@ -19,6 +19,7 @@
     "entityBlocked": false,
     "activity": null,
     "waitingSince": null,
+    "waitingOn": null,
     "lastActivityAt": null,
     "createdAt": "2026-01-01T00:00:00Z",
     "obsoleteAt": null,

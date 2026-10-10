@@ -180,6 +180,34 @@ class GoldenMasterRecordingTest {
               200,
               "{\"branch\":\"{branch}\",\"target\":\"{version}\",\"commit\":\"{sha}\","
                   + "\"result\":\"released as " + ProviderStates.RELEASED_VERSION + "\"}"),
+          // qits-1153: the declared-wait doors, as the agent itself calls them (`qits wait`).
+          Interaction.write(
+                  ProviderStates.AN_AGENT_WITH_AN_OPEN_WAIT,
+                  "createAgentWait",
+                  WORKSPACES + "/agents/{agentId}/waits",
+                  201,
+                  "{\"label\":\"work contract-00000001-10 VERIFIED\","
+                      + "\"selection\":{\"event\":\"EntityTransitioned\",\"when\":[["
+                      + "{\"path\":\"entities[].entityId\",\"op\":\"exact\",\"value\":\"00000000-0000-4000-8000-000000000001\"},"
+                      + "{\"path\":\"entities[].status\",\"op\":\"exact\",\"value\":\"VERIFIED\"}]]},"
+                      + "\"timeout\":\"PT2H\"}")
+              .as("qits:agent"),
+          Interaction.read(
+                  ProviderStates.AN_AGENT_WITH_AN_OPEN_WAIT,
+                  "listAgentWaits",
+                  WORKSPACES + "/agents/{agentId}/waits?state=OPEN",
+                  null)
+              .as("qits:agent"),
+          new Interaction(
+              ProviderStates.AN_AGENT_WITH_AN_OPEN_WAIT,
+              "cancelAgentWait",
+              "DELETE",
+              WORKSPACES + "/agents/{agentId}/waits/{waitId}",
+              200,
+              null,
+              null,
+              Map.of(),
+              "qits:agent"),
           Interaction.write(
               ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES,
               "sweepBranches",

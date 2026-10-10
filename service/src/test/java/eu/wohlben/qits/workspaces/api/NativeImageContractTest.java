@@ -171,4 +171,21 @@ public class NativeImageContractTest {
           resource + " is not on the classpath; the pinned jar moved it");
     }
   }
+
+  /**
+   * The declared-wait selection (qits-1153) is bound by qits-eventstream's own Jackson reader, which
+   * a native image only runs on registered types: the record, its condition and its operator.
+   */
+  @Test
+  public void theWaitSelectionTypesAreRegisteredForReflection() {
+    Set<Class<?>> targets =
+        Set.of(AgentWaitController.class.getAnnotation(RegisterForReflection.class).targets());
+    for (Class<?> needed :
+        List.of(
+            eu.wohlben.qits.eventstream.selection.EventSelection.class,
+            eu.wohlben.qits.eventstream.selection.EventSelection.Condition.class,
+            eu.wohlben.qits.eventstream.selection.EventSelection.Op.class)) {
+      assertTrue(targets.contains(needed), needed + " is not in AgentWaitController's targets");
+    }
+  }
 }

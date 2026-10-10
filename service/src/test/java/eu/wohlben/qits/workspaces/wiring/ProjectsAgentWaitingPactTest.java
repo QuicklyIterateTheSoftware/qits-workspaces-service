@@ -45,9 +45,11 @@ public class ProjectsAgentWaitingPactTest {
     PactDslJsonBody body =
         new PactDslJsonBody()
             .booleanType("waiting", true)
-            .stringType("cause", "Stop")
+            .stringType("cause", "Wait")
             .stringType("sessionId", "s-1")
-            .integerType("at", 1234L);
+            .integerType("at", 1234L)
+            // qits-1153, W5: only while the agent waits on a declared wait.
+            .stringType("waitingOn", "release-request 42");
     ConsumerPacts.verify(
         ConsumerPacts.pact(
             GoldenMasters.PROJECTS,
@@ -60,7 +62,8 @@ public class ProjectsAgentWaitingPactTest {
                     Trigger.event("workspace-daemon:agent-waiting"),
                     body,
                     List.of())),
-        url -> reporterAgainst(url).report(params.get("ticketId"), true, "Stop", "s-1", 1234L));
+        url -> reporterAgainst(url)
+                .report(params.get("ticketId"), true, "Wait", "release-request 42", "s-1", 1234L));
   }
 
   private static HttpAgentWaitingReporter reporterAgainst(String baseUrl) {

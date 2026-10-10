@@ -16,6 +16,8 @@ import java.util.List;
  * @param repositoryId the wrapper repository
  * @param branches every (repository, branch) it pushed, oldest first
  * @param activity the harness's last reported state; null when nothing is known
+ * @param waitingOn the labels of its OPEN declared waits (qits-1153), joined with {@code "; "};
+ *     null when it waits on nothing
  */
 public record AgentDto(
     String agentId,
@@ -37,6 +39,7 @@ public record AgentDto(
     Boolean entityBlocked,
     AgentActivityState activity,
     Instant waitingSince,
+    String waitingOn,
     Instant lastActivityAt,
     Instant createdAt,
     Instant obsoleteAt,

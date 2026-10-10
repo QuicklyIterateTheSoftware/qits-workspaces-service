@@ -36,12 +36,13 @@ public class HttpAgentWaitingReporter implements AgentWaitingReporter {
   private final AtomicBoolean absenceLogged = new AtomicBoolean();
 
   @Override
-  public void report(String workId, boolean waiting, String cause, String sessionId, long at) {
+  public void report(
+      String workId, boolean waiting, String cause, String waitingOn, String sessionId, long at) {
     try {
       door.report(
           workId,
           projectsBearer.authorization().orElse(null),
-          new ProjectsAgentWaiting.AgentWaiting(waiting, cause, sessionId, at));
+          new ProjectsAgentWaiting.AgentWaiting(waiting, cause, sessionId, at, waitingOn));
     } catch (WebApplicationException http) {
       int status = http.getResponse().getStatus();
       if (status != 404 && status != 405) {

@@ -73,6 +73,8 @@ components:
           $ref: "#/components/schemas/AgentActivityState"
         waitingSince:
           $ref: "#/components/schemas/Instant"
+        waitingOn:
+          type: string
         lastActivityAt:
           $ref: "#/components/schemas/Instant"
         createdAt:
@@ -104,6 +106,13 @@ components:
       - ACTIVE
       - OBSOLETE
       - REMOVED
+    AgentWaitState:
+      type: string
+      enum:
+      - OPEN
+      - MATCHED
+      - TIMED_OUT
+      - CANCELLED
     ApiError:
       type: object
       description: "The error envelope: a message, plus a reason or a code on a 409."
@@ -278,6 +287,20 @@ components:
             \ at least workspaceMemoryLimit, which it needs; or -1 for unlimited swap.\
             \ Absent or blank is workspaceMemoryLimit when that is set (no swap),\
             \ else the platform default"
+    CreateWaitRequest:
+      type: object
+      required:
+      - selection
+      properties:
+        label:
+          type: string
+        selection:
+          $ref: "#/components/schemas/EventSelection"
+          type: object
+        timeout:
+          type: string
+          examples:
+          - PT2H
     DeliverTurnRequest:
       type: object
       required:
@@ -382,6 +405,43 @@ components:
       properties:
         workspace:
           $ref: "#/components/schemas/WorkspaceHistoryDto"
+    EventSelection:
+      type: object
+      required:
+      - event
+      description: "qits-eventstream's EventSelection: the event name, matched exactly,\
+        \ and `when` groups (ORed) of conditions (ANDed). Empty `when` = every event\
+        \ of that name."
+      properties:
+        event:
+          type: string
+          examples:
+          - ReleaseRequestStateChanged
+        when:
+          type: array
+          items:
+            type: array
+            items:
+              $ref: "#/components/schemas/EventSelectionCondition"
+    EventSelectionCondition:
+      type: object
+      required:
+      - path
+      - op
+      properties:
+        path:
+          type: string
+          description: "Dot path; `name[]` = some element of the array"
+        op:
+          type: string
+          enum:
+          - exact
+          - prefix
+          - exists
+        value:
+          type: string
+          description: A string for exact and prefix; true or false for exists (false
+            = absent)
     Health:
       type: object
       properties:
@@ -825,6 +885,35 @@ components:
           type: string
         result:
           type: string
+    WaitList:
+      type: object
+      properties:
+        waits:
+          type: array
+          items:
+            $ref: "#/components/schemas/WaitView"
+    WaitView:
+      type: object
+      properties:
+        id:
+          type: string
+        agentId:
+          type: string
+        label:
+          type: string
+        selection:
+          $ref: "#/components/schemas/EventSelection"
+          type: object
+        state:
+          $ref: "#/components/schemas/AgentWaitState"
+        createdAt:
+          $ref: "#/components/schemas/Instant"
+        expiresAt:
+          $ref: "#/components/schemas/Instant"
+        matchedEventId:
+          type: string
+        closedAt:
+          $ref: "#/components/schemas/Instant"
     WorkItemWorkspaceDto:
       type: object
       properties:
@@ -1416,6 +1505,151 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+  /workspaces/api/agents/{agentId}/waits:
+    get:
+      summary: "The agent's waits, optionally of one state"
+      operationId: listAgentWaits
+      parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: state
+        in: query
+        schema:
+          type: string
+      responses:
+        "200":
+          description: "The agent's waits, newest first."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitList"
+        "403":
+          description: An agent's credential reading another agent's waits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No such agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Agent Wait Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:system
+        - qits:agent
+    post:
+      summary: Declare what the agent waits on
+      operationId: createAgentWait
+      parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWaitRequest"
+        required: true
+      responses:
+        "201":
+          description: "The wait, OPEN."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitView"
+        "400":
+          description: "An invalid selection (the matcher's reason), or a bad timeout."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: An agent's credential acting on another agent's waits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No such agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: AGENT_NOT_ACTIVE (the agent is OBSOLETE or REMOVED) or TOO_MANY_WAITS
+            (8 are OPEN).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Agent Wait Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:system
+        - qits:agent
+  /workspaces/api/agents/{agentId}/waits/{waitId}:
+    delete:
+      summary: Cancel one of the agent's waits
+      operationId: cancelAgentWait
+      parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: waitId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: "The wait: CANCELLED, or as it was when already closed. No\
+            \ turn is given."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitView"
+        "403":
+          description: An agent's credential cancelling another agent's wait.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: "No such agent, or no such wait of it."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Agent Wait Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:system
+        - qits:agent
   /workspaces/api/agents/{id}:
     get:
       operationId: getAgent

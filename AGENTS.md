@@ -202,7 +202,8 @@ rewritten by its claim. See "Dispatching an agent onto a branch".
 `pending_agent_launch` (the agent row's `pending_text` holds what is still to be said) and re-keys the
 prompt draft and its images on the agent (`agent_prompt_draft`, `agent_prompt_attachment`), dropping
 the old composition state rather than migrating it. V17 and V18 below describe columns and a table
-no code reads any more.
+no code reads any more. **`V23__agent_waits.sql`** (qits-1153) adds `agent_wait`, an agent's declared
+waits; `AgentWait` is a `CausedRow` (the agent's own request writes it). See "Declared waits".
 
 **`V18__dispatch_command_id.sql` adds `dispatch_command_id` to `workspace`** (qits-895): the daemon
 command the last launch this service made started, replaced by every accepted launch
@@ -853,12 +854,17 @@ There is no auth variant to select in this service. The shared `qits-auth-core` 
 retain their narrower `MachineAuth` audience/scope checks.
 
 **Every read also takes `qits:agent`; no write does** (phase 4 of the superproject's
-`principal-bound-git-refs-plan.md`: agents keep every read and lose only writes) — with one stated
-exception, a workspace runner's health check (qits-850, below). It is stated on
+`principal-bound-git-refs-plan.md`: agents keep every read and lose only writes) — with two stated
+exceptions, a workspace runner's health check (qits-850, below) and an agent's own declared waits
+(qits-1153, below). It is stated on
 each read METHOD — every `GET`, the three event streams — and never on a class, so a write added to
 a class later does not inherit the agent role. A method-level list replaces the class's, so each one
 repeats the class's roles beside `qits:agent`. `AgentReadAccessTest` has one test per class. The
 raw Vert.x proxy routes carry no role list here and are not part of this rule.
+**The one agent write door: declared waits** (qits-1153, W4). `qits:agent` and `qits:admin-agent` may
+create, list and cancel waits on `/workspaces/api/agents/{agentId}/waits`, but only for the agent
+their token belongs to: the principal must equal the agent row's `commissioned_token_subject`.
+`qits:admin` and `qits:system` act on any agent. `AgentWaitAccessTest` pins it.
 **`qits:admin-agent` is admitted wherever `qits:admin` is** (qits-628 follow-up, owner's request
 2026-10-07). It is the role qits-idp issues, beside `qits:agent`, to an ADMIN workspace's container
 credential (context kind `workspace-admin`), whose agent holds the host's docker socket. It is named
@@ -1018,6 +1024,32 @@ counts it claimed while the agent is not REMOVED. The slot keeps its own token f
 session id and waiting flip are stored on the agent, and a flip is relayed to qits-projects
 (`AgentWaitingReporter`, per agent now); `AgentBranchPushed {agentId, repository name, branch, sha}` —
 the name is mapped to a repository id through the agent's project and upserted into `agent_branch`.
+
+**Declared waits** (qits-1153, W1–W8; `AgentWaits`, `AgentWaitController`, `bus/AgentWaitListener`).
+An agent says which event it waits on (`agent_wait`: label, qits-eventstream `EventSelection` JSON,
+event name, optional expiry) and gets a turn when it happens:
+
+- **Matching.** `AgentWaitListener` is this service's one bus listener: durable, consumer id
+  `qits-workspaces.agent-waits` (never change it), signatures `*`. `selects` looks the event name up
+  in an in-memory set of the OPEN waits' names (read from the database on first use, refreshed on
+  every create, close and scheduler pass). `onFrame` evaluates the OPEN waits of that name with
+  `EventSelectionEvaluator`; a match is closed MATCHED and its wake written to the agent's
+  `pending_text` in one transaction on this service's datasource, before the claim commits. A throw
+  leaves the event owed; a repeat finds the wait closed. With the bus dark (`%dev`, `%test`), tests
+  call the listener directly.
+- **The wake** is the qits-1152 turn path: a running agent hears it at its next turn boundary, a
+  yielded one resumes for it (resume goes first, D17). Text: label, event name, `occurredAt`, event
+  id, payload cut at 1000 characters.
+- **The sweep** (first step of every scheduler pass): an OPEN wait past `expires_at` is TIMED_OUT and
+  wakes its agent; an OPEN wait of an agent that is no longer ACTIVE is CANCELLED, with no wake.
+- **Waiting on** (W5). Declaring a wait does not yield the agent. While it has an OPEN wait, the
+  waiting relay says `cause: "Wait"` and `waitingOn: <labels>` (`AgentWaitingReporter`), and an agent
+  waiting for input on a wait yields at once when another agent wants its slot (no `yield-after`).
+  A match or timeout relays `waiting: false` (`WaitMatched`, `WaitTimedOut`); a cancel while it
+  waits relays it again without the wait (`WaitCancelled`). `AgentDto.waitingOn` shows the labels.
+- **Limits.** 8 OPEN waits per agent, timeout at most 30 days, label at most 200 characters (default:
+  the selection in one line). The native image registers `EventSelection`, its `Condition` and `Op`
+  on `AgentWaitController`.
 
 **Capture files a ticket and stops** (D25): `POST /workspaces/api/capture` asks qits-projects `POST
 /projects/api/work` for an IMPROVEMENT ticket in the captured repository's project (`WorkFiler`,

@@ -41,6 +41,16 @@ public interface ProjectsAgentWaiting {
    * @param cause the hook event that said so
    * @param sessionId the agent session the report is about
    * @param at when the daemon saw it, epoch milliseconds
+   * @param waitingOn the labels of the agent's open declared waits (qits-1153, W5), sent only while
+   *     it waits on them ({@code cause: "Wait"}); left out otherwise, so the body is unchanged for a
+   *     qits-projects that predates it
    */
-  record AgentWaiting(boolean waiting, String cause, String sessionId, long at) {}
+  record AgentWaiting(
+      boolean waiting,
+      String cause,
+      String sessionId,
+      long at,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          String waitingOn) {}
 }

@@ -316,6 +316,109 @@
       ]
     },
     {
+      "name": "an agent with an open wait",
+      "slug": "an-agent-with-an-open-wait",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "releaseRequestId": "00000000-0000-4000-8000-0000000000c1",
+        "waitId": "00000000-0000-4000-8000-0000000000b1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "cancelAgentWait",
+          "method": "DELETE",
+          "path": "/workspaces/api/agents/{agentId}/waits/{waitId}",
+          "callerRole": "qits:agent",
+          "status": 200,
+          "file": "an-agent-with-an-open-wait/cancelAgentWait.json",
+          "frozen": {
+            "ids": [
+              "$.id",
+              "$.agentId",
+              "$.selection.when[*][*].value"
+            ],
+            "instants": [
+              "$.createdAt",
+              "$.expiresAt",
+              "$.closedAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "createAgentWait",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/waits",
+          "body": {
+            "label": "work contract-00000001-10 VERIFIED",
+            "selection": {
+              "event": "EntityTransitioned",
+              "when": [
+                [
+                  {
+                    "path": "entities[].entityId",
+                    "op": "exact",
+                    "value": "00000000-0000-4000-8000-000000000001"
+                  },
+                  {
+                    "path": "entities[].status",
+                    "op": "exact",
+                    "value": "VERIFIED"
+                  }
+                ]
+              ]
+            },
+            "timeout": "PT2H"
+          },
+          "callerRole": "qits:agent",
+          "status": 201,
+          "file": "an-agent-with-an-open-wait/createAgentWait.json",
+          "frozen": {
+            "ids": [
+              "$.id",
+              "$.agentId",
+              "$.selection.when[*][*].value"
+            ],
+            "instants": [
+              "$.createdAt",
+              "$.expiresAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "listAgentWaits",
+          "method": "GET",
+          "path": "/workspaces/api/agents/{agentId}/waits",
+          "query": {
+            "state": "OPEN"
+          },
+          "callerRole": "qits:agent",
+          "status": 200,
+          "file": "an-agent-with-an-open-wait/listAgentWaits.json",
+          "frozen": {
+            "ids": [
+              "$.waits[*].id",
+              "$.waits[*].agentId",
+              "$.waits[*].selection.when[*][*].value"
+            ],
+            "instants": [
+              "$.waits[*].createdAt",
+              "$.waits[*].expiresAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "an agent working on a ticket",
       "slug": "an-agent-working-on-a-ticket",
       "params": {

@@ -8,7 +8,10 @@ import eu.wohlben.qits.workspaces.control.WorkspaceRunners;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.entity.AgentRunState;
 import eu.wohlben.qits.workspaces.entity.AgentState;
+import eu.wohlben.qits.workspaces.entity.AgentWait;
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
+import eu.wohlben.qits.eventstream.selection.EventSelection;
+import eu.wohlben.qits.workspaces.persistence.AgentWaitRepository;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
@@ -81,6 +84,9 @@ public class ProviderStates {
   public static final String AGENTS_BOUND_TO_WORK_ITEMS = "a project with agents bound to work items";
   public static final String AN_AGENT_ON_A_TICKET = "an agent working on a ticket";
   public static final String AN_AGENT_ON_A_RELEASED_BRANCH = "an agent owning a released branch";
+
+  // The declared-wait state (qits-1153), for the CLI's `qits wait`.
+  public static final String AN_AGENT_WITH_AN_OPEN_WAIT = "an agent with an open wait";
   public static final String REPOSITORIES_WITH_MERGED_BRANCHES =
       "repositories with merged branches";
   public static final String A_CONFIGURED_WORKSPACE_IMAGE = "a configured workspace image";
@@ -142,6 +148,7 @@ public class ProviderStates {
   @Inject WorkspaceRepository workspaces;
   @Inject AgentWorktreeRepository agentRows;
   @Inject AgentBranchRepository agentBranches;
+  @Inject AgentWaitRepository agentWaits;
   @Inject WorkspaceService workspaceService;
   @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceRunners runners;
@@ -165,6 +172,7 @@ public class ProviderStates {
         AGENTS_BOUND_TO_WORK_ITEMS,
         AN_AGENT_ON_A_TICKET,
         AN_AGENT_ON_A_RELEASED_BRANCH,
+        AN_AGENT_WITH_AN_OPEN_WAIT,
         REPOSITORIES_WITH_MERGED_BRANCHES,
         A_CONFIGURED_WORKSPACE_IMAGE,
         NO_RUNNERS,
@@ -187,6 +195,7 @@ public class ProviderStates {
       case AGENTS_BOUND_TO_WORK_ITEMS -> agentsBoundToWorkItems();
       case AN_AGENT_ON_A_TICKET -> agentOnATicket();
       case AN_AGENT_ON_A_RELEASED_BRANCH -> agentOwningAReleasedBranch();
+      case AN_AGENT_WITH_AN_OPEN_WAIT -> agentWithAnOpenWait();
       case REPOSITORIES_WITH_MERGED_BRANCHES -> mergedBranches();
       case A_CONFIGURED_WORKSPACE_IMAGE -> new Setup(new TreeMap<>(), List.of());
       case NO_RUNNERS -> noRunners();
@@ -377,6 +386,13 @@ public class ProviderStates {
   // --- agents (qits-1152) -------------------------------------------------------------------------
 
   static final String AGENT_ACTIVE_ID = "00000000-0000-4000-8000-0000000000a1";
+
+  static final String OPEN_WAIT_ID = "00000000-0000-4000-8000-0000000000b1";
+
+  static final String RELEASE_REQUEST_ID = "00000000-0000-4000-8000-0000000000c1";
+
+  /** The caller the recording sends ({@code X-Qits-User}), and so the agents' token subject. */
+  static final String CONTRACT_CALLER = "contract-caller";
   static final String AGENT_OBSOLETE_ID = "00000000-0000-4000-8000-0000000000a2";
   static final String AGENT_REMOVED_ID = "00000000-0000-4000-8000-0000000000a3";
   static final String WRAPPER_BRANCH = "ticket/contract-00000001-10";
@@ -435,6 +451,40 @@ public class ProviderStates {
     return new Setup(params, List.copyOf(ids));
   }
 
+  /**
+   * An ACTIVE agent waiting on a release request (qits-1153): one OPEN wait, two hours to run. Its
+   * token subject is the recording's caller, so the wait doors are recorded as the agent itself.
+   */
+  private Setup agentWithAnOpenWait() {
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Long slot = slot(WorkspaceRuntimeStatus.QUEUED);
+              ids.add(slot);
+              agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
+              AgentWait wait = new AgentWait();
+              wait.id = UUID.fromString(OPEN_WAIT_ID);
+              wait.agentId = UUID.fromString(AGENT_ACTIVE_ID);
+              wait.label = "release-request " + RELEASE_REQUEST_ID;
+              wait.selection =
+                  EventSelection.of(
+                          "ReleaseRequestStateChanged",
+                          EventSelection.Condition.exact("releaseRequestId", RELEASE_REQUEST_ID),
+                          EventSelection.Condition.exact("state", "FINALIZED"))
+                      .toJson();
+              wait.eventName = "ReleaseRequestStateChanged";
+              wait.createdAt = Instant.now();
+              wait.expiresAt = wait.createdAt.plusSeconds(7200);
+              agentWaits.persist(wait);
+            });
+    Map<String, String> params = new TreeMap<>();
+    params.put("agentId", AGENT_ACTIVE_ID);
+    params.put("releaseRequestId", RELEASE_REQUEST_ID);
+    params.put("waitId", OPEN_WAIT_ID);
+    return new Setup(params, List.copyOf(ids));
+  }
+
   /** An ACTIVE agent that pushed the branch a release just consumed. */
   private Setup agentOwningAReleasedBranch() {
     List<Long> ids = new ArrayList<>();
@@ -487,6 +537,7 @@ public class ProviderStates {
     agent.entityTitle = "Invoice totals are off by one cent";
     agent.entityStatus = state == AgentState.ACTIVE ? "IMPLEMENTING" : "VERIFIED";
     agent.entityBlocked = false;
+    agent.commissionedTokenSubject = CONTRACT_CALLER;
     agent.gitRefs = "[\"refs/heads/" + WRAPPER_BRANCH + "\",\"refs/heads/" + WRAPPER_BRANCH + "-*\"]";
     // Apart by state, so a listing newest first is the same order on every run.
     agent.createdAt = Instant.now().minusSeconds(60L * state.ordinal());

@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.wiring;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -78,7 +79,7 @@ public class HttpAgentWaitingReporterTest {
   public void theReportIsPostedToTheWorkItemsDoorWithTheServiceBearer() throws Exception {
     String base = serve(204);
 
-    reporterAgainst(base).report("8d1c-work", true, "Stop", "s-1", 1234L);
+    reporterAgainst(base).report("8d1c-work", true, "Stop", null, "s-1", 1234L);
 
     assertEquals(List.of("POST /projects/api/work/8d1c-work/agent-waiting"), paths);
     assertEquals(List.of("Bearer machine"), bearers);
@@ -87,21 +88,34 @@ public class HttpAgentWaitingReporterTest {
     assertEquals("Stop", body.path("cause").asText());
     assertEquals("s-1", body.path("sessionId").asText());
     assertEquals(1234L, body.path("at").asLong());
+    assertTrue(body.path("waitingOn").isMissingNode(), "no wait: the field is left out");
+  }
+
+  /** qits-1153, W5: an agent waiting on a declared wait names it, so the item is not BLOCKED. */
+  @Test
+  public void aDeclaredWaitIsNamedInWaitingOn() throws Exception {
+    String base = serve(204);
+
+    reporterAgainst(base).report("8d1c-work", true, "Wait", "release-request 42", "s-1", 1234L);
+
+    JsonNode body = new ObjectMapper().readTree(bodies.get(0));
+    assertEquals("Wait", body.path("cause").asText());
+    assertEquals("release-request 42", body.path("waitingOn").asText());
   }
 
   @Test
   public void aQitsProjectsWithoutTheDoorIsTolerated() throws Exception {
-    reporterAgainst(serve(404)).report("w", false, "UserPromptSubmit", "s-1", 1L);
+    reporterAgainst(serve(404)).report("w", false, "UserPromptSubmit", null, "s-1", 1L);
     stopServer();
     HttpAgentWaitingReporter reporter = reporterAgainst(serve(405));
-    reporter.report("w", true, "Stop", "s-1", 2L);
-    reporter.report("w", false, "UserPromptSubmit", "s-1", 3L);
+    reporter.report("w", true, "Stop", null, "s-1", 2L);
+    reporter.report("w", false, "UserPromptSubmit", null, "s-1", 3L);
   }
 
   @Test
   public void anyOtherRefusalThrowsForTheRelayToLog() throws Exception {
     HttpAgentWaitingReporter reporter = reporterAgainst(serve(500));
 
-    assertThrows(IllegalStateException.class, () -> reporter.report("w", true, "Stop", null, 1L));
+    assertThrows(IllegalStateException.class, () -> reporter.report("w", true, "Stop", null, null, 1L));
   }
 }

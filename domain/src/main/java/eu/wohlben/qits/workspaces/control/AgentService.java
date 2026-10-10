@@ -14,6 +14,7 @@ import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
+import eu.wohlben.qits.workspaces.persistence.AgentWaitRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspacePromptAttachmentRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspacePromptDraftRepository;
@@ -174,8 +175,10 @@ public class AgentService {
 
   @Inject Instance<WorkspaceDaemonLiveness> liveness;
 
-  /** Where an agent's waiting state goes (qits-895): qits-projects derives BLOCKED from it. */
-  @Inject Instance<AgentWaitingReporter> waitingReporter;
+  /** Declared waits (qits-1153): swept every pass; they also own the waiting relay to qits-projects. */
+  @Inject AgentWaits waits;
+
+  @Inject AgentWaitRepository waitRows;
 
   /**
    * How long a RUNNING agent waits for input before it yields its slot to another agent that wants
@@ -649,14 +652,9 @@ public class AgentService {
                   agent.waitingSince = awaitingInput ? when : null;
                   return new String[] {agent.workId};
                 });
-    if (relay != null && waitingReporter.isResolvable()) {
-      try {
-        waitingReporter
-            .get()
-            .report(relay[0], awaitingInput, hookEvent, sessionId, when.toEpochMilli());
-      } catch (RuntimeException e) {
-        LOG.warnf(e, "could not relay agent %s waiting=%s to qits-projects", agentId, awaitingInput);
-      }
+    if (relay != null) {
+      // With an OPEN wait, a waiting agent is reported as waiting on it (qits-1153, W5).
+      waits.relayActivity(relay[0], id, awaitingInput, hookEvent, sessionId, when);
     }
     if (Boolean.TRUE.equals(awaitingInput)) {
       kick();
@@ -744,6 +742,11 @@ public class AgentService {
   /** One scheduler pass; see the class javadoc. Serialised: one pass at a time. */
   public void reconcile() {
     synchronized (passLock) {
+      try {
+        waits.sweep();
+      } catch (RuntimeException e) {
+        LOG.warnf(e, "declared-wait sweep failed");
+      }
       resumeYielded();
       placeQueued();
       yieldBlocked();
@@ -876,11 +879,18 @@ public class AgentService {
                     List<AgentWorktree> queued = agents.findQueued();
                     List<AgentWorktree> out = new ArrayList<>();
                     Map<Long, List<AgentWorktree>> byWorkspace = placedByWorkspace();
+                    // An agent waiting for input on a declared wait yields at once: it said what it
+                    // waits on, so there is nothing to debounce (qits-1153, W5).
+                    java.util.Set<UUID> onAWait = new java.util.HashSet<>();
+                    waitRows
+                        .findOpenByAgents(
+                            byWorkspace.values().stream().flatMap(List::stream).map(a -> a.id).toList())
+                        .forEach(w -> onAWait.add(w.agentId));
                     for (List<AgentWorktree> live : byWorkspace.values()) {
                       for (AgentWorktree agent : live) {
                         if (agent.runState != AgentRunState.RUNNING
                             || agent.waitingSince == null
-                            || agent.waitingSince.isAfter(before)
+                            || (agent.waitingSince.isAfter(before) && !onAWait.contains(agent.id))
                             || agent.pendingText != null) {
                           continue;
                         }
@@ -1394,6 +1404,9 @@ public class AgentService {
                 pushed
                     .computeIfAbsent(b.key.agentId, id -> new ArrayList<>())
                     .add(new AgentDto.Branch(b.key.repositoryId, b.key.branch, b.sha, b.pushedAt)));
+    Map<UUID, String> waitingOn =
+        QuarkusTransaction.requiringNew()
+            .call(() -> waits.waitingOn(rows.stream().map(a -> a.id).toList()));
     return rows.stream()
         .map(
             a ->
@@ -1419,6 +1432,7 @@ public class AgentService {
                         ? null
                         : activity.get().activityOf(a.id.toString()).orElse(null),
                     a.waitingSince,
+                    waitingOn.get(a.id),
                     a.lastActivityAt,
                     a.createdAt,
                     a.obsoleteAt,

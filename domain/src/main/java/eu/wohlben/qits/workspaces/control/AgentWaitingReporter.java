@@ -26,9 +26,13 @@ public interface AgentWaitingReporter {
    * @param workId the work item's entity id in qits-projects ({@code Workspace.workId})
    * @param waiting whether the agent is waiting for its user
    * @param cause the hook event that said so ({@code Stop}, {@code Notification}, {@code
-   *     SessionEnd}, {@code OomKilled}, …), or null when the frame carried none
+   *     SessionEnd}, {@code OomKilled}, …), or null when the frame carried none; for a declared
+   *     wait (qits-1153) {@code Wait} (waiting on {@code waitingOn}), {@code WaitMatched}, {@code
+   *     WaitTimedOut} or {@code WaitCancelled}
+   * @param waitingOn the labels of the agent's OPEN waits while it waits on them; null otherwise
+   *     (qits-1153, W5: the item is waiting on that, not blocked)
    * @param sessionId the agent session the frame was about, or null
    * @param at when the daemon saw it, epoch milliseconds
    */
-  void report(String workId, boolean waiting, String cause, String sessionId, long at);
+  void report(String workId, boolean waiting, String cause, String waitingOn, String sessionId, long at);
 }

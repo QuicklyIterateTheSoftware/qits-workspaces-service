@@ -154,9 +154,10 @@ deleted). A branch nothing owns answers `resolved:false` — the ordinary case.
 work item:
 
 - `POST /workspaces/api/agent-dispatches` `{repositoryId, wrapperBranch, workId, entityId,
-  entityTitle, entityStatus, entityBlocked, ticketId?, epicId?, admin?, instruction}` → `{agent,
+  entityTitle, entityStatus, entityBlocked, ticketId?, epicId?, instruction}` → `{agent,
   fresh, agentLaunch, agentIdentity}`: there should be an agent working on this item. Idempotent; a
-  queued agent waits for a free runner slot.
+  queued agent waits for a free runner slot. `admin: true` is refused: only a person's door makes
+  an admin agent.
 - `POST …/agent-dispatches/delivery` `{workId, text, compactFirst}` → `{agentId, delivered, launched,
   resumed, detail}`: say this to the item's agent. Never creates one; `agentId: null` is the answer
   for an item nobody works on.
@@ -165,6 +166,24 @@ work item:
 
 A person's doors are `GET`/`POST /workspaces/api/agents` (an agent for an existing work item, with
 `admin` for the docker socket), `GET /workspaces/api/agents/{id}` and `POST …/{id}/discard`.
+
+**Declared waits** (qits-1153; `qits wait` is the caller). An agent says what event it waits on and
+gets a turn when it happens:
+
+- `POST /workspaces/api/agents/{agentId}/waits` `{label?, selection: {event, when: [[{path, op:
+  exact|prefix|exists, value}]]}, timeout?: ISO-8601}` → 201 `{id, agentId, label, selection,
+  state: OPEN|MATCHED|TIMED_OUT|CANCELLED, createdAt, expiresAt, matchedEventId, closedAt}`. The
+  selection is qits-eventstream's `EventSelection`; an invalid one is a 400 with its reason. At most
+  8 OPEN waits per agent (`409 TOO_MANY_WAITS`); timeout at most 30 days.
+- `GET …/waits?state=` → `{waits: [...]}`; `DELETE …/waits/{waitId}` → 200 with the wait
+  (CANCELLED, or as it was if already closed).
+- `qits:agent` and `qits:admin-agent` act only on the agent their token belongs to; `qits:admin` and
+  `qits:system` on any.
+- A durable bus listener (`qits-workspaces.agent-waits`, subscribed to `*`) matches arriving events.
+  A match or a timeout closes the wait and gives the agent a turn naming the label, the event, its
+  time and a short payload; a yielded agent resumes for it. `GET /agents/{id}` shows `waitingOn`,
+  and the waiting relay to qits-projects says `cause: "Wait"` with `waitingOn` instead of a plain
+  wait for input.
 
 One behaviour worth knowing before you debug it: **a missing repository and an unreachable
 qits-projects are different answers.** Only a 404 becomes "no such repository" (and then a 404 from
