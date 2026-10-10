@@ -1016,6 +1016,15 @@ public class AgentDispatchControllerTest {
         .jsonPath();
   }
 
+  /** {@link #entityBody}, stating the block's source too (qits-895). */
+  private static Map<String, Object> entityBody(
+      String repositoryId, String branch, String title, String status, Object blocked,
+      String blockSource) {
+    Map<String, Object> body = entityBody(repositoryId, branch, title, status, blocked);
+    body.put("blockSource", blockSource);
+    return body;
+  }
+
   /** Nulls are members of the contract, so a HashMap rather than {@code Map.of}. */
   private static Map<String, Object> entityBody(
       String repositoryId, String branch, String title, String status, Object blocked) {
@@ -1179,6 +1188,74 @@ public class AgentDispatchControllerTest {
             .forWorkspace(repoId, label, rowId, branch, "master", "qits-617")
             .env()
             .get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
+  }
+
+  /**
+   * The block's source (qits-895) rides the live call to a reachable daemon, beside the three facts
+   * — and nothing else about this door changes: the row's three columns and the daemon's three keys
+   * are exactly what {@link #markingTheEntityStoresTheFactsAndTellsAReachableDaemon} already pins.
+   */
+  @Test
+  public void markingTheEntityWithABlockSourcePassesItToTheDaemon() throws Exception {
+    String repoId = seedRepository();
+    Long rowId = workspaceWithContainer(repoId, "ticket-block-source", "ticket/block-source");
+
+    JsonPath answer =
+        entity(
+            entityBody(
+                repoId, "ticket/block-source", "Waiting", "IMPLEMENTING", true, "AGENT_WAITING"),
+            200);
+
+    assertThat(answer.getBoolean("applied"), is(true));
+    JsonObject told = entityCalls.get("/workspaces/container/" + rowId + "/agents/entity");
+    assertThat(told.getString("title"), is("Waiting"));
+    assertThat(told.getString("status"), is("IMPLEMENTING"));
+    assertThat(told.getBoolean("blocked"), is(true));
+    assertThat(told.getString("blockSource"), is("AGENT_WAITING"));
+  }
+
+  /** A null or absent block source is OMITTED from the daemon call, never sent as a JSON null. */
+  @Test
+  public void aNullBlockSourceIsOmittedFromTheDaemonCall() throws Exception {
+    String repoId = seedRepository();
+    Long rowId = workspaceWithContainer(repoId, "ticket-no-block-source", "ticket/no-bsource");
+
+    entity(entityBody(repoId, "ticket/no-bsource", "Plain", "REFINED", true, null), 200);
+    JsonObject told = entityCalls.get("/workspaces/container/" + rowId + "/agents/entity");
+    assertFalse(told.containsKey("blockSource"), "blockSource must be omitted, not null: " + told);
+
+    entity(entityBody(repoId, "ticket/no-bsource", "Plain", "REFINED", false), 200);
+    told = entityCalls.get("/workspaces/container/" + rowId + "/agents/entity");
+    assertFalse(told.containsKey("blockSource"), "an older caller sends none either: " + told);
+  }
+
+  /**
+   * <b>A derived block's source must never land on the row or in the container's environment</b> —
+   * only the three facts {@link #theStoredFactsAreWhatTheNextContainerSpecCarries} already pins do,
+   * because a derived block can flap on a debounce and a container is not recreated over one.
+   */
+  @Test
+  public void aBlockSourceNeverReachesTheRowOrTheContainerSpec() throws Exception {
+    String repoId = seedRepository();
+    String label = "ticket-block-source-spec";
+    String branch = "ticket/block-source-spec";
+    workspaceService.createWorkspace(repoId, label, "master", branch, null, false, false, true);
+    Long rowId = workspaceIds.of(repoId, label);
+
+    entity(entityBody(repoId, branch, "Boots marked", "REFINED", true, "BOTH"), 200);
+
+    Workspace row = storedRow(rowId);
+    assertThat(row.entityTitle, is("Boots marked"));
+    assertThat(row.entityStatus, is("REFINED"));
+    assertThat(row.entityBlocked, is(true));
+    WorkspaceContainer spec =
+        containerFactory.forWorkspace(repoId, label, rowId, branch, "master", "qits-617");
+    assertEquals("Boots marked", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_TITLE"));
+    assertEquals("REFINED", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_STATUS"));
+    assertEquals("true", spec.env().get("QITS_WORKSPACE_DAEMON_ENTITY_BLOCKED"));
+    assertTrue(
+        spec.env().keySet().stream().noneMatch(key -> key.contains("BLOCK_SOURCE")),
+        "no block-source key of any spelling belongs in the container spec: " + spec.env().keySet());
   }
 
   /**
