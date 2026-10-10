@@ -115,7 +115,7 @@
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
              and ConsumerPactVerificationTest verifies consumers' pacts against this service.
              An external library, so it moves by hand, not by a maintenance bump. -->
-        <pact-jvm.version>4.6.21</pact-jvm.version>
+        <pact-jvm.version>4.7.5</pact-jvm.version>
         <!-- THE CONSUMER PACTS this provider verifies (epic qits-546): one jar per consumer, each
              carrying `pacts/<consumer>_qits-workspaces-service.json`, and
              ConsumerPactVerificationTest loads every such resource off the test classpath. Test
@@ -129,7 +129,7 @@
 
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.34.6</quarkus.platform.version>
+        <quarkus.platform.version>3.40.1</quarkus.platform.version>
 
         <!-- The suites need a real PostgreSQL, because the store IS PostgreSQL now — and the first
              rule here is that a clone tests green with NO DOCKER, which rules out Testcontainers
@@ -143,13 +143,13 @@
              binaries are per-arch artifacts, and a missing one fails in the middle of a suite rather
              than during resolution. -->
         <zonky.embedded-postgres.version>2.2.2</zonky.embedded-postgres.version>
-        <zonky.postgres-binaries.version>18.4.0</zonky.postgres-binaries.version>
+        <zonky.postgres-binaries.version>18.6.0</zonky.postgres-binaries.version>
 
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
         <failsafe-plugin.version>3.5.4</failsafe-plugin.version>
         <jandex-plugin.version>3.4.0</jandex-plugin.version>
-        <lombok.version>1.18.38</lombok.version>
+        <lombok.version>1.18.48</lombok.version>
         <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
         <mapstruct.version>1.6.3</mapstruct.version>
         <!-- Quinoa is a quarkiverse extension and is NOT in quarkus-bom, so unlike every io.quarkus
@@ -159,7 +159,7 @@
              same version every other Quinoa-serving service here pins (qits-ci's root pom records
              the identical reasoning), and the point is that they move together rather than each
              proving a version for itself. -->
-        <quinoa.version>2.8.2</quinoa.version>
+        <quinoa.version>2.9.2</quinoa.version>
 
         <!-- The container ITs need docker, a pulled qits/workspace image (the published, layered
              one — see AGENTS.md) and the daemon native binary, none of which a fresh clone has.
