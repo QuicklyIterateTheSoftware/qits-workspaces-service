@@ -56,8 +56,6 @@ class WorkspaceContainerFactoryTest {
     // the config key is only an override. A fixture that set it would test the override on every
     // case and never the shipped path.
     f.imageVersionOverride = Optional.empty();
-    f.projectsUrl = "http://qits-projects:8080/";
-    f.observabilityUrl = "http://dev-qits-observability:8080/";
     f.platformMcpUrl = "http://dev-qits-platform-access-mcp-service:8080/";
     f.network = "qits-net";
     f.claudeVolume = "qits_shared_dot_claude";
@@ -156,11 +154,6 @@ class WorkspaceContainerFactoryTest {
     // (QITS_WORKSPACE_DAEMON_* -> qits.workspace-daemon.*) — workspace-daemon runs in-container so
     // it can't call QitsHostResolver; the URL is composed here.
     assertEnv(c, "QITS_WORKSPACE_DAEMON_URL", "ws://qits:8080/workspaces/daemon/1");
-    assertEnv(c, "QITS_REPOSITORY_MCP_URL", "http://qits-projects:8080/projects/mcp");
-    assertEnv(
-        c,
-        "QITS_OBSERVABILITY_MCP_URL",
-        "http://dev-qits-observability:8080/observability/mcp");
     // The one central MCP server (epic qits-630), the qits CLI served over HTTP.
     assertEnv(
         c,

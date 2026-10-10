@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>The admin row is pinned twice (qits-1084): holding the commissioned client pair —
  * the spec a deployment with no edge plane still composes, and every container launched before the
- * token, byte for byte as it was — and holding a workspace token, where the five addresses come off
+ * token, byte for byte as it was — and holding a workspace token, where the four addresses come off
  * the edge plane and the credential is {@code QITS_TOKEN} with the git helper on the plane's githost,
  * while qits-net, the extra host, the docker socket stay exactly where they
  * were.
@@ -36,8 +36,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
     WorkspaceContainerFactory f = new WorkspaceContainerFactory();
     f.imageRepo = "registry.dev.localhost:8080/qits/workspace";
     f.imageVersionOverride = Optional.of("2026.1001.120000");
-    f.projectsUrl = "http://qits-projects:8080/";
-    f.observabilityUrl = "http://dev-qits-observability:8080/";
     f.platformMcpUrl = "http://dev-qits-platform-access-mcp-service:8080/";
     f.network = "qits-net";
     f.claudeVolume = "qits_shared_dot_claude";
@@ -101,8 +99,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         label qits.project=proj-1
         env TZ=Europe/Berlin
         env QITS_WORKSPACE_DAEMON_URL=ws://qits:8080/workspaces/daemon/7
-        env QITS_REPOSITORY_MCP_URL=http://qits-projects:8080/projects/mcp
-        env QITS_OBSERVABILITY_MCP_URL=http://dev-qits-observability:8080/observability/mcp
         env QITS_PLATFORM_MCP_URL=http://dev-qits-platform-access-mcp-service:8080/mcp
         env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=http://qits-platform-edge:8080/git
         env QITS_WORKSPACE_DAEMON_API_BASE_PATH=/workspaces/container/7/
@@ -177,8 +173,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         label qits.project=proj-1
         env TZ=Europe/Berlin
         env QITS_WORKSPACE_DAEMON_URL=ws://qits:8080/workspaces/daemon/8
-        env QITS_REPOSITORY_MCP_URL=http://qits-projects:8080/projects/mcp
-        env QITS_OBSERVABILITY_MCP_URL=http://dev-qits-observability:8080/observability/mcp
         env QITS_PLATFORM_MCP_URL=http://dev-qits-platform-access-mcp-service:8080/mcp
         env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=http://qits-platform-edge:8080/git
         env QITS_WORKSPACE_DAEMON_API_BASE_PATH=/workspaces/container/8/
@@ -242,7 +236,7 @@ class WorkspaceContainerFactoryGoldenSpecTest {
   }
 
   /**
-   * An admin row holding a workspace token: the edge's five addresses, the token's four lines where
+   * An admin row holding a workspace token: the edge's four addresses, the token's four lines where
    * the pair's eight were, and every DIRECT field — the network, the extra host, the docker socket,
    * the shared volumes — unchanged.
    */
@@ -274,8 +268,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         label qits.project=proj-1
         env TZ=Europe/Berlin
         env QITS_WORKSPACE_DAEMON_URL=wss://workspaces.qits.example.eu/workspaces/daemon/8
-        env QITS_REPOSITORY_MCP_URL=https://projects.qits.example.eu/projects/mcp
-        env QITS_OBSERVABILITY_MCP_URL=https://observability.qits.example.eu/observability/mcp
         env QITS_PLATFORM_MCP_URL=https://mcp.qits.example.eu/mcp
         env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=https://githost.qits.example.eu/git
         env QITS_WORKSPACE_DAEMON_API_BASE_PATH=/workspaces/container/8/

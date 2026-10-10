@@ -82,8 +82,6 @@ class RunnerWorkspaceSpecsTest {
     List<String> addresses =
         List.of(
             "QITS_WORKSPACE_DAEMON_URL",
-            "QITS_REPOSITORY_MCP_URL",
-            "QITS_OBSERVABILITY_MCP_URL",
             "QITS_PLATFORM_MCP_URL",
             "QITS_WORKSPACE_DAEMON_GIT_BASE_URL");
     List<String> paths =
@@ -130,11 +128,8 @@ class RunnerWorkspaceSpecsTest {
     // plane's — the fixture factory's own (example.eu) is the DIRECT spec's.
     Map<String, String> env = spec.env();
     assertEquals("wss://workspaces.qits.wohlben.eu/workspaces/daemon/7", env.get(addresses.get(0)));
-    assertEquals("https://projects.qits.wohlben.eu/projects/mcp", env.get(addresses.get(1)));
-    assertEquals(
-        "https://observability.qits.wohlben.eu/observability/mcp", env.get(addresses.get(2)));
-    assertEquals("https://mcp.qits.wohlben.eu/mcp", spec.env().get(addresses.get(3)));
-    assertEquals("https://githost.qits.wohlben.eu/git", spec.env().get(addresses.get(4)));
+    assertEquals("https://mcp.qits.wohlben.eu/mcp", spec.env().get(addresses.get(1)));
+    assertEquals("https://githost.qits.wohlben.eu/git", spec.env().get(addresses.get(2)));
     assertEquals("wohlben.eu", spec.env().get("QITS_DOMAIN"));
     for (String key : addresses) {
       assertTrue(direct.containsKey(key), key);

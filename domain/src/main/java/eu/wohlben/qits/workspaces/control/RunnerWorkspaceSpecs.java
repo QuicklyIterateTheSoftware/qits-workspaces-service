@@ -20,10 +20,10 @@ import java.util.Map;
  * commit identity are the factory's readings too.
  *
  * <p><b>Every address comes from the {@link WorkspaceAddressPlane}</b> (qits-625, qits-799): the
- * dial-home socket, the git base and the three MCP servers are public edge names, {@code
+ * dial-home socket, the git base and the central MCP server are public edge names, {@code
  * <app>.qits.<domain>}, and {@code QITS_DOMAIN} is the plane's. A runner's node has no qits-net and
  * no internal DNS, so a RUNNER spec has no network and no extra host — the record has no field for
- * either — and none of the DIRECT spec's wire aliases. The five addresses are written by {@link
+ * either — and none of the DIRECT spec's wire aliases. The four addresses are written by {@link
  * WorkspaceContainerFactory#addressEnv}, the same method a DIRECT admin or editor row that holds a
  * workspace token is addressed with (qits-1084).
  *

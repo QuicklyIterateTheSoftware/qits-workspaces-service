@@ -15,7 +15,7 @@ import java.util.Locale;
  * through the platform edge. There is no docker network to join and no extra host to add, and no
  * idp token url is composed: nothing in a token-holding container mints. A DIRECT container that
  * holds the client pair is not composed from this record at all; one that holds a workspace token
- * (an admin or editor row on an edge plane, qits-1084) takes its five addresses from it through
+ * (an admin or editor row on an edge plane, qits-1084) takes its four addresses from it through
  * {@link WorkspaceContainerFactory#addressEnv}, because the token only works through the edge, and
  * keeps everything else DIRECT — qits-net, the extra host, the docker socket, the editor block.
  *
@@ -45,19 +45,11 @@ public record WorkspaceAddressPlane(String domain, List<String> registrySpelling
   /** qits-githost's root-level prefix, passed through the edge verbatim: the clone base. */
   static final String GIT_PATH = "/git";
 
-  /** qits-projects' repository MCP server ({@code /projects/mcp}). */
-  static final String REPOSITORY_MCP_PATH = "/projects/mcp";
-
-  /** qits-observability's MCP server ({@code /observability/mcp}). */
-  static final String OBSERVABILITY_MCP_PATH = "/observability/mcp";
-
   /** qits-platform-access-mcp-service's central qits CLI MCP server (epic qits-630). */
   static final String PLATFORM_MCP_PATH = "/mcp";
 
   static final String WORKSPACES_HOST = "workspaces";
   static final String GITHOST_HOST = "githost";
-  static final String PROJECTS_HOST = "projects";
-  static final String OBSERVABILITY_HOST = "observability";
   static final String PLATFORM_MCP_HOST = "mcp";
   static final String REGISTRY_HOST = "registry";
 
@@ -116,18 +108,6 @@ public record WorkspaceAddressPlane(String domain, List<String> registrySpelling
    */
   public String gitAuthHost() {
     return host(GITHOST_HOST);
-  }
-
-  /** {@code https://projects.qits.<d>/projects/mcp}: {@code QITS_REPOSITORY_MCP_URL}. */
-  public String repositoryMcpUrl() {
-    return "https://" + host(PROJECTS_HOST) + REPOSITORY_MCP_PATH;
-  }
-
-  /**
-   * {@code https://observability.qits.<d>/observability/mcp}: {@code QITS_OBSERVABILITY_MCP_URL}.
-   */
-  public String observabilityMcpUrl() {
-    return "https://" + host(OBSERVABILITY_HOST) + OBSERVABILITY_MCP_PATH;
   }
 
   /** {@code https://mcp.qits.<d>/mcp}: {@code QITS_PLATFORM_MCP_URL}. */

@@ -108,8 +108,6 @@ public final class TestWorkspaceContainerFactory {
     // assignment can replace. The two versions below stay invented and stay different from each
     // other, for the reason the constants' javadoc gives.
     f.imageVersionOverride = Optional.of(IMAGE_VERSION);
-    f.projectsUrl = "http://qits-projects:8080";
-    f.observabilityUrl = "http://dev-qits-observability:8080";
     f.platformMcpUrl = "http://dev-qits-platform-access-mcp-service:8080";
     f.network = "qits-net";
     f.claudeVolume = "qits_shared_dot_claude";

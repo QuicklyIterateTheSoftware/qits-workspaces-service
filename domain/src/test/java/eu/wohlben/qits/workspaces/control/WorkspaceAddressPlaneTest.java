@@ -28,9 +28,6 @@ class WorkspaceAddressPlaneTest {
     assertEquals("wss://workspaces.qits.wohlben.eu/workspaces/daemon/42", plane.daemonUrl(42L));
     assertEquals("https://githost.qits.wohlben.eu/git", plane.gitBaseUrl());
     assertEquals("githost.qits.wohlben.eu", plane.gitAuthHost());
-    assertEquals("https://projects.qits.wohlben.eu/projects/mcp", plane.repositoryMcpUrl());
-    assertEquals(
-        "https://observability.qits.wohlben.eu/observability/mcp", plane.observabilityMcpUrl());
     assertEquals("https://mcp.qits.wohlben.eu/mcp", plane.platformMcpUrl());
   }
 

@@ -26,18 +26,10 @@ public class WorkspaceContainerFactory {
 
   private static final Logger LOG = Logger.getLogger(WorkspaceContainerFactory.class);
 
-  /** qits-projects' service base; forwarded explicitly because the daemon control socket is not a gateway. */
-  @ConfigProperty(name = "qits.projects.url")
-  String projectsUrl;
-
-  /** qits-observability's service base, used by workspace-scoped coding agents. */
-  @ConfigProperty(name = "qits.observability.url", defaultValue = "http://${QITS_ENVIRONMENT:dev}-qits-observability:8080")
-  String observabilityUrl;
-
   /**
    * qits-platform-access-mcp-service's base — the one central MCP server the qits CLI is served as
-   * (epic qits-630). Same shape as {@link #observabilityUrl} above: an environment-qualified default,
-   * because it too is an environment service rather than a platform-wide singleton.
+   * (epic qits-630). An environment-qualified default, because it is an environment service rather
+   * than a platform-wide singleton.
    */
   @ConfigProperty(
       name = "qits.workspaces.platform-mcp-url",
@@ -669,7 +661,7 @@ public class WorkspaceContainerFactory {
     // A ROW THAT HOLDS A WORKSPACE TOKEN IS ADDRESSED THROUGH THE EDGE (qits-1084). A qits_tok_ is
     // only spent by the public edge, which exchanges it for a JWT; presented on qits-net straight to
     // a service it is an unknown bearer. So an admin or editor row holding one takes every address
-    // it dials — the daemon socket, the three MCP servers and the git base — from the plane, exactly
+    // it dials — the daemon socket, the MCP server and the git base — from the plane, exactly
     // as a RUNNER spec does, through the same method (addressEnv). Everything else DIRECT stays:
     // qits-net, the extra host, the docker socket, the editor block, the host-to-daemon tunnel. A
     // row holding the pair (or nothing) keeps the internal addresses below, byte for byte.
@@ -686,14 +678,8 @@ public class WorkspaceContainerFactory {
               + qitsPort
               + "/workspaces/daemon/"
               + rowId);
-      // MCP servers are owned by sibling services, not by the control-socket authority above.
-      // Tell the daemon each address outright so a direct qits-workspaces control socket is never
-      // mistaken for a gateway. The daemon adds the project/repository/workspace query scope later.
-      // QITS_PLATFORM_MCP_URL is the central qits CLI MCP server (epic qits-630) and carries no such
-      // scope — it is the one address every workspace container gets regardless of repository.
-      container.env("QITS_REPOSITORY_MCP_URL", serviceBase(projectsUrl) + "/projects/mcp");
-      container.env(
-          "QITS_OBSERVABILITY_MCP_URL", serviceBase(observabilityUrl) + "/observability/mcp");
+      // The one MCP server: the central qits CLI MCP server (epic qits-630), owned by a sibling
+      // service, so told outright rather than derived from the control-socket authority above.
       container.env("QITS_PLATFORM_MCP_URL", serviceBase(platformMcpUrl) + "/mcp");
       // The git base the daemon self-clones from, told outright — never derived. The daemon's
       // fallback derives the pre-split address (/artifacts/git off the dial-home authority) and
@@ -844,16 +830,14 @@ public class WorkspaceContainerFactory {
   }
 
   /**
-   * The five addresses a container that reaches the platform through the edge is told, every one a
+   * The four addresses a container that reaches the platform through the edge is told, every one a
    * public name off {@code plane}, in the DIRECT spec's order: the daemon's dial-home socket ({@code
-   * wss} on the workspaces vhost), the three MCP servers and the git base it self-clones from.
+   * wss} on the workspaces vhost), the central MCP server and the git base it self-clones from.
    * Shared by the RUNNER spec ({@link RunnerWorkspaceSpecs}) and a DIRECT row that holds a workspace
    * token (qits-1084), so the two cannot drift.
    */
   static void addressEnv(WorkspaceAddressPlane plane, long rowId, BiConsumer<String, String> env) {
     env.accept("QITS_WORKSPACE_DAEMON_URL", plane.daemonUrl(rowId));
-    env.accept("QITS_REPOSITORY_MCP_URL", plane.repositoryMcpUrl());
-    env.accept("QITS_OBSERVABILITY_MCP_URL", plane.observabilityMcpUrl());
     env.accept("QITS_PLATFORM_MCP_URL", plane.platformMcpUrl());
     env.accept("QITS_WORKSPACE_DAEMON_GIT_BASE_URL", plane.gitBaseUrl());
   }

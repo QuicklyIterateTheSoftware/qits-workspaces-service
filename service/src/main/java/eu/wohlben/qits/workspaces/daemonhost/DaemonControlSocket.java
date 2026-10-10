@@ -17,7 +17,7 @@ import org.jboss.logging.Logger;
  * {@link WorkspaceDaemonRegistry} owns the state and correlated traffic.
  *
  * <p>Reachability mirrors the container's other channels ({@code /artifacts/git}, {@code
- * /observability/api/otel}, {@code /projects/mcp}): a plain {@code ws://} connection over qits-net
+ * /observability/api/otel}): a plain {@code ws://} connection over qits-net
  * on the main HTTP port, authenticated with {@code qits:system}. {@code SameOriginUpgradeCheck}
  * permits it because {@code workspace-daemon} is a non-browser client and sends no {@code Origin}.
  *

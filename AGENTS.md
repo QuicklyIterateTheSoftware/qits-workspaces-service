@@ -1157,7 +1157,7 @@ row switches arm at its next container, never under a running one.
 - **The spec follows what the row holds.** `WorkspaceContainerFactory` asks
   `WorkspaceCredentials.tokenFor` first; a token row gets `QITS_TOKEN`, `QITS_TOKEN_SUBJECT`,
   `GIT_CONFIG_GLOBAL` and `QITS_GIT_AUTH_HOST` on the plane's githost (`tokenEnv`), and its daemon
-  URL, three MCP URLs and git base from the plane (`addressEnv`) — both shared with
+  URL, MCP URL and git base from the plane (`addressEnv`) — both shared with
   `RunnerWorkspaceSpecs` — and none of the pair block: no `QITS_COMMISSIONED_CLIENT_*`, no token url,
   no audience. A token only works through the edge (which exchanges it for a JWT), which is why the
   addresses move with it. Everything else DIRECT stays: qits-net, the extra host, the docker socket,

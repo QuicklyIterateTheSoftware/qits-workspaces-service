@@ -15,7 +15,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  *
  * <p><b>It reads the two image keys itself rather than through {@link WorkspaceContainerFactory}</b>,
  * and only for their registry host. {@link WorkspaceService} injects this bean, and the factory
- * carries required config with no defaults ({@code qits.projects.url}, the oidc-client block): a
+ * carries required config with no defaults: a
  * dependency on it from here would make every {@code @QuarkusTest} that boots the service satisfy
  * all of it — {@link RetiredImageVersionKeys} records the same lesson.
  */

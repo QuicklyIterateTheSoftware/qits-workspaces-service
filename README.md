@@ -298,7 +298,7 @@ container carries
     QITS_GIT_AUTH_HOST                githost.qits.<domain>, the one host that helper answers for
 
 and none of the pair block above. Because the edge is the only thing that accepts a `qits_tok_`
-(it exchanges it for a JWT), such a container's daemon socket, MCP servers and git base are the
+(it exchanges it for a JWT), such a container's daemon socket, MCP server and git base are the
 public `<app>.qits.<domain>` names rather than the internal ones; it is otherwise the same DIRECT
 container — on qits-net, the admin one with the docker socket, the editor with its port and project
 list. With **no** public domain the pair is commissioned as before and a WARN says so; that is the
