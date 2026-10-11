@@ -344,6 +344,10 @@ public class AgentService {
    * <b>Say this to the agent working on the item</b>. Never creates an agent: an item nobody
    * dispatched has nobody to tell, and that is answered, not refused. A yielded agent resumes to
    * hear it (D16); a queued one hears it as part of its first turn.
+   *
+   * <p>An OBSOLETE agent is told too. A release of one of its branches marks it OBSOLETE, but the
+   * item can go on — the next phase, another repository — and that agent is still the one working
+   * on it, with its session.
    */
   public Delivery deliver(String workId, String text, boolean compactFirst) {
     String said = trimmed(text);
@@ -351,7 +355,7 @@ public class AgentService {
       throw new BadRequestException("A turn needs text.");
     }
     Optional<AgentWorktree> found =
-        QuarkusTransaction.requiringNew().call(() -> agents.findActiveByWorkId(workId));
+        QuarkusTransaction.requiringNew().call(() -> agents.findLiveByWorkId(workId));
     if (found.isEmpty()) {
       return new Delivery(
           null, false, false, false, "No agent works on work item " + workId + "; nothing was said.");

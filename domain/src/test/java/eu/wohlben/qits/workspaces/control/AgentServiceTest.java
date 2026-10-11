@@ -179,6 +179,30 @@ public class AgentServiceTest {
   }
 
   @Test
+  void aDeliveryReachesAnAgentAReleaseMadeObsolete() {
+    // qits-248: a release took one of the agent's branches mid-item, and the next phase's turn was
+    // answered "nobody works on it" while the agent still ran.
+    AgentService.Dispatch dispatched = dispatch("w-obsolete", true, null);
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    UUID id = UUID.fromString(agentId);
+    liveness.markLive(slot);
+    service.reconcile();
+    QuarkusTransaction.requiringNew()
+        .run(() -> branches.upsert(id, "service-repo", "ticket/w-obsolete-fix", "abc", Instant.now()));
+    service.resolveReleasedBranch("service-repo", "ticket/w-obsolete-fix", "2026.1.1", "abc", null);
+    assertEquals(AgentState.OBSOLETE, row(agentId).state);
+
+    AgentService.Delivery delivery = service.deliver("w-obsolete", "verify it", false);
+    assertEquals(agentId, delivery.agentId());
+    assertTrue(delivery.delivered());
+    service.reconcile();
+
+    assertTrue(daemon.callsFor(agentId).contains("turn " + slot + " " + agentId + " verify it"));
+    liveness.markDead(slot);
+  }
+
+  @Test
   void aDeliveryForAnItemNobodyWorksOnSaysSoAndCreatesNothing() {
     AgentService.Delivery delivery = service.deliver("w-nobody", "hello", false);
     assertNull(delivery.agentId());
