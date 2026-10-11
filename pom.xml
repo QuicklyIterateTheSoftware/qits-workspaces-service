@@ -121,6 +121,10 @@
              scope at the declaration site; a pin in <properties> like every other qits jar, so
              qits-maintenance bumps it when the consumer releases a changed pact. -->
         <qits.landing-app-pacts-qits-workspaces-service.version>2026.1003.184026</qits.landing-app-pacts-qits-workspaces-service.version>
+        <!-- qits-projects' consumer pact against this service (qits-1152). PLACEHOLDER: no release
+             of qits-projects-service has published this jar yet; its first release that does
+             moves this pin, and until then a build needs a locally installed jar. -->
+        <qits.projects-service-pacts-qits-workspaces-service.version>2026.1011.72707</qits.projects-service-pacts-qits-workspaces-service.version>
         <qits.maven.repository.url>https://registry.qits.wohlben.eu/artifacts/maven/maven</qits.maven.repository.url>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -388,6 +392,11 @@
                 <groupId>eu.wohlben.qits</groupId>
                 <artifactId>qits-landing-app-pacts-qits-workspaces-service</artifactId>
                 <version>${qits.landing-app-pacts-qits-workspaces-service.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>eu.wohlben.qits</groupId>
+                <artifactId>qits-projects-service-pacts-qits-workspaces-service</artifactId>
+                <version>${qits.projects-service-pacts-qits-workspaces-service.version}</version>
             </dependency>
             <dependency>
                 <groupId>${project.groupId}</groupId>
