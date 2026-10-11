@@ -100,6 +100,35 @@
             ],
             "listFilteredTo": null
           }
+        },
+        {
+          "operationId": "listAgents",
+          "method": "GET",
+          "path": "/workspaces/api/agents",
+          "query": {
+            "state": "ACTIVE"
+          },
+          "status": 200,
+          "file": "a-project-with-agents-bound-to-work-items/listAgents.json",
+          "frozen": {
+            "ids": [
+              "$.agents[*].agentId",
+              "$.agents[*].repositoryId",
+              "$.agents[*].workId",
+              "$.agents[*].ticketId",
+              "$.agents[*].branches[*].repositoryId"
+            ],
+            "instants": [
+              "$.agents[*].branches[*].pushedAt",
+              "$.agents[*].lastActivityAt",
+              "$.agents[*].createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.agents[*].workspaceRowId"
+            ],
+            "listFilteredTo": "$.agents"
+          }
         }
       ]
     },

@@ -131,6 +131,13 @@ class GoldenMasterRecordingTest {
               "listAgentDispatchReferences",
               WORKSPACES + "/agent-dispatches/references?workId={bugTicketId}",
               null),
+          // The landing app's In Progress tab: every work item an ACTIVE agent works on. Other
+          // tests share the store, so the list keeps only this state's agents.
+          Interaction.read(
+              ProviderStates.AGENTS_BOUND_TO_WORK_ITEMS,
+              "listAgents",
+              WORKSPACES + "/agents?state=ACTIVE",
+              "$.agents"),
           Interaction.read(
               ProviderStates.A_WORK_ITEM_WITH_NO_WORKSPACES,
               "listWorkItemWorkspaces",
