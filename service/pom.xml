@@ -154,6 +154,14 @@
             <artifactId>qits-auth-core</artifactId>
         </dependency>
         <dependency>
+            <!-- CallerServerFilter/CallerClientFilter: jandex-indexed, so merely being on this
+                 deployable's classpath records inbound X-Qits-Caller as the qits.caller span
+                 attribute and stamps it on every @RegisterRestClient call under wiring/. This
+                 service builds no raw HttpClient of its own. -->
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-http-core</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-rest-jackson</artifactId>
         </dependency>

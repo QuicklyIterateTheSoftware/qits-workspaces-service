@@ -89,6 +89,10 @@
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
         <qits.arch-rules.version>2026.1002.70617</qits.arch-rules.version>
         <qits.auth-core.version>2026.1002.70617</qits.auth-core.version>
+        <!-- CallerServerFilter/CallerClientFilter: jandex-indexed filters that record inbound
+             X-Qits-Caller as the qits.caller span attribute and stamp it on outgoing REST-client
+             calls. Also published by qits-integrations-quarkus. -->
+        <qits.http-core.version>0-qits-1198-local</qits.http-core.version>
         <qits.containers-client.version>2026.1010.173216</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
@@ -338,6 +342,16 @@
                 <groupId>${project.groupId}</groupId>
                 <artifactId>qits-auth-core</artifactId>
                 <version>${qits.auth-core.version}</version>
+            </dependency>
+            <dependency>
+                <!-- CallerServerFilter: having the jar on the deployable's classpath records
+                     inbound X-Qits-Caller as the qits.caller span attribute. Compile scope in
+                     `service` only; this repo builds no HttpClient of its own (the 6
+                     @RegisterRestClient interfaces under wiring/ stamp it automatically via
+                     CallerClientFilter). -->
+                <groupId>${project.groupId}</groupId>
+                <artifactId>qits-http-core</artifactId>
+                <version>${qits.http-core.version}</version>
             </dependency>
             <dependency>
                 <!-- The platform's database resilience: PatientPgDriver, which every postgresql
