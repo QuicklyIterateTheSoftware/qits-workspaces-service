@@ -39,6 +39,8 @@ import org.junit.jupiter.api.Test;
 @QuarkusTest
 public class AgentServiceTest {
 
+  @Inject FakeAgentWaitingReporter reporter;
+
   @Inject AgentService service;
   @Inject AgentWorktreeRepository agents;
   @Inject AgentBranchRepository branches;
@@ -335,6 +337,48 @@ public class AgentServiceTest {
 
     AgentDto discarded = service.discard(UUID.fromString(agentId), true);
     assertEquals(AgentState.REMOVED, discarded.state());
+  }
+
+  @Test
+  void aTurnTypedIntoAWaitingAgentTellsQitsProjectsItNoLongerWaits() {
+    // qits-1198: the agent waited, a phase turn was typed into it, and qits-projects kept it
+    // blocked while it worked, because the turn cleared the flag here without saying so.
+    AgentService.Dispatch dispatched = dispatch("w-blocked", true, null);
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    service.reconcile();
+    service.onActivity(agentId, Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
+
+    service.deliver("w-blocked", "implement it", false);
+    service.reconcile();
+    service.onActivity(agentId, Boolean.FALSE, "s-1", "UserPromptSubmit", System.currentTimeMillis());
+
+    List<FakeAgentWaitingReporter.Report> reports = reporter.reportsFor("w-blocked");
+    assertFalse(reports.isEmpty());
+    assertFalse(reports.get(reports.size() - 1).waiting(), "the last word qits-projects heard");
+    liveness.markDead(slot);
+  }
+
+  @Test
+  void aPushReportedWhileQitsProjectsDoesNotAnswerIsRecordedOnALaterPass() {
+    // qits-168: the push of qits-ci-service came while the name lookup failed, and was dropped.
+    AgentService.Dispatch dispatched = dispatch("w-push", true, null);
+    UUID id = UUID.fromString(dispatched.agent().agentId());
+    String wrapperName = FakeRepositoryLookup.nameOf(repoId);
+    try {
+      repositories.findOutage(true);
+      service.onBranchPushed(id.toString(), wrapperName, "ticket/w-push", "abc");
+      assertTrue(QuarkusTransaction.requiringNew().call(() -> branches.findByAgent(id)).isEmpty());
+    } finally {
+      repositories.findOutage(false);
+    }
+
+    service.reconcile();
+
+    assertEquals(
+        List.of(id),
+        QuarkusTransaction.requiringNew().call(() -> branches.agentsOn(repoId, "ticket/w-push")));
   }
 
   @Test
