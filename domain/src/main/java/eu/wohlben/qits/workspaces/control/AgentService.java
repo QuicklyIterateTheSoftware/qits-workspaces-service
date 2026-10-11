@@ -35,8 +35,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -186,6 +188,18 @@ public class AgentService {
    */
   @ConfigProperty(name = "qits.workspace.agent.yield-after", defaultValue = "PT30S")
   Duration yieldAfter;
+
+  /** A push the daemon reported, kept until its repository name maps to an id. */
+  private record PendingPush(UUID agentId, String repositoryName, String branch, String sha, Instant pushedAt) {}
+
+  /** Pushes whose repository qits-projects could not name yet; tried again every pass. */
+  private final Queue<PendingPush> unresolvedPushes = new ConcurrentLinkedQueue<>();
+
+  /** How long a push whose repository cannot be named is tried again before it is given up. */
+  static final Duration PUSH_RETRY_LIMIT = Duration.ofHours(1);
+
+  /** The cause relayed to qits-projects when a turn is typed into an agent that was waiting. */
+  static final String CAUSE_TURN = "TurnDelivered";
 
   /** How long an OBSOLETE agent must be idle before the cleanup sweep looks at it (D4). */
   @ConfigProperty(name = "qits.workspace.agent.cleanup-idle", defaultValue = "PT30S")
@@ -344,6 +358,10 @@ public class AgentService {
    * <b>Say this to the agent working on the item</b>. Never creates an agent: an item nobody
    * dispatched has nobody to tell, and that is answered, not refused. A yielded agent resumes to
    * hear it (D16); a queued one hears it as part of its first turn.
+   *
+   * <p>An OBSOLETE agent is told too. A release of one of its branches marks it OBSOLETE, but the
+   * item can go on — the next phase, another repository — and that agent is still the one working
+   * on it, with its session.
    */
   public Delivery deliver(String workId, String text, boolean compactFirst) {
     String said = trimmed(text);
@@ -351,7 +369,7 @@ public class AgentService {
       throw new BadRequestException("A turn needs text.");
     }
     Optional<AgentWorktree> found =
-        QuarkusTransaction.requiringNew().call(() -> agents.findActiveByWorkId(workId));
+        QuarkusTransaction.requiringNew().call(() -> agents.findLiveByWorkId(workId));
     if (found.isEmpty()) {
       return new Delivery(
           null, false, false, false, "No agent works on work item " + workId + "; nothing was said.");
@@ -670,22 +688,68 @@ public class AgentService {
     if (id == null || repositoryName == null || branch == null || branch.isBlank()) {
       return;
     }
-    AgentWorktree agent = QuarkusTransaction.requiringNew().call(() -> agents.findById(id));
-    if (agent == null) {
-      LOG.debugf("A push was reported for unknown agent %s", agentId);
-      return;
+    PendingPush push = new PendingPush(id, repositoryName, branch, sha, Instant.now());
+    if (!recordPush(push)) {
+      unresolvedPushes.add(push);
     }
-    String repositoryId = repositoryIdOf(agent.repositoryId, repositoryName);
+  }
+
+  /**
+   * Record one push. False when qits-projects did not answer the name lookup: the push is then tried
+   * again on the next pass, because a lost push is a branch whose release never marks its agent
+   * OBSOLETE.
+   */
+  private boolean recordPush(PendingPush push) {
+    AgentWorktree agent = QuarkusTransaction.requiringNew().call(() -> agents.findById(push.agentId()));
+    if (agent == null) {
+      LOG.debugf("A push was reported for unknown agent %s", push.agentId());
+      return true;
+    }
+    String repositoryId;
+    try {
+      repositoryId = repositoryIdOf(agent.repositoryId, push.repositoryName());
+    } catch (RuntimeException registryDidNotAnswer) {
+      LOG.infof(
+          "Could not map repository %s of agent %s's push of '%s' yet (%s); trying again",
+          push.repositoryName(), push.agentId(), push.branch(), registryDidNotAnswer.getMessage());
+      return false;
+    }
     if (repositoryId == null) {
       LOG.warnf(
           "Agent %s pushed '%s' of a repository named %s, which its project does not list; not"
               + " recorded",
-          agentId, branch, repositoryName);
-      return;
+          push.agentId(), push.branch(), push.repositoryName());
+      return true;
     }
     QuarkusTransaction.requiringNew()
-        .run(() -> agentBranches.upsert(id, repositoryId, branch, sha, Instant.now()));
+        .run(
+            () ->
+                agentBranches.upsert(
+                    push.agentId(), repositoryId, push.branch(), push.sha(), push.pushedAt()));
     changePublisher.fire(agent.repositoryId, agent.workspaceId, WorkspaceChangeHint.Topic.AGENTS);
+    return true;
+  }
+
+  /** Step 0: the pushes whose repository qits-projects could not name before, tried again. */
+  void retryPushes() {
+    int pending = unresolvedPushes.size();
+    Instant giveUpBefore = Instant.now().minus(PUSH_RETRY_LIMIT);
+    for (int i = 0; i < pending; i++) {
+      PendingPush push = unresolvedPushes.poll();
+      if (push == null) {
+        return;
+      }
+      if (recordPush(push)) {
+        continue;
+      }
+      if (push.pushedAt().isBefore(giveUpBefore)) {
+        LOG.warnf(
+            "Gave up mapping repository %s of agent %s's push of '%s' after %s; not recorded",
+            push.repositoryName(), push.agentId(), push.branch(), PUSH_RETRY_LIMIT);
+      } else {
+        unresolvedPushes.add(push);
+      }
+    }
   }
 
   /** A workspace's daemon connected or went: its agents are started again on the next pass. */
@@ -694,27 +758,26 @@ public class AgentService {
     kick();
   }
 
+  /**
+   * The id of repository {@code name} in the wrapper's project, or null when it lists none. Throws
+   * when qits-projects does not answer.
+   */
   private String repositoryIdOf(String wrapperId, String name) {
-    try {
-      RepositoryLookup.RepositoryView wrapper = repositories.find(wrapperId).orElse(null);
-      if (wrapper == null) {
-        return null;
-      }
-      if (name.equals(wrapper.name())) {
-        return wrapper.id();
-      }
-      if (wrapper.projectId() == null) {
-        return null;
-      }
-      return repositories.listByProject(wrapper.projectId()).stream()
-          .filter(r -> name.equals(r.name()))
-          .map(RepositoryLookup.RepositoryView::id)
-          .findFirst()
-          .orElse(null);
-    } catch (RuntimeException registryDidNotAnswer) {
-      LOG.debugf("could not map repository name %s: %s", name, registryDidNotAnswer.toString());
+    RepositoryLookup.RepositoryView wrapper = repositories.find(wrapperId).orElse(null);
+    if (wrapper == null) {
       return null;
     }
+    if (name.equals(wrapper.name())) {
+      return wrapper.id();
+    }
+    if (wrapper.projectId() == null) {
+      return null;
+    }
+    return repositories.listByProject(wrapper.projectId()).stream()
+        .filter(r -> name.equals(r.name()))
+        .map(RepositoryLookup.RepositoryView::id)
+        .findFirst()
+        .orElse(null);
   }
 
   // --- the scheduler ------------------------------------------------------------------------------
@@ -742,6 +805,7 @@ public class AgentService {
   /** One scheduler pass; see the class javadoc. Serialised: one pass at a time. */
   public void reconcile() {
     synchronized (passLock) {
+      retryPushes();
       try {
         waits.sweep();
       } catch (RuntimeException e) {
@@ -922,8 +986,9 @@ public class AgentService {
                   () -> {
                     AgentWorktree row = agents.findById(agent.id);
                     if (row.runState == AgentRunState.RUNNING) {
+                      // waitingSince stays: a yielded agent still waits for a person, and the
+                      // hook of the turn it resumes on is the flip that clears it.
                       row.runState = AgentRunState.YIELDED;
-                      row.waitingSince = null;
                     }
                   });
           started.remove(agent.id);
@@ -1048,17 +1113,26 @@ public class AgentService {
       return;
     }
     pendingSince.remove(agent.id);
-    QuarkusTransaction.requiringNew()
-        .run(
-            () -> {
-              AgentWorktree row = agents.findById(agent.id);
-              if (Objects.equals(row.pendingText, text)) {
-                row.pendingText = null;
-              }
-              row.pendingCompact = false;
-              row.waitingSince = null;
-              row.lastActivityAt = Instant.now();
-            });
+    Instant now = Instant.now();
+    AgentWorktree told =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  AgentWorktree row = agents.findById(agent.id);
+                  if (Objects.equals(row.pendingText, text)) {
+                    row.pendingText = null;
+                  }
+                  row.pendingCompact = false;
+                  boolean was = row.waitingSince != null;
+                  row.waitingSince = null;
+                  row.lastActivityAt = now;
+                  return was ? row : null;
+                });
+    if (told != null) {
+      // The agent was waiting and now has a turn. qits-projects heard the waiting flip, so it
+      // hears this one too: the hook that follows the turn finds nothing left to flip.
+      waits.relayActivity(told.workId, told.id, false, CAUSE_TURN, told.sessionId, now);
+    }
   }
 
   /** Step 5: OBSOLETE agents of VERIFIED items, idle long enough, are removed or prompted (D4–D7). */
