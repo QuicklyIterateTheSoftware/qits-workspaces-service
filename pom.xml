@@ -92,7 +92,7 @@
         <!-- CallerServerFilter/CallerClientFilter: jandex-indexed filters that record inbound
              X-Qits-Caller as the qits.caller span attribute and stamp it on outgoing REST-client
              calls. Also published by qits-integrations-quarkus. -->
-        <qits.http-core.version>0-qits-1198-local</qits.http-core.version>
+        <qits.http-core.version>2026.1011.185745</qits.http-core.version>
         <qits.containers-client.version>2026.1010.173216</qits.containers-client.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
