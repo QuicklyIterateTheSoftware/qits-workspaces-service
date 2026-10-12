@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.containers;
 
 import eu.wohlben.qits.containers.client.ContainersClient;
+import eu.wohlben.qits.http.QitsHttpClients;
 import io.quarkus.oidc.client.NamedOidcClient;
 import io.quarkus.oidc.client.OidcClient;
 import io.quarkus.oidc.client.runtime.TokensHelper;
@@ -81,12 +82,15 @@ public class ContainersClientProducer {
 
   @Inject @NamedOidcClient("qits") OidcClient oidcClient;
 
+  /** Wraps the client\'s HttpClient: a CLIENT span and X-Qits-Caller on every call to qits-containers. */
+  @Inject QitsHttpClients clients;
+
   private final TokensHelper tokens = new TokensHelper();
 
   @Produces
   @Singleton
   ContainersClient containersClient() {
-    return new ContainersClient(url, requestTimeout, ensureTimeout, this::bearer);
+    return new ContainersClient(url, requestTimeout, ensureTimeout, this::bearer, clients);
   }
 
   /** The access token to put on the next request, or none. Never throws — see the class javadoc. */
