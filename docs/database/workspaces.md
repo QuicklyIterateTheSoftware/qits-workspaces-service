@@ -72,6 +72,8 @@ erDiagram
     string repository_id "not null"
     enum run_state "not null"
     text session_id
+    text start_refusal
+    instant start_refused_at
     enum state "not null"
     text ticket_id
     instant waiting_since
