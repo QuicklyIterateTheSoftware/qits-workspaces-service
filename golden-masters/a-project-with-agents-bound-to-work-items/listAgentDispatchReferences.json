@@ -32,7 +32,9 @@
         "lastActivityAt": "2026-01-01T00:00:00Z",
         "createdAt": "2026-01-01T00:00:00Z",
         "obsoleteAt": null,
-        "removedAt": null
+        "removedAt": null,
+        "startRefusal": null,
+        "startRefusedAt": null
       }
     },
     {
@@ -60,7 +62,9 @@
         "lastActivityAt": "2026-01-01T00:00:00Z",
         "createdAt": "2026-01-01T00:00:00Z",
         "obsoleteAt": "2026-01-01T00:00:00Z",
-        "removedAt": null
+        "removedAt": null,
+        "startRefusal": null,
+        "startRefusedAt": null
       }
     },
     {
@@ -88,7 +92,9 @@
         "lastActivityAt": "2026-01-01T00:00:00Z",
         "createdAt": "2026-01-01T00:00:00Z",
         "obsoleteAt": "2026-01-01T00:00:00Z",
-        "removedAt": "2026-01-01T00:00:00Z"
+        "removedAt": "2026-01-01T00:00:00Z",
+        "startRefusal": null,
+        "startRefusedAt": null
       }
     }
   ]

@@ -23,7 +23,9 @@
     "lastActivityAt": null,
     "createdAt": "2026-01-01T00:00:00Z",
     "obsoleteAt": null,
-    "removedAt": null
+    "removedAt": null,
+    "startRefusal": null,
+    "startRefusedAt": null
   },
   "fresh": true,
   "agentLaunch": "QUEUED",

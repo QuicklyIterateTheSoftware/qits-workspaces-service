@@ -206,6 +206,9 @@ no code reads any more. **`V23__agent_waits.sql`** (qits-1153) adds `agent_wait`
 waits; `AgentWait` is a `CausedRow` (the agent's own request writes it). See "Declared waits".
 **`V24__yield_keeps_the_harness.sql`** (qits-1212) drops `uq_agent_worktree_running`: a yield no
 longer stops the harness, so a workspace may hold several RUNNING agents.
+**`V25__agent_start_refusal.sql`** (qits-1217) adds `start_refusal` and `start_refused_at` to
+`agent_worktree`: why the daemon last refused to start the agent, and since when. Nullable columns on
+a `CausedRow`, so no `ArchRulesTest` decision; see "Agents and the workspaces they run in", Drive.
 
 **`V18__dispatch_command_id.sql` adds `dispatch_command_id` to `workspace`** (qits-895): the daemon
 command the last launch this service made started, replaced by every accepted launch
@@ -970,7 +973,8 @@ makes every daemon call, one pass at a time, kicked after each door and every
 2. **Place** — a QUEUED agent goes to an empty workspace of its wrapper and posture, else to a new
    one while the eligible runners' slots outnumber the RUNNER workspaces (an admin agent always gets
    a new DIRECT admin workspace, D10), else to a workspace whose agents have all yielded, else it
-   waits.
+   waits. Never to a workspace where another live agent (ACTIVE or OBSOLETE) of the repository holds
+   its wrapper branch: git checks a branch out in one worktree at a time (qits-1217).
 3. **Yield** — a RUNNING agent waiting for input longer than `qits.workspace.agent.yield-after` (30 s)
    yields when another agent wants its slot (D14, D16). A yield frees the slot and nothing else: no
    daemon call, the harness keeps running, and its terminal, turns and entity updates keep working
@@ -981,6 +985,9 @@ makes every daemon call, one pass at a time, kicked after each door and every
    terminal), and its pending turn is said at a turn boundary (`/turn`; BUSY waits up to the launch
    window). The daemon holds a turn until the harness has started and types it on one line. The daemon keeps the agent credential in
    memory only, so every agent is started again after its daemon connects (`onDaemonConnection`).
+   A refused start (409) is stored on the row once per distinct detail (`start_refusal`,
+   `start_refused_at`, `AgentDto.startRefusal`/`startRefusedAt`) and tried again every pass; the
+   next accepted start clears it (qits-1217).
 5. **Clean up** (D4, D5, D7) — an OBSOLETE agent whose item is VERIFIED (the status the entity door
    stores) and that has been idle for `qits.workspace.agent.cleanup-idle` (30 s) is checked
    (`cleanup-check`): clean → `DELETE agent-worktrees/{id}`, token deleted, REMOVED; leftover work →
@@ -997,7 +1004,11 @@ connection and the next frames.
 - `POST /workspaces/api/agent-dispatches` `{repositoryId, wrapperBranch, workId, entityId,
   entityTitle, entityStatus, entityBlocked, ticketId?, epicId?, harness?, instruction}` →
   `{agent, fresh, agentLaunch: SCHEDULED|SKIPPED_RUNNING|QUEUED, agentIdentity}`. Idempotent per
-  `workId`: the ACTIVE agent is the answer (`fresh:false`). `admin: true` is refused (400): an admin
+  `workId`: the ACTIVE agent is the answer (`fresh:false`). With none, the item's newest OBSOLETE
+  agent on the same wrapper branch is made ACTIVE again (its obsolete and cleanup marks cleared) and
+  is the answer, told the instruction whatever its run state (qits-1217): a release that took one of
+  its branches does not end the item, and a second agent on that branch would collide with the
+  first's worktree. An OBSOLETE agent on another wrapper branch gets a new agent beside it. `admin: true` is refused (400): an admin
   agent holds the host's docker socket, so only the person door below makes one, never a door
   `qits:system` may press.
 - `GET …/agent-dispatches/references?workId=…` (repeating; `ticketId`/`epicId` read as work ids) →

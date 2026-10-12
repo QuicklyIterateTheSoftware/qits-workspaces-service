@@ -138,6 +138,17 @@ public class AgentWorktree extends PanacheEntityBase implements CausedRow {
   @Column(name = "obsolete_at")
   public Instant obsoleteAt;
 
+  /**
+   * Why its workspace's daemon refused to start it, as the daemon said (qits-1217, {@code V25});
+   * null while no start is refused. Cleared by the next start the daemon accepts.
+   */
+  @Column(name = "start_refusal", columnDefinition = "text")
+  public String startRefusal;
+
+  /** When the refusal in {@link #startRefusal} was first seen; null with it. */
+  @Column(name = "start_refused_at")
+  public Instant startRefusedAt;
+
   @Column(name = "created_at", nullable = false, updatable = false)
   public Instant createdAt;
 

@@ -83,6 +83,10 @@ components:
           $ref: "#/components/schemas/Instant"
         removedAt:
           $ref: "#/components/schemas/Instant"
+        startRefusal:
+          type: string
+        startRefusedAt:
+          $ref: "#/components/schemas/Instant"
     AgentHarness:
       type: string
       enum:

@@ -31,11 +31,24 @@ public class FakeAgentDaemon implements AgentDaemon {
 
   private volatile Outcome turnAnswer = Outcome.OK;
 
+  /** The refusal every start answers with; null: starts are accepted. */
+  private volatile String startRefusal;
+
   public void reset() {
     calls.clear();
     starts.clear();
     checks.clear();
     turnAnswer = Outcome.OK;
+    startRefusal = null;
+  }
+
+  /** Every start is refused (409) with {@code detail} until {@link #acceptStarts}. */
+  public void refuseStarts(String detail) {
+    startRefusal = detail;
+  }
+
+  public void acceptStarts() {
+    startRefusal = null;
   }
 
   public void leftover(String agentId, CleanupCheck check) {
@@ -61,6 +74,10 @@ public class FakeAgentDaemon implements AgentDaemon {
   public Started start(Long workspaceRowId, Start start) {
     calls.add("start " + workspaceRowId + " " + start.agentId() + " " + start.instruction());
     starts.add(start);
+    String refusal = startRefusal;
+    if (refusal != null) {
+      return Started.of(Outcome.REFUSED, refusal);
+    }
     return new Started(Outcome.OK, "cmd-" + start.agentId(), "session-" + start.agentId(), start.sessionId() != null, null);
   }
 

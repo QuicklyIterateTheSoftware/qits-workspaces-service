@@ -210,6 +210,110 @@ public class AgentServiceTest {
     liveness.markDead(slot);
   }
 
+  /** A release takes {@code branch}, a submodule branch the agent pushed: the agent is OBSOLETE. */
+  private void releaseBranchOf(String agentId, String branch) {
+    UUID id = UUID.fromString(agentId);
+    QuarkusTransaction.requiringNew()
+        .run(() -> branches.upsert(id, "service-repo", branch, "abc", Instant.now()));
+    service.resolveReleasedBranch("service-repo", branch, "2026.1.1", "abc", null);
+    assertEquals(AgentState.OBSOLETE, row(agentId).state);
+  }
+
+  private long liveRowsOf(String workId) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                agents.findByWorkIds(List.of(workId)).stream()
+                    .filter(a -> a.state != AgentState.REMOVED)
+                    .count());
+  }
+
+  @Test
+  void aDispatchRevivesTheAgentAReleaseMadeObsoleteInsteadOfMakingASecond() {
+    // qits-1199: a release took one of the agent's branches mid-item, the next dispatch made a
+    // second agent on the same wrapper branch, and its daemon refused it "already checked out".
+    AgentService.Dispatch first = dispatch("w-revive", true, "first phase");
+    String agentId = first.agent().agentId();
+    Long slot = first.agent().workspaceRowId();
+    liveness.markLive(slot);
+    service.reconcile();
+    releaseBranchOf(agentId, "ticket/w-revive-fix");
+    QuarkusTransaction.requiringNew()
+        .run(() -> agents.findById(UUID.fromString(agentId)).cleanupPromptedAt = Instant.now());
+    assertNotEquals("VERIFIED", row(agentId).entityStatus, "the item goes on");
+
+    AgentService.Dispatch again = dispatch("w-revive", true, "next phase");
+
+    assertEquals(agentId, again.agent().agentId(), "the item's agent is the answer");
+    assertFalse(again.fresh());
+    assertEquals(AgentState.ACTIVE, again.agent().state());
+    AgentWorktree revived = row(agentId);
+    assertEquals(AgentState.ACTIVE, revived.state);
+    assertNull(revived.obsoleteAt);
+    assertNull(revived.cleanupPromptedAt);
+    assertEquals(slot, revived.workspaceId, "it keeps its slot, worktree and session");
+    assertEquals(1, liveRowsOf("w-revive"), "no second agent for the item");
+    liveness.markDead(slot);
+  }
+
+  @Test
+  void aRevivedAgentHearsTheNewInstructionRunningOrYielded() {
+    AgentService.Dispatch running = dispatch("w-revive-running", true, null);
+    String runningId = running.agent().agentId();
+    Long runningSlot = running.agent().workspaceRowId();
+    AgentService.Dispatch yielded = dispatch("w-revive-yielded", true, null);
+    String yieldedId = yielded.agent().agentId();
+    Long yieldedSlot = yielded.agent().workspaceRowId();
+    liveness.markLive(runningSlot);
+    liveness.markLive(yieldedSlot);
+    service.reconcile();
+    assertTrue(service.isStarted(UUID.fromString(runningId)));
+    releaseBranchOf(runningId, "ticket/w-revive-running-fix");
+    releaseBranchOf(yieldedId, "ticket/w-revive-yielded-fix");
+    setRunState(yieldedId, AgentRunState.YIELDED);
+
+    AgentService.Dispatch toRunning = dispatch("w-revive-running", true, "verify the fix");
+    AgentService.Dispatch toYielded = dispatch("w-revive-yielded", true, "verify it too");
+    assertEquals(AgentService.AgentLaunch.SCHEDULED, toRunning.agentLaunch(), "not skipped");
+    service.reconcile();
+
+    assertTrue(
+        daemon.callsFor(runningId)
+            .contains("turn " + runningSlot + " " + runningId + " verify the fix"));
+    assertEquals(AgentRunState.RUNNING, row(yieldedId).runState, "the yielded agent resumed");
+    assertTrue(
+        daemon.callsFor(yieldedId)
+            .contains("turn " + yieldedSlot + " " + yieldedId + " verify it too"));
+    assertEquals(yieldedId, toYielded.agent().agentId());
+    liveness.markDead(runningSlot);
+    liveness.markDead(yieldedSlot);
+  }
+
+  @Test
+  void anObsoleteAgentOnAnotherWrapperBranchGetsANewAgentBesideIt() {
+    AgentService.Dispatch first = dispatch("w-other-branch", true, null);
+    String agentId = first.agent().agentId();
+    releaseBranchOf(agentId, "ticket/w-other-branch-fix");
+
+    AgentService.Dispatch other =
+        service.dispatch(
+            new AgentService.AgentRequest(
+                repoId,
+                "epic/w-other-branch",
+                "w-other-branch",
+                "w-other-branch",
+                null,
+                "w-other-branch",
+                true,
+                null,
+                "go",
+                new EntityFacts("A title", "REFINED", false)));
+
+    assertTrue(other.fresh());
+    assertNotEquals(agentId, other.agent().agentId());
+    assertEquals(AgentState.OBSOLETE, row(agentId).state, "the old one is left as it was");
+  }
+
   @Test
   void aDeliveryForAnItemNobodyWorksOnSaysSoAndCreatesNothing() {
     AgentService.Delivery delivery = service.deliver("w-nobody", "hello", false);
@@ -365,6 +469,72 @@ public class AgentServiceTest {
         AgentRunState.QUEUED,
         row(second.toString()).runState,
         "the slot is taken again: one pass does not book it twice");
+  }
+
+  @Test
+  void aQueuedAgentIsNeverPlacedWhereALiveAgentHoldsItsWrapperBranch() {
+    Long slot = runnerSlot();
+    // An OBSOLETE agent that yielded: the slot reads as all-yielded, but its worktree holds the branch.
+    UUID obsolete = agentIn(slot, false, AgentRunState.YIELDED);
+    String branch = row(obsolete.toString()).wrapperBranch;
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agents.findById(obsolete);
+              row.state = AgentState.OBSOLETE;
+              row.obsoleteAt = Instant.now();
+            });
+    UUID sameBranch = agentIn(null, false, AgentRunState.QUEUED);
+    QuarkusTransaction.requiringNew().run(() -> agents.findById(sameBranch).wrapperBranch = branch);
+    UUID otherBranch = agentIn(null, false, AgentRunState.QUEUED);
+
+    service.placeQueued();
+
+    AgentWorktree waiting = row(sameBranch.toString());
+    assertEquals(AgentRunState.QUEUED, waiting.runState, "git would refuse it the branch there");
+    assertNull(waiting.workspaceId);
+    AgentWorktree placed = row(otherBranch.toString());
+    assertEquals(AgentRunState.RUNNING, placed.runState, "another branch takes the slot");
+    assertEquals(slot, placed.workspaceId);
+  }
+
+  @Test
+  void aRefusedStartIsStoredOnTheAgentAndAnAcceptedOneClearsIt() {
+    AgentService.Dispatch dispatched = dispatch("w-refused", true, "go");
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    String detail = "fatal: 'ticket/w-refused' is already checked out at '/workspace/agents/x'";
+    daemon.refuseStarts(detail);
+    try {
+      liveness.markLive(slot);
+      service.reconcile();
+
+      AgentWorktree refused = row(agentId);
+      assertEquals(detail, refused.startRefusal);
+      assertNotNull(refused.startRefusedAt);
+      assertEquals(AgentRunState.RUNNING, refused.runState, "the scheduler keeps trying");
+      AgentDto view = service.get(UUID.fromString(agentId));
+      assertEquals(detail, view.startRefusal());
+      assertEquals(refused.startRefusedAt, view.startRefusedAt());
+
+      service.reconcile();
+      assertEquals(
+          refused.startRefusedAt,
+          row(agentId).startRefusedAt,
+          "the same refusal again is not a new one");
+
+      daemon.acceptStarts();
+      service.reconcile();
+
+      AgentWorktree accepted = row(agentId);
+      assertTrue(service.isStarted(UUID.fromString(agentId)));
+      assertNull(accepted.startRefusal);
+      assertNull(accepted.startRefusedAt);
+      assertNull(service.get(UUID.fromString(agentId)).startRefusal());
+    } finally {
+      daemon.acceptStarts();
+      liveness.markDead(slot);
+    }
   }
 
   @Test

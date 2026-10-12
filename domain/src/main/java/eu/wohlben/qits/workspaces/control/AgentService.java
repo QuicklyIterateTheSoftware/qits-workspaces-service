@@ -259,8 +259,10 @@ public class AgentService {
 
   /**
    * <b>There should be an agent working on this work item</b> — the dispatch door, said
-   * idempotently. An ACTIVE agent of the item is the answer ({@code fresh:false}); otherwise one is
-   * created and placed. Never a 409 for an existing agent: the caller presses this to reach a state.
+   * idempotently. An ACTIVE agent of the item is the answer ({@code fresh:false}); so is its newest
+   * OBSOLETE agent on the same wrapper branch, made ACTIVE again and told the instruction
+   * (qits-1217); otherwise one is created and placed. Never a 409 for an existing agent: the caller
+   * presses this to reach a state.
    *
    * @throws NotFoundException no such repository; nothing is created
    * @throws BadRequestException no work item, or a wrapper branch git will not take
@@ -281,9 +283,9 @@ public class AgentService {
           "'" + wrapperBranch + "' is the repository's default branch; an agent never works on it.");
     }
 
-    Optional<AgentWorktree> existing = QuarkusTransaction.requiringNew().call(() -> agents.findActiveByWorkId(workId));
+    Optional<Found> existing = activeOrRevived(workId, wrapperBranch);
     if (existing.isPresent()) {
-      return found(existing.get().id, request);
+      return found(existing.get(), request);
     }
 
     UUID id = UUID.randomUUID();
@@ -310,12 +312,11 @@ public class AgentService {
               });
     } catch (RuntimeException raced) {
       // Two dispatches for one item: the loser answers the winner, as a re-press would.
-      Optional<AgentWorktree> winner =
-          QuarkusTransaction.requiringNew().call(() -> agents.findActiveByWorkId(workId));
+      Optional<Found> winner = activeOrRevived(workId, wrapperBranch);
       if (winner.isEmpty()) {
         throw raced;
       }
-      return found(winner.get().id, request);
+      return found(winner.get(), request);
     }
     LOG.infof("Agent %s created for work item %s on %s", id, workId, wrapperBranch);
     mintToken(id);
@@ -329,8 +330,68 @@ public class AgentService {
         placed.commissionedTokenSubject);
   }
 
-  /** A dispatch that found the item's agent: its facts refreshed, an idle one told the instruction. */
-  private Dispatch found(UUID id, AgentRequest request) {
+  /** The item's agent a dispatch answers with, and whether this dispatch revived it. */
+  private record Found(UUID id, boolean revived) {}
+
+  /**
+   * The item's ACTIVE agent; else its newest OBSOLETE one when that stands on the same wrapper
+   * branch, made ACTIVE again (qits-1217). A release that took one of an agent's branches makes it
+   * OBSOLETE while its item goes on, and the agent keeps its worktree, session and slot until the
+   * item is VERIFIED: a second agent on the same wrapper branch would be refused by its daemon
+   * ("already checked out") for as long as the first stands. An OBSOLETE agent on another wrapper
+   * branch is left alone, and the caller creates a new agent.
+   *
+   * <p>Two dispatches that revive at once are settled by {@code uq_agent_worktree_active_work}: the
+   * loser answers the winner.
+   */
+  private Optional<Found> activeOrRevived(String workId, String wrapperBranch) {
+    Optional<AgentWorktree> active =
+        QuarkusTransaction.requiringNew().call(() -> agents.findActiveByWorkId(workId));
+    if (active.isPresent()) {
+      return Optional.of(new Found(active.get().id, false));
+    }
+    Optional<UUID> revived;
+    try {
+      revived =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () -> {
+                    AgentWorktree live = agents.findLiveByWorkId(workId).orElse(null);
+                    if (live == null
+                        || live.state != AgentState.OBSOLETE
+                        || !wrapperBranch.equals(live.wrapperBranch)) {
+                      return Optional.<UUID>empty();
+                    }
+                    live.state = AgentState.ACTIVE;
+                    live.obsoleteAt = null;
+                    live.cleanupPromptedAt = null;
+                    agents.flush();
+                    return Optional.of(live.id);
+                  });
+    } catch (RuntimeException raced) {
+      Optional<AgentWorktree> winner =
+          QuarkusTransaction.requiringNew().call(() -> agents.findActiveByWorkId(workId));
+      if (winner.isEmpty()) {
+        throw raced;
+      }
+      return Optional.of(new Found(winner.get().id, false));
+    }
+    revived.ifPresent(
+        id ->
+            LOG.infof(
+                "Agent %s of work item %s is ACTIVE again: dispatched again on %s after a release"
+                    + " made it obsolete",
+                id, workId, wrapperBranch));
+    return revived.map(id -> new Found(id, true));
+  }
+
+  /**
+   * A dispatch that found the item's agent: its facts refreshed, an idle one told the instruction.
+   * A revived agent is told it whatever its run state, a running one included, as a delivery is:
+   * it is a new instruction for an agent that has worked on the item before, not a re-press.
+   */
+  private Dispatch found(Found found, AgentRequest request) {
+    UUID id = found.id();
     String instruction = trimmed(request.instruction());
     AgentLaunch launch =
         QuarkusTransaction.requiringNew()
@@ -338,10 +399,13 @@ public class AgentService {
                 () -> {
                   AgentWorktree agent = agents.findById(id);
                   applyFacts(agent, request.facts(), null);
-                  if (agent.runState == AgentRunState.RUNNING && started.containsKey(id)) {
+                  if (found.revived()) {
+                    if (instruction != null) {
+                      appendTurn(agent, instruction, false);
+                    }
+                  } else if (agent.runState == AgentRunState.RUNNING && started.containsKey(id)) {
                     return AgentLaunch.SKIPPED_RUNNING;
-                  }
-                  if (instruction != null && agent.pendingText == null) {
+                  } else if (instruction != null && agent.pendingText == null) {
                     agent.pendingText = instruction;
                   }
                   return agent.runState == AgentRunState.QUEUED
@@ -382,8 +446,7 @@ public class AgentService {
             .call(
                 () -> {
                   AgentWorktree row = agents.findById(id);
-                  row.pendingText = row.pendingText == null ? said : row.pendingText + "\n\n" + said;
-                  row.pendingCompact = row.pendingCompact || (compactFirst && compactBeforeTurn);
+                  appendTurn(row, said, compactFirst);
                   return row;
                 });
     bringUp(agent);
@@ -416,6 +479,17 @@ public class AgentService {
               false,
               "The agent waits for a workspace slot; this is part of its first turn.");
     };
+  }
+
+  /**
+   * {@code said} becomes part of what the agent has still to hear, after anything already pending.
+   * The scheduler says it whatever the agent's run state: at the next turn boundary of a running
+   * agent, as the resume of a yielded one (D16), as part of a queued one's first turn. Called inside
+   * a transaction, on a managed row.
+   */
+  private void appendTurn(AgentWorktree row, String said, boolean compactFirst) {
+    row.pendingText = row.pendingText == null ? said : row.pendingText + "\n\n" + said;
+    row.pendingCompact = row.pendingCompact || (compactFirst && compactBeforeTurn);
   }
 
   /**
@@ -889,7 +963,7 @@ public class AgentService {
                       }
                       // Checked again where it is written: an agent of the slot may have woken
                       // since it was chosen. The next pass tries again.
-                      if (!free(chosen)) {
+                      if (!free(chosen, row)) {
                         return false;
                       }
                       row.workspaceId = chosen;
@@ -907,7 +981,10 @@ public class AgentService {
     }
   }
 
-  /** An ACTIVE workspace of the agent's wrapper and posture that hosts no live agent. */
+  /**
+   * An ACTIVE workspace of the agent's wrapper and posture that hosts no live agent — so none that
+   * holds its wrapper branch either ({@link #holdsBranchOf}).
+   */
   private Long emptySlotFor(AgentWorktree agent) {
     for (Workspace workspace : slotsOf(agent)) {
       if (agents.findLiveByWorkspace(workspace.id).isEmpty()) {
@@ -921,20 +998,40 @@ public class AgentService {
   private Long yieldedSlotFor(AgentWorktree agent) {
     for (Workspace workspace : slotsOf(agent)) {
       List<AgentWorktree> live = agents.findLiveByWorkspace(workspace.id);
-      if (!live.isEmpty() && allYielded(live)) {
+      if (!live.isEmpty() && allYielded(live) && !holdsBranchOf(live, agent)) {
         return workspace.id;
       }
     }
     return null;
   }
 
-  /** Whether a queued agent may take the workspace: it hosts no live agent, or all have yielded. */
-  private boolean free(Long workspaceId) {
-    return allYielded(agents.findLiveByWorkspace(workspaceId));
+  /**
+   * Whether a queued agent may take the workspace: it hosts no live agent, or all have yielded, and
+   * none of them holds the agent's wrapper branch.
+   */
+  private boolean free(Long workspaceId, AgentWorktree agent) {
+    List<AgentWorktree> live = agents.findLiveByWorkspace(workspaceId);
+    return allYielded(live) && !holdsBranchOf(live, agent);
   }
 
   private static boolean allYielded(List<AgentWorktree> live) {
     return live.stream().allMatch(a -> a.runState == AgentRunState.YIELDED && a.pendingText == null);
+  }
+
+  /**
+   * Whether another live agent (ACTIVE or OBSOLETE: an OBSOLETE one keeps its worktree until it is
+   * REMOVED) holds the agent's wrapper branch of the same repository there (qits-1217). Git checks a
+   * branch out in one worktree of a clone at a time, so the daemon would refuse the start with
+   * "already checked out", every pass.
+   */
+  private static boolean holdsBranchOf(List<AgentWorktree> live, AgentWorktree agent) {
+    return live.stream()
+        .anyMatch(
+            a ->
+                !a.id.equals(agent.id)
+                    && a.state != AgentState.REMOVED
+                    && Objects.equals(a.repositoryId, agent.repositoryId)
+                    && Objects.equals(a.wrapperBranch, agent.wrapperBranch));
   }
 
   /** The ACTIVE slot workspaces (no branch of their own) of an agent's wrapper and posture. */
@@ -1083,9 +1180,8 @@ public class AgentService {
                       fresh.entityTitle, fresh.entityStatus, Boolean.TRUE.equals(fresh.entityBlocked)),
                   fresh.blockSource));
       if (answer.outcome() != AgentDaemon.Outcome.OK) {
-        if (answer.outcome() == AgentDaemon.Outcome.REFUSED
-            && !Objects.equals(lastRefusal.put(agent.id, String.valueOf(answer.detail())), answer.detail())) {
-          LOG.warnf("Workspace %s refused to start agent %s: %s", workspace.id, agent.id, answer.detail());
+        if (answer.outcome() == AgentDaemon.Outcome.REFUSED) {
+          recordRefusal(workspace.id, agent, answer.detail());
         }
         return;
       }
@@ -1098,6 +1194,8 @@ public class AgentService {
                 row.commandId = answer.commandId() == null ? row.commandId : answer.commandId();
                 row.sessionId = answer.sessionId() == null ? row.sessionId : answer.sessionId();
                 row.lastActivityAt = Instant.now();
+                row.startRefusal = null;
+                row.startRefusedAt = null;
                 if (Objects.equals(row.pendingText, instruction)) {
                   row.pendingText = null;
                 }
@@ -1154,6 +1252,33 @@ public class AgentService {
       // hears this one too: the hook that follows the turn finds nothing left to flip.
       waits.relayActivity(told.workId, told.id, false, CAUSE_TURN, told.sessionId, now);
     }
+  }
+
+  /**
+   * A refused start (qits-1217): logged and stored on the row once per distinct detail, so the
+   * agent's view says why it does not run while the scheduler keeps trying every pass. The next
+   * accepted start clears it.
+   */
+  private void recordRefusal(Long workspaceId, AgentWorktree agent, String detail) {
+    String said =
+        detail == null || detail.isBlank()
+            ? "The workspace daemon refused to start the agent and gave no reason."
+            : detail;
+    if (Objects.equals(lastRefusal.put(agent.id, said), said)) {
+      return;
+    }
+    LOG.warnf("Workspace %s refused to start agent %s: %s", workspaceId, agent.id, said);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agents.findById(agent.id);
+              if (row == null || Objects.equals(row.startRefusal, said)) {
+                return;
+              }
+              row.startRefusal = said;
+              row.startRefusedAt = Instant.now();
+            });
+    changePublisher.fire(agent.repositoryId, workspaceId, WorkspaceChangeHint.Topic.AGENTS);
   }
 
   /** Step 5: OBSOLETE agents of VERIFIED items, idle long enough, are removed or prompted (D4–D7). */
@@ -1531,7 +1656,9 @@ public class AgentService {
                     a.lastActivityAt,
                     a.createdAt,
                     a.obsoleteAt,
-                    a.removedAt))
+                    a.removedAt,
+                    a.startRefusal,
+                    a.startRefusedAt))
         .toList();
   }
 
