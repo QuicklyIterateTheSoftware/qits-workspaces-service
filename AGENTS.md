@@ -204,6 +204,8 @@ prompt draft and its images on the agent (`agent_prompt_draft`, `agent_prompt_at
 the old composition state rather than migrating it. V17 and V18 below describe columns and a table
 no code reads any more. **`V23__agent_waits.sql`** (qits-1153) adds `agent_wait`, an agent's declared
 waits; `AgentWait` is a `CausedRow` (the agent's own request writes it). See "Declared waits".
+**`V24__yield_keeps_the_harness.sql`** (qits-1212) drops `uq_agent_worktree_running`: a yield no
+longer stops the harness, so a workspace may hold several RUNNING agents.
 
 **`V18__dispatch_command_id.sql` adds `dispatch_command_id` to `workspace`** (qits-895): the daemon
 command the last launch this service made started, replaced by every accepted launch
@@ -947,14 +949,15 @@ resolved its row; the `editor` column stays, unread.
 A **workspace** is a slot: one container on a runner (an admin one DIRECT on the platform host),
 scoped to a project's wrapper, holding one long-lived clone. An **agent** is one work item's coding
 agent and its worktree inside a workspace (`/workspace/agents/<agentId>/<wrapper name>` on the
-daemon). A workspace hosts many agents and runs one harness at a time. The decisions are D1–D26 of the
+daemon). A workspace hosts many agents, and each keeps its harness running while it is placed. The decisions are D1–D26 of the
 superproject's `agent-workspace-decoupling-plan.md`; `AgentService` holds the semantics.
 
 **The rows.** `agent_worktree` (`V21`, `AgentWorktree`, a `CausedRow`): work item, wrapper branch,
 slot, `state` ACTIVE → OBSOLETE → REMOVED, `run_state` QUEUED → RUNNING ⇄ YIELDED, session, the turn
 still to be said (`pending_text`), the agent's own token and Git refs. `agent_branch` (`@Uncaused`, a
 native upsert on the registry's thread) holds every (repository, branch) the daemon reported pushed.
-Unique indexes keep one ACTIVE agent per work item and one RUNNING agent per workspace. A slot is a
+A unique index keeps one ACTIVE agent per work item. A workspace may hold several RUNNING agents:
+`V24` dropped the one-RUNNING-per-workspace index (qits-1212). A slot is a
 `workspace` row with **no branch**; the old work columns on `workspace` stay, unread by slots (D20).
 
 **The doors write rows; one scheduler talks to the daemons.** Dispatch, delivery, entity, a person's
@@ -962,14 +965,17 @@ create and a release's resolution write the agent row and answer at once. `Agent
 makes every daemon call, one pass at a time, kicked after each door and every
 `qits.workspace.agent.sweep-interval` (`wiring/AgentSweep`):
 
-1. **Resume** — a workspace with no RUNNING agent gives the slot to a YIELDED agent with something to
-   hear. A resume goes before a new agent (D17).
+1. **Resume** — every YIELDED agent with something to hear is RUNNING again at once, even beside
+   another RUNNING agent. A resume goes before a new agent (D17).
 2. **Place** — a QUEUED agent goes to an empty workspace of its wrapper and posture, else to a new
    one while the eligible runners' slots outnumber the RUNNER workspaces (an admin agent always gets
    a new DIRECT admin workspace, D10), else to a workspace whose agents have all yielded, else it
    waits.
 3. **Yield** — a RUNNING agent waiting for input longer than `qits.workspace.agent.yield-after` (30 s)
-   yields when another agent wants its slot (D14, D16).
+   yields when another agent wants its slot (D14, D16). A yield frees the slot and nothing else: no
+   daemon call, the harness keeps running, and its terminal, turns and entity updates keep working
+   (qits-1212). A yielded agent that works again (`awaitingInput: false`, say a person typed in its
+   terminal) is RUNNING again.
 4. **Drive** — a RUNNING agent whose daemon answers is started with `POST agent-worktrees` (its
    instruction, session, entity facts and credential; `mode: INTERACTIVE`, the harness's TUI in a
    terminal), and its pending turn is said at a turn boundary (`/turn`; BUSY waits up to the launch
@@ -1048,7 +1054,8 @@ event name, optional expiry) and gets a turn when it happens:
   wakes its agent; an OPEN wait of an agent that is no longer ACTIVE is CANCELLED, with no wake.
 - **Waiting on** (W5). Declaring a wait does not yield the agent. While it has an OPEN wait, the
   waiting relay says `cause: "Wait"` and `waitingOn: <labels>` (`AgentWaitingReporter`), and an agent
-  waiting for input on a wait yields at once when another agent wants its slot (no `yield-after`).
+  waiting for input on a wait gives up its slot at once when another agent wants it (no
+  `yield-after`); its harness keeps running.
   A match or timeout relays `waiting: false` (`WaitMatched`, `WaitTimedOut`); a cancel while it
   waits relays it again without the wait (`WaitCancelled`). `AgentDto.waitingOn` shows the labels.
 - **Limits.** 8 OPEN waits per agent, timeout at most 30 days, label at most 200 characters (default:
@@ -1059,8 +1066,7 @@ event name, optional expiry) and gets a turn when it happens:
 /projects/api/work` for an IMPROVEMENT ticket in the captured repository's project (`WorkFiler`,
 `wiring/HttpWorkFiler`) and answers `{work: {id, qualifiedId}}`. No workspace, branch or agent.
 
-**Known limits.** A yielded agent's unpushed commits wait until it resumes (its credential is
-re-handed only on a start). The person door derives the wrapper branch from what it is told; it does
+**Known limits.** The person door derives the wrapper branch from what it is told; it does
 not read the work item. `MountedClaudeTranscripts` reads a slot's sessions per agent directory, keyed
 on the wrapper's name.
 

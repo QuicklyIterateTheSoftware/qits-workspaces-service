@@ -53,13 +53,14 @@ import org.jboss.logging.Logger;
  *
  * <p>A workspace is a <em>slot</em>: one container on a runner, scoped to a project's wrapper. An
  * agent is one work item's coding agent and its worktree inside a workspace. A workspace hosts many
- * agents but runs one harness at a time; an agent waiting for input yields the slot when another
- * agent wants it, and resumes later in the same workspace.
+ * agents. An agent waiting for input yields its slot when another agent wants it: its harness keeps
+ * running, and the workspace takes one more agent. It is RUNNING again once it has something to
+ * hear or works again (qits-1212).
  *
  * <h2>The doors write rows; one scheduler acts on the daemons</h2>
  *
  * <p>Every door here — dispatch, delivery, entity, a person's create, a release's resolution —
- * writes the agent row and answers at once. The daemon calls (start, turn, yield, cleanup check,
+ * writes the agent row and answers at once. The daemon calls (start, turn, cleanup check,
  * remove) are made by {@link #reconcile}, one pass at a time on one thread, kicked after every door
  * and run on a timer by {@code wiring/AgentSweep}. So two calls about one agent never race, and
  * what is still to be done is always a row: a restart loses nothing.
@@ -67,13 +68,14 @@ import org.jboss.logging.Logger;
  * <p>A pass, in order:
  *
  * <ol>
- *   <li><b>Resume</b>: a workspace with no RUNNING agent gives its slot to a YIELDED agent that has
- *       something to hear — a resume goes before a new agent (D17).
+ *   <li><b>Resume</b>: every YIELDED agent that has something to hear is RUNNING again at once,
+ *       even beside another RUNNING agent — a resume goes before a new agent (D17).
  *   <li><b>Place</b>: each QUEUED agent goes to an empty workspace of its wrapper and posture, else
  *       to a new workspace while the runners have free slots (an admin agent: a new DIRECT admin
  *       workspace), else to a workspace whose agents have all yielded, else it stays QUEUED.
  *   <li><b>Yield</b>: a RUNNING agent that has waited for input longer than {@code
- *       qits.workspace.agent.yield-after} gives up its slot when another agent wants it.
+ *       qits.workspace.agent.yield-after} gives up its slot when another agent wants it. Only the
+ *       row changes: no daemon call, and its harness keeps running.
  *   <li><b>Drive</b>: a RUNNING agent whose daemon answers is started (again after a daemon restart:
  *       its credential lives only in daemon memory) and is told what it has still to hear.
  *   <li><b>Clean up</b> (D4, D5, D7): an OBSOLETE agent whose work item is VERIFIED and that has
@@ -356,8 +358,8 @@ public class AgentService {
 
   /**
    * <b>Say this to the agent working on the item</b>. Never creates an agent: an item nobody
-   * dispatched has nobody to tell, and that is answered, not refused. A yielded agent resumes to
-   * hear it (D16); a queued one hears it as part of its first turn.
+   * dispatched has nobody to tell, and that is answered, not refused. A yielded agent is RUNNING
+   * again at once to hear it (D16); a queued one hears it as part of its first turn.
    *
    * <p>An OBSOLETE agent is told too. A release of one of its branches marks it OBSOLETE, but the
    * item can go on — the next phase, another repository — and that agent is still the one working
@@ -404,8 +406,8 @@ public class AgentService {
               false,
               false,
               true,
-              "The agent had yielded its workspace; it resumes with this turn once the slot is"
-                  + " free.");
+              "The agent had yielded its workspace slot; it hears this at its next turn"
+                  + " boundary.");
       case QUEUED ->
           new Delivery(
               agentId,
@@ -635,7 +637,9 @@ public class AgentService {
   /**
    * An activity frame for one agent: the activity time, the waiting state and the session. A flip
    * of the waiting state is relayed to qits-projects (qits-895), which derives the item's BLOCKED
-   * from it; the relay is now per agent and stored, so a reconnect does not repeat it.
+   * from it; the relay is now per agent and stored, so a reconnect does not repeat it. A YIELDED
+   * agent that works again (a person typed in its terminal) is RUNNING again, so it counts as
+   * holding its slot.
    */
   public void onActivity(
       String agentId,
@@ -648,6 +652,7 @@ public class AgentService {
       return;
     }
     Instant when = at > 0 ? Instant.ofEpochMilli(at) : Instant.now();
+    AtomicBoolean busyAgain = new AtomicBoolean();
     String[] relay =
         QuarkusTransaction.requiringNew()
             .call(
@@ -657,6 +662,13 @@ public class AgentService {
                     return null;
                   }
                   agent.lastActivityAt = when;
+                  if (Boolean.FALSE.equals(awaitingInput)
+                      && agent.runState == AgentRunState.YIELDED
+                      && agent.workspaceId != null) {
+                    agent.runState = AgentRunState.RUNNING;
+                    busyAgain.set(true);
+                    LOG.infof("Agent %s works again in workspace %s", agent.id, agent.workspaceId);
+                  }
                   if (sessionId != null && !sessionId.isBlank()) {
                     agent.sessionId = sessionId;
                   }
@@ -674,7 +686,7 @@ public class AgentService {
       // With an OPEN wait, a waiting agent is reported as waiting on it (qits-1153, W5).
       waits.relayActivity(relay[0], id, awaitingInput, hookEvent, sessionId, when);
     }
-    if (Boolean.TRUE.equals(awaitingInput)) {
+    if (Boolean.TRUE.equals(awaitingInput) || busyAgain.get()) {
       kick();
     }
   }
@@ -820,28 +832,23 @@ public class AgentService {
     }
   }
 
-  /** Step 1: a free workspace goes to a yielded agent with something to hear before anyone new. */
+  /**
+   * Step 1: every yielded agent with something to hear is RUNNING again at once, before anyone new
+   * is placed. Another RUNNING agent in its workspace does not hold it back: its harness never
+   * stopped, so it hears the turn at its next turn boundary ({@link #drive}).
+   */
   void resumeYielded() {
     synchronized (placeLock) {
       QuarkusTransaction.requiringNew()
           .run(
-              () -> {
-                Map<Long, List<AgentWorktree>> byWorkspace = placedByWorkspace();
-                for (Map.Entry<Long, List<AgentWorktree>> entry : byWorkspace.entrySet()) {
-                  List<AgentWorktree> live = entry.getValue();
-                  if (live.stream().anyMatch(a -> a.runState == AgentRunState.RUNNING)) {
-                    continue;
-                  }
-                  live.stream()
+              () ->
+                  agents.findPlacedLive().stream()
                       .filter(a -> a.runState == AgentRunState.YIELDED && a.pendingText != null)
-                      .findFirst()
-                      .ifPresent(
+                      .forEach(
                           a -> {
                             a.runState = AgentRunState.RUNNING;
                             LOG.infof("Agent %s resumes in workspace %s", a.id, a.workspaceId);
-                          });
-                }
-              });
+                          }));
     }
   }
 
@@ -866,24 +873,30 @@ public class AgentService {
           continue;
         }
         Long chosen = slot;
-        try {
-          QuarkusTransaction.requiringNew()
-              .run(
-                  () -> {
-                    AgentWorktree row = agents.findById(agent.id);
-                    if (row.state != AgentState.ACTIVE || row.runState != AgentRunState.QUEUED) {
-                      return;
-                    }
-                    row.workspaceId = chosen;
-                    row.runState = AgentRunState.RUNNING;
-                    agents.flush();
-                  });
-          LOG.infof("Agent %s placed in workspace %s", agent.id, chosen);
-          changePublisher.fire(agent.repositoryId, chosen, WorkspaceChangeHint.Topic.AGENTS);
-        } catch (RuntimeException taken) {
-          // uq_agent_worktree_running: another agent took the slot first. The next pass tries again.
+        boolean placed =
+            QuarkusTransaction.requiringNew()
+                .call(
+                    () -> {
+                      AgentWorktree row = agents.findById(agent.id);
+                      if (row.state != AgentState.ACTIVE || row.runState != AgentRunState.QUEUED) {
+                        return false;
+                      }
+                      // Checked again where it is written: an agent of the slot may have woken
+                      // since it was chosen. The next pass tries again.
+                      if (!free(chosen)) {
+                        return false;
+                      }
+                      row.workspaceId = chosen;
+                      row.runState = AgentRunState.RUNNING;
+                      agents.flush();
+                      return true;
+                    });
+        if (!placed) {
           LOG.debugf("Workspace %s was taken before agent %s got it", chosen, agent.id);
+          continue;
         }
+        LOG.infof("Agent %s placed in workspace %s", agent.id, chosen);
+        changePublisher.fire(agent.repositoryId, chosen, WorkspaceChangeHint.Topic.AGENTS);
       }
     }
   }
@@ -902,12 +915,20 @@ public class AgentService {
   private Long yieldedSlotFor(AgentWorktree agent) {
     for (Workspace workspace : slotsOf(agent)) {
       List<AgentWorktree> live = agents.findLiveByWorkspace(workspace.id);
-      if (!live.isEmpty()
-          && live.stream().allMatch(a -> a.runState == AgentRunState.YIELDED && a.pendingText == null)) {
+      if (!live.isEmpty() && allYielded(live)) {
         return workspace.id;
       }
     }
     return null;
+  }
+
+  /** Whether a queued agent may take the workspace: it hosts no live agent, or all have yielded. */
+  private boolean free(Long workspaceId) {
+    return allYielded(agents.findLiveByWorkspace(workspaceId));
+  }
+
+  private static boolean allYielded(List<AgentWorktree> live) {
+    return live.stream().allMatch(a -> a.runState == AgentRunState.YIELDED && a.pendingText == null);
   }
 
   /** The ACTIVE slot workspaces (no branch of their own) of an agent's wrapper and posture. */
@@ -929,12 +950,13 @@ public class AgentService {
         .call(() -> runnerRepository.eligibleSlots() > workspaceRepository.countActiveOnRunners());
   }
 
-  /** Step 3: a RUNNING agent waiting for input yields to an agent that wants its slot (D14, D16). */
+  /**
+   * Step 3: a RUNNING agent waiting for input yields to an agent that wants its slot (D14, D16). A
+   * yield writes the row and nothing else: the harness keeps running and the agent stays started,
+   * so its terminal, turns and entity updates keep working (qits-1212).
+   */
   void yieldBlocked() {
     synchronized (passLock) {
-      if (!daemon.isResolvable()) {
-        return;
-      }
       Instant before = Instant.now().minus(yieldAfter);
       List<AgentWorktree> candidates =
           QuarkusTransaction.requiringNew()
@@ -976,26 +998,19 @@ public class AgentService {
                     return out;
                   });
       for (AgentWorktree agent : candidates) {
-        AgentDaemon.Outcome outcome =
-            started.containsKey(agent.id)
-                ? daemon.get().yield(agent.workspaceId, agent.id.toString())
-                : AgentDaemon.Outcome.OK;
-        if (outcome == AgentDaemon.Outcome.OK || outcome == AgentDaemon.Outcome.UNKNOWN_AGENT) {
-          QuarkusTransaction.requiringNew()
-              .run(
-                  () -> {
-                    AgentWorktree row = agents.findById(agent.id);
-                    if (row.runState == AgentRunState.RUNNING) {
-                      // waitingSince stays: a yielded agent still waits for a person, and the
-                      // hook of the turn it resumes on is the flip that clears it.
-                      row.runState = AgentRunState.YIELDED;
-                    }
-                  });
-          started.remove(agent.id);
-          LOG.infof("Agent %s yielded workspace %s", agent.id, agent.workspaceId);
-          resumeYielded();
-          placeQueued();
-        }
+        QuarkusTransaction.requiringNew()
+            .run(
+                () -> {
+                  AgentWorktree row = agents.findById(agent.id);
+                  if (row.runState == AgentRunState.RUNNING) {
+                    // waitingSince stays: a yielded agent still waits for a person, and the
+                    // hook of the turn it resumes on is the flip that clears it.
+                    row.runState = AgentRunState.YIELDED;
+                  }
+                });
+        LOG.infof("Agent %s yielded workspace %s", agent.id, agent.workspaceId);
+        resumeYielded();
+        placeQueued();
       }
     }
   }

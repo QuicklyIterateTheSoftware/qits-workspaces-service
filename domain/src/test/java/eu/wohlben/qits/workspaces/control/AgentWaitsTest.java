@@ -15,10 +15,15 @@ import eu.wohlben.qits.workspaces.entity.AgentRunState;
 import eu.wohlben.qits.workspaces.entity.AgentWait;
 import eu.wohlben.qits.workspaces.entity.AgentWaitState;
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
+import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
+import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
+import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.ForbiddenException;
 import eu.wohlben.qits.workspaces.persistence.AgentWaitRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -43,7 +48,7 @@ public class AgentWaitsTest {
   @Inject AgentWaitRepository waitRows;
   @Inject FakeAgentWaitingReporter reporter;
   @Inject FakeAgentDaemon daemon;
-  @Inject FakeRepositoryLookup repositories;
+  @Inject WorkspaceRepository workspaces;
 
   private static EventSelection verified() {
     return EventSelection.of(
@@ -205,43 +210,34 @@ public class AgentWaitsTest {
 
   @Test
   void anAgentWaitingOnAWaitYieldsAtOnceWhenAnotherAgentWantsTheSlot() {
-    String repoId = "waits-admin-" + UUID.randomUUID().toString().substring(0, 8);
-    repositories.register(repoId, "main");
-    AgentService.Dispatch dispatched =
-        service.dispatch(
-            new AgentService.AgentRequest(
-                repoId,
-                "ticket/w-yield",
-                "w-yield-" + UUID.randomUUID(),
-                null,
-                null,
-                null,
-                true,
-                null,
-                null,
-                null));
-    UUID id = UUID.fromString(dispatched.agent().agentId());
-    Long slot = dispatched.agent().workspaceRowId();
-    UUID queued = UUID.randomUUID();
-    AgentWorktree placed = row(id);
+    String repoId = "waits-slot-" + UUID.randomUUID().toString().substring(0, 8);
+    // A RUNNER slot no runner holds, and a regular agent queued for it: no pass can place that one
+    // elsewhere, so only the yield frees a slot for it (qits-1212: a resume no longer waits for one).
+    Long slot =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  Workspace row = new Workspace();
+                  row.repositoryId = repoId;
+                  row.workspaceId = "ws-" + repoId;
+                  row.status = WorkspaceStatus.ACTIVE;
+                  row.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                  row.placement = WorkspacePlacement.RUNNER;
+                  workspaces.persist(row);
+                  return row.id;
+                });
+    UUID id = agent("w-yield");
+    UUID queued = agent("w-yield-other");
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
-              // A yielded agent of the same slot with something to hear wants it back.
-              AgentWorktree other = new AgentWorktree();
-              other.id = queued;
-              other.repositoryId = placed.repositoryId;
-              other.workId = "w-yield-other-" + queued;
-              other.wrapperBranch = "ticket/w-yield-other";
-              other.admin = true;
-              other.workspaceId = slot;
-              other.runState = AgentRunState.YIELDED;
-              other.pendingText = "your answer";
-              other.createdAt = Instant.now();
-              other.gitRefs = "[]";
-              agents.persist(other);
+              AgentWorktree running = agents.findById(id);
+              running.repositoryId = repoId;
+              running.workspaceId = slot;
+              running.runState = AgentRunState.RUNNING;
               // Waiting for input just now: well inside the yield time.
-              agents.findById(id).waitingSince = Instant.now();
+              running.waitingSince = Instant.now();
+              agents.findById(queued).repositoryId = repoId;
             });
     waits.create(id, "ci run 9", EventSelection.of("BuildStatusChanged"), null);
 

@@ -13,6 +13,7 @@ import eu.wohlben.qits.workspaces.entity.AgentState;
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
+import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
@@ -32,7 +33,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@link AgentService} (qits-1152) on a real database: dispatch and placement, the scheduler's
- * start, turn, yield and resume, a release making an agent obsolete, and the cleanup sweep (D4–D7).
+ * start, turn, yield (a row change only, qits-1212) and resume, a release making an agent obsolete, and the cleanup sweep (D4–D7).
  * The daemon is {@link FakeAgentDaemon}; admin agents are used where a slot is needed, because a
  * DIRECT admin workspace needs no runner.
  */
@@ -211,43 +212,136 @@ public class AgentServiceTest {
     assertFalse(delivery.delivered() || delivery.launched() || delivery.resumed());
   }
 
+  /** A RUNNER slot of this test's wrapper, made by hand: no runner holds it, so nothing starts. */
+  private Long runnerSlot() {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              Workspace row = new Workspace();
+              row.repositoryId = repoId;
+              row.workspaceId = "ws-" + UUID.randomUUID().toString().substring(0, 8);
+              row.status = WorkspaceStatus.ACTIVE;
+              row.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+              row.placement = WorkspacePlacement.RUNNER;
+              workspaces.persist(row);
+              return row.id;
+            });
+  }
+
+  /** An agent row of this test's wrapper, put straight into {@code slot} (null: queued). */
+  private UUID agentIn(Long slot, boolean admin, AgentRunState runState) {
+    UUID id = UUID.randomUUID();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = new AgentWorktree();
+              row.id = id;
+              row.repositoryId = repoId;
+              row.workId = "w-" + id;
+              row.wrapperBranch = "ticket/w-" + id;
+              row.admin = admin;
+              row.workspaceId = slot;
+              row.runState = runState;
+              row.createdAt = Instant.now();
+              row.gitRefs = "[]";
+              agents.persist(row);
+            });
+    return id;
+  }
+
+  private void setRunState(String agentId, AgentRunState runState) {
+    QuarkusTransaction.requiringNew()
+        .run(() -> agents.findById(UUID.fromString(agentId)).runState = runState);
+  }
+
   @Test
-  void aWaitingAgentYieldsToAQueuedOneAndResumesWhenSpokenTo() {
+  void aYieldOnlyFreesTheSlotAndTheHarnessKeepsRunning() {
     AgentService.Dispatch first = dispatch("w-first", true, null);
     String firstId = first.agent().agentId();
     Long slot = first.agent().workspaceRowId();
     liveness.markLive(slot);
     service.reconcile();
+    assertTrue(service.isStarted(UUID.fromString(firstId)));
 
-    // A second admin agent of the same wrapper, queued behind a full capacity is not possible for
-    // DIRECT, so it is placed in a new admin slot; queue one by hand to stand for a full runner.
-    UUID queued = UUID.randomUUID();
-    QuarkusTransaction.requiringNew()
-        .run(
-            () -> {
-              AgentWorktree waiting = new AgentWorktree();
-              waiting.id = queued;
-              waiting.repositoryId = repoId;
-              waiting.workId = "w-second";
-              waiting.wrapperBranch = "ticket/w-second";
-              waiting.admin = true;
-              waiting.createdAt = Instant.now();
-              waiting.gitRefs = "[]";
-              agents.persist(waiting);
-            });
+    // An admin agent always gets a new slot, so queue one by hand to stand for a full runner.
+    agentIn(null, true, AgentRunState.QUEUED);
     // The first agent has waited for input since long before the yield time.
     QuarkusTransaction.requiringNew()
         .run(() -> agents.findById(UUID.fromString(firstId)).waitingSince = Instant.now().minusSeconds(3600));
+    List<String> before = daemon.callsFor(firstId);
 
     service.yieldBlocked();
 
-    assertTrue(daemon.callsFor(firstId).contains("yield " + slot + " " + firstId));
     assertEquals(AgentRunState.YIELDED, row(firstId).runState);
+    assertEquals(before, daemon.callsFor(firstId), "a yield makes no daemon call");
+    assertTrue(service.isStarted(UUID.fromString(firstId)), "the harness keeps running");
 
-    // Spoken to, the yielded agent resumes once its slot is free again.
+    // Spoken to, the yielded agent runs again and hears it at its next turn boundary.
     AgentService.Delivery delivery = service.deliver("w-first", "your answer", false);
     assertTrue(delivery.resumed());
+    service.reconcile();
+    assertEquals(AgentRunState.RUNNING, row(firstId).runState);
+    assertTrue(daemon.callsFor(firstId).contains("turn " + slot + " " + firstId + " your answer"));
     liveness.markDead(slot);
+  }
+
+  @Test
+  void aYieldedAgentWithATurnRunsAgainBesideAnotherRunningAgent() {
+    AgentService.Dispatch first = dispatch("w-beside", true, null);
+    String firstId = first.agent().agentId();
+    Long slot = first.agent().workspaceRowId();
+    liveness.markLive(slot);
+    service.reconcile();
+    // It yielded, and another agent took its slot and runs there.
+    setRunState(firstId, AgentRunState.YIELDED);
+    UUID other = agentIn(slot, true, AgentRunState.RUNNING);
+
+    service.deliver("w-beside", "your answer", false);
+    service.reconcile();
+
+    assertEquals(AgentRunState.RUNNING, row(firstId).runState);
+    assertEquals(AgentRunState.RUNNING, row(other.toString()).runState);
+    assertTrue(daemon.callsFor(firstId).contains("turn " + slot + " " + firstId + " your answer"));
+    assertEquals(
+        1,
+        daemon.starts().stream().filter(s -> s.agentId().equals(firstId)).count(),
+        "it hears the turn in the harness it kept; it is not started again");
+    liveness.markDead(slot);
+  }
+
+  @Test
+  void aYieldedAgentThatWorksAgainIsRunningAgain() {
+    Long slot = runnerSlot();
+    UUID id = agentIn(slot, false, AgentRunState.YIELDED);
+
+    service.onActivity(id.toString(), Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
+    assertEquals(AgentRunState.YIELDED, row(id.toString()).runState, "still waiting: still yielded");
+
+    service.onActivity(
+        id.toString(), Boolean.FALSE, "s-1", "UserPromptSubmit", System.currentTimeMillis());
+    assertEquals(AgentRunState.RUNNING, row(id.toString()).runState);
+  }
+
+  @Test
+  void aQueuedAgentTakesOnlyAnEmptyOrAnAllYieldedWorkspace() {
+    Long slot = runnerSlot();
+    UUID running = agentIn(slot, false, AgentRunState.RUNNING);
+    UUID queued = agentIn(null, false, AgentRunState.QUEUED);
+    UUID second = agentIn(null, false, AgentRunState.QUEUED);
+
+    service.placeQueued();
+    assertEquals(AgentRunState.QUEUED, row(queued.toString()).runState, "its agent runs");
+
+    setRunState(running.toString(), AgentRunState.YIELDED);
+    service.placeQueued();
+
+    AgentWorktree placed = row(queued.toString());
+    assertEquals(AgentRunState.RUNNING, placed.runState);
+    assertEquals(slot, placed.workspaceId);
+    assertEquals(
+        AgentRunState.QUEUED,
+        row(second.toString()).runState,
+        "the slot is taken again: one pass does not book it twice");
   }
 
   @Test

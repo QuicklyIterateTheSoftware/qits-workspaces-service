@@ -137,11 +137,6 @@ public class DaemonAgentClient implements AgentDaemon {
   }
 
   @Override
-  public Outcome yield(Long workspaceRowId, String agentId) {
-    return simple(workspaceRowId, HttpMethod.POST, path(agentId, "yield"), new JsonObject());
-  }
-
-  @Override
   public Outcome turn(Long workspaceRowId, String agentId, String text) {
     if (text == null || text.isBlank()) {
       return Outcome.REFUSED;

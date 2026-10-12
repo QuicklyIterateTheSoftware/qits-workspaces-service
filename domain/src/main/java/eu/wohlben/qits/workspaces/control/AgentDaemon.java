@@ -61,9 +61,6 @@ public interface AgentDaemon {
   /** {@code POST agent-worktrees}: idempotent; starts or resumes the harness. */
   Started start(Long workspaceRowId, Start start);
 
-  /** {@code POST agent-worktrees/{id}/yield}: stops the harness, keeps everything. */
-  Outcome yield(Long workspaceRowId, String agentId);
-
   /** {@code POST agent-worktrees/{id}/turn}: a user turn, restarting a stopped harness first. */
   Outcome turn(Long workspaceRowId, String agentId, String text);
 

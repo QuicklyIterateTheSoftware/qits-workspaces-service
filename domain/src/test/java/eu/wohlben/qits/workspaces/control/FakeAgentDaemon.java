@@ -65,12 +65,6 @@ public class FakeAgentDaemon implements AgentDaemon {
   }
 
   @Override
-  public Outcome yield(Long workspaceRowId, String agentId) {
-    calls.add("yield " + workspaceRowId + " " + agentId);
-    return Outcome.OK;
-  }
-
-  @Override
   public Outcome turn(Long workspaceRowId, String agentId, String text) {
     calls.add("turn " + workspaceRowId + " " + agentId + " " + text);
     return turnAnswer;

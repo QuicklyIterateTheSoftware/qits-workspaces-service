@@ -25,8 +25,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The agent tables (qits-1152, {@code V21}) as the schema keeps them: one ACTIVE agent per work
- * item, one RUNNING agent per workspace, a QUEUED agent in no workspace, and a pushed branch
- * recorded once per (agent, repository, branch).
+ * item, any number of RUNNING agents per workspace (qits-1212, {@code V24}), a QUEUED agent in no
+ * workspace, and a pushed branch recorded once per (agent, repository, branch).
  */
 @QuarkusTest
 public class AgentSchemaTest {
@@ -77,7 +77,7 @@ public class AgentSchemaTest {
   }
 
   @Test
-  void oneRunningAgentPerWorkspace() {
+  void aWorkspaceMayHoldTwoRunningAgents() {
     Long slot = slot();
     Consumer<AgentWorktree> running =
         a -> {
@@ -85,7 +85,7 @@ public class AgentSchemaTest {
           a.runState = AgentRunState.RUNNING;
         };
     insert("schema-" + UUID.randomUUID(), running);
-    assertThrows(RuntimeException.class, () -> insert("schema-" + UUID.randomUUID(), running));
+    assertDoesNotThrow(() -> insert("schema-" + UUID.randomUUID(), running));
     assertDoesNotThrow(
         () ->
             insert(
