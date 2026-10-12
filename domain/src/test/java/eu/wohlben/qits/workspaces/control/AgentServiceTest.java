@@ -141,6 +141,10 @@ public class AgentServiceTest {
     assertNotNull(dispatched.agentIdentity(), "the agent holds a token of its own");
     assertEquals(1, commissioner.agentTokensMinted().size());
     assertEquals(
+        agentId,
+        commissioner.agentTokensMinted().get(0).agentId(),
+        "the agent claim (qits-1213) is minted from the agent's own id");
+    assertEquals(
         List.of("refs/heads/ticket/w-admin", "refs/heads/ticket/w-admin-*"),
         commissioner.agentTokensMinted().get(0).gitRefs());
 

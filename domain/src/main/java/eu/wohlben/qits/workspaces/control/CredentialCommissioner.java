@@ -77,6 +77,12 @@ public interface CredentialCommissioner {
    */
   String PROJECT_CLAIM = "project";
 
+  /**
+   * The claim that names the agent a token belongs to (qits-1213): the agent's UUID. Only an agent
+   * token states it, never a slot's or any other workspace credential.
+   */
+  String AGENT_CLAIM = "agent";
+
   /** One live commission as the owner's reconcile reads it back. Never carries a secret. */
   record Commission(String clientId, String contextKind, String contextId) {}
 
@@ -201,7 +207,8 @@ public interface CredentialCommissioner {
   /**
    * An <b>agent's</b> credential (qits-1152, D3, D18): a token of the workspace kind for {@code
    * admin}, context id {@link #AGENT_CONTEXT_PREFIX}{@code <agentId>}, scoped to the project and
-   * stating the agent's own Git refs. Empty when no issuer is wired.
+   * stating the agent's own Git refs. Its claims also state {@link #AGENT_CLAIM} = {@code agentId}
+   * (qits-1213). Empty when no issuer is wired.
    */
   default Optional<WorkspaceToken> commissionAgentToken(
       String agentId, String projectId, List<String> gitRefs, boolean admin) {

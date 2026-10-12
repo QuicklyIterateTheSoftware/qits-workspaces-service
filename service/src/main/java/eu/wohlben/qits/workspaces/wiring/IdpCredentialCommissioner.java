@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -305,7 +306,7 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
   @Override
   public Optional<WorkspaceToken> commissionToken(
       long rowId, String projectId, List<String> gitRefs, boolean admin) {
-    return mint(Long.toString(rowId), "workspace " + rowId, projectId, gitRefs, admin);
+    return mint(Long.toString(rowId), "workspace " + rowId, claims(projectId), gitRefs, admin);
   }
 
   /**
@@ -313,16 +314,27 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
    *
    * <p>The same mint as a workspace's, with the context id {@code agent-<id>}: the kind stays the
    * workspace's ({@code workspace} or {@code workspace-admin}), so qits-idp issues the same roles,
-   * and the id says whose it is.
+   * and the id says whose it is. The claims also state {@code agent} = the agent id (qits-1213), so
+   * a service that reads the token knows which agent calls.
    */
   @Override
   public Optional<WorkspaceToken> commissionAgentToken(
       String agentId, String projectId, List<String> gitRefs, boolean admin) {
-    return mint(AGENT_CONTEXT_PREFIX + agentId, "agent " + agentId, projectId, gitRefs, admin);
+    Map<String, String> claims = new LinkedHashMap<>();
+    Map<String, String> project = claims(projectId);
+    if (project != null) {
+      claims.putAll(project);
+    }
+    claims.put(AGENT_CLAIM, agentId);
+    return mint(AGENT_CONTEXT_PREFIX + agentId, "agent " + agentId, claims, gitRefs, admin);
   }
 
   private Optional<WorkspaceToken> mint(
-      String contextId, String whose, String projectId, List<String> gitRefs, boolean admin) {
+      String contextId,
+      String whose,
+      Map<String, String> claims,
+      List<String> gitRefs,
+      boolean admin) {
     String authorization = authorization();
     if (authorization == null) {
       return Optional.empty();
@@ -331,7 +343,7 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
       new IdpTokens.TokenRequest(
           CredentialCommissioner.contextKindFor(admin),
           contextId,
-          claims(projectId),
+          claims,
           gitRefs == null ? null : List.copyOf(gitRefs))
     };
     return Optional.of(

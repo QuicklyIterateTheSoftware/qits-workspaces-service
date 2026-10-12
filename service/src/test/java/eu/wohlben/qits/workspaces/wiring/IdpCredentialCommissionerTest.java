@@ -459,6 +459,58 @@ public class IdpCredentialCommissionerTest {
     assertFalse(bodies.get(1).contains("\"claims\""), bodies.get(1));
   }
 
+  /**
+   * An agent's token states {@code agent} = the agent id beside {@code project} (qits-1213); a
+   * slot's token, minted through the workspace door, states no {@code agent}.
+   */
+  @Test
+  public void anAgentsTokenStatesTheAgentClaimAndASlotsDoesNot() throws Exception {
+    String agentId = "07a79d74-b3ff-40a3-9b66-bceda7435a37";
+    String url =
+        serve(
+            List.of(
+                new Answer(
+                    201,
+                    "{\"tokenId\":\"t-4\",\"token\":\"qits_tok_agt\","
+                        + "\"subject\":\"tok-workspace-t-4\"}"),
+                new Answer(
+                    201,
+                    "{\"tokenId\":\"t-5\",\"token\":\"qits_tok_slot\","
+                        + "\"subject\":\"tok-workspace-t-5\"}")));
+    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
+
+    commissioner.commissionAgentToken(
+        agentId, A_PROJECT, List.of("refs/heads/ticket/a", "refs/heads/ticket/a-*"), false);
+    commissioner.commissionToken(10L, A_PROJECT, List.of(), false);
+
+    assertTrue(bodies.get(0).contains("\"contextId\":\"agent-" + agentId + "\""), bodies.get(0));
+    assertTrue(
+        bodies
+            .get(0)
+            .contains(
+                "\"claims\":{\"project\":\"" + A_PROJECT + "\",\"agent\":\"" + agentId + "\"}"),
+        bodies.get(0));
+    assertTrue(
+        bodies.get(1).contains("\"claims\":{\"project\":\"" + A_PROJECT + "\"}"), bodies.get(1));
+    assertFalse(bodies.get(1).contains("\"agent\""), bodies.get(1));
+  }
+
+  /** An agent whose project the registry cannot name still states who it is. */
+  @Test
+  public void anUnscopedAgentsTokenStatesOnlyTheAgentClaim() throws Exception {
+    String url =
+        serve(
+            List.of(
+                new Answer(
+                    201,
+                    "{\"tokenId\":\"t-6\",\"token\":\"qits_tok_u\","
+                        + "\"subject\":\"tok-workspace-t-6\"}")));
+
+    commissionerAgainst(url).commissionAgentToken("a-1", null, List.of(), false);
+
+    assertTrue(bodies.get(0).contains("\"claims\":{\"agent\":\"a-1\"}"), bodies.get(0));
+  }
+
   @Test
   public void aRefusedGitRefListMintsTheTokenAgainPushingNothing() throws Exception {
     String url =

@@ -1021,7 +1021,8 @@ connection and the next frames.
 
 **The agent credential** (D3, D18): a token of the workspace kind (`workspace-admin` for an admin
 agent), context id `agent-<id>`, scoped to the project, with Git refs `[refs/heads/<wrapperBranch>,
-refs/heads/<wrapperBranch>-*]` (a trailing `*` is a prefix glob, `GitRefs`). Minted only where there is
+refs/heads/<wrapperBranch>-*]` (a trailing `*` is a prefix glob, `GitRefs`). Its claims state
+`agent` = the agent id beside `project` (qits-1213); no other workspace credential states it. Minted only where there is
 an edge plane, stored on the row, handed to the daemon as the harness `env` (`QITS_TOKEN`,
 `QITS_TOKEN_SUBJECT`) and nowhere else, deleted when the agent is REMOVED. `CommissionReconciler`
 counts it claimed while the agent is not REMOVED. The slot keeps its own token for the daemon, with
