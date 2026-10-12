@@ -640,8 +640,12 @@ public class AgentService {
    * from it; the relay is now per agent and stored, so a reconnect does not repeat it. A YIELDED
    * agent that works again (a person typed in its terminal) is RUNNING again, so it counts as
    * holding its slot.
+   *
+   * <p>A frame counts only from the daemon of the workspace the agent is placed in. Another
+   * workspace's daemon cannot change this agent's row.
    */
   public void onActivity(
+      Long workspaceId,
       String agentId,
       Boolean awaitingInput,
       String sessionId,
@@ -658,7 +662,9 @@ public class AgentService {
             .call(
                 () -> {
                   AgentWorktree agent = agents.findById(id);
-                  if (agent == null || agent.state == AgentState.REMOVED) {
+                  if (agent == null
+                      || agent.state == AgentState.REMOVED
+                      || !Objects.equals(agent.workspaceId, workspaceId)) {
                     return null;
                   }
                   agent.lastActivityAt = when;

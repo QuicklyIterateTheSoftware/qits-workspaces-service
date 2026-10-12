@@ -3,6 +3,7 @@ package eu.wohlben.qits.workspaces.control;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -314,12 +315,30 @@ public class AgentServiceTest {
     Long slot = runnerSlot();
     UUID id = agentIn(slot, false, AgentRunState.YIELDED);
 
-    service.onActivity(id.toString(), Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
+    service.onActivity(row(id.toString()).workspaceId, id.toString(), Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
     assertEquals(AgentRunState.YIELDED, row(id.toString()).runState, "still waiting: still yielded");
 
     service.onActivity(
-        id.toString(), Boolean.FALSE, "s-1", "UserPromptSubmit", System.currentTimeMillis());
+        row(id.toString()).workspaceId,
+        id.toString(),
+        Boolean.FALSE,
+        "s-1",
+        "UserPromptSubmit",
+        System.currentTimeMillis());
     assertEquals(AgentRunState.RUNNING, row(id.toString()).runState);
+  }
+
+  @Test
+  void aFrameFromAnotherWorkspacesDaemonChangesNothing() {
+    Long slot = runnerSlot();
+    UUID id = agentIn(slot, false, AgentRunState.YIELDED);
+
+    service.onActivity(
+        slot + 1000, id.toString(), Boolean.FALSE, "s-x", "UserPromptSubmit", System.currentTimeMillis());
+
+    AgentWorktree after = row(id.toString());
+    assertEquals(AgentRunState.YIELDED, after.runState);
+    assertNotEquals("s-x", after.sessionId);
   }
 
   @Test
@@ -442,11 +461,11 @@ public class AgentServiceTest {
     Long slot = dispatched.agent().workspaceRowId();
     liveness.markLive(slot);
     service.reconcile();
-    service.onActivity(agentId, Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
+    service.onActivity(row(agentId).workspaceId, agentId, Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
 
     service.deliver("w-blocked", "implement it", false);
     service.reconcile();
-    service.onActivity(agentId, Boolean.FALSE, "s-1", "UserPromptSubmit", System.currentTimeMillis());
+    service.onActivity(row(agentId).workspaceId, agentId, Boolean.FALSE, "s-1", "UserPromptSubmit", System.currentTimeMillis());
 
     List<FakeAgentWaitingReporter.Report> reports = reporter.reportsFor("w-blocked");
     assertFalse(reports.isEmpty());
@@ -480,12 +499,12 @@ public class AgentServiceTest {
     AgentService.Dispatch dispatched = dispatch("w-activity", false, null);
     String agentId = dispatched.agent().agentId();
 
-    service.onActivity(agentId, Boolean.TRUE, "s-9", "Stop", System.currentTimeMillis());
+    service.onActivity(row(agentId).workspaceId, agentId, Boolean.TRUE, "s-9", "Stop", System.currentTimeMillis());
     AgentWorktree waiting = row(agentId);
     assertEquals("s-9", waiting.sessionId);
     assertNotNull(waiting.waitingSince);
 
-    service.onActivity(agentId, Boolean.FALSE, null, "UserPromptSubmit", System.currentTimeMillis());
+    service.onActivity(row(agentId).workspaceId, agentId, Boolean.FALSE, null, "UserPromptSubmit", System.currentTimeMillis());
     assertNull(row(agentId).waitingSince);
   }
 }

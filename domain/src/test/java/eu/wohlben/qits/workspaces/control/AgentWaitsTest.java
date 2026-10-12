@@ -200,7 +200,7 @@ public class AgentWaitsTest {
     String workId = row(id).workId;
     waits.create(id, "release-request 42", EventSelection.of("ReleaseRequestStateChanged"), null);
 
-    service.onActivity(id.toString(), Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
+    service.onActivity(row(id).workspaceId, id.toString(), Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
 
     FakeAgentWaitingReporter.Report report = reporter.reportsFor(workId).get(0);
     assertTrue(report.waiting());

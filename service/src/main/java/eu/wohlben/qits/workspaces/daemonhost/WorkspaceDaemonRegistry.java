@@ -527,6 +527,7 @@ public class WorkspaceDaemonRegistry
         () -> {
           try {
             agentService.onActivity(
+                workspaceId,
                 activity.agentId(),
                 activity.awaitingInput(),
                 activity.sessionId(),
