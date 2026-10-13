@@ -18,6 +18,9 @@ import java.util.List;
  * @param activity the harness's last reported state; null when nothing is known
  * @param waitingOn the labels of its OPEN declared waits (qits-1153), joined with {@code "; "};
  *     null when it waits on nothing
+ * @param waitingOnSince when the oldest of those OPEN waits was declared (qits-1229), so a reader
+ *     can say how long the agent has waited on them; null when it waits on nothing. Not {@code
+ *     waitingSince}, which is when the harness last stopped for input
  * @param startRefusal why its workspace's daemon refused to start it (qits-1217), as the daemon
  *     said; null while no start is refused. The scheduler keeps trying; the next accepted start
  *     clears it
@@ -44,6 +47,7 @@ public record AgentDto(
     AgentActivityState activity,
     Instant waitingSince,
     String waitingOn,
+    Instant waitingOnSince,
     Instant lastActivityAt,
     Instant createdAt,
     Instant obsoleteAt,

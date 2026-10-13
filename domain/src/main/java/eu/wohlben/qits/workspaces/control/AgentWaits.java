@@ -51,6 +51,10 @@ import org.jboss.logging.Logger;
  *   <li><b>Waiting on</b> (W5): while an agent has an OPEN wait, its waiting relay to qits-projects
  *       says {@code cause: "Wait"} and names the wait's label in {@code waitingOn}, so the item is
  *       read as waiting on that, not blocked.
+ *   <li><b>The hint</b> (qits-1229): a wait opening or closing changes what {@code AgentDto} says
+ *       ({@code waitingOn}, {@code waitingOnSince}), so it fires {@code AGENTS} on the agent's
+ *       workspace channel once the change has committed. An agent with no workspace (QUEUED) is in
+ *       no workspace's listing, and nothing is fired for it.
  * </ul>
  */
 @ApplicationScoped
@@ -82,6 +86,8 @@ public class AgentWaits {
   @Inject AgentService agentService;
 
   @Inject Instance<AgentWaitingReporter> waitingReporter;
+
+  @Inject WorkspaceChangePublisher changePublisher;
 
   /** The event names some OPEN wait names. Replaced whole; read without a lock. */
   private volatile Set<String> openNames = Set.of();
@@ -172,6 +178,7 @@ public class AgentWaits {
                 });
     addName(selection.event());
     LOG.infof("Agent %s waits on %s (%s)", agentId, finalLabel, id);
+    hint(List.of(Placed.of(agent)));
     relayIfWaiting(agent, CAUSE_WAIT);
     return get(agentId, id);
   }
@@ -220,6 +227,9 @@ public class AgentWaits {
       refreshNames();
       LOG.infof("Agent %s's wait %s was cancelled", agentId, waitId);
       AgentWorktree agent = QuarkusTransaction.requiringNew().call(() -> agents.findById(agentId));
+      if (agent != null) {
+        hint(List.of(Placed.of(agent)));
+      }
       relayIfWaiting(agent, CAUSE_CANCELLED);
     }
     return get(agentId, waitId);
@@ -253,6 +263,7 @@ public class AgentWaits {
       return 0;
     }
     JsonNode tree = EventSelectionEvaluator.parsePayload(payload);
+    List<Placed> closedFor = new ArrayList<>();
     List<Woken> woken =
         QuarkusTransaction.requiringNew()
             .call(
@@ -270,6 +281,7 @@ public class AgentWaits {
                       continue;
                     }
                     close(wait, AgentWaitState.MATCHED, eventId);
+                    closedFor.add(placedOf(wait.agentId));
                     String turn = matchedTurn(wait.label, selection, eventId, occurredAt, tree);
                     AgentWorktree agent = wake(wait.agentId, turn);
                     if (agent != null) {
@@ -280,6 +292,7 @@ public class AgentWaits {
                   }
                   return out;
                 });
+    hint(closedFor);
     if (woken.isEmpty()) {
       return 0;
     }
@@ -298,6 +311,7 @@ public class AgentWaits {
    */
   public void sweep() {
     Instant now = Instant.now();
+    List<Placed> closedFor = new ArrayList<>();
     List<Woken> woken =
         QuarkusTransaction.requiringNew()
             .call(
@@ -305,10 +319,12 @@ public class AgentWaits {
                   List<Woken> out = new ArrayList<>();
                   for (AgentWait wait : waits.findOpenOfInactiveAgentsForUpdate()) {
                     close(wait, AgentWaitState.CANCELLED, null);
+                    closedFor.add(placedOf(wait.agentId));
                     LOG.infof("Agent %s is no longer active: its wait %s is cancelled", wait.agentId, wait.label);
                   }
                   for (AgentWait wait : waits.findExpiredForUpdate(now)) {
                     close(wait, AgentWaitState.TIMED_OUT, null);
+                    closedFor.add(placedOf(wait.agentId));
                     Duration after = Duration.between(wait.createdAt, wait.expiresAt);
                     AgentWorktree agent =
                         wake(
@@ -328,6 +344,7 @@ public class AgentWaits {
                   }
                   return out;
                 });
+    hint(closedFor);
     refreshNames();
     for (Woken w : woken) {
       relay(w.workId(), false, CAUSE_TIMED_OUT, null, w.sessionId(), now);
@@ -339,20 +356,36 @@ public class AgentWaits {
 
   // --- waiting on (W5) ----------------------------------------------------------------------------
 
-  /** The labels of each agent's OPEN waits, oldest first, joined; agents with none are absent. */
-  public Map<UUID, String> waitingOn(Collection<UUID> agentIds) {
+  /**
+   * What an agent waits on: its OPEN waits' labels, oldest first, joined with {@code "; "}, and when
+   * the oldest of them was declared.
+   */
+  public record WaitingOn(String labels, Instant since) {}
+
+  /** {@link WaitingOn} per agent with an OPEN wait, from one read; agents with none are absent. */
+  public Map<UUID, WaitingOn> waitingOn(Collection<UUID> agentIds) {
     Map<UUID, List<String>> labels = new LinkedHashMap<>();
+    Map<UUID, Instant> since = new LinkedHashMap<>();
     for (AgentWait wait : waits.findOpenByAgents(agentIds)) {
       labels.computeIfAbsent(wait.agentId, id -> new ArrayList<>()).add(wait.label);
+      since.merge(wait.agentId, wait.createdAt, (a, b) -> a.isBefore(b) ? a : b);
     }
-    Map<UUID, String> out = new LinkedHashMap<>();
-    labels.forEach((id, list) -> out.put(id, bounded(String.join("; ", list), 4 * MAX_LABEL)));
+    Map<UUID, WaitingOn> out = new LinkedHashMap<>();
+    labels.forEach(
+        (id, list) ->
+            out.put(
+                id, new WaitingOn(bounded(String.join("; ", list), 4 * MAX_LABEL), since.get(id))));
     return out;
   }
 
-  /** {@link #waitingOn(Collection)} for one agent, in a transaction of its own; null = none. */
+  /** The labels of {@link #waitingOn(Collection)} for one agent, in a transaction of its own; null = none. */
   public String waitingOn(UUID agentId) {
-    return QuarkusTransaction.requiringNew().call(() -> waitingOn(List.of(agentId)).get(agentId));
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              WaitingOn on = waitingOn(List.of(agentId)).get(agentId);
+              return on == null ? null : on.labels();
+            });
   }
 
   /**
@@ -387,6 +420,32 @@ public class AgentWaits {
   // --- helpers ------------------------------------------------------------------------------------
 
   private record Woken(String workId, String sessionId) {}
+
+  /** Where an agent is listed: its wrapper and its workspace (null while it has none). */
+  private record Placed(String repositoryId, Long workspaceId) {
+    static Placed of(AgentWorktree agent) {
+      return new Placed(agent.repositoryId, agent.workspaceId);
+    }
+  }
+
+  /** Where the agent is listed, read in the caller's transaction; null when there is no such agent. */
+  private Placed placedOf(UUID agentId) {
+    AgentWorktree agent = agents.findById(agentId);
+    return agent == null ? null : Placed.of(agent);
+  }
+
+  /**
+   * A wait opened or closed: fire {@code AGENTS} once per workspace whose agent it was. Called after
+   * the change committed, so a reader the hint sends back sees it. An agent with no workspace is in
+   * no workspace's listing and fires nothing.
+   */
+  private void hint(Collection<Placed> placed) {
+    for (Placed p : new java.util.LinkedHashSet<>(placed)) {
+      if (p != null && p.workspaceId() != null) {
+        changePublisher.fire(p.repositoryId(), p.workspaceId(), WorkspaceChangeHint.Topic.AGENTS);
+      }
+    }
+  }
 
   /** The wake: the turn is appended to what the agent has still to hear. Called in a transaction. */
   private AgentWorktree wake(UUID agentId, String turn) {

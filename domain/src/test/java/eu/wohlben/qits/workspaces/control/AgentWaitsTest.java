@@ -49,6 +49,7 @@ public class AgentWaitsTest {
   @Inject FakeAgentWaitingReporter reporter;
   @Inject FakeAgentDaemon daemon;
   @Inject WorkspaceRepository workspaces;
+  @Inject RecordedHints hints;
 
   private static EventSelection verified() {
     return EventSelection.of(
@@ -162,6 +163,193 @@ public class AgentWaitsTest {
     assertTrue(row(timed).pendingText.contains("timed out after 2h"), row(timed).pendingText);
     assertEquals(AgentWaitState.CANCELLED, waitRow(dropped.id()).state);
     assertNull(row(obsolete).pendingText, "a cancelled wait gives no turn");
+  }
+
+  /** The agent put YIELDED into a RUNNER slot of its own wrapper that no runner holds. */
+  private Long yieldedInASlot(UUID id) {
+    return inASlot(id, "waits-yielded-", AgentRunState.YIELDED, Instant.now().minusSeconds(3600));
+  }
+
+  /** The agent put into a RUNNER slot of its own wrapper that no runner holds. */
+  private Long inASlot(UUID id, String repoPrefix, AgentRunState runState, Instant waitingSince) {
+    String repoId = repoPrefix + UUID.randomUUID().toString().substring(0, 8);
+    Long slot =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  Workspace row = new Workspace();
+                  row.repositoryId = repoId;
+                  row.workspaceId = "ws-" + repoId;
+                  row.status = WorkspaceStatus.ACTIVE;
+                  row.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                  row.placement = WorkspacePlacement.RUNNER;
+                  workspaces.persist(row);
+                  return row.id;
+                });
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree agent = agents.findById(id);
+              agent.repositoryId = repoId;
+              agent.workspaceId = slot;
+              agent.runState = runState;
+              agent.waitingSince = waitingSince;
+            });
+    return slot;
+  }
+
+  /** Backdate a wait's declaration (and its expiry, when it has one, to just past). */
+  private void backdate(String waitId, Instant createdAt, boolean expired) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWait wait = waitRows.findById(UUID.fromString(waitId));
+              wait.createdAt = createdAt;
+              if (expired) {
+                wait.expiresAt = Instant.now().minusSeconds(1);
+              }
+            });
+  }
+
+  /**
+   * qits-1229: {@code waitingOnSince} is when the oldest OPEN wait was declared — not the hook's
+   * {@code waitingSince} — and goes with the last of them.
+   */
+  @Test
+  void waitingOnSinceIsTheOldestOpenWaitsDeclarationAndGoesWithTheLastOfThem() {
+    UUID id = agent("w-since");
+    assertNull(service.get(id).waitingOnSince());
+
+    AgentWaitDto older = waits.create(id, "older", EventSelection.of("BuildStatusChanged"), null);
+    AgentWaitDto newer = waits.create(id, "newer", verified(), null);
+    backdate(older.id(), Instant.now().minus(Duration.ofHours(2)), false);
+    backdate(newer.id(), Instant.now().minus(Duration.ofHours(1)), false);
+
+    var view = service.get(id);
+    assertEquals("older; newer", view.waitingOn());
+    assertEquals(waitRow(older.id()).createdAt, view.waitingOnSince());
+    assertNull(view.waitingSince(), "the hook clock is untouched by a wait");
+
+    waits.cancel(id, UUID.fromString(older.id()));
+    assertEquals(waitRow(newer.id()).createdAt, service.get(id).waitingOnSince());
+
+    assertEquals(
+        1,
+        waits.onEvent(
+            "ev-since",
+            "EntityTransitioned",
+            Instant.now(),
+            "{\"entities\":[{\"entityId\":\"e-1\",\"status\":\"VERIFIED\"}]}"));
+    assertNull(service.get(id).waitingOn());
+    assertNull(service.get(id).waitingOnSince());
+  }
+
+  /**
+   * qits-1229: a wait opening, being cancelled, timing out or matching fires {@code AGENTS} on the
+   * agent's workspace channel, so the listing re-reads {@code waitingOn}.
+   */
+  @Test
+  void aWaitOpeningOrClosingFiresTheAgentsHintForTheAgentsWorkspace() throws Exception {
+    UUID id = agent("w-hint");
+    // RUNNING in a slot no runner holds: nothing places or starts it, so only the waits fire.
+    Long slot = inASlot(id, "waits-hint-", AgentRunState.RUNNING, null);
+    WorkspaceChangeHint.Topic agentsTopic = WorkspaceChangeHint.Topic.AGENTS;
+
+    AgentWaitDto cancelled = waits.create(id, "to cancel", EventSelection.of("BuildStatusChanged"), null);
+    assertTrue(hints.awaitFor(slot, agentsTopic, 1, 5_000) >= 1, "create fires");
+
+    waits.cancel(id, UUID.fromString(cancelled.id()));
+    assertTrue(hints.awaitFor(slot, agentsTopic, 2, 5_000) >= 2, "cancel fires");
+    // A cancel of a closed wait changes nothing, and fires nothing.
+    waits.cancel(id, UUID.fromString(cancelled.id()));
+
+    AgentWaitDto timed = waits.create(id, "to time out", EventSelection.of("BuildStatusChanged"), Duration.ofHours(1));
+    assertTrue(hints.awaitFor(slot, agentsTopic, 3, 5_000) >= 3);
+    backdate(timed.id(), Instant.now().minus(Duration.ofHours(1)).minusSeconds(1), true);
+    waits.sweep();
+    assertEquals(AgentWaitState.TIMED_OUT, waitRow(timed.id()).state);
+    assertTrue(hints.awaitFor(slot, agentsTopic, 4, 5_000) >= 4, "a timeout fires");
+
+    waits.create(id, "to match", verified(), null);
+    assertTrue(hints.awaitFor(slot, agentsTopic, 5, 5_000) >= 5);
+    assertEquals(
+        1,
+        waits.onEvent(
+            "ev-hint",
+            "EntityTransitioned",
+            Instant.now(),
+            "{\"entities\":[{\"entityId\":\"e-1\",\"status\":\"VERIFIED\"}]}"));
+    assertTrue(hints.awaitFor(slot, agentsTopic, 6, 5_000) >= 6, "a match fires");
+    assertTrue(
+        hints.forRepository(row(id).repositoryId).stream()
+            .allMatch(h -> slot.equals(h.workspaceRowId())),
+        "only the workspace channel, never the repository's");
+  }
+
+  /** qits-1229: an agent with no workspace (QUEUED) is in no listing; its waits fire nothing. */
+  @Test
+  void aWaitOfAnAgentWithNoWorkspaceFiresNothing() throws Exception {
+    UUID unplaced = agent("w-nohint");
+    String repoId = "waits-nohint-" + UUID.randomUUID().toString().substring(0, 8);
+    QuarkusTransaction.requiringNew().run(() -> agents.findById(unplaced).repositoryId = repoId);
+
+    AgentWaitDto wait = waits.create(unplaced, "unplaced", EventSelection.of("BuildStatusChanged"), null);
+    waits.cancel(unplaced, UUID.fromString(wait.id()));
+
+    // A placed agent's wait, fired after: once its hint has arrived, the earlier ones would have.
+    UUID placed = agent("w-nohint-placed");
+    Long slot = inASlot(placed, "waits-nohint-placed-", AgentRunState.RUNNING, null);
+    waits.create(placed, "placed", EventSelection.of("BuildStatusChanged"), null);
+    assertTrue(hints.awaitFor(slot, WorkspaceChangeHint.Topic.AGENTS, 1, 5_000) >= 1);
+    Thread.sleep(200);
+
+    assertEquals(List.of(), hints.forRepository(repoId));
+  }
+
+  /** A match wakes a yielded agent: its wake is pending, and the resume makes it RUNNING (qits-1212). */
+  @Test
+  void aMatchOnAYieldedAgentMakesItRunning() {
+    UUID id = agent("w-match-yielded");
+    yieldedInASlot(id);
+    waits.create(id, "ticket e-1 verified", verified(), null);
+
+    assertEquals(
+        1,
+        waits.onEvent(
+            "ev-y1",
+            "EntityTransitioned",
+            Instant.now(),
+            "{\"entities\":[{\"entityId\":\"e-1\",\"status\":\"VERIFIED\"}]}"));
+    assertNotNull(row(id).pendingText);
+    service.resumeYielded();
+
+    AgentWorktree after = row(id);
+    assertEquals(AgentRunState.RUNNING, after.runState);
+    assertTrue(after.pendingText.contains("\"ticket e-1 verified\" matched"), after.pendingText);
+  }
+
+  /** A timeout wakes a yielded agent the same way (qits-1212). */
+  @Test
+  void aTimeoutOnAYieldedAgentMakesItRunning() {
+    UUID id = agent("w-timeout-yielded");
+    yieldedInASlot(id);
+    AgentWaitDto wait = waits.create(id, "ci run 11", EventSelection.of("BuildStatusChanged"), Duration.ofHours(1));
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                waitRows.update(
+                    "createdAt = ?1, expiresAt = ?2 where id = ?3",
+                    Instant.now().minus(Duration.ofHours(1)).minusSeconds(1),
+                    Instant.now().minusSeconds(1),
+                    UUID.fromString(wait.id())));
+
+    waits.sweep();
+    service.resumeYielded();
+
+    assertEquals(AgentWaitState.TIMED_OUT, waitRow(wait.id()).state);
+    AgentWorktree after = row(id);
+    assertEquals(AgentRunState.RUNNING, after.runState);
+    assertTrue(after.pendingText.contains("timed out"), after.pendingText);
   }
 
   @Test

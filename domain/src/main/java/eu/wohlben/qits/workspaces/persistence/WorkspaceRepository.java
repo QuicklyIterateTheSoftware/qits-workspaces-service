@@ -185,12 +185,23 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
     return list("status = ?1 and branch is null order by id", WorkspaceStatus.ACTIVE);
   }
 
-  /** How many ACTIVE rows are placed on runners: the slots in use against the runners' capacity. */
-  public long countActiveOnRunners() {
+  /**
+   * How many ACTIVE RUNNER rows hold a runner slot or wait for one: the slots in use against the
+   * runners' capacity (qits-1228). RUNNING and PROVISIONING hold one, as {@link
+   * #countLiveOnRunner} counts them; QUEUED waits for one, with or without a runner, so a slot
+   * queued earlier in the same pass is counted before the next is created. A STOPPED or FAILED row
+   * holds none whatever its {@code runnerId} says, and an old-model row left that way must not eat
+   * capacity for good.
+   */
+  public long countHoldingRunnerSlots() {
     return count(
-        "status = ?1 and placement = ?2",
+        "status = ?1 and placement = ?2 and runtimeStatus in ?3",
         WorkspaceStatus.ACTIVE,
-        eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER);
+        WorkspacePlacement.RUNNER,
+        List.of(
+            WorkspaceRuntimeStatus.QUEUED,
+            WorkspaceRuntimeStatus.PROVISIONING,
+            WorkspaceRuntimeStatus.RUNNING));
   }
 
   // --- Any-status (history / discovery) ----------------------------------------------------------
