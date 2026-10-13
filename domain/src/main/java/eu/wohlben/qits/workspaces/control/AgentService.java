@@ -32,10 +32,12 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Queue;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -78,9 +80,10 @@ import org.jboss.logging.Logger;
  *       row changes: no daemon call, and its harness keeps running.
  *   <li><b>Drive</b>: a RUNNING agent whose daemon answers is started (again after a daemon restart:
  *       its credential lives only in daemon memory) and is told what it has still to hear.
- *   <li><b>Clean up</b> (D4, D5, D7): an OBSOLETE agent whose work item is VERIFIED and that has
- *       been idle for {@code qits.workspace.agent.cleanup-idle} is removed if its worktrees are clean
- *       and pushed; otherwise it is handed the cleanup prompt instead.
+ *   <li><b>Clean up</b> (D4, D5, D7): an OBSOLETE agent whose work item is closed (VERIFIED,
+ *       DONE or DROPPED) and that has been idle for {@code qits.workspace.agent.cleanup-idle} is
+ *       removed if its worktrees are clean and pushed; otherwise it is handed the cleanup prompt
+ *       instead.
  *   <li><b>Remove empty workspaces</b> (D2).
  * </ol>
  */
@@ -97,7 +100,8 @@ public class AgentService {
           + " cases, if they are blocked somehow, create a new ticket and push them under that"
           + " workId. Say explicitly what you committed, why, and why it has not been released yet.";
 
-  private static final String VERIFIED = "VERIFIED";
+  /** The statuses that end an item (D4): the cleanup sweep removes a closed item's OBSOLETE agents. */
+  private static final Set<String> CLOSING_STATUSES = Set.of("VERIFIED", "DONE", "DROPPED");
 
   /** A branch name git and the daemon both take: no leading dash, no spaces or control characters. */
   private static final Pattern BRANCH = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]{0,199}");
@@ -337,9 +341,9 @@ public class AgentService {
    * The item's ACTIVE agent; else its newest OBSOLETE one when that stands on the same wrapper
    * branch, made ACTIVE again (qits-1217). A release that took one of an agent's branches makes it
    * OBSOLETE while its item goes on, and the agent keeps its worktree, session and slot until the
-   * item is VERIFIED: a second agent on the same wrapper branch would be refused by its daemon
-   * ("already checked out") for as long as the first stands. An OBSOLETE agent on another wrapper
-   * branch is left alone, and the caller creates a new agent.
+   * item is closed (VERIFIED, DONE or DROPPED): a second agent on the same wrapper branch would be
+   * refused by its daemon ("already checked out") for as long as the first stands. An OBSOLETE
+   * agent on another wrapper branch is left alone, and the caller creates a new agent.
    *
    * <p>Two dispatches that revive at once are settled by {@code uq_agent_worktree_active_work}: the
    * loser answers the winner.
@@ -495,7 +499,7 @@ public class AgentService {
   /**
    * Store the work item's title, status word and blocked flag on its agent, and tell a running
    * harness live. The facts are what the daemon names the session after, and the status is what
-   * the cleanup sweep reads (VERIFIED, D4).
+   * the cleanup sweep reads (VERIFIED, DONE or DROPPED, D4).
    */
   public EntityMark markEntity(String workId, EntityFacts facts, String blockSource) {
     return mark(workId, facts, blockSource, false);
@@ -506,27 +510,33 @@ public class AgentService {
     return mark(workId, new EntityFacts(null, null, blocked), blockSource, true);
   }
 
+  /**
+   * Applied to every non-REMOVED agent of the item (ACTIVE and every OBSOLETE one), not only the
+   * one {@link AgentWorktreeRepository#findLiveByWorkId} would answer with: an item with two
+   * OBSOLETE agents must not leave the older one's facts frozen. The answer and the live daemon
+   * notification still name the primary row — ACTIVE, else the newest OBSOLETE — the same row
+   * {@code findLiveByWorkId} picks.
+   */
   private EntityMark mark(String workId, EntityFacts facts, String blockSource, boolean blockedOnly) {
-    Optional<AgentWorktree> stored =
+    List<AgentWorktree> stored =
         QuarkusTransaction.requiringNew()
             .call(
-                () ->
-                    agents
-                        .findLiveByWorkId(workId)
-                        .map(
-                            agent -> {
-                              if (blockedOnly) {
-                                agent.entityBlocked = facts.blocked();
-                                agent.blockSource = trimmed(blockSource);
-                              } else {
-                                applyFacts(agent, facts, blockSource);
-                              }
-                              return agent;
-                            }));
+                () -> {
+                  List<AgentWorktree> live = agents.findLiveAllByWorkId(workId);
+                  for (AgentWorktree agent : live) {
+                    if (blockedOnly) {
+                      agent.entityBlocked = facts.blocked();
+                      agent.blockSource = trimmed(blockSource);
+                    } else {
+                      applyFacts(agent, facts, blockSource);
+                    }
+                  }
+                  return live;
+                });
     if (stored.isEmpty()) {
       return new EntityMark(null, false);
     }
-    AgentWorktree agent = stored.get();
+    AgentWorktree agent = stored.get(0);
     boolean applied = false;
     if (agent.workspaceId != null && started.containsKey(agent.id) && daemon.isResolvable()) {
       applied =
@@ -549,8 +559,9 @@ public class AgentService {
   /**
    * A release deleted {@code branch} of {@code repositoryId}: every ACTIVE agent that owns it — as
    * its wrapper branch, or as a branch it pushed — is marked OBSOLETE (D4). Nothing is removed
-   * here; the cleanup sweep does that once the item is VERIFIED and the agent idle. A workspace of
-   * the old model standing on the branch is resolved as before (the drain, D20).
+   * here; the cleanup sweep does that once the item is closed (VERIFIED, DONE or DROPPED) and the
+   * agent idle. A workspace of the old model standing on the branch is resolved as before (the
+   * drain, D20).
    */
   public Resolution resolveReleasedBranch(
       String repositoryId, String branch, String target, String commit, String result) {
@@ -1281,15 +1292,21 @@ public class AgentService {
     changePublisher.fire(agent.repositoryId, workspaceId, WorkspaceChangeHint.Topic.AGENTS);
   }
 
-  /** Step 5: OBSOLETE agents of VERIFIED items, idle long enough, are removed or prompted (D4–D7). */
+  /**
+   * Step 5: OBSOLETE agents of closed items (VERIFIED, DONE or DROPPED), idle long enough, are
+   * removed or prompted (D4–D7). Judged by the item's CURRENT status — the row {@code
+   * findLiveByWorkId} returns, which the relay has always kept current — so a stale OBSOLETE row
+   * whose own {@code entityStatus} never caught up still heals.
+   */
   void cleanUp() {
     synchronized (passLock) {
       Instant idleBefore = Instant.now().minus(cleanupIdle);
       List<AgentWorktree> obsolete =
           QuarkusTransaction.requiringNew().call(() -> agents.findObsolete());
+      Map<String, String> currentStatus = currentStatusByWorkId(obsolete);
       for (AgentWorktree agent : obsolete) {
         try {
-          cleanUp(agent, idleBefore);
+          cleanUp(agent, idleBefore, currentStatus);
         } catch (RuntimeException e) {
           LOG.warnf(e, "Could not clean up agent %s", agent.id);
         }
@@ -1297,8 +1314,34 @@ public class AgentService {
     }
   }
 
-  private void cleanUp(AgentWorktree agent, Instant idleBefore) {
-    if (!VERIFIED.equalsIgnoreCase(agent.entityStatus)) {
+  /** One {@code findLiveByWorkId} lookup per distinct workId of the pass's OBSOLETE agents. */
+  private Map<String, String> currentStatusByWorkId(List<AgentWorktree> obsolete) {
+    Map<String, String> out = new HashMap<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              for (AgentWorktree agent : obsolete) {
+                String workId = agent.workId;
+                if (workId == null || out.containsKey(workId)) {
+                  continue;
+                }
+                out.put(
+                    workId, agents.findLiveByWorkId(workId).map(a -> a.entityStatus).orElse(null));
+              }
+            });
+    return out;
+  }
+
+  private static boolean isClosed(String status) {
+    return status != null && CLOSING_STATUSES.contains(status.toUpperCase(Locale.ROOT));
+  }
+
+  private void cleanUp(AgentWorktree agent, Instant idleBefore, Map<String, String> currentStatus) {
+    String status = currentStatus.get(agent.workId);
+    if (status == null) {
+      status = agent.entityStatus;
+    }
+    if (!isClosed(status)) {
       return;
     }
     if (agent.lastActivityAt != null && agent.lastActivityAt.isAfter(idleBefore)) {

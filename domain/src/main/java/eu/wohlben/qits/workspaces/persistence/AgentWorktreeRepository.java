@@ -5,6 +5,7 @@ import eu.wohlben.qits.workspaces.entity.AgentState;
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import io.quarkus.hibernate.orm.panache.PanacheRepositoryBase;
 import jakarta.enterprise.context.ApplicationScoped;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -34,6 +35,19 @@ public class AgentWorktreeRepository implements PanacheRepositoryBase<AgentWorkt
             workId.trim(),
             AgentState.OBSOLETE)
         .firstResultOptional();
+  }
+
+  /** Every live agent of a work item (ACTIVE, else every OBSOLETE): the ACTIVE one first, then OBSOLETE newest first. */
+  public List<AgentWorktree> findLiveAllByWorkId(String workId) {
+    if (workId == null || workId.isBlank()) {
+      return List.of();
+    }
+    String trimmed = workId.trim();
+    List<AgentWorktree> out = new ArrayList<>();
+    findActiveByWorkId(trimmed).ifPresent(out::add);
+    out.addAll(
+        list("workId = ?1 and state = ?2 order by createdAt desc", trimmed, AgentState.OBSOLETE));
+    return out;
   }
 
   /** Every agent of these work items, whatever its state, newest first. */

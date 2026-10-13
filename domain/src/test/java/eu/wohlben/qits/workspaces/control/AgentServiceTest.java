@@ -27,10 +27,13 @@ import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * {@link AgentService} (qits-1152) on a real database: dispatch and placement, the scheduler's
@@ -364,13 +367,17 @@ public class AgentServiceTest {
   }
 
   @Test
-  void aYieldOnlyFreesTheSlotAndTheHarnessKeepsRunning() {
+  void aYieldOnlyFreesTheSlotAndTheHarnessKeepsRunning() throws InterruptedException {
     AgentService.Dispatch first = dispatch("w-first", true, null);
     String firstId = first.agent().agentId();
     Long slot = first.agent().workspaceRowId();
     liveness.markLive(slot);
     service.reconcile();
     assertTrue(service.isStarted(UUID.fromString(firstId)));
+    // The scheduler coalesces a kick per dispatch/reconnect and runs it on its own thread; let any
+    // still-pending pass from this or an earlier test settle before hand-queuing below, or a stray
+    // placeQueued() could place that agent itself and starve this test's own yieldBlocked() call.
+    Thread.sleep(100);
 
     // An admin agent always gets a new slot, so queue one by hand to stand for a full runner.
     agentIn(null, true, AgentRunState.QUEUED);
@@ -572,6 +579,163 @@ public class AgentServiceTest {
     service.removeEmptyWorkspaces();
     assertEquals(WorkspaceStatus.ABANDONED, workspace(slot).status, "the empty slot goes too (D2)");
     liveness.markDead(slot);
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"DONE", "DROPPED"})
+  void theSweepRemovesAnObsoleteAgentWhoseItemIsDoneOrDropped(String status) {
+    // qits-1219: an item does not only close as VERIFIED; DONE and DROPPED end it too.
+    String workId = "w-" + status.toLowerCase(Locale.ROOT);
+    AgentService.Dispatch dispatched = dispatch(workId, true, null);
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    UUID id = UUID.fromString(agentId);
+    QuarkusTransaction.requiringNew()
+        .run(() -> branches.upsert(id, "service-repo", "ticket/" + workId + "-fix", "abc", Instant.now()));
+    service.resolveReleasedBranch("service-repo", "ticket/" + workId + "-fix", "2026.1.1", "abc", null);
+    assertEquals(AgentState.OBSOLETE, row(agentId).state);
+
+    service.markEntity(workId, new EntityFacts("A title", status, false), null);
+    liveness.markLive(slot);
+    service.reconcile(); // deterministically past the agent's start, so it stops touching lastActivityAt
+    QuarkusTransaction.requiringNew()
+        .run(() -> agents.findById(id).lastActivityAt = Instant.now().minusSeconds(3600));
+    service.cleanUp();
+
+    assertEquals(AgentState.REMOVED, row(agentId).state);
+    liveness.markDead(slot);
+  }
+
+  @Test
+  void aNonClosingStatusStillRemovesNothing() {
+    AgentService.Dispatch dispatched = dispatch("w-implemented", true, null);
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    UUID id = UUID.fromString(agentId);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                branches.upsert(id, "service-repo", "ticket/w-implemented-fix", "abc", Instant.now()));
+    service.resolveReleasedBranch("service-repo", "ticket/w-implemented-fix", "2026.1.1", "abc", null);
+    assertEquals(AgentState.OBSOLETE, row(agentId).state);
+
+    service.markEntity("w-implemented", new EntityFacts("A title", "IMPLEMENTED", false), null);
+    liveness.markLive(slot);
+    QuarkusTransaction.requiringNew()
+        .run(() -> agents.findById(id).lastActivityAt = Instant.now().minusSeconds(3600));
+    service.cleanUp();
+
+    assertEquals(AgentState.OBSOLETE, row(agentId).state, "IMPLEMENTED does not close the item");
+    liveness.markDead(slot);
+  }
+
+  @Test
+  void anItemWithTwoObsoleteAgentsMarksBothAndTheSweepRemovesBoth() {
+    // qits-1219: `mark` used to write only the one row `findLiveByWorkId` picked, leaving an
+    // older OBSOLETE agent's entityStatus frozen forever.
+    AgentService.Dispatch first = dispatch("w-two-obsolete", true, null);
+    String firstId = first.agent().agentId();
+    Long firstSlot = first.agent().workspaceRowId();
+    releaseBranchOf(firstId, "ticket/w-two-obsolete-fix");
+
+    AgentService.Dispatch second =
+        service.dispatch(
+            new AgentService.AgentRequest(
+                repoId,
+                "epic/w-two-obsolete",
+                "w-two-obsolete",
+                "w-two-obsolete",
+                null,
+                "w-two-obsolete",
+                true,
+                null,
+                "go",
+                new EntityFacts("A title", "REFINED", false)));
+    String secondId = second.agent().agentId();
+    Long secondSlot = second.agent().workspaceRowId();
+    assertNotEquals(firstId, secondId);
+    releaseBranchOf(secondId, "epic/w-two-obsolete-fix");
+    assertEquals(2, liveRowsOf("w-two-obsolete"), "both agents stand, both OBSOLETE");
+
+    service.markEntity("w-two-obsolete", new EntityFacts("A title", "DONE", false), null);
+
+    assertEquals("DONE", row(firstId).entityStatus, "the older row is not left behind");
+    assertEquals("DONE", row(secondId).entityStatus);
+
+    liveness.markLive(firstSlot);
+    liveness.markLive(secondSlot);
+    service.reconcile(); // deterministically past both agents' starts
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              agents.findById(UUID.fromString(firstId)).lastActivityAt =
+                  Instant.now().minusSeconds(3600);
+              agents.findById(UUID.fromString(secondId)).lastActivityAt =
+                  Instant.now().minusSeconds(3600);
+            });
+    service.cleanUp();
+
+    assertEquals(AgentState.REMOVED, row(firstId).state);
+    assertEquals(AgentState.REMOVED, row(secondId).state);
+    liveness.markDead(firstSlot);
+    liveness.markDead(secondSlot);
+  }
+
+  @Test
+  void aStaleOlderObsoleteRowIsHealedByTheItemsCurrentStatus() {
+    // qits-1219: judged by the item's CURRENT status (the newest live row), not the agent's own
+    // possibly-frozen entityStatus.
+    AgentService.Dispatch first = dispatch("w-stale", true, null);
+    String firstId = first.agent().agentId();
+    Long firstSlot = first.agent().workspaceRowId();
+    releaseBranchOf(firstId, "ticket/w-stale-fix");
+
+    AgentService.Dispatch second =
+        service.dispatch(
+            new AgentService.AgentRequest(
+                repoId,
+                "epic/w-stale",
+                "w-stale",
+                "w-stale",
+                null,
+                "w-stale",
+                true,
+                null,
+                "go",
+                new EntityFacts("A title", "REFINED", false)));
+    String secondId = second.agent().agentId();
+    Long secondSlot = second.agent().workspaceRowId();
+    releaseBranchOf(secondId, "epic/w-stale-fix");
+
+    // The older row is stale, frozen on an in-progress status; the newer one is DONE.
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              agents.findById(UUID.fromString(firstId)).entityStatus = "IMPLEMENTING";
+              agents.findById(UUID.fromString(secondId)).entityStatus = "DONE";
+            });
+
+    liveness.markLive(firstSlot);
+    liveness.markLive(secondSlot);
+    service.reconcile(); // deterministically past both agents' starts
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              agents.findById(UUID.fromString(firstId)).lastActivityAt =
+                  Instant.now().minusSeconds(3600);
+              agents.findById(UUID.fromString(secondId)).lastActivityAt =
+                  Instant.now().minusSeconds(3600);
+            });
+
+    service.cleanUp();
+
+    assertEquals(
+        AgentState.REMOVED,
+        row(firstId).state,
+        "healed: judged by the item's current status, not its own frozen one");
+    assertEquals(AgentState.REMOVED, row(secondId).state);
+    liveness.markDead(firstSlot);
+    liveness.markDead(secondSlot);
   }
 
   @Test

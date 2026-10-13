@@ -22,8 +22,9 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  *
  * <p>Since qits-1152 what it resolves are <b>agents</b>: every ACTIVE agent owning the branch — as
  * its wrapper branch, or as a branch it pushed — is marked OBSOLETE, and the cleanup sweep removes
- * it once its item is VERIFIED and it has been idle (D4). A workspace of the old model standing on
- * the branch is still resolved as it was (the drain, D20), answering {@code agentIds: []}.
+ * it once its item is closed (VERIFIED, DONE or DROPPED) and it has been idle (D4). A workspace of
+ * the old model standing on the branch is still resolved as it was (the drain, D20), answering
+ * {@code agentIds: []}.
  *
  * <p>A class of its own at {@code {qits:admin, qits:system}}, for the reason {@code
  * AgentDispatchController} gives: {@code BranchController}'s class role is a person's, and a
