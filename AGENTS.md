@@ -978,13 +978,19 @@ makes every daemon call, one pass at a time, kicked after each door and every
 3. **Yield** — a RUNNING agent waiting for input longer than `qits.workspace.agent.yield-after` (30 s)
    yields when another agent wants its slot (D14, D16). A yield frees the slot and nothing else: no
    daemon call, the harness keeps running, and its terminal, turns and entity updates keep working
-   (qits-1212). A yielded agent that works again (`awaitingInput: false`, say a person typed in its
-   terminal) is RUNNING again.
+   (qits-1212). The write is the yield: a candidate that is no longer RUNNING when its row is read
+   again yields nothing, so nothing is logged and nobody is placed on its account. A yielded agent
+   that works again (`awaitingInput: false`, say a person typed in its terminal) is RUNNING again.
 4. **Drive** — a RUNNING agent whose daemon answers is started with `POST agent-worktrees` (its
    instruction, session, entity facts and credential; `mode: INTERACTIVE`, the harness's TUI in a
    terminal), and its pending turn is said at a turn boundary (`/turn`; BUSY waits up to the launch
    window). The daemon holds a turn until the harness has started and types it on one line. The daemon keeps the agent credential in
-   memory only, so every agent is started again after its daemon connects (`onDaemonConnection`).
+   memory only, so every placed agent is started again after its daemon connects
+   (`onDaemonConnection`) or this service restarts — a YIELDED one included, since it keeps its
+   harness (qits-1212). A YIELDED agent is only started: no instruction, its pending turn left on
+   the row and its run state YIELDED, for the resume to make it RUNNING and the drive to say the
+   turn. The daemon's start is idempotent — a harness that still runs is answered as started and
+   left alone — so a start after a lost `started` map never gives an agent a second harness.
    A refused start (409) is stored on the row once per distinct detail (`start_refusal`,
    `start_refused_at`, `AgentDto.startRefusal`/`startRefusedAt`) and tried again every pass; the
    next accepted start clears it (qits-1217).
@@ -997,7 +1003,7 @@ makes every daemon call, one pass at a time, kicked after each door and every
 
 Every pending thing is a row, so a restart loses nothing. What is in memory — which agents this
 process started on the current daemon connection, the per-agent activity — is rebuilt by the next
-connection and the next frames.
+pass and the next frames: every placed agent, RUNNING or YIELDED, is started again (qits-1212).
 
 **The doors** (machine doors `{qits:admin, qits:admin-agent, qits:system}`, reads add `qits:agent`):
 

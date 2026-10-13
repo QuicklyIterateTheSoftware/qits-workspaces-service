@@ -425,6 +425,123 @@ public class AgentServiceTest {
     liveness.markDead(slot);
   }
 
+  private long startsOf(String agentId) {
+    return daemon.starts().stream().filter(s -> s.agentId().equals(agentId)).count();
+  }
+
+  private AgentDaemon.Start lastStartOf(String agentId) {
+    List<AgentDaemon.Start> starts =
+        daemon.starts().stream().filter(s -> s.agentId().equals(agentId)).toList();
+    return starts.get(starts.size() - 1);
+  }
+
+  /**
+   * A reconnect forgets which agents were started on the daemon (qits-1212). A yielded agent keeps
+   * its harness, so it is started again like a running one — with no turn and still YIELDED — and
+   * hears entity updates again. Woken, it hears its turn in that harness: no second start.
+   */
+  @Test
+  void aYieldedAgentIsStartedAgainAfterAReconnectAndIsNeverStartedTwice()
+      throws InterruptedException {
+    AgentService.Dispatch dispatched = dispatch("w-reconnect", true, null);
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    service.reconcile();
+    assertEquals(1, startsOf(agentId));
+    Thread.sleep(100);
+    setRunState(agentId, AgentRunState.YIELDED);
+
+    service.onDaemonConnection(slot);
+    service.reconcile();
+
+    assertTrue(service.isStarted(id), "the yielded agent holds a harness on the new connection");
+    assertEquals(2, startsOf(agentId));
+    assertNull(lastStartOf(agentId).instruction(), "a start-only carries no turn");
+    assertEquals("session-" + agentId, lastStartOf(agentId).sessionId(), "it resumes its session");
+    assertEquals(AgentRunState.YIELDED, row(agentId).runState, "started, not woken");
+
+    // Entity updates reach it again.
+    AgentService.EntityMark mark =
+        service.markEntity("w-reconnect", new EntityFacts("A title", "IMPLEMENTED", false), null);
+    assertTrue(mark.applied());
+    assertTrue(daemon.callsFor(agentId).contains("entity " + slot + " " + agentId + " IMPLEMENTED"));
+
+    // Another pass starts nothing: it is started on this connection.
+    service.reconcile();
+    assertEquals(2, startsOf(agentId));
+
+    // Woken, it hears the turn in the harness it holds.
+    service.deliver("w-reconnect", "your answer", false);
+    service.reconcile();
+    assertEquals(AgentRunState.RUNNING, row(agentId).runState);
+    assertTrue(daemon.callsFor(agentId).contains("turn " + slot + " " + agentId + " your answer"));
+    assertNull(row(agentId).pendingText);
+    assertEquals(2, startsOf(agentId), "no agent ever gets a second harness from this service");
+    liveness.markDead(slot);
+  }
+
+  /**
+   * A restart of this service starts with nothing started (qits-1212). The drive starts a placed
+   * yielded agent again and leaves its pending turn on the row, for the resume to say once it is
+   * RUNNING: a start-only path never takes it.
+   */
+  @Test
+  void aServiceRestartStartsAYieldedAgentAgainAndLeavesItsTurnPending()
+      throws InterruptedException {
+    AgentService.Dispatch dispatched = dispatch("w-restart", true, null);
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    service.reconcile();
+    Thread.sleep(100);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agents.findById(id);
+              row.runState = AgentRunState.YIELDED;
+              row.pendingText = "a wake";
+            });
+
+    service.forgetStarted();
+    assertFalse(service.isStarted(id));
+    service.driveRunning();
+
+    assertTrue(service.isStarted(id));
+    assertEquals(2, startsOf(agentId));
+    assertNull(lastStartOf(agentId).instruction());
+    AgentWorktree after = row(agentId);
+    assertEquals(AgentRunState.YIELDED, after.runState);
+    assertEquals("a wake", after.pendingText, "the pending turn is the resume's to say");
+    assertFalse(
+        daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("turn ")),
+        "a start-only path says nothing");
+
+    // The resume makes it RUNNING and the drive says the turn, in the harness it holds.
+    service.reconcile();
+    assertEquals(AgentRunState.RUNNING, row(agentId).runState);
+    assertTrue(daemon.callsFor(agentId).contains("turn " + slot + " " + agentId + " a wake"));
+    assertNull(row(agentId).pendingText);
+    assertEquals(2, startsOf(agentId));
+    liveness.markDead(slot);
+  }
+
+  /** Only a written yield is a yield (qits-1212): a row that is no longer RUNNING yields nothing. */
+  @Test
+  void aYieldIsWrittenOnlyOverARunningAgent() {
+    Long slot = runnerSlot();
+    UUID running = agentIn(slot, false, AgentRunState.RUNNING);
+    UUID yielded = agentIn(slot, false, AgentRunState.YIELDED);
+
+    assertTrue(service.writeYield(running));
+    assertEquals(AgentRunState.YIELDED, row(running.toString()).runState);
+    assertFalse(service.writeYield(running), "a second write finds it yielded already");
+    assertFalse(service.writeYield(yielded));
+    assertFalse(service.writeYield(UUID.randomUUID()), "no row, no yield");
+  }
+
   @Test
   void aYieldedAgentThatWorksAgainIsRunningAgain() {
     Long slot = runnerSlot();
@@ -476,6 +593,26 @@ public class AgentServiceTest {
         AgentRunState.QUEUED,
         row(second.toString()).runState,
         "the slot is taken again: one pass does not book it twice");
+  }
+
+  @Test
+  void aQueuedAgentSkipsAWorkspaceWhoseYieldedAgentHasATurnPending() {
+    Long slot = runnerSlot();
+    UUID yielded = agentIn(slot, false, AgentRunState.YIELDED);
+    QuarkusTransaction.requiringNew().run(() -> agents.findById(yielded).pendingText = "a wake");
+    UUID queued = agentIn(null, false, AgentRunState.QUEUED);
+
+    service.placeQueued();
+    assertEquals(
+        AgentRunState.QUEUED,
+        row(queued.toString()).runState,
+        "the yielded agent is about to resume: its slot is not all-yielded");
+    assertNull(row(queued.toString()).workspaceId);
+
+    QuarkusTransaction.requiringNew().run(() -> agents.findById(yielded).pendingText = null);
+    service.placeQueued();
+    assertEquals(AgentRunState.RUNNING, row(queued.toString()).runState);
+    assertEquals(slot, row(queued.toString()).workspaceId);
   }
 
   @Test

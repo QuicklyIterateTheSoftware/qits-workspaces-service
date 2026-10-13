@@ -79,7 +79,10 @@ import org.jboss.logging.Logger;
  *       qits.workspace.agent.yield-after} gives up its slot when another agent wants it. Only the
  *       row changes: no daemon call, and its harness keeps running.
  *   <li><b>Drive</b>: a RUNNING agent whose daemon answers is started (again after a daemon restart:
- *       its credential lives only in daemon memory) and is told what it has still to hear.
+ *       its credential lives only in daemon memory) and is told what it has still to hear. A placed
+ *       YIELDED agent is started too when this process has not started it on its daemon's current
+ *       connection — after a reconnect or a restart of this service — but only started: it stays
+ *       YIELDED and hears nothing until it is RUNNING again (qits-1212).
  *   <li><b>Clean up</b> (D4, D5, D7): an OBSOLETE agent whose work item is closed (VERIFIED,
  *       DONE or DROPPED) and that has been idle for {@code qits.workspace.agent.cleanup-idle} is
  *       removed if its worktrees are clean and pushed; otherwise it is handed the cleanup prompt
@@ -225,7 +228,9 @@ public class AgentService {
   /**
    * The agents started on the current connection of their workspace's daemon, by agent id, with
    * the workspace row. Cleared for a workspace whenever its daemon connects or goes: the daemon
-   * keeps the agent credential in memory only, so after a restart every agent is started again.
+   * keeps the agent credential in memory only, so after a restart every placed agent is started
+   * again, a YIELDED one included (qits-1212). Empty in a fresh process for the same reason: a
+   * start of an agent whose harness still runs launches nothing in the daemon.
    */
   private final Map<UUID, Long> started = new ConcurrentHashMap<>();
 
@@ -855,10 +860,18 @@ public class AgentService {
     }
   }
 
-  /** A workspace's daemon connected or went: its agents are started again on the next pass. */
+  /**
+   * A workspace's daemon connected or went: its placed agents are started again on the next pass,
+   * the RUNNING ones and the YIELDED ones alike (qits-1212), a YIELDED one with no turn.
+   */
   public void onDaemonConnection(Long workspaceRowId) {
     started.values().removeIf(row -> Objects.equals(row, workspaceRowId));
     kick();
+  }
+
+  /** What a fresh process knows: no agent started anywhere. Tests stand for a service restart with it. */
+  void forgetStarted() {
+    started.clear();
   }
 
   /**
@@ -1112,16 +1125,9 @@ public class AgentService {
                     return out;
                   });
       for (AgentWorktree agent : candidates) {
-        QuarkusTransaction.requiringNew()
-            .run(
-                () -> {
-                  AgentWorktree row = agents.findById(agent.id);
-                  if (row.runState == AgentRunState.RUNNING) {
-                    // waitingSince stays: a yielded agent still waits for a person, and the
-                    // hook of the turn it resumes on is the flip that clears it.
-                    row.runState = AgentRunState.YIELDED;
-                  }
-                });
+        if (!writeYield(agent.id)) {
+          continue;
+        }
         LOG.infof("Agent %s yielded workspace %s", agent.id, agent.workspaceId);
         resumeYielded();
         placeQueued();
@@ -1129,24 +1135,85 @@ public class AgentService {
     }
   }
 
-  /** Step 4: start the RUNNING agents and tell them what they have still to hear. */
+  /**
+   * Write the yield of one candidate: RUNNING becomes YIELDED. Only a write is a yield (qits-1212):
+   * an agent that is no longer RUNNING when its row is read again (it works again, or a wait or a
+   * turn woke it and it ran) yielded nothing, so the caller logs nothing and places nobody on its
+   * account.
+   *
+   * @return whether the row was written
+   */
+  boolean writeYield(UUID id) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              AgentWorktree row = agents.findById(id);
+              if (row == null || row.runState != AgentRunState.RUNNING) {
+                return false;
+              }
+              // waitingSince stays: a yielded agent still waits for a person, and the hook of the
+              // turn it resumes on is the flip that clears it.
+              row.runState = AgentRunState.YIELDED;
+              return true;
+            });
+  }
+
+  /**
+   * Step 4: start the RUNNING agents and tell them what they have still to hear; start the placed
+   * YIELDED agents this process has not started on their daemon's current connection (qits-1212).
+   *
+   * <p>A yielded agent keeps its harness, so it has to be started like any other placed agent after
+   * its daemon connects again or this service restarts: the daemon keeps the agent credential in
+   * memory only, and {@link #started} begins empty. Without that its harness is gone after a daemon
+   * restart, and {@link #mark} relays nothing to it until it is woken. It is only started ({@link
+   * #ensureStarted}): its run state stays YIELDED and its pending turn stays on the row, for
+   * {@link #resumeYielded} to make it RUNNING and {@link #drive} to say it. A start of an agent
+   * whose harness still runs launches nothing in the daemon, so no agent gets a second harness.
+   */
   void driveRunning() {
     synchronized (passLock) {
-      List<AgentWorktree> running =
+      List<AgentWorktree> placed =
           QuarkusTransaction.requiringNew()
               .call(
                   () ->
                       agents.findPlacedLive().stream()
-                          .filter(a -> a.runState == AgentRunState.RUNNING)
+                          .filter(
+                              a ->
+                                  a.runState == AgentRunState.RUNNING
+                                      || (a.runState == AgentRunState.YIELDED
+                                          && !started.containsKey(a.id)))
                           .toList());
-      for (AgentWorktree agent : running) {
+      for (AgentWorktree agent : placed) {
         try {
-          drive(agent);
+          if (agent.runState == AgentRunState.RUNNING) {
+            drive(agent);
+          } else {
+            ensureStarted(agent);
+          }
         } catch (RuntimeException e) {
           LOG.warnf(e, "Could not drive agent %s", agent.id);
         }
       }
     }
+  }
+
+  /**
+   * A placed YIELDED agent's harness, started on its daemon's current connection with no
+   * instruction (qits-1212). Nothing else: no turn, the pending text untouched, the run state left
+   * YIELDED, and a workspace that is gone is left to the resume, which makes it RUNNING and lets
+   * {@link #drive} queue it for a new one.
+   */
+  private void ensureStarted(AgentWorktree agent) {
+    Workspace workspace =
+        QuarkusTransaction.requiringNew()
+            .call(() -> workspaceRepository.findByIdOptional(agent.workspaceId).orElse(null));
+    if (workspace == null
+        || workspace.status != WorkspaceStatus.ACTIVE
+        || !daemonLive(workspace.id)
+        || !daemon.isResolvable()) {
+      return;
+    }
+    start(agent, workspace, daemon.get(), false);
   }
 
   private void drive(AgentWorktree agent) {
@@ -1170,51 +1237,7 @@ public class AgentService {
     }
     AgentDaemon port = daemon.get();
     if (!started.containsKey(agent.id)) {
-      if (!agent.holdsToken()) {
-        mintToken(agent.id);
-      }
-      AgentWorktree fresh = require(agent.id);
-      String instruction = fresh.pendingText;
-      AgentDaemon.Started answer =
-          port.start(
-              workspace.id,
-              new AgentDaemon.Start(
-                  fresh.id.toString(),
-                  fresh.workId,
-                  fresh.entityId,
-                  fresh.wrapperBranch,
-                  fresh.harness.name(),
-                  fresh.sessionId,
-                  agentEnv(fresh),
-                  instruction,
-                  new EntityFacts(
-                      fresh.entityTitle, fresh.entityStatus, Boolean.TRUE.equals(fresh.entityBlocked)),
-                  fresh.blockSource));
-      if (answer.outcome() != AgentDaemon.Outcome.OK) {
-        if (answer.outcome() == AgentDaemon.Outcome.REFUSED) {
-          recordRefusal(workspace.id, agent, answer.detail());
-        }
-        return;
-      }
-      lastRefusal.remove(agent.id);
-      started.put(agent.id, workspace.id);
-      QuarkusTransaction.requiringNew()
-          .run(
-              () -> {
-                AgentWorktree row = agents.findById(agent.id);
-                row.commandId = answer.commandId() == null ? row.commandId : answer.commandId();
-                row.sessionId = answer.sessionId() == null ? row.sessionId : answer.sessionId();
-                row.lastActivityAt = Instant.now();
-                row.startRefusal = null;
-                row.startRefusedAt = null;
-                if (Objects.equals(row.pendingText, instruction)) {
-                  row.pendingText = null;
-                }
-              });
-      LOG.infof(
-          "Agent %s %s in workspace %s",
-          agent.id, answer.resumed() ? "resumed" : "started", workspace.id);
-      changePublisher.fire(agent.repositoryId, workspace.id, WorkspaceChangeHint.Topic.AGENTS);
+      start(agent, workspace, port, true);
       return;
     }
     AgentWorktree fresh = require(agent.id);
@@ -1263,6 +1286,66 @@ public class AgentService {
       // hears this one too: the hook that follows the turn finds nothing left to flip.
       waits.relayActivity(told.workId, told.id, false, CAUSE_TURN, told.sessionId, now);
     }
+  }
+
+  /**
+   * Start the agent on {@code workspace}'s daemon and record it in {@link #started}. With {@code
+   * withTurn}, a RUNNING agent's pending text is its instruction and is taken off the row once the
+   * daemon accepted it. Without (a YIELDED agent, qits-1212), the start carries no instruction and
+   * leaves the row's pending text and activity time alone: the agent is only made to hold a harness
+   * again, and its turn is said once it is RUNNING.
+   */
+  private void start(AgentWorktree agent, Workspace workspace, AgentDaemon port, boolean withTurn) {
+    if (!agent.holdsToken()) {
+      mintToken(agent.id);
+    }
+    AgentWorktree fresh = require(agent.id);
+    String instruction = withTurn ? fresh.pendingText : null;
+    AgentDaemon.Started answer =
+        port.start(
+            workspace.id,
+            new AgentDaemon.Start(
+                fresh.id.toString(),
+                fresh.workId,
+                fresh.entityId,
+                fresh.wrapperBranch,
+                fresh.harness.name(),
+                fresh.sessionId,
+                agentEnv(fresh),
+                instruction,
+                new EntityFacts(
+                    fresh.entityTitle, fresh.entityStatus, Boolean.TRUE.equals(fresh.entityBlocked)),
+                fresh.blockSource));
+    if (answer.outcome() != AgentDaemon.Outcome.OK) {
+      if (answer.outcome() == AgentDaemon.Outcome.REFUSED) {
+        recordRefusal(workspace.id, agent, answer.detail());
+      }
+      return;
+    }
+    lastRefusal.remove(agent.id);
+    started.put(agent.id, workspace.id);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agents.findById(agent.id);
+              row.commandId = answer.commandId() == null ? row.commandId : answer.commandId();
+              row.sessionId = answer.sessionId() == null ? row.sessionId : answer.sessionId();
+              row.startRefusal = null;
+              row.startRefusedAt = null;
+              if (withTurn) {
+                row.lastActivityAt = Instant.now();
+                if (Objects.equals(row.pendingText, instruction)) {
+                  row.pendingText = null;
+                }
+              }
+            });
+    LOG.infof(
+        "Agent %s %s in workspace %s%s",
+        agent.id,
+        answer.resumed() ? "resumed" : "started",
+        workspace.id,
+        withTurn ? "" : ", still yielded");
+    changePublisher.fire(agent.repositoryId, workspace.id, WorkspaceChangeHint.Topic.AGENTS);
   }
 
   /**

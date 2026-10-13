@@ -164,6 +164,80 @@ public class AgentWaitsTest {
     assertNull(row(obsolete).pendingText, "a cancelled wait gives no turn");
   }
 
+  /** The agent put YIELDED into a RUNNER slot of its own wrapper that no runner holds. */
+  private Long yieldedInASlot(UUID id) {
+    String repoId = "waits-yielded-" + UUID.randomUUID().toString().substring(0, 8);
+    Long slot =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  Workspace row = new Workspace();
+                  row.repositoryId = repoId;
+                  row.workspaceId = "ws-" + repoId;
+                  row.status = WorkspaceStatus.ACTIVE;
+                  row.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                  row.placement = WorkspacePlacement.RUNNER;
+                  workspaces.persist(row);
+                  return row.id;
+                });
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree agent = agents.findById(id);
+              agent.repositoryId = repoId;
+              agent.workspaceId = slot;
+              agent.runState = AgentRunState.YIELDED;
+              agent.waitingSince = Instant.now().minusSeconds(3600);
+            });
+    return slot;
+  }
+
+  /** A match wakes a yielded agent: its wake is pending, and the resume makes it RUNNING (qits-1212). */
+  @Test
+  void aMatchOnAYieldedAgentMakesItRunning() {
+    UUID id = agent("w-match-yielded");
+    yieldedInASlot(id);
+    waits.create(id, "ticket e-1 verified", verified(), null);
+
+    assertEquals(
+        1,
+        waits.onEvent(
+            "ev-y1",
+            "EntityTransitioned",
+            Instant.now(),
+            "{\"entities\":[{\"entityId\":\"e-1\",\"status\":\"VERIFIED\"}]}"));
+    assertNotNull(row(id).pendingText);
+    service.resumeYielded();
+
+    AgentWorktree after = row(id);
+    assertEquals(AgentRunState.RUNNING, after.runState);
+    assertTrue(after.pendingText.contains("\"ticket e-1 verified\" matched"), after.pendingText);
+  }
+
+  /** A timeout wakes a yielded agent the same way (qits-1212). */
+  @Test
+  void aTimeoutOnAYieldedAgentMakesItRunning() {
+    UUID id = agent("w-timeout-yielded");
+    yieldedInASlot(id);
+    AgentWaitDto wait = waits.create(id, "ci run 11", EventSelection.of("BuildStatusChanged"), Duration.ofHours(1));
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                waitRows.update(
+                    "createdAt = ?1, expiresAt = ?2 where id = ?3",
+                    Instant.now().minus(Duration.ofHours(1)).minusSeconds(1),
+                    Instant.now().minusSeconds(1),
+                    UUID.fromString(wait.id())));
+
+    waits.sweep();
+    service.resumeYielded();
+
+    assertEquals(AgentWaitState.TIMED_OUT, waitRow(wait.id()).state);
+    AgentWorktree after = row(id);
+    assertEquals(AgentRunState.RUNNING, after.runState);
+    assertTrue(after.pendingText.contains("timed out"), after.pendingText);
+  }
+
   @Test
   void anAgentHoldsAtMostEightOpenWaitsAndACancelIsIdempotent() {
     UUID id = agent("w-cap");
