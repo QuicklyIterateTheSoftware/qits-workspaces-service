@@ -1750,7 +1750,7 @@ public class AgentService {
                 pushed
                     .computeIfAbsent(b.key.agentId, id -> new ArrayList<>())
                     .add(new AgentDto.Branch(b.key.repositoryId, b.key.branch, b.sha, b.pushedAt)));
-    Map<UUID, String> waitingOn =
+    Map<UUID, AgentWaits.WaitingOn> waitingOn =
         QuarkusTransaction.requiringNew()
             .call(() -> waits.waitingOn(rows.stream().map(a -> a.id).toList()));
     return rows.stream()
@@ -1778,7 +1778,8 @@ public class AgentService {
                         ? null
                         : activity.get().activityOf(a.id.toString()).orElse(null),
                     a.waitingSince,
-                    waitingOn.get(a.id),
+                    waitingOn.containsKey(a.id) ? waitingOn.get(a.id).labels() : null,
+                    waitingOn.containsKey(a.id) ? waitingOn.get(a.id).since() : null,
                     a.lastActivityAt,
                     a.createdAt,
                     a.obsoleteAt,

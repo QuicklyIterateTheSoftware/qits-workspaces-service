@@ -1075,7 +1075,10 @@ event name, optional expiry) and gets a turn when it happens:
   waiting for input on a wait gives up its slot at once when another agent wants it (no
   `yield-after`); its harness keeps running.
   A match or timeout relays `waiting: false` (`WaitMatched`, `WaitTimedOut`); a cancel while it
-  waits relays it again without the wait (`WaitCancelled`). `AgentDto.waitingOn` shows the labels.
+  waits relays it again without the wait (`WaitCancelled`). `AgentDto.waitingOn` shows the labels,
+  `AgentDto.waitingOnSince` when the oldest of them was declared (qits-1229; not `waitingSince`,
+  the hook's clock). A wait opening or closing fires `AGENTS` on the agent's workspace channel after
+  it commits; an agent with no workspace fires nothing.
 - **Limits.** 8 OPEN waits per agent, timeout at most 30 days, label at most 200 characters (default:
   the selection in one line). The native image registers `EventSelection`, its `Condition` and `Op`
   on `AgentWaitController`.

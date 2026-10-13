@@ -75,6 +75,8 @@ components:
           $ref: "#/components/schemas/Instant"
         waitingOn:
           type: string
+        waitingOnSince:
+          $ref: "#/components/schemas/Instant"
         lastActivityAt:
           $ref: "#/components/schemas/Instant"
         createdAt:
@@ -3087,4 +3089,4 @@ paths:
         - qits:admin-agent
 info:
   title: qits-workspaces API
-  version: 2026.1010.163357
+  version: 2026.1013.190306
