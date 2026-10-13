@@ -240,6 +240,13 @@ public class AgentService {
   /** The last refusal logged per agent, so a refusing daemon is logged once and not every pass. */
   private final Map<UUID, String> lastRefusal = new ConcurrentHashMap<>();
 
+  /**
+   * The queued agents whose wait for a runner slot was logged, so it is logged once and not every
+   * pass (qits-1228). An agent leaves it when it is placed or no longer queued, so a re-queue logs
+   * again and the set never outgrows the queue.
+   */
+  private final Set<UUID> waitingForCapacity = ConcurrentHashMap.newKeySet();
+
   private final ExecutorService pass =
       Executors.newSingleThreadExecutor(
           runnable -> {
@@ -960,20 +967,32 @@ public class AgentService {
   void placeQueued() {
     synchronized (placeLock) {
       List<AgentWorktree> queued = QuarkusTransaction.requiringNew().call(() -> agents.findQueued());
+      waitingForCapacity.retainAll(queued.stream().map(a -> a.id).toList());
       for (AgentWorktree agent : queued) {
         Long slot = QuarkusTransaction.requiringNew().call(() -> emptySlotFor(agent));
-        if (slot == null && hasCapacity(agent.admin)) {
-          try {
-            slot = workspaces.createSlot(agent.repositoryId, agent.admin).id;
-          } catch (RuntimeException refused) {
-            LOG.warnf(
-                refused, "Could not create a workspace for agent %s; it stays queued", agent.id);
+        RunnerCapacity capacity = null;
+        if (slot == null) {
+          capacity = agent.admin ? null : runnerCapacity();
+          if (capacity == null || capacity.free()) {
+            try {
+              slot = workspaces.createSlot(agent.repositoryId, agent.admin).id;
+            } catch (RuntimeException refused) {
+              LOG.warnf(
+                  refused, "Could not create a workspace for agent %s; it stays queued", agent.id);
+            }
           }
         }
         if (slot == null) {
           slot = QuarkusTransaction.requiringNew().call(() -> yieldedSlotFor(agent));
         }
         if (slot == null) {
+          if (capacity != null && !capacity.free() && waitingForCapacity.add(agent.id)) {
+            LOG.infof(
+                "Agent %s stays queued for a runner slot: runner slots %d, in use or queued %d",
+                agent.id,
+                capacity.slots(),
+                capacity.inUse());
+          }
           continue;
         }
         Long chosen = slot;
@@ -999,6 +1018,7 @@ public class AgentService {
           LOG.debugf("Workspace %s was taken before agent %s got it", chosen, agent.id);
           continue;
         }
+        waitingForCapacity.remove(agent.id);
         LOG.infof("Agent %s placed in workspace %s", agent.id, chosen);
         changePublisher.fire(agent.repositoryId, chosen, WorkspaceChangeHint.Topic.AGENTS);
       }
@@ -1066,15 +1086,25 @@ public class AgentService {
   }
 
   /**
-   * Whether a new workspace may be created: always for an admin agent (DIRECT, on the platform
-   * host), and while the runners' slots outnumber the runner-placed workspaces otherwise.
+   * The eligible runners' slots against the RUNNER workspaces in use or queued for one ({@link
+   * WorkspaceRepository#countHoldingRunnerSlots}), read together. A new regular workspace may be
+   * created while it is {@link RunnerCapacity#free}; an admin one needs none (DIRECT, on the
+   * platform host).
    */
-  boolean hasCapacity(boolean admin) {
-    if (admin) {
-      return true;
-    }
+  RunnerCapacity runnerCapacity() {
     return QuarkusTransaction.requiringNew()
-        .call(() -> runnerRepository.eligibleSlots() > workspaceRepository.countActiveOnRunners());
+        .call(
+            () ->
+                new RunnerCapacity(
+                    runnerRepository.eligibleSlots(),
+                    workspaceRepository.countHoldingRunnerSlots()));
+  }
+
+  /** The runner slots there are, and how many of them are in use or queued for. */
+  record RunnerCapacity(long slots, long inUse) {
+    boolean free() {
+      return slots > inUse;
+    }
   }
 
   /**

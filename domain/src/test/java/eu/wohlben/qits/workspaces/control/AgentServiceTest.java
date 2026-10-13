@@ -14,6 +14,7 @@ import eu.wohlben.qits.workspaces.entity.AgentState;
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
+import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
@@ -21,14 +22,19 @@ import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,12 +56,18 @@ public class AgentServiceTest {
   @Inject AgentWorktreeRepository agents;
   @Inject AgentBranchRepository branches;
   @Inject WorkspaceRepository workspaces;
+  @Inject WorkspaceRunnerRepository runnerRepository;
   @Inject FakeRepositoryLookup repositories;
   @Inject FakeAgentDaemon daemon;
   @Inject FakeWorkspaceDaemonLiveness liveness;
   @Inject FakeCredentialCommissioner commissioner;
 
   private String repoId;
+
+  /** The runners and agents a capacity test wrote, removed after it (qits-1228). */
+  private final List<UUID> createdRunners = new ArrayList<>();
+
+  private final List<UUID> createdAgents = new ArrayList<>();
 
   @BeforeEach
   void setUp() {
@@ -76,6 +88,20 @@ public class AgentServiceTest {
   @AfterEach
   void tearDown() {
     commissioner.reset();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              createdAgents.forEach(agents::deleteById);
+              if (!createdRunners.isEmpty()) {
+                // A capacity test's RUNNER rows hold the suite's runner slots: none may outlive it.
+                workspaces.findActiveByRepositoryId(repoId).stream()
+                    .filter(w -> w.placement == WorkspacePlacement.RUNNER)
+                    .forEach(w -> w.status = WorkspaceStatus.ABANDONED);
+              }
+              createdRunners.forEach(runnerRepository::deleteById);
+            });
+    createdAgents.clear();
+    createdRunners.clear();
   }
 
   private AgentService.Dispatch dispatch(String workId, boolean admin, String instruction) {
@@ -342,6 +368,10 @@ public class AgentServiceTest {
 
   /** An agent row of this test's wrapper, put straight into {@code slot} (null: queued). */
   private UUID agentIn(Long slot, boolean admin, AgentRunState runState) {
+    return agentIn(slot, admin, runState, Instant.now());
+  }
+
+  private UUID agentIn(Long slot, boolean admin, AgentRunState runState, Instant createdAt) {
     UUID id = UUID.randomUUID();
     QuarkusTransaction.requiringNew()
         .run(
@@ -354,7 +384,7 @@ public class AgentServiceTest {
               row.admin = admin;
               row.workspaceId = slot;
               row.runState = runState;
-              row.createdAt = Instant.now();
+              row.createdAt = createdAt;
               row.gitRefs = "[]";
               agents.persist(row);
             });
@@ -981,5 +1011,159 @@ public class AgentServiceTest {
 
     service.onActivity(row(agentId).workspaceId, agentId, Boolean.FALSE, null, "UserPromptSubmit", System.currentTimeMillis());
     assertNull(row(agentId).waitingSince);
+  }
+
+  // --- runner capacity (qits-1228) --------------------------------------------------------------
+  // The suite shares one database and the scheduler's own thread may run a pass at any moment, so
+  // each test queues its agents first, ahead of any other test's leftovers, and frees the runner
+  // slots last: whichever pass sees the capacity places this test's agents.
+
+  /**
+   * An eligible runner sized so that exactly {@code free} runner slots are free, over whatever
+   * other tests left holding one. A pass of its own first: it waits out a scheduler pass already
+   * under way, whose list of queued agents may predate this test's, so the next pass to see the
+   * capacity has this test's agents at the head of its queue.
+   */
+  private UUID freeRunnerSlots(int free) {
+    return freeRunnerSlots(free, () -> {});
+  }
+
+  /**
+   * {@link #freeRunnerSlots(int)}, sized before {@code alongside} runs and committed with it, so
+   * whatever {@code alongside} writes cannot change the size.
+   */
+  private UUID freeRunnerSlots(int free, Runnable alongside) {
+    service.reconcile();
+    AgentService.RunnerCapacity before = service.runnerCapacity();
+    long slots = before.inUse() - before.slots() + free;
+    assertTrue(slots > 0, "another test left free runner slots behind: " + before);
+    UUID id = UUID.randomUUID();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              WorkspaceRunner runner = new WorkspaceRunner();
+              runner.id = id;
+              runner.name = "capacity-" + id.toString().substring(0, 8);
+              runner.slots = (int) slots;
+              runner.clientId = "runner-" + id;
+              runner.createdAt = Instant.now();
+              runnerRepository.persist(runner);
+              alongside.run();
+            });
+    createdRunners.add(id);
+    return id;
+  }
+
+  /** An old-model RUNNER row on a branch of this test's wrapper: never a slot an agent takes. */
+  private void branchRow(WorkspaceRuntimeStatus runtimeStatus) {
+    QuarkusTransaction.requiringNew().run(() -> persistBranchRow(runtimeStatus));
+  }
+
+  private void persistBranchRow(WorkspaceRuntimeStatus runtimeStatus) {
+    Workspace row = new Workspace();
+    row.repositoryId = repoId;
+    row.workspaceId = "ws-" + UUID.randomUUID().toString().substring(0, 8);
+    row.branch = "ticket/old-" + UUID.randomUUID().toString().substring(0, 8);
+    row.status = WorkspaceStatus.ACTIVE;
+    row.runtimeStatus = runtimeStatus;
+    row.placement = WorkspacePlacement.RUNNER;
+    workspaces.persist(row);
+  }
+
+  /** A queued regular agent ahead of any other test's leftovers: the queue is oldest first. */
+  private UUID queuedFirst() {
+    UUID id =
+        agentIn(
+            null, false, AgentRunState.QUEUED, Instant.EPOCH.plusSeconds(createdAgents.size()));
+    createdAgents.add(id);
+    return id;
+  }
+
+  /** This test's slot workspaces: the rows a pass created. */
+  private List<Workspace> slots() {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                workspaces.findActiveByRepositoryId(repoId).stream()
+                    .filter(w -> w.branch == null)
+                    .toList());
+  }
+
+  @Test
+  void aStoppedRunnerRowWithNoRunnerHoldsNoSlotAndAQueuedAgentGetsOne() {
+    UUID queued = queuedFirst();
+    // Sized before the stopped row exists: the count it is sized by must not decide the outcome.
+    freeRunnerSlots(1, () -> persistBranchRow(WorkspaceRuntimeStatus.STOPPED));
+
+    service.placeQueued();
+
+    AgentWorktree placed = row(queued.toString());
+    assertEquals(AgentRunState.RUNNING, placed.runState, "the stopped row eats no capacity");
+    Workspace slot = workspace(placed.workspaceId);
+    assertEquals(WorkspacePlacement.RUNNER, slot.placement);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, slot.runtimeStatus);
+  }
+
+  @Test
+  void aTakenRunnerSlotKeepsAnAgentQueuedAndTheWaitIsLoggedOnce() {
+    List<String> logged = new CopyOnWriteArrayList<>();
+    Handler capture =
+        new Handler() {
+          @Override
+          public void publish(LogRecord record) {
+            logged.add(
+                record.getParameters() == null
+                    ? record.getMessage()
+                    : String.format(record.getMessage(), record.getParameters()));
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    // Attached before the agent exists: the scheduler's own pass may be the one that logs.
+    java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger(AgentService.class.getName());
+    logger.addHandler(capture);
+    UUID queued;
+    try {
+      queued = queuedFirst();
+      branchRow(WorkspaceRuntimeStatus.RUNNING);
+      freeRunnerSlots(0);
+
+      service.placeQueued();
+      service.placeQueued();
+    } finally {
+      logger.removeHandler(capture);
+    }
+
+    List<String> waits =
+        logged.stream().filter(m -> m.startsWith("Agent " + queued + " stays queued")).toList();
+    assertEquals(AgentRunState.QUEUED, row(queued.toString()).runState);
+    assertTrue(slots().isEmpty(), "no slot is created over a full runner");
+    assertEquals(1, waits.size(), "logged once over two passes: " + waits);
+    // The numbers are the ones of whichever pass logged first, the settling one included.
+    assertTrue(
+        waits
+            .get(0)
+            .matches(".* stays queued for a runner slot: runner slots \\d+, in use or queued \\d+"),
+        waits.get(0));
+  }
+
+  @Test
+  void aQueuedRunnerRowHoldsItsSlotSoOnePassCreatesOneSlotForTwoAgents() {
+    UUID first = queuedFirst();
+    UUID second = queuedFirst();
+    freeRunnerSlots(1);
+
+    service.placeQueued();
+
+    List<Workspace> created = slots();
+    assertEquals(1, created.size(), "the first slot is QUEUED and counted before the second agent");
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, created.get(0).runtimeStatus);
+    assertEquals(created.get(0).id, row(first.toString()).workspaceId);
+    assertEquals(AgentRunState.QUEUED, row(second.toString()).runState);
   }
 }
