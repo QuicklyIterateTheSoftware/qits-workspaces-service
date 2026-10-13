@@ -310,8 +310,8 @@
       "name": "an agent owning a released branch",
       "slug": "an-agent-owning-a-released-branch",
       "params": {
-        "branch": "ticket/contract-00000001-10-totals",
-        "repositoryId": "00000000-0000-4000-8000-000000000015",
+        "branch": "ticket/contract-00000001-10",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
         "sha": "0123456789abcdef0123456789abcdef01234567",
         "version": "2026.101.120000"
       },

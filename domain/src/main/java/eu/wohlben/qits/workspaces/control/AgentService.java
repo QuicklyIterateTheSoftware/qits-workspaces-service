@@ -339,10 +339,10 @@ public class AgentService {
 
   /**
    * The item's ACTIVE agent; else its newest OBSOLETE one when that stands on the same wrapper
-   * branch, made ACTIVE again (qits-1217). A release that took one of an agent's branches makes it
-   * OBSOLETE while its item goes on, and the agent keeps its worktree, session and slot until the
-   * item is closed (VERIFIED, DONE or DROPPED): a second agent on the same wrapper branch would be
-   * refused by its daemon ("already checked out") for as long as the first stands. An OBSOLETE
+   * branch, made ACTIVE again (qits-1217). A release of an agent's wrapper branch makes it OBSOLETE
+   * while its item goes on, and the agent keeps its worktree, session and slot until the item is
+   * closed (VERIFIED, DONE or DROPPED): a second agent on the same wrapper branch would be refused
+   * by its daemon ("already checked out") for as long as the first stands. An OBSOLETE
    * agent on another wrapper branch is left alone, and the caller creates a new agent.
    *
    * <p>Two dispatches that revive at once are settled by {@code uq_agent_worktree_active_work}: the
@@ -429,7 +429,7 @@ public class AgentService {
    * dispatched has nobody to tell, and that is answered, not refused. A yielded agent is RUNNING
    * again at once to hear it (D16); a queued one hears it as part of its first turn.
    *
-   * <p>An OBSOLETE agent is told too. A release of one of its branches marks it OBSOLETE, but the
+   * <p>An OBSOLETE agent is told too. A release of its wrapper branch marks it OBSOLETE, but the
    * item can go on — the next phase, another repository — and that agent is still the one working
    * on it, with its session.
    */
@@ -557,11 +557,11 @@ public class AgentService {
   }
 
   /**
-   * A release deleted {@code branch} of {@code repositoryId}: every ACTIVE agent that owns it — as
-   * its wrapper branch, or as a branch it pushed — is marked OBSOLETE (D4). Nothing is removed
-   * here; the cleanup sweep does that once the item is closed (VERIFIED, DONE or DROPPED) and the
-   * agent idle. A workspace of the old model standing on the branch is resolved as before (the
-   * drain, D20).
+   * A release deleted {@code branch} of {@code repositoryId}: every ACTIVE agent whose wrapper
+   * branch it is is marked OBSOLETE (D4). A branch an agent merely pushed, in a submodule, marks
+   * nobody: only the wrapper branch's release ends an agent's work. Nothing is removed here; the
+   * cleanup sweep does that once the item is closed (VERIFIED, DONE or DROPPED) and the agent idle.
+   * A workspace of the old model standing on the branch is resolved as before (the drain, D20).
    */
   public Resolution resolveReleasedBranch(
       String repositoryId, String branch, String target, String commit, String result) {
@@ -572,17 +572,9 @@ public class AgentService {
         QuarkusTransaction.requiringNew()
             .call(
                 () -> {
-                  Map<UUID, AgentWorktree> owners = new LinkedHashMap<>();
-                  agents.findActiveByWrapperBranch(repositoryId, branch).forEach(a -> owners.put(a.id, a));
-                  for (UUID id : agentBranches.agentsOn(repositoryId, branch)) {
-                    AgentWorktree agent = agents.findById(id);
-                    if (agent != null && agent.state == AgentState.ACTIVE) {
-                      owners.putIfAbsent(id, agent);
-                    }
-                  }
                   Instant now = Instant.now();
                   List<String> ids = new ArrayList<>();
-                  for (AgentWorktree agent : owners.values()) {
+                  for (AgentWorktree agent : agents.findActiveByWrapperBranch(repositoryId, branch)) {
                     agent.state = AgentState.OBSOLETE;
                     agent.obsoleteAt = now;
                     ids.add(agent.id.toString());
@@ -799,8 +791,8 @@ public class AgentService {
 
   /**
    * Record one push. False when qits-projects did not answer the name lookup: the push is then tried
-   * again on the next pass, because a lost push is a branch whose release never marks its agent
-   * OBSOLETE.
+   * again on the next pass, because a lost push is a branch missing from the agent's listed
+   * branches.
    */
   private boolean recordPush(PendingPush push) {
     AgentWorktree agent = QuarkusTransaction.requiringNew().call(() -> agents.findById(push.agentId()));

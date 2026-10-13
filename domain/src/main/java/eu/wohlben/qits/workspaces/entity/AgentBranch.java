@@ -13,7 +13,8 @@ import java.util.UUID;
 
 /**
  * One branch an agent pushed, in one repository (qits-1152, D22) — what the release at VERIFIED
- * names, and what a released branch's resolution finds its agents by.
+ * names, and what the agent's views list as its pushed branches. Its release marks nobody: only
+ * the agent's wrapper branch does (D4).
  *
  * <p>{@code @Uncaused} by decision: it is written only by the native upsert in {@code
  * AgentBranchRepository}, on the daemon registry's thread when an {@code AgentBranchPushed} frame

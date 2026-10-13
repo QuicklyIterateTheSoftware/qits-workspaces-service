@@ -20,11 +20,11 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * branch</b>. The one door a release calls, and not a release door: qits-projects deletes each
  * released branch through a githost primitive that fires no event, and says so here.
  *
- * <p>Since qits-1152 what it resolves are <b>agents</b>: every ACTIVE agent owning the branch — as
- * its wrapper branch, or as a branch it pushed — is marked OBSOLETE, and the cleanup sweep removes
- * it once its item is closed (VERIFIED, DONE or DROPPED) and it has been idle (D4). A workspace of
- * the old model standing on the branch is still resolved as it was (the drain, D20), answering
- * {@code agentIds: []}.
+ * <p>Since qits-1152 what it resolves are <b>agents</b>: every ACTIVE agent whose wrapper branch it
+ * is is marked OBSOLETE, and the cleanup sweep removes it once its item is closed (VERIFIED, DONE
+ * or DROPPED) and it has been idle (D4). A branch an agent merely pushed, in a submodule, marks
+ * nobody. A workspace of the old model standing on the branch is still resolved as it was (the
+ * drain, D20), answering {@code agentIds: []}.
  *
  * <p>A class of its own at {@code {qits:admin, qits:system}}, for the reason {@code
  * AgentDispatchController} gives: {@code BranchController}'s class role is a person's, and a

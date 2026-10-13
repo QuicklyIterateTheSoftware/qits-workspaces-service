@@ -146,9 +146,9 @@ refuses it with `RELEASE_REQUIRED`.
 **One door a release calls.** `POST /workspaces/api/branches/resolution?repositoryId=<id>`
 (`{qits:admin, qits:system}`), body `{branch, target?, commit?, result?}` → `{resolved, agentIds}`. A
 released branch is deleted on the git host by a primitive that fires no event, so the release says
-so here: every ACTIVE agent owning the branch becomes OBSOLETE, and the cleanup sweep removes it once
-its work item is closed (VERIFIED, DONE or DROPPED) and it has been idle (leftover work is handed
-back to the agent, never deleted). A branch nothing owns answers `resolved:false` — the ordinary case.
+so here: every ACTIVE agent whose wrapper branch it is becomes OBSOLETE (a branch an agent merely
+pushed marks nobody), and the cleanup sweep removes it once its work item is closed (VERIFIED, DONE
+or DROPPED) and it has been idle (leftover work is handed back to the agent, never deleted). A branch nothing owns answers `resolved:false` — the ordinary case.
 
 **The machine doors qits-projects presses** (`{qits:admin, qits:system}`), every one keyed by the
 work item:

@@ -958,7 +958,8 @@ superproject's `agent-workspace-decoupling-plan.md`; `AgentService` holds the se
 **The rows.** `agent_worktree` (`V21`, `AgentWorktree`, a `CausedRow`): work item, wrapper branch,
 slot, `state` ACTIVE → OBSOLETE → REMOVED, `run_state` QUEUED → RUNNING ⇄ YIELDED, session, the turn
 still to be said (`pending_text`), the agent's own token and Git refs. `agent_branch` (`@Uncaused`, a
-native upsert on the registry's thread) holds every (repository, branch) the daemon reported pushed.
+native upsert on the registry's thread) holds every (repository, branch) the daemon reported pushed:
+what the agent's views list, never what a release's resolution looks up.
 A unique index keeps one ACTIVE agent per work item. A workspace may hold several RUNNING agents:
 `V24` dropped the one-RUNNING-per-workspace index (qits-1212). A slot is a
 `workspace` row with **no branch**; the old work columns on `workspace` stay, unread by slots (D20).
@@ -1006,8 +1007,8 @@ connection and the next frames.
   `{agent, fresh, agentLaunch: SCHEDULED|SKIPPED_RUNNING|QUEUED, agentIdentity}`. Idempotent per
   `workId`: the ACTIVE agent is the answer (`fresh:false`). With none, the item's newest OBSOLETE
   agent on the same wrapper branch is made ACTIVE again (its obsolete and cleanup marks cleared) and
-  is the answer, told the instruction whatever its run state (qits-1217): a release that took one of
-  its branches does not end the item, and a second agent on that branch would collide with the
+  is the answer, told the instruction whatever its run state (qits-1217): a release of its wrapper
+  branch does not end the item, and a second agent on that branch would collide with the
   first's worktree. An OBSOLETE agent on another wrapper branch gets a new agent beside it. `admin: true` is refused (400): an admin
   agent holds the host's docker socket, so only the person door below makes one, never a door
   `qits:system` may press.
@@ -1018,8 +1019,8 @@ connection and the next frames.
 - `POST …/entity` `{workId, title, status, blocked, blockSource?}` and `…/blocked` `{workId, blocked,
   blockSource?}` → `{agentId, applied}`.
 - `POST /workspaces/api/branches/resolution?repositoryId=` → `{resolved, agentIds}`: every ACTIVE
-  agent owning the branch (wrapper branch or a pushed one) becomes OBSOLETE. An old-model workspace
-  on the branch resolves as before.
+  agent whose wrapper branch it is becomes OBSOLETE; a branch an agent merely pushed marks nobody.
+  An old-model workspace on the branch resolves as before.
 - `GET /workspaces/api/agents?workId=&workspaceId=&state=`, `GET /workspaces/api/agents/{id}`;
   person doors `{qits:admin, qits:admin-agent}`: `POST /workspaces/api/agents` (an agent for an
   existing work item, D24; `wrapperBranch` defaults to `ticket|epic/<entityId>`) and `POST

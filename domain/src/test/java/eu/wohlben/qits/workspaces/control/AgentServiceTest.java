@@ -191,18 +191,14 @@ public class AgentServiceTest {
 
   @Test
   void aDeliveryReachesAnAgentAReleaseMadeObsolete() {
-    // qits-248: a release took one of the agent's branches mid-item, and the next phase's turn was
+    // qits-248: a release took the agent's wrapper branch mid-item, and the next phase's turn was
     // answered "nobody works on it" while the agent still ran.
     AgentService.Dispatch dispatched = dispatch("w-obsolete", true, null);
     String agentId = dispatched.agent().agentId();
     Long slot = dispatched.agent().workspaceRowId();
-    UUID id = UUID.fromString(agentId);
     liveness.markLive(slot);
     service.reconcile();
-    QuarkusTransaction.requiringNew()
-        .run(() -> branches.upsert(id, "service-repo", "ticket/w-obsolete-fix", "abc", Instant.now()));
-    service.resolveReleasedBranch("service-repo", "ticket/w-obsolete-fix", "2026.1.1", "abc", null);
-    assertEquals(AgentState.OBSOLETE, row(agentId).state);
+    releaseWrapperOf(agentId);
 
     AgentService.Delivery delivery = service.deliver("w-obsolete", "verify it", false);
     assertEquals(agentId, delivery.agentId());
@@ -213,12 +209,10 @@ public class AgentServiceTest {
     liveness.markDead(slot);
   }
 
-  /** A release takes {@code branch}, a submodule branch the agent pushed: the agent is OBSOLETE. */
-  private void releaseBranchOf(String agentId, String branch) {
-    UUID id = UUID.fromString(agentId);
-    QuarkusTransaction.requiringNew()
-        .run(() -> branches.upsert(id, "service-repo", branch, "abc", Instant.now()));
-    service.resolveReleasedBranch("service-repo", branch, "2026.1.1", "abc", null);
+  /** A release takes the agent's wrapper branch: the agent is OBSOLETE (D4). */
+  private void releaseWrapperOf(String agentId) {
+    AgentWorktree agent = row(agentId);
+    service.resolveReleasedBranch(agent.repositoryId, agent.wrapperBranch, "2026.1.1", "abc", null);
     assertEquals(AgentState.OBSOLETE, row(agentId).state);
   }
 
@@ -233,14 +227,14 @@ public class AgentServiceTest {
 
   @Test
   void aDispatchRevivesTheAgentAReleaseMadeObsoleteInsteadOfMakingASecond() {
-    // qits-1199: a release took one of the agent's branches mid-item, the next dispatch made a
+    // qits-1199: a release took the agent's wrapper branch mid-item, the next dispatch made a
     // second agent on the same wrapper branch, and its daemon refused it "already checked out".
     AgentService.Dispatch first = dispatch("w-revive", true, "first phase");
     String agentId = first.agent().agentId();
     Long slot = first.agent().workspaceRowId();
     liveness.markLive(slot);
     service.reconcile();
-    releaseBranchOf(agentId, "ticket/w-revive-fix");
+    releaseWrapperOf(agentId);
     QuarkusTransaction.requiringNew()
         .run(() -> agents.findById(UUID.fromString(agentId)).cleanupPromptedAt = Instant.now());
     assertNotEquals("VERIFIED", row(agentId).entityStatus, "the item goes on");
@@ -271,8 +265,8 @@ public class AgentServiceTest {
     liveness.markLive(yieldedSlot);
     service.reconcile();
     assertTrue(service.isStarted(UUID.fromString(runningId)));
-    releaseBranchOf(runningId, "ticket/w-revive-running-fix");
-    releaseBranchOf(yieldedId, "ticket/w-revive-yielded-fix");
+    releaseWrapperOf(runningId);
+    releaseWrapperOf(yieldedId);
     setRunState(yieldedId, AgentRunState.YIELDED);
 
     AgentService.Dispatch toRunning = dispatch("w-revive-running", true, "verify the fix");
@@ -296,7 +290,7 @@ public class AgentServiceTest {
   void anObsoleteAgentOnAnotherWrapperBranchGetsANewAgentBesideIt() {
     AgentService.Dispatch first = dispatch("w-other-branch", true, null);
     String agentId = first.agent().agentId();
-    releaseBranchOf(agentId, "ticket/w-other-branch-fix");
+    releaseWrapperOf(agentId);
 
     AgentService.Dispatch other =
         service.dispatch(
@@ -550,11 +544,9 @@ public class AgentServiceTest {
     String agentId = dispatched.agent().agentId();
     Long slot = dispatched.agent().workspaceRowId();
     UUID id = UUID.fromString(agentId);
-    QuarkusTransaction.requiringNew()
-        .run(() -> branches.upsert(id, "service-repo", "ticket/w-release-fix", "abc", Instant.now()));
 
     AgentService.Resolution resolution =
-        service.resolveReleasedBranch("service-repo", "ticket/w-release-fix", "2026.1.1", "abc", null);
+        service.resolveReleasedBranch(repoId, "ticket/w-release", "2026.1.1", "abc", null);
     assertTrue(resolution.resolved());
     assertEquals(List.of(agentId), resolution.agentIds());
     assertEquals(AgentState.OBSOLETE, row(agentId).state);
@@ -581,6 +573,24 @@ public class AgentServiceTest {
     liveness.markDead(slot);
   }
 
+  @Test
+  void aReleasedSubmoduleBranchTheAgentPushedMarksNobody() {
+    // qits-1227: only the release of an agent's wrapper branch ends its work; a submodule branch it
+    // pushed is released while the item goes on.
+    AgentService.Dispatch dispatched = dispatch("w-pushed", true, null);
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    QuarkusTransaction.requiringNew()
+        .run(() -> branches.upsert(id, "service-repo", "ticket/w-pushed-fix", "abc", Instant.now()));
+
+    AgentService.Resolution resolution =
+        service.resolveReleasedBranch("service-repo", "ticket/w-pushed-fix", "2026.1.1", "abc", null);
+
+    assertFalse(resolution.resolved());
+    assertEquals(List.of(), resolution.agentIds());
+    assertEquals(AgentState.ACTIVE, row(agentId).state);
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {"DONE", "DROPPED"})
   void theSweepRemovesAnObsoleteAgentWhoseItemIsDoneOrDropped(String status) {
@@ -590,10 +600,7 @@ public class AgentServiceTest {
     String agentId = dispatched.agent().agentId();
     Long slot = dispatched.agent().workspaceRowId();
     UUID id = UUID.fromString(agentId);
-    QuarkusTransaction.requiringNew()
-        .run(() -> branches.upsert(id, "service-repo", "ticket/" + workId + "-fix", "abc", Instant.now()));
-    service.resolveReleasedBranch("service-repo", "ticket/" + workId + "-fix", "2026.1.1", "abc", null);
-    assertEquals(AgentState.OBSOLETE, row(agentId).state);
+    releaseWrapperOf(agentId);
 
     service.markEntity(workId, new EntityFacts("A title", status, false), null);
     liveness.markLive(slot);
@@ -612,12 +619,7 @@ public class AgentServiceTest {
     String agentId = dispatched.agent().agentId();
     Long slot = dispatched.agent().workspaceRowId();
     UUID id = UUID.fromString(agentId);
-    QuarkusTransaction.requiringNew()
-        .run(
-            () ->
-                branches.upsert(id, "service-repo", "ticket/w-implemented-fix", "abc", Instant.now()));
-    service.resolveReleasedBranch("service-repo", "ticket/w-implemented-fix", "2026.1.1", "abc", null);
-    assertEquals(AgentState.OBSOLETE, row(agentId).state);
+    releaseWrapperOf(agentId);
 
     service.markEntity("w-implemented", new EntityFacts("A title", "IMPLEMENTED", false), null);
     liveness.markLive(slot);
@@ -636,7 +638,7 @@ public class AgentServiceTest {
     AgentService.Dispatch first = dispatch("w-two-obsolete", true, null);
     String firstId = first.agent().agentId();
     Long firstSlot = first.agent().workspaceRowId();
-    releaseBranchOf(firstId, "ticket/w-two-obsolete-fix");
+    releaseWrapperOf(firstId);
 
     AgentService.Dispatch second =
         service.dispatch(
@@ -654,7 +656,7 @@ public class AgentServiceTest {
     String secondId = second.agent().agentId();
     Long secondSlot = second.agent().workspaceRowId();
     assertNotEquals(firstId, secondId);
-    releaseBranchOf(secondId, "epic/w-two-obsolete-fix");
+    releaseWrapperOf(secondId);
     assertEquals(2, liveRowsOf("w-two-obsolete"), "both agents stand, both OBSOLETE");
 
     service.markEntity("w-two-obsolete", new EntityFacts("A title", "DONE", false), null);
@@ -688,7 +690,7 @@ public class AgentServiceTest {
     AgentService.Dispatch first = dispatch("w-stale", true, null);
     String firstId = first.agent().agentId();
     Long firstSlot = first.agent().workspaceRowId();
-    releaseBranchOf(firstId, "ticket/w-stale-fix");
+    releaseWrapperOf(firstId);
 
     AgentService.Dispatch second =
         service.dispatch(
@@ -705,7 +707,7 @@ public class AgentServiceTest {
                 new EntityFacts("A title", "REFINED", false)));
     String secondId = second.agent().agentId();
     Long secondSlot = second.agent().workspaceRowId();
-    releaseBranchOf(secondId, "epic/w-stale-fix");
+    releaseWrapperOf(secondId);
 
     // The older row is stale, frozen on an in-progress status; the newer one is DONE.
     QuarkusTransaction.requiringNew()

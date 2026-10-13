@@ -485,7 +485,10 @@ public class ProviderStates {
     return new Setup(params, List.copyOf(ids));
   }
 
-  /** An ACTIVE agent that pushed the branch a release just consumed. */
+  /**
+   * An ACTIVE agent whose wrapper branch a release just consumed (qits-1227: only the wrapper
+   * branch's release makes an agent OBSOLETE, never a branch it pushed).
+   */
   private Setup agentOwningAReleasedBranch() {
     List<Long> ids = new ArrayList<>();
     QuarkusTransaction.requiringNew()
@@ -494,16 +497,10 @@ public class ProviderStates {
               Long slot = slot(WorkspaceRuntimeStatus.QUEUED);
               ids.add(slot);
               agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
-              agentBranches.upsert(
-                  UUID.fromString(AGENT_ACTIVE_ID),
-                  RELEASED_REPOSITORY_ID,
-                  PUSHED_BRANCH,
-                  RELEASED_SHA,
-                  Instant.now());
             });
     Map<String, String> params = new TreeMap<>();
-    params.put("branch", PUSHED_BRANCH);
-    params.put("repositoryId", RELEASED_REPOSITORY_ID);
+    params.put("branch", WRAPPER_BRANCH);
+    params.put("repositoryId", WRAPPER_REPOSITORY_ID);
     params.put("sha", RELEASED_SHA);
     params.put("version", RELEASED_VERSION);
     return new Setup(params, List.copyOf(ids));
