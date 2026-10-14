@@ -1054,7 +1054,8 @@ pass and the next frames: every placed agent, RUNNING or YIELDED, is started aga
 - `GET /workspaces/api/agents?workId=&workspaceId=&state=`, `GET /workspaces/api/agents/{id}`;
   person doors `{qits:admin, qits:admin-agent}`: `POST /workspaces/api/agents` (an agent for an
   existing work item, D24; `wrapperBranch` defaults to `ticket|epic/<entityId>`) and `POST
-  /workspaces/api/agents/{id}/discard` (`409 AGENT_HAS_LEFTOVER_WORK` unless `force`).
+  /workspaces/api/agents/{id}/discard` (`409 AGENT_BUSY` for a still-working harness, or
+  `AGENT_HAS_LEFTOVER_WORK`, unless `force`; qits-1238).
 - The prompt draft and its images are the agent's: `/workspaces/api/agents/{id}/prompt-draft` and
   `/prompt-attachments` (`V22` re-keyed the tables; composition state was dropped, not migrated).
 - `/work/workspaces` and `/work/{ref}/workspaces` keep their shape (the landing app's pact): one entry

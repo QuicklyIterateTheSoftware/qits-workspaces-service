@@ -1167,6 +1167,28 @@ public class AgentServiceTest {
     assertEquals(AgentState.REMOVED, discarded.state());
   }
 
+  @Test
+  void aPersonsDiscardRefusesABusyAgentUnlessForced() {
+    // qits-1238: a clean check with the harness still busy in the background (a subagent, a
+    // monitor, a background shell) must not be read as nothing left to do, or discard would kill a
+    // harness still working.
+    AgentService.Dispatch dispatched = dispatch("w-discard-busy", true, null);
+    String agentId = dispatched.agent().agentId();
+    daemon.leftover(agentId, new AgentDaemon.CleanupCheck(true, List.of(), List.of(), true));
+
+    ConflictException refused =
+        assertThrows(
+            ConflictException.class, () -> service.discard(UUID.fromString(agentId), false));
+    assertEquals("AGENT_BUSY", refused.code());
+    assertFalse(
+        daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("remove ")),
+        "no removal while it is busy");
+    assertEquals(AgentState.ACTIVE, row(agentId).state, "still there, not removed");
+
+    AgentDto discarded = service.discard(UUID.fromString(agentId), true);
+    assertEquals(AgentState.REMOVED, discarded.state());
+  }
+
   /** What {@link AgentService} logged while {@code run} ran, formatted. */
   private static List<String> logsOf(Runnable run) {
     List<String> logged = new CopyOnWriteArrayList<>();

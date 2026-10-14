@@ -1714,9 +1714,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentDto"
         "409":
-          description: "AGENT_HAS_LEFTOVER_WORK (uncommitted or unpushed work, named)\
-            \ or AGENT_DAEMON_UNREACHABLE; nothing was removed. Send `force: true`\
-            \ to remove anyway."
+          description: "AGENT_BUSY (harness still working in the background), AGENT_HAS_LEFTOVER_WORK\
+            \ (uncommitted or unpushed work, named) or AGENT_DAEMON_UNREACHABLE; nothing\
+            \ was removed. Send `force: true` to remove anyway."
           content:
             application/json:
               schema:
@@ -3089,4 +3089,4 @@ paths:
         - qits:admin-agent
 info:
   title: qits-workspaces API
-  version: 2026.1013.190306
+  version: 2026.1014.123033
