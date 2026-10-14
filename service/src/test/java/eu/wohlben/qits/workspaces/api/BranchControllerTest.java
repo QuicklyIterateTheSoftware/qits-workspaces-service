@@ -7,11 +7,17 @@ import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.TestGit;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
+import eu.wohlben.qits.workspaces.entity.AgentState;
+import eu.wohlben.qits.workspaces.entity.AgentWorktree;
+import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.UUID;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
@@ -32,6 +38,7 @@ public class BranchControllerTest {
 
   @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceService workspaceService;
+  @Inject AgentWorktreeRepository agents;
 
   /**
    * A repository with a bare origin on disk and a resolvable id, seeded in-JVM.
@@ -65,6 +72,25 @@ public class BranchControllerTest {
     Path originPath = Path.of(dataDir, repoId, "origin");
     return TestGit.exec(
         originPath.toFile(), "git", "for-each-ref", "--format=%(refname:short)", "refs/heads");
+  }
+
+  /**
+   * Stages an agent (qits-1152) whose {@code wrapperBranch} is {@code branch}, with no legacy
+   * {@code workspace} row standing on it.
+   */
+  private void stageAgent(String repoId, String branch, AgentState state) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = new AgentWorktree();
+              row.id = UUID.randomUUID();
+              row.repositoryId = repoId;
+              row.workId = "w-branch-cleanup-" + row.id;
+              row.wrapperBranch = branch;
+              row.state = state;
+              row.createdAt = Instant.now();
+              agents.persist(row);
+            });
   }
 
   /**
@@ -348,6 +374,32 @@ public class BranchControllerTest {
         .post("/workspaces/api/branches/cleanup?repositoryId=" + repoId)
         .then()
         .statusCode(Response.Status.BAD_REQUEST.getStatusCode());
+  }
+
+  /**
+   * An ACTIVE agent's wrapper branch (qits-1152) is the same refusal as a legacy workspace row's
+   * branch, even though it is fully merged at main's head and holds no such row: {@link
+   * WorkspaceService#canCleanupBranch} — the single criterion this door re-checks under its
+   * transaction — must say no, and the door answers 400 rather than deleting it.
+   */
+  @Test
+  public void testCleanupBranchRejectsActiveAgentWrapperBranch() throws Exception {
+    String repoId = createProjectAndRepository();
+    Path origin = Path.of(dataDir, repoId, "origin").toAbsolutePath();
+    TestGit.exec(origin.toFile(), "git", "branch", "agent-wrap", "master");
+    stageAgent(repoId, "agent-wrap", AgentState.ACTIVE);
+
+    given()
+        .contentType(ContentType.JSON)
+        .body(new BranchController.CleanupBranchRequest("agent-wrap", null))
+        .when()
+        .post("/workspaces/api/branches/cleanup?repositoryId=" + repoId)
+        .then()
+        .statusCode(Response.Status.BAD_REQUEST.getStatusCode());
+
+    org.junit.jupiter.api.Assertions.assertTrue(
+        originBranches(repoId).lines().anyMatch(b -> b.equals("agent-wrap")),
+        "a refused cleanup deletes nothing");
   }
 
   @Test
