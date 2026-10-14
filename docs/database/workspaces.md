@@ -74,6 +74,7 @@ erDiagram
     text session_id
     text start_refusal
     instant start_refused_at
+    long started_workspace_id
     enum state "not null"
     text ticket_id
     instant waiting_since
