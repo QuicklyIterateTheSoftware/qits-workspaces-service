@@ -11,13 +11,19 @@ import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.TestGit;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
+import eu.wohlben.qits.workspaces.entity.AgentState;
+import eu.wohlben.qits.workspaces.entity.AgentWorktree;
+import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
 import io.restassured.path.json.JsonPath;
 import jakarta.inject.Inject;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
@@ -44,6 +50,7 @@ public class GcControllerTest {
 
   @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceService workspaceService;
+  @Inject AgentWorktreeRepository agents;
 
   private String seedOrigin() {
     try {
@@ -63,6 +70,26 @@ public class GcControllerTest {
     Path origin = Path.of(dataDir, repoId, "origin").toAbsolutePath();
     return TestGit.exec(
         origin.toFile(), "git", "for-each-ref", "--format=%(refname:short)", "refs/heads");
+  }
+
+  /**
+   * Stages an agent (qits-1152) whose {@code wrapperBranch} is {@code branch}, with no legacy
+   * {@code workspace} row standing on it — exactly the shape the sweep used to miss, since {@link
+   * eu.wohlben.qits.workspaces.control.WorkspaceService} resolved only the legacy table.
+   */
+  private void stageAgent(String repoId, String branch, AgentState state) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = new AgentWorktree();
+              row.id = UUID.randomUUID();
+              row.repositoryId = repoId;
+              row.workId = "w-gc-sweep-" + row.id;
+              row.wrapperBranch = branch;
+              row.state = state;
+              row.createdAt = Instant.now();
+              agents.persist(row);
+            });
   }
 
   private JsonPath sweep(String repoId, boolean dryRun) {
@@ -114,6 +141,37 @@ public class GcControllerTest {
     // commits) and the main branch itself.
     assertThat(survivors, containsString("feature"));
     assertThat(survivors, containsString("master"));
+  }
+
+  /**
+   * An ACTIVE agent's wrapper branch (qits-1152) protects it exactly as a legacy workspace row
+   * does, even though it is fully merged and holds no such row: {@code merged-work} is dispatched
+   * at main's head and must survive a real sweep until the agent releases it.
+   */
+  @Test
+  public void anActiveAgentsWrapperBranchSurvivesARealSweep() throws Exception {
+    String repoId = seedOrigin();
+    stageAgent(repoId, "merged-work", AgentState.ACTIVE);
+
+    JsonPath report = sweep(repoId, false);
+
+    assertThat(report.getList("removed.branch", String.class), not(hasItem("merged-work")));
+    assertThat(originBranches(repoId), containsString("merged-work"));
+  }
+
+  /**
+   * Only ACTIVE protects. Once the agent is OBSOLETE (its branch released and consumed) the same
+   * branch is exactly the leftover the sweep exists to take.
+   */
+  @Test
+  public void anObsoleteAgentsWrapperBranchIsStillSwept() throws Exception {
+    String repoId = seedOrigin();
+    stageAgent(repoId, "merged-work", AgentState.OBSOLETE);
+
+    JsonPath report = sweep(repoId, false);
+
+    assertThat(report.getList("removed.branch", String.class), hasItem("merged-work"));
+    assertThat(originBranches(repoId), not(containsString("merged-work")));
   }
 
   /** The prefix a deployment still wants kept is the caller's to name — and it holds. */
