@@ -1,0 +1,12 @@
+-- WHERE AN AGENT'S WORKTREE LIVES (qits-1233).
+--
+-- An agent placed in a workspace that never came up (FAILED, no daemon) is queued for another
+-- workspace instead of stranding there. That is only safe when nothing of the agent is in the
+-- FAILED workspace's volume: the empty slot is then discarded, volume and all. So the row records
+-- the workspace where a start of the agent was last accepted, which is where its worktree lives,
+-- and an agent that started in the FAILED workspace stays placed there.
+--
+-- Nullable, no backfill, part of no constraint and never a foreign key: null means no start was
+-- recorded. A row that predates this column and holds a command id has been started somewhere, and
+-- is read as started where it is placed.
+alter table agent_worktree add column started_workspace_id bigint;

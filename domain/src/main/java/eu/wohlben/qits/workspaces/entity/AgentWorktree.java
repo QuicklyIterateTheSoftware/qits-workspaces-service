@@ -149,6 +149,14 @@ public class AgentWorktree extends PanacheEntityBase implements CausedRow {
   @Column(name = "start_refused_at")
   public Instant startRefusedAt;
 
+  /**
+   * The workspace where a start of this agent was last accepted, so where its worktree lives
+   * (qits-1233, {@code V26}); null while no start was recorded. An agent never leaves a FAILED
+   * workspace that holds its worktree.
+   */
+  @Column(name = "started_workspace_id")
+  public Long startedWorkspaceId;
+
   @Column(name = "created_at", nullable = false, updatable = false)
   public Instant createdAt;
 

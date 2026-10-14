@@ -86,7 +86,8 @@ import org.jboss.logging.Logger;
  *       connection — after a reconnect or a restart of this service — but only started: it stays
  *       YIELDED and hears nothing until it is RUNNING again (qits-1212). A RUNNING agent whose
  *       workspace is FAILED with no daemon — it never came up — is queued for another workspace,
- *       the reason stored as its start refusal (qits-1233).
+ *       the reason stored as its start refusal, unless it started there: then its worktree is in
+ *       that volume and it waits for the workspace (qits-1233).
  *   <li><b>Clean up</b> (D4, D5, D7): an OBSOLETE agent whose work item is closed (VERIFIED,
  *       DONE or DROPPED) and that has been idle for {@code qits.workspace.agent.cleanup-idle} is
  *       removed if its worktrees are clean and pushed; otherwise it is handed the cleanup prompt
@@ -1309,7 +1310,19 @@ public class AgentService {
       return;
     }
     if (workspace.runtimeStatus == WorkspaceRuntimeStatus.FAILED && !daemonLive(workspace.id)) {
-      requeueFromFailed(agent, workspace);
+      if (mayHoldWorktree(agent, workspace)) {
+        // Its worktree is in that volume: moving the agent would let the empty slot be discarded
+        // with it. It waits for the workspace, which a person or a restart brings back.
+        recordRefusal(
+            workspace.id,
+            agent,
+            "Workspace "
+                + workspace.id
+                + " failed to start again; the agent's worktree is there, so it waits for that"
+                + " workspace.");
+      } else {
+        requeueFromFailed(agent, workspace);
+      }
       return;
     }
     if (!daemonLive(workspace.id) || !daemon.isResolvable()) {
@@ -1369,7 +1382,19 @@ public class AgentService {
   }
 
   /**
-   * The agent's workspace never came up, or failed to start again: FAILED, with no daemon (qits-1233).
+   * Whether the agent's worktree may live in {@code workspace}'s volume (qits-1233): a start was
+   * accepted there last, or — a row from before {@code started_workspace_id} — it was started
+   * somewhere (it holds a command id) and no start was recorded since.
+   */
+  private static boolean mayHoldWorktree(AgentWorktree agent, Workspace workspace) {
+    return agent.startedWorkspaceId == null
+        ? agent.commandId != null
+        : agent.startedWorkspaceId.equals(workspace.id);
+  }
+
+  /**
+   * The agent's workspace never came up: FAILED, with no daemon, and the agent never started there
+   * ({@link #mayHoldWorktree}), so nothing of it is in its volume (qits-1233).
    * Nothing will ever start the agent there — the scheduler does not restart a FAILED workspace,
    * and nobody else is told — so it is queued for another one, as for a workspace that is gone, and
    * the reason is stored as its start refusal for its view to show. The empty FAILED slot is then
@@ -1465,6 +1490,7 @@ public class AgentService {
               AgentWorktree row = agents.findById(agent.id);
               row.commandId = answer.commandId() == null ? row.commandId : answer.commandId();
               row.sessionId = answer.sessionId() == null ? row.sessionId : answer.sessionId();
+              row.startedWorkspaceId = workspace.id;
               row.startRefusal = null;
               row.startRefusedAt = null;
               if (withTurn) {

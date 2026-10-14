@@ -997,7 +997,11 @@ makes every daemon call, one pass at a time, kicked after each door and every
    next accepted start clears it (qits-1217). A RUNNING agent whose workspace is FAILED with no
    daemon (it never came up: `RunnerClaims.awaitDaemon`, or a failed launch) is queued for another
    workspace, the reason stored as its start refusal; `WorkspaceUnqueued` kicks the pass that does
-   it, and a FAILED workspace is never offered as a slot. A second failure in a row holds the agent
+   it, and a FAILED workspace is never offered as a slot. Only an agent that never started there:
+   `started_workspace_id` (`V26`) records where a start was last accepted, which is where the
+   worktree lives, and an agent whose worktree is in the FAILED volume stays placed and waits for
+   that workspace, the reason stored once. A row from before `V26` (null) with a command id counts
+   as started where it is placed. A second failure in a row holds the agent
    back from placement 1 min, doubling to 30 min, until an accepted start (qits-1233).
 5. **Clean up** (D4, D5, D7) — an OBSOLETE agent whose item is VERIFIED (the status the entity door
    stores) and that has been idle for `qits.workspace.agent.cleanup-idle` (30 s) is checked

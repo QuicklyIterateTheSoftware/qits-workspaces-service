@@ -792,6 +792,51 @@ public class AgentServiceTest {
   }
 
   @Test
+  void anAgentWhoseWorktreeIsInTheFailedWorkspaceWaitsForItAndSaysWhyOnce() {
+    // qits-1233: moving it would let the empty slot be discarded, volume and worktree with it.
+    Long failed = failedSlot();
+    UUID startedThere = agentIn(failed, true, AgentRunState.RUNNING);
+    UUID legacy = agentIn(failed, true, AgentRunState.RUNNING);
+    createdAgents.add(startedThere);
+    createdAgents.add(legacy);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              agents.findById(startedThere).startedWorkspaceId = failed;
+              agents.findById(startedThere).commandId = "cmd-earlier";
+              // A row from before started_workspace_id: started somewhere, recorded nowhere.
+              agents.findById(legacy).commandId = "cmd-earlier";
+            });
+
+    service.reconcile();
+
+    for (UUID id : List.of(startedThere, legacy)) {
+      AgentWorktree waiting = row(id.toString());
+      assertEquals(failed, waiting.workspaceId, "it stays where its worktree is");
+      assertEquals(AgentRunState.RUNNING, waiting.runState);
+      assertNotNull(waiting.startRefusal);
+      assertTrue(
+          waiting.startRefusal.contains("the agent's worktree is there"), waiting.startRefusal);
+    }
+    Instant first = row(startedThere.toString()).startRefusedAt;
+    service.reconcile();
+    assertEquals(first, row(startedThere.toString()).startRefusedAt, "said once, not every pass");
+  }
+
+  @Test
+  void anAcceptedStartRecordsWhereTheWorktreeLives() {
+    AgentService.Dispatch dispatched = dispatch("w-started-where", true, "go");
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      assertEquals(slot, row(dispatched.agent().agentId()).startedWorkspaceId);
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
   void aReleasedBranchMakesItsAgentsObsoleteAndTheSweepRemovesThemOnceVerifiedAndIdle() {
     AgentService.Dispatch dispatched = dispatch("w-release", true, null);
     String agentId = dispatched.agent().agentId();
@@ -806,6 +851,7 @@ public class AgentServiceTest {
 
     // Not VERIFIED yet: nothing is removed.
     liveness.markLive(slot);
+    service.reconcile(); // deterministically past the agent's start, so it stops touching lastActivityAt
     QuarkusTransaction.requiringNew()
         .run(() -> agents.findById(id).lastActivityAt = Instant.now().minusSeconds(3600));
     service.cleanUp();
@@ -1115,13 +1161,13 @@ public class AgentServiceTest {
     Long slot = row(agentId).workspaceId;
     try {
       assertEquals(AgentState.OBSOLETE, row(agentId).state, "no answer to the remove: it stays");
-      List<String> skips =
-          logged.stream().filter(m -> m.startsWith("Cleanup leaves agent " + agentId)).toList();
+      // A background pass may also have logged an earlier skip (not idle yet); this one is the stall.
+      String stall =
+          "Cleanup leaves agent " + agentId + " for now: its removal was answered UNREACHABLE";
       assertEquals(
-          List.of(
-              "Cleanup leaves agent " + agentId + " for now: its removal was answered UNREACHABLE"),
-          skips,
-          "the stall says why, once over two passes");
+          1,
+          logged.stream().filter(stall::equals).count(),
+          "the stall says why, once over two passes: " + logged);
 
       daemon.forget(agentId);
       service.cleanUp();
