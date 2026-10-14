@@ -43,6 +43,7 @@
              published now, as eu.wohlben.qits:qits-workspace-daemon-protocol, and the version of
              that jar IS the workspace image this service starts — so it is a dependency below, and
              the copy is gone. Its pom always said this would be the day. -->
+        <module>workspaces-events</module>
         <module>gitmirror</module>
         <module>domain</module>
         <module>service</module>
@@ -317,6 +318,13 @@
                 </exclusions>
             </dependency>
             <!-- The reactor's own modules, so children depend on them version-less. -->
+            <dependency>
+                <!-- The event vocabulary (qits-1236): plain records over qits-eventstream. `domain`
+                     builds them, `service` hands them to the bus. -->
+                <groupId>${project.groupId}</groupId>
+                <artifactId>qits-workspaces-events</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <dependency>
                 <!-- The git substrate: the mirror cache, its worktrees and its pushes. Framework
                      -free like the daemon protocol beside it, so `domain` gets a library and not a

@@ -44,6 +44,12 @@
             <artifactId>qits-workspaces-domain</artifactId>
         </dependency>
         <dependency>
+            <!-- The event vocabulary (qits-1236), stated rather than leaned on through `domain`:
+                 `bus/` publishes these records and registers them for reflection. -->
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-workspaces-events</artifactId>
+        </dependency>
+        <dependency>
             <!-- The daemon wire contract, released by qits-workspace-daemon and no longer vendored
                  here. Stated explicitly although `domain` already pulls it: this module IS the side
                  that speaks the protocol (DaemonControlSocket, WorkspaceDaemonRegistry), and a

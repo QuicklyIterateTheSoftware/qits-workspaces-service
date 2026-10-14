@@ -21,6 +21,7 @@ qits-githost and lands a tag. AGENTS.md, "Agents and the workspaces they run in"
 
 | Module | What |
 |---|---|
+| `workspaces-events/` | `eu.wohlben.qits.workspaces.events` — the lifecycle vocabulary (`qits-workspaces-events`): plain records over qits-eventstream, what this service publishes about agents and workspaces. |
 | `gitmirror/` | `eu.wohlben.qits.workspaces.gitmirror` — the git substrate: a local mirror per repository, the worktrees a merge runs in, and the pushes that are the only way a ref moves. Framework-free; its tests run offline against throwaway bares. |
 | `domain/` | `eu.wohlben.qits.workspaces.*` — entity, persistence, dto, mapper, control, and the framework-free SPIs the daemon implements. No web, no JAX-RS. |
 | `service/` | `eu.wohlben.qits.workspaces.{api,daemonhost}` — JAX-RS routes, the SSE channels, and the daemon control socket + registry. |
@@ -86,6 +87,7 @@ the consuming application implements:
 | `WorkFiler` | *implemented here* | `HttpWorkFiler` (`POST /projects/api/work`); absent means a capture is a 500 |
 | `CredentialCommissioner` | no | no container is given a platform credential — today's behaviour |
 | `ContainerRuntime` | *implemented here* | `WorkspaceContainers`, over qits-containers — **admin workspaces only**; every regular workspace runs on a workspace runner (`RunnerPlacement`) and never reaches it (qits-780) |
+| `LifecycleAnnouncer` | *implemented here* | `EventstreamLifecycleAnnouncer`, onto the bus (qits-1236); absent means the lifecycle events are not published and nothing else changes |
 
 In the other direction this context publishes `WorkspaceResolved` when a workspace is integrated or
 abandoned. Because the delete is **soft**, no FK cascade ever fires for rows other contexts hang off
@@ -216,10 +218,12 @@ naming what is missing, rather than opening a store nobody meant.
 The `eventstream` database is named explicitly because the derived default would collide with every
 other consumer of that library on the same postgres; `db` takes the derived `qits_workspaces`.
 
-**The event bus needs nothing else.** This service publishes no event any more (`SCMRelease` went
-with the release door); what remains of the `qits-eventstream` jar is the causation stamp on every
-push and the outbox database it boots with. Every remaining key ships as a default — `qits.events.url`
-is the qits-net alias. Set it when the bus lives somewhere else:
+**The event bus needs nothing else.** This service publishes the agent and workspace lifecycle
+(`AgentPlaced` … `AgentRemoved`, `WorkspaceStarted`/`Failed`/`Removed`; qits-1236, see AGENTS.md,
+"The lifecycle events"), listens once for declared waits, and stamps the causation id on every push;
+an event the inline PUT does not deliver waits in the outbox database above. Every remaining key
+ships as a default — `qits.events.url` is the qits-net alias. Set it when the bus lives somewhere
+else:
 
     QITS_EVENTS_URL=http://qits-events:8080
 

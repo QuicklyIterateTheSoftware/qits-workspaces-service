@@ -5,6 +5,8 @@ import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
+import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
+import eu.wohlben.qits.workspaces.events.WorkspaceStarted;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -27,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -107,6 +110,12 @@ public class RunnerClaims {
 
   /** A row's start ended other than by a claim; fired by {@link #abandonStart} (qits-626). */
   @Inject Event<WorkspaceUnqueued> unqueued;
+
+  /**
+   * {@code WorkspaceStarted} and {@code WorkspaceFailed} for a RUNNER row (qits-1236), once per
+   * transition and after the write committed. Absent: nothing is announced.
+   */
+  @Inject Instance<LifecycleAnnouncer> lifecycle;
 
   private final Map<Long, WorkspaceProcessTracker.Handle> starts = new ConcurrentHashMap<>();
 
@@ -303,6 +312,7 @@ public class RunnerClaims {
         }
       }
       if (error == null) {
+        AtomicBoolean cameUp = new AtomicBoolean();
         Optional<Workspace> written =
             write(
                 runnerId,
@@ -311,8 +321,12 @@ public class RunnerClaims {
                   if (row.runtimeStatus == WorkspaceRuntimeStatus.PROVISIONING) {
                     row.runtimeStatus = WorkspaceRuntimeStatus.RUNNING;
                     row.runtimeError = null;
+                    cameUp.set(true);
                   }
                 });
+        if (cameUp.get()) {
+          written.ifPresent(this::announceStarted);
+        }
         if (written.filter(row -> row.runtimeStatus == WorkspaceRuntimeStatus.RUNNING).isPresent()) {
           WorkspaceProcessTracker.Handle done = starts.remove(rowId);
           if (done != null) {
@@ -323,6 +337,7 @@ public class RunnerClaims {
         return;
       }
       LOG.warnf("Runner workspace %s did not come up: %s", rowId, error);
+      AtomicBoolean failed = new AtomicBoolean();
       Optional<Workspace> written =
           write(
               runnerId,
@@ -331,8 +346,12 @@ public class RunnerClaims {
                 if (row.runtimeStatus == WorkspaceRuntimeStatus.PROVISIONING) {
                   row.runtimeStatus = WorkspaceRuntimeStatus.FAILED;
                   row.runtimeError = truncate(error);
+                  failed.set(true);
                 }
               });
+      if (failed.get()) {
+        written.ifPresent(this::announceFailed);
+      }
       if (written.filter(row -> row.runtimeStatus == WorkspaceRuntimeStatus.FAILED).isPresent()) {
         abandonStart(rowId, error);
       }
@@ -354,15 +373,20 @@ public class RunnerClaims {
    */
   public boolean launchFailed(UUID runnerId, Long rowId, String detail) {
     String reason = detail == null || detail.isBlank() ? "the runner could not launch it" : detail;
+    AtomicBoolean failed = new AtomicBoolean();
     Optional<Workspace> written =
         write(
             runnerId,
             rowId,
             row -> {
+              failed.set(row.runtimeStatus != WorkspaceRuntimeStatus.FAILED);
               row.runtimeStatus = WorkspaceRuntimeStatus.FAILED;
               row.runtimeError = truncate(reason);
               row.queuedAt = null;
             });
+    if (failed.get()) {
+      written.ifPresent(this::announceFailed);
+    }
     written.ifPresent(row -> abandonStart(rowId, reason));
     return written.isPresent();
   }
@@ -529,6 +553,9 @@ public class RunnerClaims {
     for (Workspace row : changed) {
       changePublisher.runtimeChanged(row.repositoryId, row.id);
       if (row.runtimeStatus == WorkspaceRuntimeStatus.RUNNING) {
+        // `changed` holds only rows whose status this pass moved: a RUNNING row found running
+        // again is not in it, and announces nothing.
+        announceStarted(row);
         WorkspaceProcessTracker.Handle process = starts.remove(row.id);
         if (process != null) {
           process.settleSegment(QUEUED_SEGMENT, true);
@@ -571,6 +598,18 @@ public class RunnerClaims {
     for (Workspace row : owned) {
       changePublisher.runtimeChanged(row.repositoryId, row.id);
     }
+  }
+
+  private void announceStarted(Workspace row) {
+    LifecycleAnnouncer.announce(
+        lifecycle, new WorkspaceStarted(row.id.toString(), row.repositoryId, Instant.now()));
+  }
+
+  private void announceFailed(Workspace row) {
+    LifecycleAnnouncer.announce(
+        lifecycle,
+        new WorkspaceFailed(
+            row.id.toString(), row.repositoryId, row.runtimeError, Instant.now()));
   }
 
   private void backlogChanged(Workspace row) {

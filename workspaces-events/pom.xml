@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>eu.wohlben.qits</groupId>
+        <artifactId>qits-workspaces</artifactId>
+        <version>2026.1014.92409</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <!-- qits-workspaces' event vocabulary (qits-1236): what this service announces about its agents
+         and their workspaces. `AgentPlaced` through `AgentHarnessExited` (one per fact about an
+         agent row; `AgentPlaced` states the family's conventions), and `WorkspaceStarted`,
+         `WorkspaceFailed`, `WorkspaceRemoved` for the slot underneath.
+
+         A module of its own for qits-ci's `ci-events` reason: a vocabulary is what a consumer needs,
+         and nothing else in this repository is. It depends on `qits-eventstream` and on nothing
+         else, not even quarkus-arc: these are plain records, and a data module that cannot boot a
+         container cannot grow a service.
+
+         There was a module of this name once, holding `SCMRelease`, and it went with the release
+         door on 2026-09-03 because this service stopped publishing that event. It is back because
+         this service publishes again: the rule was never "no events module", it was "no events
+         module for an event this service does not publish". -->
+    <artifactId>qits-workspaces-events</artifactId>
+    <name>qits-workspaces :: events</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-eventstream</artifactId>
+        </dependency>
+        <dependency>
+            <!-- Plain JUnit 5, not quarkus-junit5: nothing here is a @QuarkusTest. The suite drives
+                 plain constructors and the canonical serializer, which needs no container. -->
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -11,6 +11,8 @@ import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
+import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
+import eu.wohlben.qits.workspaces.events.WorkspaceStarted;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -45,6 +47,7 @@ public class RunnerClaimsTest {
   @Inject WorkspaceRepository workspaceRepository;
   @Inject FakeRunnerPlacement placement;
   @Inject FakeWorkspaceDaemonProvisioner daemons;
+  @Inject RecordingLifecycleAnnouncer announced;
 
   private final List<UUID> createdRunners = new ArrayList<>();
   private final List<Long> rows = new ArrayList<>();
@@ -307,6 +310,72 @@ public class RunnerClaimsTest {
 
     assertTrue(claims.exited(a.id, row));
     assertEquals(WorkspaceRuntimeStatus.QUEUED, read(row).runtimeStatus);
+  }
+
+  // --- the lifecycle events (qits-1236) -----------------------------------------------------------
+
+  /** A failed launch is one WorkspaceFailed, carrying the runner's reason; a repeat is none. */
+  @Test
+  public void aFailedLaunchIsAnnouncedFailedOnce() {
+    WorkspaceRunner a = eligibleRunner(1);
+    Long row = queued(null, Instant.now());
+    claims.reserveFor(a).orElseThrow();
+
+    assertTrue(claims.launchFailed(a.id, row, "pull refused"));
+    assertTrue(claims.launchFailed(a.id, row, "pull refused"));
+
+    List<WorkspaceFailed> failed =
+        announced.of(WorkspaceFailed.class, e -> e.workspaceId().equals(row.toString()));
+    assertEquals(1, failed.size(), failed.toString());
+    assertEquals("pull refused", failed.get(0).runtimeError());
+    assertEquals(read(row).repositoryId, failed.get(0).repositoryId());
+  }
+
+  /**
+   * The daemon's report makes a launched row RUNNING: one WorkspaceStarted. An inventory that finds
+   * it running again says nothing; one that brings a STOPPED row back is a second transition.
+   */
+  @Test
+  public void aRunnerRowIsAnnouncedStartedOncePerTransition() throws Exception {
+    WorkspaceRunner a = eligibleRunner(1);
+    Long row = queued(null, Instant.now());
+    claims.reserveFor(a).orElseThrow();
+    daemons.answerRunnerRows(id -> Optional.of(ProvisionResult.ok("abc")));
+
+    assertTrue(claims.launched(a.id, row));
+    awaitStatus(row, WorkspaceRuntimeStatus.RUNNING);
+    assertEquals(
+        1, announced.await(WorkspaceStarted.class, e -> e.workspaceId().equals(row.toString()), 1).size());
+
+    claims.reconcile(a.id, List.of(new RunnerClaims.HeldContainer(row, true)));
+    assertEquals(
+        1,
+        announced.of(WorkspaceStarted.class, e -> e.workspaceId().equals(row.toString())).size(),
+        "RUNNING found running again is no transition");
+
+    assertTrue(claims.exited(a.id, row));
+    claims.reconcile(a.id, List.of(new RunnerClaims.HeldContainer(row, true)));
+    assertEquals(
+        2, announced.of(WorkspaceStarted.class, e -> e.workspaceId().equals(row.toString())).size());
+  }
+
+  /** No daemon dials home: one WorkspaceFailed, saying so. */
+  @Test
+  public void aLaunchWhoseDaemonNeverDialsHomeIsAnnouncedFailed() throws Exception {
+    WorkspaceRunner a = eligibleRunner(1);
+    Long row = queued(null, Instant.now());
+    claims.reserveFor(a).orElseThrow();
+    daemons.answerRunnerRows(id -> Optional.empty());
+
+    assertTrue(claims.launched(a.id, row));
+
+    List<WorkspaceFailed> failed =
+        announced.await(WorkspaceFailed.class, e -> e.workspaceId().equals(row.toString()), 1);
+    assertEquals(1, failed.size());
+    assertTrue(
+        failed.get(0).runtimeError().startsWith("no workspace-daemon dialed home within"),
+        failed.get(0).runtimeError());
+    assertTrue(announced.of(WorkspaceStarted.class, e -> e.workspaceId().equals(row.toString())).isEmpty());
   }
 
   // --- the inventory reconcile --------------------------------------------------------------------

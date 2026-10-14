@@ -73,17 +73,24 @@ split package:
 - `domain/` — `entity`, `persistence`, `dto`, `mapper`, `control`, `error`. Framework-free in the
   sense that matters: no JAX-RS, no websockets. Entities are Panache active-record with public
   fields; mappers are MapStruct `@Mapper(componentModel = "jakarta")`. It depends on
-  qits-eventstream for the causation persistence trio and nothing else out of that jar — see
-  "The causation stamp on every push" for why the boundary reads *seams* rather than *the bus*.
+  qits-eventstream for the causation persistence trio and the `QitsEvent` vocabulary the lifecycle
+  events implement, and nothing else out of that jar — see "The causation stamp on every push" for
+  why the boundary reads *seams* rather than *the bus*.
 - `service/` — `api` (JAX-RS + SSE, including the raw vertx routes), `daemonhost` (the control
-  socket and registry), `bus` (what is left of the event-bus wiring: the push causation stamp),
+  socket and registry), `bus` (the event-bus wiring: the lifecycle announcer and the native
+  registration of what it publishes, the declared-wait listener, the push causation stamp),
   `wiring`, `security`.
+- `workspaces-events/` — `events` and nothing else: the lifecycle vocabulary (qits-1236), plain
+  records over qits-eventstream, artifact `qits-workspaces-events`. See "The lifecycle events".
 
-There **was** a `workspaces-events/` module — `events` and nothing else, the vocabulary a consumer
-depended on — holding `SCMRelease`. It went with the release door on 2026-09-03: qits-projects
-publishes that event now and declares its own identical record, and no other repository ever
-imported this jar (qits-ci keeps a local copy of its own). Do not reintroduce the module for an
-event this service does not publish.
+**The module is back, and why that is not a contradiction.** There was a `workspaces-events/`
+module holding `SCMRelease`; it went with the release door on 2026-09-03, because qits-projects
+publishes that event now, and the rule then was "do not reintroduce the module for an event this
+service does not publish". qits-1236 is the case that rule left open: this service publishes again
+— the agent and workspace lifecycle — so its vocabulary has a home of its own, between
+qits-eventstream and everything else, depending on nothing but that jar. A consumer depends on it
+and gets records, not this service's domain. It is still never a home for an event somebody else
+publishes.
 
 `control/` is flat on purpose, and deliberately stayed flat as the context grew: the monorepo split
 it across `domain.repository`, `domain.workspace`, `domain.service`, `domain.bootstrap`,
@@ -625,7 +632,8 @@ one `release(<version>): <summary>` commit, pushed it atomically with an annotat
 branch. **All of it is gone**, along with `Mode.RELEASE`, `VersionStamp`, `VersionBumper`,
 `MavenVersionBumper`, `NpmVersionBumper`, `PomVersions`, `PackageJsonVersions`, `TextSplice`,
 `DeploymentSpecReader`, `ReleaseAnnouncer`, `SCMReleaseAnnouncer`, the `workspaces-events` module
-that held `SCMRelease`, and `qits.workspaces.release.entry-branch`.
+that held `SCMRelease` (the name came back with qits-1236 for the lifecycle events, and holds
+nothing of the release), and `qits.workspaces.release.entry-branch`.
 
 **A release is a release request in qits-projects now**: it folds `main`, the named branches and
 every released-but-unmerged tag onto a `release/<id>` branch through qits-githost's in-core git
@@ -787,7 +795,8 @@ eventstream jar also carries the platform's causation *persistence vocabulary* �
 `CausationStamp`, `@Uncaused`, three jakarta-persistence-shaped types with no publish, no subscribe
 and no wire in them — and `Workspace` and `WorkspaceEvent` implement it, so the jar sits in
 `domain/`'s pom now. What the rule still forbids is control flow: no listener, no publisher, no
-`EventFrame`, no `QitsEventBus` anywhere in `domain`, and the announcement ports stay ports. The
+`EventFrame`, no `QitsEventBus` anywhere in `domain`, and the announcement ports stay ports —
+`LifecycleAnnouncer` (qits-1236) takes a built `QitsEvent` record and is implemented in `service`. The
 `PushCausation` port above is untouched by the narrowing — reading the ambient scope to build a
 header is a bus seam, and it stays in `service`. What the dependency costs is honest and paid in
 the suite: the jar's persistence unit boots in this module's tests too, so
@@ -820,7 +829,8 @@ version}` says source control has this release and nothing more — the statemen
 exists is qits-ci's `SoftwareRelease`, a whole build later. This service published it from the
 instant a release push was accepted until 2026-09-03; the publisher moved with the release door, and
 `ReleaseAnnouncer`, `SCMReleaseAnnouncer`, the `workspaces-events` module that held the record and
-`bus/EventWireReflection` all went with it. **The wire name is the class name**
+`bus/EventWireReflection` all went with it (the last two are back since qits-1236, for the lifecycle
+events, and hold no `SCMRelease`). **The wire name is the class name**
 (`QitsEvent.signature()` returns the simple class name), so qits-projects' own identical record is
 the same event on the wire; nothing keying on the signature noticed the move.
 
@@ -828,10 +838,12 @@ What the file `.config/qits/ci-event-release.yml` in this repository does is unc
 `SCMRelease` for **this** repository and builds the released tag. The publisher is somebody else's
 now, the consumer is still ours.
 
-**What is left of the bus here is the causation half** (above): `EventstreamPushCausation` reading
-the ambient scope onto every push, and the eventstream jar's persistence trio on the entities. This
-service publishes nothing and listens for nothing, and `qits.eventstream.enabled` stays off in
-`%dev`/`%test` because the sweeper is the jar's.
+**What else of the bus is here**: the causation half (above) — `EventstreamPushCausation` reading
+the ambient scope onto every push, and the eventstream jar's persistence trio on the entities; one
+listener, `bus/AgentWaitListener` (qits-1153, "Declared waits"); and since qits-1236 one publisher,
+the lifecycle events ("The lifecycle events"). `qits.eventstream.enabled` stays off in
+`%dev`/`%test`: a clone-alone suite has no qits-events to reach, and the tests assert the events at
+the `LifecycleAnnouncer` port instead.
 
 Two things the move left behind here, both worth not re-deriving:
 
@@ -1095,6 +1107,57 @@ event name, optional expiry) and gets a turn when it happens:
 - **Limits.** 8 OPEN waits per agent, timeout at most 30 days, label at most 200 characters (default:
   the selection in one line). The native image registers `EventSelection`, its `Condition` and `Op`
   on `AgentWaitController`.
+
+**The lifecycle events** (qits-1236; the records in `workspaces-events/`, the port
+`control/LifecycleAnnouncer`, the publisher `bus/EventstreamLifecycleAnnouncer`). What the scheduler
+does to an agent and its workspace is announced on the bus, one event per fact, so an agent or a
+person can wait on it — `qits wait --event AgentRemoved --when 'agentId=<id>'` selects on the
+payload's top-level fields:
+
+| Event | Fields (besides `eventId`/`occurredAt`, which ride the envelope) | Reason words |
+|---|---|---|
+| `AgentPlaced` | `agentId`, `workId`, `workspaceId`, `repositoryId` | |
+| `AgentStarted` | the four, `commandId`, `launched`, `resumed` (the daemon's answer) | |
+| `AgentStartRefused` | the four, `detail` (the daemon's refusal, or the never-came-up sentence) | |
+| `AgentRequeued` | the four (`workspaceId` is the one it left), `reason`, `detail` | `WORKSPACE_FAILED`, `WORKSPACE_GONE` |
+| `AgentYielded` | the four | |
+| `AgentResumed` | the four, `reason` | `TURN_PENDING`, `WORKS_AGAIN` |
+| `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs) — one per agent | |
+| `AgentCleanupDeferred` | the four, `reason`, `detail` | `ITEM_NOT_CLOSED`, `RECENTLY_ACTIVE`, `TURN_PENDING`, `HARNESS_BUSY`, `DAEMON_NOT_CONNECTED`, `NO_DAEMON_CLIENT`, `CHECK_UNANSWERED`, `BUSY_IN_BACKGROUND`, `REMOVAL_UNANSWERED`, `LEFTOVER_WORK_PROMPTED` |
+| `AgentRemoved` | the four, `reason`, `harnessStopped`, `detail` | `OBSOLETE_NEVER_PLACED`, `OBSOLETE_WORKSPACE_GONE`, `UNKNOWN_TO_DAEMON`, `RELEASED_IDLE_CLEAN`, `DISCARDED` |
+| `AgentHarnessExited` | the four, `commandId`, `status`, `exitCode`, `stoppedBy` | `stoppedBy`: `DAEMON_REMOVE`, `DAEMON_YIELD`, `KILLED`, `SELF` |
+| `WorkspaceStarted` | `workspaceId`, `repositoryId` | |
+| `WorkspaceFailed` | `workspaceId`, `repositoryId`, `runtimeError` | |
+| `WorkspaceRemoved` | `workspaceId`, `repositoryId`, `reason` | `NO_AGENT_LEFT` |
+
+The rules they keep:
+
+- **Ids are strings, flat and top-level.** `workspaceId` is the workspace ROW id (the number in
+  `/workspaces/daemon/<id>`), not the `ws-…` name; `workId` is the agent row's `work_id`. An absent
+  value (a never-placed agent's workspace) is an absent key.
+- **No text a person or an agent wrote.** No instruction, pending turn, prompt draft, work item title
+  or a release's `result`; a `detail` is a sentence this service wrote, or a daemon's refusal.
+- **Published after the write committed**, from the site that wrote it: the
+  `QuarkusTransaction.requiringNew()` block has returned (or, for `WorkspaceRemoved`, the
+  `@Transactional` `discardWorkspace`). Where the write happens inside a lambda (`resumeYielded`,
+  `onActivity`, `resolveReleasedBranch`, `markRemoved`) the event is built there and announced after.
+- **Once per transition.** `AgentRemoved` only from the call that flipped the row;
+  `WorkspaceStarted`/`WorkspaceFailed` only when the runtime status changed (a RUNNING row found
+  running again by an inventory, or re-stamped by the DIRECT ladder's already-running short-circuit,
+  says nothing); `AgentStartRefused` under the `lastRefusal` throttle; `AgentCleanupDeferred` under
+  the `lastSkip` throttle, which is keyed on the reason WORD, so a detail that moves under one reason
+  (the workspace's runtime status, the item's status) is neither a new log line nor a new event.
+- **`harnessStopped` is true exactly when `AgentDaemon.remove` answered OK** for that removal.
+- **`AgentHarnessExited` is not wired yet.** The record and `AgentService.onHarnessExited` exist; the
+  daemon frame that reports a harness exit is being added to qits-workspace-daemon's protocol, and
+  `daemonhost` calls `onHarnessExited` once this service builds against that protocol jar.
+- **Off the caller's thread, in order.** `EventstreamLifecycleAnnouncer` reads the causation scope on
+  the caller's thread and publishes on one thread of its own (qits-ci's `RunnerLifecycleAnnouncer`),
+  with a request context activated for the outbox's fallback. `bus/EventWireReflection` registers
+  every record for the native image; `EventWireReflectionTest` guards the list.
+- **The tests** assert at the port: `RecordingLifecycleAnnouncer` (domain tests) records, and
+  `LifecycleEventsTest` and `RunnerClaimsTest` drive the transitions;
+  `workspaces-events/…/LifecycleEventsContractTest` pins every wire name and payload field.
 
 **Capture files a ticket and stops** (D25): `POST /workspaces/api/capture` asks qits-projects `POST
 /projects/api/work` for an IMPROVEMENT ticket in the captured repository's project (`WorkFiler`,

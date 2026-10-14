@@ -1,5 +1,6 @@
 package eu.wohlben.qits.workspaces.control;
 
+import eu.wohlben.qits.eventstream.QitsEvent;
 import eu.wohlben.qits.workspaces.dto.AgentDto;
 import eu.wohlben.qits.workspaces.dto.WorkItemWorkspaceDto;
 import eu.wohlben.qits.workspaces.entity.AgentBranch;
@@ -13,6 +14,17 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
+import eu.wohlben.qits.workspaces.events.AgentCleanupDeferred;
+import eu.wohlben.qits.workspaces.events.AgentHarnessExited;
+import eu.wohlben.qits.workspaces.events.AgentObsolete;
+import eu.wohlben.qits.workspaces.events.AgentPlaced;
+import eu.wohlben.qits.workspaces.events.AgentRemoved;
+import eu.wohlben.qits.workspaces.events.AgentRequeued;
+import eu.wohlben.qits.workspaces.events.AgentResumed;
+import eu.wohlben.qits.workspaces.events.AgentStartRefused;
+import eu.wohlben.qits.workspaces.events.AgentStarted;
+import eu.wohlben.qits.workspaces.events.AgentYielded;
+import eu.wohlben.qits.workspaces.events.WorkspaceRemoved;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWaitRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
@@ -198,6 +210,12 @@ public class AgentService {
   @Inject AgentWaits waits;
 
   @Inject AgentWaitRepository waitRows;
+
+  /**
+   * The lifecycle events (qits-1236), each announced after the write it reports committed. Absent:
+   * nothing is announced.
+   */
+  @Inject Instance<LifecycleAnnouncer> lifecycle;
 
   /**
    * How long a RUNNING agent waits for input before it yields its slot to another agent that wants
@@ -612,23 +630,35 @@ public class AgentService {
     if (branch == null || branch.isBlank()) {
       throw new BadRequestException("A branch is required to resolve a released branch.");
     }
-    List<String> marked =
+    List<AgentObsolete> obsolete =
         QuarkusTransaction.requiringNew()
             .call(
                 () -> {
                   Instant now = Instant.now();
-                  List<String> ids = new ArrayList<>();
+                  List<AgentObsolete> out = new ArrayList<>();
                   for (AgentWorktree agent : agents.findActiveByWrapperBranch(repositoryId, branch)) {
                     agent.state = AgentState.OBSOLETE;
                     agent.obsoleteAt = now;
-                    ids.add(agent.id.toString());
+                    // The release's own words (`result`) are not on the wire: only its refs.
+                    out.add(
+                        new AgentObsolete(
+                            agent.id.toString(),
+                            agent.workId,
+                            idOf(agent.workspaceId),
+                            agent.repositoryId,
+                            branch,
+                            trimmed(target),
+                            trimmed(commit),
+                            now));
                   }
-                  return ids;
+                  return out;
                 });
+    List<String> marked = obsolete.stream().map(AgentObsolete::agentId).toList();
     if (!marked.isEmpty()) {
       LOG.infof(
           "Release %s consumed branch '%s' of %s: agents %s are obsolete",
           target, branch, repositoryId, marked);
+      obsolete.forEach(this::announce);
       kick();
       return new Resolution(true, marked);
     }
@@ -648,6 +678,7 @@ public class AgentService {
     if (agent.state == AgentState.REMOVED) {
       return view(agent);
     }
+    boolean harnessStopped = false;
     if (agent.workspaceId != null && daemon.isResolvable()) {
       AgentDaemon port = daemon.get();
       AgentDaemon.CleanupAnswer answer =
@@ -670,10 +701,11 @@ public class AgentService {
         }
       }
       if (answer.isFound()) {
-        port.remove(agent.workspaceId, id.toString(), true);
+        harnessStopped =
+            port.remove(agent.workspaceId, id.toString(), true) == AgentDaemon.Outcome.OK;
       }
     }
-    markRemoved(id, "discarded by a person");
+    markRemoved(id, AgentRemoved.DISCARDED, harnessStopped, "discarded by a person");
     kick();
     return view(require(id));
   }
@@ -780,6 +812,7 @@ public class AgentService {
     }
     Instant when = at > 0 ? Instant.ofEpochMilli(at) : Instant.now();
     AtomicBoolean busyAgain = new AtomicBoolean();
+    AgentResumed[] wokeUp = new AgentResumed[1];
     String[] relay =
         QuarkusTransaction.requiringNew()
             .call(
@@ -796,6 +829,7 @@ public class AgentService {
                       && agent.workspaceId != null) {
                     agent.runState = AgentRunState.RUNNING;
                     busyAgain.set(true);
+                    wokeUp[0] = resumed(agent, AgentResumed.WORKS_AGAIN, when);
                     LOG.infof("Agent %s works again in workspace %s", agent.id, agent.workspaceId);
                   }
                   if (sessionId != null && !sessionId.isBlank()) {
@@ -811,6 +845,9 @@ public class AgentService {
                   agent.waitingSince = awaitingInput ? when : null;
                   return new String[] {agent.workId};
                 });
+    if (wokeUp[0] != null) {
+      announce(wokeUp[0]);
+    }
     if (relay != null) {
       // With an OPEN wait, a waiting agent is reported as waiting on it (qits-1153, W5).
       waits.relayActivity(relay[0], id, awaitingInput, hookEvent, sessionId, when);
@@ -818,6 +855,40 @@ public class AgentService {
     if (Boolean.TRUE.equals(awaitingInput) || busyAgain.get()) {
       kick();
     }
+  }
+
+  /**
+   * An agent's harness ended in {@code workspaceId}'s container, as its daemon reported it:
+   * announced as {@link AgentHarnessExited}, and nothing else — the row is not written. An agent
+   * this service does not know is not announced. {@code stoppedBy} is one of that event's words.
+   */
+  public void onHarnessExited(
+      Long workspaceId,
+      String agentId,
+      String commandId,
+      String status,
+      Integer exitCode,
+      String stoppedBy,
+      long at) {
+    UUID id = parse(agentId);
+    if (id == null) {
+      return;
+    }
+    AgentWorktree agent = QuarkusTransaction.requiringNew().call(() -> agents.findById(id));
+    if (agent == null) {
+      return;
+    }
+    announce(
+        new AgentHarnessExited(
+            agent.id.toString(),
+            agent.workId,
+            idOf(workspaceId),
+            agent.repositoryId,
+            commandId,
+            status,
+            exitCode,
+            stoppedBy,
+            at > 0 ? Instant.ofEpochMilli(at) : Instant.now()));
   }
 
   /**
@@ -985,16 +1056,21 @@ public class AgentService {
    */
   void resumeYielded() {
     synchronized (placeLock) {
-      QuarkusTransaction.requiringNew()
-          .run(
-              () ->
-                  agents.findPlacedLive().stream()
-                      .filter(a -> a.runState == AgentRunState.YIELDED && a.pendingText != null)
-                      .forEach(
-                          a -> {
-                            a.runState = AgentRunState.RUNNING;
-                            LOG.infof("Agent %s resumes in workspace %s", a.id, a.workspaceId);
-                          }));
+      Instant now = Instant.now();
+      List<AgentResumed> resumed =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () ->
+                      agents.findPlacedLive().stream()
+                          .filter(a -> a.runState == AgentRunState.YIELDED && a.pendingText != null)
+                          .map(
+                              a -> {
+                                a.runState = AgentRunState.RUNNING;
+                                LOG.infof("Agent %s resumes in workspace %s", a.id, a.workspaceId);
+                                return resumed(a, AgentResumed.TURN_PENDING, now);
+                              })
+                          .toList());
+      resumed.forEach(this::announce);
     }
   }
 
@@ -1060,6 +1136,9 @@ public class AgentService {
         }
         waitingForCapacity.remove(agent.id);
         LOG.infof("Agent %s placed in workspace %s", agent.id, chosen);
+        announce(
+            new AgentPlaced(
+                agent.id.toString(), agent.workId, idOf(chosen), agent.repositoryId, Instant.now()));
         changePublisher.fire(agent.repositoryId, chosen, WorkspaceChangeHint.Topic.AGENTS);
       }
     }
@@ -1207,6 +1286,13 @@ public class AgentService {
           continue;
         }
         LOG.infof("Agent %s yielded workspace %s", agent.id, agent.workspaceId);
+        announce(
+            new AgentYielded(
+                agent.id.toString(),
+                agent.workId,
+                idOf(agent.workspaceId),
+                agent.repositoryId,
+                Instant.now()));
         resumeYielded();
         placeQueued();
       }
@@ -1310,6 +1396,17 @@ public class AgentService {
                 row.runState = AgentRunState.QUEUED;
               });
       started.remove(agent.id);
+      announce(
+          new AgentRequeued(
+              agent.id.toString(),
+              agent.workId,
+              idOf(agent.workspaceId),
+              agent.repositoryId,
+              AgentRequeued.WORKSPACE_GONE,
+              "Workspace "
+                  + agent.workspaceId
+                  + " is gone; the agent is queued for another workspace.",
+              Instant.now()));
       return;
     }
     if (workspace.runtimeStatus == WorkspaceRuntimeStatus.FAILED && !daemonLive(workspace.id)) {
@@ -1436,9 +1533,7 @@ public class AgentService {
         workspace.runtimeError == null || workspace.runtimeError.isBlank()
             ? "it failed to start"
             : workspace.runtimeError;
-    recordRefusal(
-        workspace.id,
-        agent,
+    String detail =
         "Workspace "
             + workspace.id
             + " did not come up ("
@@ -1447,7 +1542,17 @@ public class AgentService {
             + (again.times() > 1
                 ? ", not before " + again.notBefore() + " (failure " + again.times() + " in a row)"
                 : "")
-            + ".");
+            + ".";
+    announce(
+        new AgentRequeued(
+            agent.id.toString(),
+            agent.workId,
+            idOf(workspace.id),
+            agent.repositoryId,
+            AgentRequeued.WORKSPACE_FAILED,
+            detail,
+            now));
+    recordRefusal(workspace.id, agent, detail);
   }
 
   /**
@@ -1515,6 +1620,16 @@ public class AgentService {
         !withTurn
             ? ", still yielded"
             : told || instruction == null ? "" : ", its turn still pending");
+    announce(
+        new AgentStarted(
+            fresh.id.toString(),
+            fresh.workId,
+            idOf(workspace.id),
+            fresh.repositoryId,
+            answer.commandId() == null ? fresh.commandId : answer.commandId(),
+            answer.launched(),
+            answer.resumed(),
+            Instant.now()));
     changePublisher.fire(agent.repositoryId, workspace.id, WorkspaceChangeHint.Topic.AGENTS);
   }
 
@@ -1542,6 +1657,14 @@ public class AgentService {
               row.startRefusal = said;
               row.startRefusedAt = Instant.now();
             });
+    announce(
+        new AgentStartRefused(
+            agent.id.toString(),
+            agent.workId,
+            idOf(workspaceId),
+            agent.repositoryId,
+            said,
+            Instant.now()));
     changePublisher.fire(agent.repositoryId, workspaceId, WorkspaceChangeHint.Topic.AGENTS);
   }
 
@@ -1599,32 +1722,38 @@ public class AgentService {
     if (!isClosed(status)) {
       skip(
           agent,
+          AgentCleanupDeferred.ITEM_NOT_CLOSED,
           status == null ? "its item has no status" : "its item is " + status + ", not closed",
           false);
       return;
     }
     if (agent.lastActivityAt != null && agent.lastActivityAt.isAfter(idleBefore)) {
-      skip(agent, "it was active within " + cleanupIdle, false);
+      skip(agent, AgentCleanupDeferred.RECENTLY_ACTIVE, "it was active within " + cleanupIdle, false);
       return;
     }
     if (agent.pendingText != null) {
-      skip(agent, "a turn is still to be said to it", false);
+      skip(agent, AgentCleanupDeferred.TURN_PENDING, "a turn is still to be said to it", false);
       return;
     }
     if (activity.isResolvable()
         && activity.get().activityOf(agent.id.toString()).orElse(null) == AgentActivityState.BUSY) {
-      skip(agent, "its harness is busy with a turn", false);
+      skip(agent, AgentCleanupDeferred.HARNESS_BUSY, "its harness is busy with a turn", false);
       return;
     }
     if (agent.workspaceId == null) {
-      markRemoved(agent.id, "obsolete, and never placed");
+      markRemoved(
+          agent.id, AgentRemoved.OBSOLETE_NEVER_PLACED, false, "obsolete, and never placed");
       return;
     }
     Workspace workspace =
         QuarkusTransaction.requiringNew()
             .call(() -> workspaceRepository.findByIdOptional(agent.workspaceId).orElse(null));
     if (workspace == null || workspace.status != WorkspaceStatus.ACTIVE) {
-      markRemoved(agent.id, "obsolete, and its workspace is gone");
+      markRemoved(
+          agent.id,
+          AgentRemoved.OBSOLETE_WORKSPACE_GONE,
+          false,
+          "obsolete, and its workspace is gone");
       return;
     }
     if (!daemonLive(workspace.id)) {
@@ -1634,6 +1763,7 @@ public class AgentService {
       }
       skip(
           agent,
+          AgentCleanupDeferred.DAEMON_NOT_CONNECTED,
           "workspace "
               + workspace.id
               + "'s daemon is not connected ("
@@ -1643,41 +1773,50 @@ public class AgentService {
       return;
     }
     if (!daemon.isResolvable()) {
-      skip(agent, "no daemon client is configured", false);
+      skip(agent, AgentCleanupDeferred.NO_DAEMON_CLIENT, "no daemon client is configured", false);
       return;
     }
     AgentDaemon port = daemon.get();
     AgentDaemon.CleanupAnswer answer = port.cleanupCheck(workspace.id, agent.id.toString());
     if (answer.isUnknownAgent()) {
       // Removed already: a remove whose OK never arrived, or a daemon that lost it (qits-1233).
-      markRemoved(agent.id, "its daemon no longer knows it");
+      markRemoved(agent.id, AgentRemoved.UNKNOWN_TO_DAEMON, false, "its daemon no longer knows it");
       return;
     }
     if (!answer.isFound()) {
-      skip(agent, "its cleanup check went unanswered: " + answer.detail(), true);
+      skip(
+          agent,
+          AgentCleanupDeferred.CHECK_UNANSWERED,
+          "its cleanup check went unanswered: " + answer.detail(),
+          true);
       return;
     }
     AgentDaemon.CleanupCheck check = answer.check();
     if (check.busy()) {
       // Background work in the harness after its main turn ended (qits-1233): neither removed,
       // which would kill it mid-call, nor prompted, which would type into a working agent.
-      skip(agent, BUSY_IN_BACKGROUND, false);
+      skip(agent, AgentCleanupDeferred.BUSY_IN_BACKGROUND, BUSY_IN_BACKGROUND, false);
       return;
     }
     if (check.clean()) {
       AgentDaemon.Outcome removed = port.remove(workspace.id, agent.id.toString(), false);
       if (removed == AgentDaemon.Outcome.OK || removed == AgentDaemon.Outcome.UNKNOWN_AGENT) {
-        markRemoved(agent.id, "released, idle and clean");
+        markRemoved(
+            agent.id,
+            AgentRemoved.RELEASED_IDLE_CLEAN,
+            removed == AgentDaemon.Outcome.OK,
+            "released, idle and clean");
         return;
       }
       if (removed == AgentDaemon.Outcome.BUSY) {
         // Became busy between the check and the removal: the daemon's refusal says so.
-        skip(agent, BUSY_IN_BACKGROUND, false);
+        skip(agent, AgentCleanupDeferred.BUSY_IN_BACKGROUND, BUSY_IN_BACKGROUND, false);
         return;
       }
       if (removed != AgentDaemon.Outcome.REFUSED) {
         skip(
             agent,
+            AgentCleanupDeferred.REMOVAL_UNANSWERED,
             "its removal was answered " + removed,
             removed == AgentDaemon.Outcome.UNREACHABLE);
         return;
@@ -1691,6 +1830,7 @@ public class AgentService {
     if (!promptAgain) {
       skip(
           agent,
+          AgentCleanupDeferred.LEFTOVER_WORK_PROMPTED,
           "it holds leftover work, was prompted to clean up and has not worked since",
           false);
       return;
@@ -1707,30 +1847,42 @@ public class AgentService {
   }
 
   /**
-   * Why the sweep left an OBSOLETE agent alone this pass, logged once per agent and distinct reason
-   * (qits-1233): the sweep runs every few seconds, and a stalled agent used to be stalled without
-   * a line. {@code warn} for a daemon that does not answer; INFO otherwise.
+   * Why the sweep left an OBSOLETE agent alone this pass, logged and announced ({@link
+   * AgentCleanupDeferred}) once per agent and distinct reason (qits-1233): the sweep runs every few
+   * seconds, and a stalled agent used to be stalled without a line. Keyed on the reason WORD, not
+   * on {@code detail} (qits-1236): a detail that moves under the same reason — a workspace's runtime
+   * status, the item's status — is the same deferral, not a new line and a new event every time it
+   * changes. {@code warn} for a daemon that does not answer; INFO otherwise.
    */
-  private void skip(AgentWorktree agent, String reason, boolean warn) {
+  private void skip(AgentWorktree agent, String reason, String detail, boolean warn) {
     if (Objects.equals(lastSkip.put(agent.id, reason), reason)) {
       return;
     }
     if (warn) {
-      LOG.warnf("Cleanup leaves agent %s for now: %s", agent.id, reason);
+      LOG.warnf("Cleanup leaves agent %s for now: %s", agent.id, detail);
     } else {
-      LOG.infof("Cleanup leaves agent %s for now: %s", agent.id, reason);
+      LOG.infof("Cleanup leaves agent %s for now: %s", agent.id, detail);
     }
+    announce(
+        new AgentCleanupDeferred(
+            agent.id.toString(),
+            agent.workId,
+            idOf(agent.workspaceId),
+            agent.repositoryId,
+            reason,
+            detail,
+            Instant.now()));
   }
 
   /** Step 6: a slot workspace with no live agent goes (D2), container, volume and credential. */
   void removeEmptyWorkspaces() {
     synchronized (passLock) {
       Instant orphanBefore = Instant.now().minus(ORPHAN_SLOT_GRACE);
-      List<Long> empty =
+      List<Workspace> empty =
           QuarkusTransaction.requiringNew()
               .call(
                   () -> {
-                    List<Long> out = new ArrayList<>();
+                    List<Workspace> out = new ArrayList<>();
                     for (Workspace workspace : workspaceRepository.findActiveSlots()) {
                       List<AgentWorktree> all = agents.findByWorkspace(workspace.id);
                       boolean anyLive = all.stream().anyMatch(a -> a.state != AgentState.REMOVED);
@@ -1743,14 +1895,19 @@ public class AgentService {
                           && workspace.createdAt.isAfter(orphanBefore)) {
                         continue;
                       }
-                      out.add(workspace.id);
+                      out.add(workspace);
                     }
                     return out;
                   });
-      for (Long id : empty) {
+      for (Workspace slot : empty) {
+        Long id = slot.id;
         try {
+          // A @Transactional method: it has committed once it returns.
           workspaces.discardWorkspace(id, "Removed: its last agent was removed (qits-1152, D2).", true);
           LOG.infof("Workspace %s removed: no agent left in it", id);
+          announce(
+              new WorkspaceRemoved(
+                  idOf(id), slot.repositoryId, WorkspaceRemoved.NO_AGENT_LEFT, Instant.now()));
         } catch (RuntimeException e) {
           LOG.warnf(e, "Could not remove empty workspace %s", id);
         }
@@ -1789,6 +1946,22 @@ public class AgentService {
     return liveness.isResolvable() && liveness.get().isDaemonLive(workspaceId);
   }
 
+  /** {@code event} to the lifecycle port; call it only once the write it reports committed. */
+  private void announce(QitsEvent event) {
+    LifecycleAnnouncer.announce(lifecycle, event);
+  }
+
+  /** A workspace row id as the events carry it; null stays null, and is no key on the wire. */
+  private static String idOf(Long id) {
+    return id == null ? null : id.toString();
+  }
+
+  /** The resume of {@code agent}, built inside the transaction that wrote it, announced after. */
+  private static AgentResumed resumed(AgentWorktree agent, String reason, Instant at) {
+    return new AgentResumed(
+        agent.id.toString(), agent.workId, idOf(agent.workspaceId), agent.repositoryId, reason, at);
+  }
+
   /** The placed, live agents by workspace, in one read. Called inside a transaction. */
   private Map<Long, List<AgentWorktree>> placedByWorkspace() {
     Map<Long, List<AgentWorktree>> byWorkspace = new LinkedHashMap<>();
@@ -1798,9 +1971,19 @@ public class AgentService {
     return byWorkspace;
   }
 
-  /** REMOVED: the row stays as history; the credential and the prompt draft go. */
-  void markRemoved(UUID id, String why) {
-    String tokenId =
+  /** What a removal that flipped the row hands on: the token to delete, and the event. */
+  private record Removal(String tokenId, AgentRemoved event) {}
+
+  /**
+   * REMOVED: the row stays as history; the credential and the prompt draft go. Announced ({@link
+   * AgentRemoved}) only by the call that flipped the row, after its commit.
+   *
+   * @param reason one of {@link AgentRemoved}'s reason words
+   * @param harnessStopped whether the daemon answered this removal OK
+   * @param detail the sentence logged and announced
+   */
+  void markRemoved(UUID id, String reason, boolean harnessStopped, String detail) {
+    Removal removal =
         QuarkusTransaction.requiringNew()
             .call(
                 () -> {
@@ -1820,17 +2003,28 @@ public class AgentService {
                   row.pendingText = null;
                   attachments.deleteByAgentId(id);
                   drafts.deleteByAgentId(id);
-                  return held == null ? "" : held;
+                  return new Removal(
+                      held == null ? "" : held,
+                      new AgentRemoved(
+                          id.toString(),
+                          row.workId,
+                          idOf(row.workspaceId),
+                          row.repositoryId,
+                          reason,
+                          harnessStopped,
+                          detail,
+                          row.removedAt));
                 });
     started.remove(id);
     pendingSince.remove(id);
     requeued.remove(id);
     lastSkip.remove(id);
-    if (tokenId == null) {
+    if (removal == null) {
       return;
     }
-    LOG.infof("Agent %s removed: %s", id, why);
-    deleteToken(tokenId);
+    LOG.infof("Agent %s removed: %s", id, detail);
+    announce(removal.event());
+    deleteToken(removal.tokenId());
   }
 
   /**

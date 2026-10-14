@@ -19,6 +19,7 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
+import eu.wohlben.qits.workspaces.events.AgentRemoved;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
@@ -99,7 +100,7 @@ public class AgentServiceTest {
                         .stream()
                         .map(a -> a.id)
                         .toList());
-    left.forEach(id -> service.markRemoved(id, "the test is over"));
+    left.forEach(id -> service.markRemoved(id, AgentRemoved.DISCARDED, false, "the test is over"));
     commissioner.reset();
     QuarkusTransaction.requiringNew()
         .run(

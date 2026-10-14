@@ -6,6 +6,8 @@ import eu.wohlben.qits.workspaces.error.IntegrateConflictException;
 import eu.wohlben.qits.workspaces.error.InternalServerErrorException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.error.RunnerRefusals;
+import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
+import eu.wohlben.qits.workspaces.events.WorkspaceStarted;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
 import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerRefDto;
 import eu.wohlben.qits.workspaces.dto.WorkItemWorkspaceDto;
@@ -98,6 +100,13 @@ public class WorkspaceService {
    * runner connected — see {@link RunnerPlacement}. A DIRECT row never reaches it.
    */
   @Inject Instance<RunnerPlacement> runnerPlacement;
+
+  /**
+   * {@code WorkspaceStarted} and {@code WorkspaceFailed} for a DIRECT row, and {@code
+   * WorkspaceFailed} for a RUNNER row refused before the queue (qits-1236): once per transition,
+   * after the write committed. Absent: nothing is announced.
+   */
+  @Inject Instance<LifecycleAnnouncer> lifecycle;
 
   /** The runner session's writes, and the start processes a runner's launch settles. */
   @Inject RunnerClaims runnerClaims;
@@ -327,8 +336,30 @@ public class WorkspaceService {
       if (stoppedSince(rowId, start)) {
         return false;
       }
-      QuarkusTransaction.requiringNew().run(() -> markRuntime(repoId, workspaceId, status, error));
+      RuntimeMark mark =
+          QuarkusTransaction.requiringNew()
+              .call(() -> markRuntime(repoId, workspaceId, status, error));
+      // Committed: announce a transition, not a re-stamp (the already-running short-circuit
+      // writes RUNNING over RUNNING).
+      if (mark != null && mark.was() != status) {
+        announceRuntime(mark.rowId(), repoId, status, error);
+      }
       return true;
+    }
+  }
+
+  /** A DIRECT row's runtime write: the row it landed on and the status it replaced. */
+  private record RuntimeMark(Long rowId, WorkspaceRuntimeStatus was) {}
+
+  /** {@code WorkspaceStarted} for RUNNING, {@code WorkspaceFailed} for FAILED, nothing otherwise. */
+  private void announceRuntime(
+      Long rowId, String repoId, WorkspaceRuntimeStatus status, String error) {
+    if (status == WorkspaceRuntimeStatus.RUNNING) {
+      LifecycleAnnouncer.announce(
+          lifecycle, new WorkspaceStarted(rowId.toString(), repoId, Instant.now()));
+    } else if (status == WorkspaceRuntimeStatus.FAILED) {
+      LifecycleAnnouncer.announce(
+          lifecycle, new WorkspaceFailed(rowId.toString(), repoId, error, Instant.now()));
     }
   }
 
@@ -2535,15 +2566,19 @@ public class WorkspaceService {
     }
   }
 
-  private void markRuntime(
+  /** @return the row written and the status it held, or null when no ACTIVE row matched */
+  private RuntimeMark markRuntime(
       String repoId, String workspaceId, WorkspaceRuntimeStatus status, String error) {
-    workspaceRepository
+    return workspaceRepository
         .findActiveByRepositoryAndWorkspaceId(repoId, workspaceId)
-        .ifPresent(
+        .map(
             wt -> {
+              RuntimeMark mark = new RuntimeMark(wt.id, wt.runtimeStatus);
               wt.runtimeStatus = status;
               wt.runtimeError = error;
-            });
+              return mark;
+            })
+        .orElse(null);
   }
 
   private static String truncate(String s) {
@@ -3434,18 +3469,25 @@ public class WorkspaceService {
     LOG.errorf(
         "Workspace %s/%s cannot be placed on a runner: %s",
         row.repositoryId, row.workspaceId, reason);
-    QuarkusTransaction.requiringNew()
-        .run(
-            () ->
-                workspaceRepository
-                    .findByIdOptional(row.id)
-                    .ifPresent(
-                        w -> {
-                          w.runtimeStatus = WorkspaceRuntimeStatus.FAILED;
-                          w.runtimeError = truncate(reason);
-                          w.queuedAt = null;
-                        }));
+    boolean failed =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () ->
+                    workspaceRepository
+                        .findByIdOptional(row.id)
+                        .map(
+                            w -> {
+                              boolean was = w.runtimeStatus == WorkspaceRuntimeStatus.FAILED;
+                              w.runtimeStatus = WorkspaceRuntimeStatus.FAILED;
+                              w.runtimeError = truncate(reason);
+                              w.queuedAt = null;
+                              return !was;
+                            })
+                        .orElse(false));
     changePublisher.runtimeChanged(row.repositoryId, row.id);
+    if (failed) {
+      announceRuntime(row.id, row.repositoryId, WorkspaceRuntimeStatus.FAILED, truncate(reason));
+    }
     WorkspaceProcessTracker.Handle process =
         narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null;
     if (process == null) {
