@@ -1033,6 +1033,36 @@ public class AgentServiceTest {
     assertEquals(AgentState.REMOVED, discarded.state());
   }
 
+  /** What {@link AgentService} logged while {@code run} ran, formatted. */
+  private static List<String> logsOf(Runnable run) {
+    List<String> logged = new CopyOnWriteArrayList<>();
+    Handler capture =
+        new Handler() {
+          @Override
+          public void publish(LogRecord record) {
+            logged.add(
+                record.getParameters() == null
+                    ? record.getMessage()
+                    : String.format(record.getMessage(), record.getParameters()));
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger(AgentService.class.getName());
+    logger.addHandler(capture);
+    try {
+      run.run();
+    } finally {
+      logger.removeHandler(capture);
+    }
+    return logged;
+  }
+
   /**
    * An admin agent started in its slot, whose daemon stays live, then released, its item VERIFIED
    * and idle: what the sweep cleans up. {@code script} runs before the item closes, so no
@@ -1058,12 +1088,28 @@ public class AgentServiceTest {
   void anAgentWhoseRemovalWasNeverConfirmedIsRemovedOnceItsDaemonNoLongerKnowsIt() {
     // qits-1233 (qits-1229's agent): the daemon removed the agent but its OK never arrived, and
     // every later cleanup check answered 404 — which read as "no answer", so the sweep stalled.
-    String agentId =
-        sweepable("w-lost", id -> daemon.removesAnswer(id, AgentDaemon.Outcome.UNREACHABLE));
+    // Captured from the start: a background pass kicked by the item's VERIFIED may sweep first.
+    List<String> made = new ArrayList<>();
+    List<String> logged =
+        logsOf(
+            () -> {
+              made.add(
+                  sweepable(
+                      "w-lost", id -> daemon.removesAnswer(id, AgentDaemon.Outcome.UNREACHABLE)));
+              service.cleanUp();
+              service.cleanUp();
+            });
+    String agentId = made.get(0);
     Long slot = row(agentId).workspaceId;
     try {
-      service.cleanUp();
       assertEquals(AgentState.OBSOLETE, row(agentId).state, "no answer to the remove: it stays");
+      List<String> skips =
+          logged.stream().filter(m -> m.startsWith("Cleanup leaves agent " + agentId)).toList();
+      assertEquals(
+          List.of(
+              "Cleanup leaves agent " + agentId + " for now: its removal was answered UNREACHABLE"),
+          skips,
+          "the stall says why, once over two passes");
 
       daemon.forget(agentId);
       service.cleanUp();

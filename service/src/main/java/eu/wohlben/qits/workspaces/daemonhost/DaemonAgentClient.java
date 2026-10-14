@@ -252,8 +252,10 @@ public class DaemonAgentClient implements AgentDaemon {
       return Outcome.UNKNOWN_AGENT;
     }
     if (status >= 500) {
-      LOG.debugf(
-          "workspace %s's daemon answered %s to %s %s", workspaceRowId, Integer.valueOf(status), method, path);
+      // Shown (qits-1233): a remove the daemon failed to confirm stalls the cleanup sweep.
+      LOG.warnf(
+          "workspace %s's daemon answered %s to %s %s: %s",
+          workspaceRowId, Integer.valueOf(status), method, path, answer.body());
       return Outcome.UNREACHABLE;
     }
     LOG.debugf(
@@ -312,6 +314,11 @@ public class DaemonAgentClient implements AgentDaemon {
                           .map(buffer -> new Answer(response.statusCode(), buffer.toString()))),
           requestTimeoutMs);
     } catch (RuntimeException e) {
+      // Shown, without the trace (qits-1233): a lost answer to a remove is how an agent's row
+      // outlived its worktree. The trace stays at debug.
+      LOG.infof(
+          "workspace %s's daemon did not answer %s %s: %s",
+          route.workspaceRowId(), method, path, rootMessage(e));
       LOG.debugf(
           e, "workspace %s's daemon did not answer %s %s", route.workspaceRowId(), method, path);
       return null;
@@ -324,6 +331,15 @@ public class DaemonAgentClient implements AgentDaemon {
     } catch (RuntimeException notJson) {
       return null;
     }
+  }
+
+  private static String rootMessage(Throwable e) {
+    Throwable root = e;
+    while (root.getCause() != null && root.getCause() != root) {
+      root = root.getCause();
+    }
+    String message = root.getMessage();
+    return root.getClass().getSimpleName() + (message == null ? "" : ": " + message);
   }
 
   private static String blankToNull(String value) {

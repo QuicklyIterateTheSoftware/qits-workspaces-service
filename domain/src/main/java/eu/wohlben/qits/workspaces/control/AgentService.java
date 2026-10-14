@@ -244,6 +244,12 @@ public class AgentService {
   /** The last refusal logged per agent, so a refusing daemon is logged once and not every pass. */
   private final Map<UUID, String> lastRefusal = new ConcurrentHashMap<>();
 
+  /**
+   * The last reason the cleanup sweep logged for leaving an agent alone, so each is logged once and
+   * not every pass (qits-1233). An agent leaves it when it is REMOVED.
+   */
+  private final Map<UUID, String> lastSkip = new ConcurrentHashMap<>();
+
   /** The first wait before an agent whose workspace failed again is placed again (qits-1233). */
   static final Duration REQUEUE_BACKOFF = Duration.ofMinutes(1);
 
@@ -1513,6 +1519,7 @@ public class AgentService {
       List<AgentWorktree> obsolete =
           QuarkusTransaction.requiringNew().call(() -> agents.findObsolete());
       Map<String, String> currentStatus = currentStatusByWorkId(obsolete);
+      lastSkip.keySet().retainAll(obsolete.stream().map(a -> a.id).toList());
       for (AgentWorktree agent : obsolete) {
         try {
           cleanUp(agent, idleBefore, currentStatus);
@@ -1551,15 +1558,23 @@ public class AgentService {
       status = agent.entityStatus;
     }
     if (!isClosed(status)) {
+      skip(
+          agent,
+          status == null ? "its item has no status" : "its item is " + status + ", not closed",
+          false);
       return;
     }
     if (agent.lastActivityAt != null && agent.lastActivityAt.isAfter(idleBefore)) {
+      skip(agent, "it was active within " + cleanupIdle, false);
       return;
     }
-    if (agent.pendingText != null
-        || (activity.isResolvable()
-            && activity.get().activityOf(agent.id.toString()).orElse(null)
-                == AgentActivityState.BUSY)) {
+    if (agent.pendingText != null) {
+      skip(agent, "a turn is still to be said to it", false);
+      return;
+    }
+    if (activity.isResolvable()
+        && activity.get().activityOf(agent.id.toString()).orElse(null) == AgentActivityState.BUSY) {
+      skip(agent, "its harness is busy with a turn", false);
       return;
     }
     if (agent.workspaceId == null) {
@@ -1578,9 +1593,18 @@ public class AgentService {
         // The check needs the daemon: start the workspace to clean it up.
         startQuietly(workspace.id);
       }
+      skip(
+          agent,
+          "workspace "
+              + workspace.id
+              + "'s daemon is not connected ("
+              + workspace.runtimeStatus
+              + ")",
+          false);
       return;
     }
     if (!daemon.isResolvable()) {
+      skip(agent, "no daemon client is configured", false);
       return;
     }
     AgentDaemon port = daemon.get();
@@ -1591,6 +1615,7 @@ public class AgentService {
       return;
     }
     if (!answer.isFound()) {
+      skip(agent, "its cleanup check went unanswered: " + answer.detail(), true);
       return;
     }
     AgentDaemon.CleanupCheck check = answer.check();
@@ -1601,6 +1626,10 @@ public class AgentService {
         return;
       }
       if (removed != AgentDaemon.Outcome.REFUSED) {
+        skip(
+            agent,
+            "its removal was answered " + removed,
+            removed == AgentDaemon.Outcome.UNREACHABLE);
         return;
       }
     }
@@ -1610,6 +1639,10 @@ public class AgentService {
         agent.cleanupPromptedAt == null
             || (agent.lastActivityAt != null && agent.lastActivityAt.isAfter(agent.cleanupPromptedAt));
     if (!promptAgain) {
+      skip(
+          agent,
+          "it holds leftover work, was prompted to clean up and has not worked since",
+          false);
       return;
     }
     String prompt = CLEANUP_PROMPT + "\n\nWhat the check found: " + describe(check) + ".";
@@ -1621,6 +1654,22 @@ public class AgentService {
               row.cleanupPromptedAt = Instant.now();
             });
     LOG.infof("Agent %s has leftover work; it is prompted to clean up", agent.id);
+  }
+
+  /**
+   * Why the sweep left an OBSOLETE agent alone this pass, logged once per agent and distinct reason
+   * (qits-1233): the sweep runs every few seconds, and a stalled agent used to be stalled without
+   * a line. {@code warn} for a daemon that does not answer; INFO otherwise.
+   */
+  private void skip(AgentWorktree agent, String reason, boolean warn) {
+    if (Objects.equals(lastSkip.put(agent.id, reason), reason)) {
+      return;
+    }
+    if (warn) {
+      LOG.warnf("Cleanup leaves agent %s for now: %s", agent.id, reason);
+    } else {
+      LOG.infof("Cleanup leaves agent %s for now: %s", agent.id, reason);
+    }
   }
 
   /** Step 6: a slot workspace with no live agent goes (D2), container, volume and credential. */
@@ -1726,6 +1775,7 @@ public class AgentService {
     started.remove(id);
     pendingSince.remove(id);
     requeued.remove(id);
+    lastSkip.remove(id);
     if (tokenId == null) {
       return;
     }
