@@ -61,7 +61,7 @@ public class WorkspaceDaemonConsumerPactTest {
         "startAgentWorktree",
         Trigger.operation("dispatchAgent"),
         body,
-        List.of("$.commandId", "$.sessionId", "$.resumed"),
+        List.of("$.commandId", "$.sessionId", "$.resumed", "$.launched"),
         (row, agentId) -> {
           AgentDaemon.Started started =
               client.start(

@@ -230,7 +230,8 @@ public class AgentService {
    * the workspace row. Cleared for a workspace whenever its daemon connects or goes: the daemon
    * keeps the agent credential in memory only, so after a restart every placed agent is started
    * again, a YIELDED one included (qits-1212). Empty in a fresh process for the same reason: a
-   * start of an agent whose harness still runs launches nothing in the daemon.
+   * start of an agent whose harness still runs launches nothing in the daemon, and ignores its
+   * instruction, so the pending turn stays on the row for {@link #drive} to say (qits-1225).
    */
   private final Map<UUID, Long> started = new ConcurrentHashMap<>();
 
@@ -1190,7 +1191,9 @@ public class AgentService {
    * restart, and {@link #mark} relays nothing to it until it is woken. It is only started ({@link
    * #ensureStarted}): its run state stays YIELDED and its pending turn stays on the row, for
    * {@link #resumeYielded} to make it RUNNING and {@link #drive} to say it. A start of an agent
-   * whose harness still runs launches nothing in the daemon, so no agent gets a second harness.
+   * whose harness still runs launches nothing in the daemon, so no agent gets a second harness; a
+   * RUNNING agent's pending turn then stays on the row and is said as a turn on the next pass
+   * (qits-1225).
    */
   void driveRunning() {
     synchronized (passLock) {
@@ -1313,9 +1316,12 @@ public class AgentService {
   /**
    * Start the agent on {@code workspace}'s daemon and record it in {@link #started}. With {@code
    * withTurn}, a RUNNING agent's pending text is its instruction and is taken off the row once the
-   * daemon accepted it. Without (a YIELDED agent, qits-1212), the start carries no instruction and
-   * leaves the row's pending text and activity time alone: the agent is only made to hold a harness
-   * again, and its turn is said once it is RUNNING.
+   * daemon launched a harness with it. A start that launched nothing (the harness still ran: a
+   * restart of this service, a reconnect of the daemon) attached to it and ignored the instruction:
+   * the pending text and activity time stay, and the next {@link #drive}, the agent now started,
+   * says the text as a turn (qits-1225). Without {@code withTurn} (a YIELDED agent, qits-1212), the
+   * start carries no instruction and leaves the row's pending text and activity time alone: the
+   * agent is only made to hold a harness again, and its turn is said once it is RUNNING.
    */
   private void start(AgentWorktree agent, Workspace workspace, AgentDaemon port, boolean withTurn) {
     if (!agent.holdsToken()) {
@@ -1346,6 +1352,7 @@ public class AgentService {
     }
     lastRefusal.remove(agent.id);
     started.put(agent.id, workspace.id);
+    boolean told = withTurn && answer.launched();
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
@@ -1354,7 +1361,7 @@ public class AgentService {
               row.sessionId = answer.sessionId() == null ? row.sessionId : answer.sessionId();
               row.startRefusal = null;
               row.startRefusedAt = null;
-              if (withTurn) {
+              if (told) {
                 row.lastActivityAt = Instant.now();
                 if (Objects.equals(row.pendingText, instruction)) {
                   row.pendingText = null;
@@ -1364,9 +1371,11 @@ public class AgentService {
     LOG.infof(
         "Agent %s %s in workspace %s%s",
         agent.id,
-        answer.resumed() ? "resumed" : "started",
+        !answer.launched() ? "attached" : answer.resumed() ? "resumed" : "started",
         workspace.id,
-        withTurn ? "" : ", still yielded");
+        !withTurn
+            ? ", still yielded"
+            : told || instruction == null ? "" : ", its turn still pending");
     changePublisher.fire(agent.repositoryId, workspace.id, WorkspaceChangeHint.Topic.AGENTS);
   }
 

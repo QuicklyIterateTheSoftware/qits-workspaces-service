@@ -6,12 +6,18 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A scripted {@link AgentDaemon} (qits-1152): every call is recorded, every workspace is reachable
  * unless marked otherwise, and the cleanup check answers clean unless a test scripts leftover work.
  * {@link #reset} between tests.
+ *
+ * <p>Harnesses survive like the daemon's (qits-1225): the first start of an agent launches one with
+ * the instruction as its opening turn; a later start finds it running and answers {@code
+ * launched=false}, the instruction ignored, until {@link #restart} (a daemon restart) or a remove
+ * forgets it.
  */
 @ApplicationScoped
 public class FakeAgentDaemon implements AgentDaemon {
@@ -29,6 +35,9 @@ public class FakeAgentDaemon implements AgentDaemon {
 
   private final Map<String, CleanupCheck> checks = new ConcurrentHashMap<>();
 
+  /** The agents whose harness runs, by agent id. */
+  private final Set<String> harnesses = ConcurrentHashMap.newKeySet();
+
   private volatile Outcome turnAnswer = Outcome.OK;
 
   /** The refusal every start answers with; null: starts are accepted. */
@@ -38,8 +47,14 @@ public class FakeAgentDaemon implements AgentDaemon {
     calls.clear();
     starts.clear();
     checks.clear();
+    harnesses.clear();
     turnAnswer = Outcome.OK;
     startRefusal = null;
+  }
+
+  /** A daemon restart: every harness is gone; the next start of each agent launches one again. */
+  public void restart() {
+    harnesses.clear();
   }
 
   /** Every start is refused (409) with {@code detail} until {@link #acceptStarts}. */
@@ -78,7 +93,14 @@ public class FakeAgentDaemon implements AgentDaemon {
     if (refusal != null) {
       return Started.of(Outcome.REFUSED, refusal);
     }
-    return new Started(Outcome.OK, "cmd-" + start.agentId(), "session-" + start.agentId(), start.sessionId() != null, null);
+    boolean launched = harnesses.add(start.agentId());
+    return new Started(
+        Outcome.OK,
+        "cmd-" + start.agentId(),
+        "session-" + start.agentId(),
+        start.sessionId() != null,
+        launched,
+        null);
   }
 
   @Override
@@ -103,6 +125,10 @@ public class FakeAgentDaemon implements AgentDaemon {
   public Outcome remove(Long workspaceRowId, String agentId, boolean force) {
     calls.add("remove " + workspaceRowId + " " + agentId + " force=" + force);
     CleanupCheck check = checks.get(agentId);
-    return check != null && !check.clean() && !force ? Outcome.REFUSED : Outcome.OK;
+    if (check != null && !check.clean() && !force) {
+      return Outcome.REFUSED;
+    }
+    harnesses.remove(agentId);
+    return Outcome.OK;
   }
 }

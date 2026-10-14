@@ -12,7 +12,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The daemon's cleanup-check answer (qits-1152, D5) as {@link DaemonAgentClient} reads it: {@code
- * {clean, dirty: [repository], unpushed: [{repository, branch|null, commits}]}}.
+ * {clean, dirty: [repository], unpushed: [{repository, branch|null, commits}]}}, and an accepted
+ * start's {@code launched} flag (qits-1225).
  */
 class DaemonAgentClientAnswersTest {
 
@@ -46,5 +47,31 @@ class DaemonAgentClientAnswersTest {
   void aBodyThatIsNoCheckIsNone() {
     assertNull(DaemonAgentClient.cleanupCheckOf(null));
     assertNull(DaemonAgentClient.cleanupCheckOf(new JsonObject("{\"error\":\"x\"}")));
+  }
+
+  @Test
+  void aStartThatLaunchedNothingSaysSo() {
+    AgentDaemon.Started started =
+        DaemonAgentClient.startedOf(
+            new JsonObject(
+                "{\"commandId\":\"c\",\"sessionId\":\"s\",\"resumed\":true,\"launched\":false}"));
+    assertEquals(AgentDaemon.Outcome.OK, started.outcome());
+    assertEquals("c", started.commandId());
+    assertEquals("s", started.sessionId());
+    assertTrue(started.resumed());
+    assertFalse(started.launched());
+  }
+
+  @Test
+  void aStartThatLaunchedAHarnessSaysSo() {
+    assertTrue(
+        DaemonAgentClient.startedOf(new JsonObject("{\"commandId\":\"c\",\"launched\":true}"))
+            .launched());
+  }
+
+  @Test
+  void aStartWithoutTheFlagReadsAsLaunched() {
+    assertTrue(DaemonAgentClient.startedOf(new JsonObject("{\"commandId\":\"c\"}")).launched());
+    assertTrue(DaemonAgentClient.startedOf(null).launched(), "no body, or none that parses");
   }
 }
