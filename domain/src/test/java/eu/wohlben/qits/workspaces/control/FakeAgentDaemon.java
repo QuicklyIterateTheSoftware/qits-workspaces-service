@@ -133,6 +133,9 @@ public class FakeAgentDaemon implements AgentDaemon {
       return scripted;
     }
     CleanupCheck check = checks.get(agentId);
-    return check != null && !check.clean() && !force ? Outcome.REFUSED : Outcome.OK;
+    if (check == null || force) {
+      return Outcome.OK;
+    }
+    return check.busy() ? Outcome.BUSY : check.clean() ? Outcome.OK : Outcome.REFUSED;
   }
 }

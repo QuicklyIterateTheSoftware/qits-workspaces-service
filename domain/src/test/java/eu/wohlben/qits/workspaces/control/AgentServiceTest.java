@@ -1136,6 +1136,56 @@ public class AgentServiceTest {
   }
 
   @Test
+  void anAgentBusyInTheBackgroundIsNeitherRemovedNorPrompted() {
+    // qits-1233 (qits-1212's agent): a background verify task ran after the main turn's Stop, and
+    // the sweep removed the agent mid tool call — clean, idle by its last frame, and not BUSY.
+    String agentId =
+        sweepable(
+            "w-busy",
+            id ->
+                daemon.leftover(
+                    id, new AgentDaemon.CleanupCheck(false, List.of("wrapper"), List.of(), true)));
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.cleanUp();
+
+      AgentWorktree left = row(agentId);
+      assertEquals(AgentState.OBSOLETE, left.state);
+      assertNull(left.cleanupPromptedAt, "no cleanup prompt typed into a working agent");
+      assertNull(left.pendingText);
+      assertFalse(
+          daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("remove ")),
+          "no removal while it works");
+
+      // Done, and clean: removed on the next sweep.
+      daemon.leftover(agentId, new AgentDaemon.CleanupCheck(true, List.of(), List.of()));
+      service.cleanUp();
+      assertEquals(AgentState.REMOVED, row(agentId).state);
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aRemovalRefusedBecauseTheAgentWentBusyIsNoLeftoverWork() {
+    // The check said clean, then a background task started: the daemon refuses the removal with
+    // a check that says busy, which is no reason to prompt the agent.
+    String agentId =
+        sweepable("w-went-busy", id -> daemon.removesAnswer(id, AgentDaemon.Outcome.BUSY));
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.cleanUp();
+
+      AgentWorktree left = row(agentId);
+      assertEquals(AgentState.OBSOLETE, left.state);
+      assertNull(left.cleanupPromptedAt);
+      assertNull(left.pendingText);
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
   void aTurnTypedIntoAWaitingAgentTellsQitsProjectsItNoLongerWaits() {
     // qits-1198: the agent waited, a phase turn was typed into it, and qits-projects kept it
     // blocked while it worked, because the turn cleared the flag here without saying so.

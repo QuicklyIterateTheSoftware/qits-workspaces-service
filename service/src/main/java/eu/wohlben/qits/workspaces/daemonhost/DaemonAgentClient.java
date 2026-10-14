@@ -198,10 +198,26 @@ public class DaemonAgentClient implements AgentDaemon {
         : CleanupAnswer.found(check);
   }
 
+  /**
+   * A refusal (409) is the daemon's cleanup check as its body; one that says {@code busy} is {@link
+   * Outcome#BUSY}, not leftover work (qits-1233).
+   */
   @Override
   public Outcome remove(Long workspaceRowId, String agentId, boolean force) {
-    return simple(
-        workspaceRowId, HttpMethod.DELETE, path(agentId, null) + (force ? "?force=true" : ""), null);
+    String path = path(agentId, null) + (force ? "?force=true" : "");
+    Route route = route(workspaceRowId);
+    if (route == null) {
+      return Outcome.UNREACHABLE;
+    }
+    Answer answer = send(route, HttpMethod.DELETE, path, null);
+    Outcome outcome = outcomeOf(workspaceRowId, HttpMethod.DELETE, path, answer);
+    if (outcome == Outcome.REFUSED && answer.status() == 409) {
+      CleanupCheck refusal = cleanupCheckOf(json(answer.body()));
+      if (refusal != null && refusal.busy()) {
+        return Outcome.BUSY;
+      }
+    }
+    return outcome;
   }
 
   /** The cleanup check's body, or null when it is not one. Package-private for its test. */
@@ -232,7 +248,12 @@ public class DaemonAgentClient implements AgentDaemon {
                 commits == null ? 0 : commits));
       }
     }
-    return new CleanupCheck(Boolean.TRUE.equals(json.getBoolean("clean")), dirty, unpushed);
+    // busy (qits-1233) is optional: a daemon that predates it is never busy.
+    return new CleanupCheck(
+        Boolean.TRUE.equals(json.getBoolean("clean")),
+        dirty,
+        unpushed,
+        Boolean.TRUE.equals(json.getBoolean("busy")));
   }
 
   private Outcome simple(Long workspaceRowId, HttpMethod method, String path, JsonObject body) {
@@ -240,7 +261,11 @@ public class DaemonAgentClient implements AgentDaemon {
     if (route == null) {
       return Outcome.UNREACHABLE;
     }
-    Answer answer = send(route, method, path, body);
+    return outcomeOf(workspaceRowId, method, path, send(route, method, path, body));
+  }
+
+  private static Outcome outcomeOf(
+      Long workspaceRowId, HttpMethod method, String path, Answer answer) {
     if (answer == null) {
       return Outcome.UNREACHABLE;
     }

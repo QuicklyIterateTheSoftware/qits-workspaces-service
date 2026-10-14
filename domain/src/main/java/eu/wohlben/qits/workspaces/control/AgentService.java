@@ -107,6 +107,9 @@ public class AgentService {
           + " cases, if they are blocked somehow, create a new ticket and push them under that"
           + " workId. Say explicitly what you committed, why, and why it has not been released yet.";
 
+  /** Why the sweep leaves an agent whose harness works in the background (qits-1233). */
+  private static final String BUSY_IN_BACKGROUND = "busy: its harness has background work running";
+
   /** The statuses that end an item (D4): the cleanup sweep removes a closed item's OBSOLETE agents. */
   private static final Set<String> CLOSING_STATUSES = Set.of("VERIFIED", "DONE", "DROPPED");
 
@@ -1509,7 +1512,8 @@ public class AgentService {
 
   /**
    * Step 5: OBSOLETE agents of closed items (VERIFIED, DONE or DROPPED), idle long enough, are
-   * removed or prompted (D4–D7). Judged by the item's CURRENT status — the row {@code
+   * removed or prompted (D4–D7). One whose daemon reports background work in its harness ({@code
+   * busy}) is neither (qits-1233); one its daemon no longer knows is REMOVED. Judged by the item's CURRENT status — the row {@code
    * findLiveByWorkId} returns, which the relay has always kept current — so a stale OBSOLETE row
    * whose own {@code entityStatus} never caught up still heals.
    */
@@ -1619,10 +1623,21 @@ public class AgentService {
       return;
     }
     AgentDaemon.CleanupCheck check = answer.check();
+    if (check.busy()) {
+      // Background work in the harness after its main turn ended (qits-1233): neither removed,
+      // which would kill it mid-call, nor prompted, which would type into a working agent.
+      skip(agent, BUSY_IN_BACKGROUND, false);
+      return;
+    }
     if (check.clean()) {
       AgentDaemon.Outcome removed = port.remove(workspace.id, agent.id.toString(), false);
       if (removed == AgentDaemon.Outcome.OK || removed == AgentDaemon.Outcome.UNKNOWN_AGENT) {
         markRemoved(agent.id, "released, idle and clean");
+        return;
+      }
+      if (removed == AgentDaemon.Outcome.BUSY) {
+        // Became busy between the check and the removal: the daemon's refusal says so.
+        skip(agent, BUSY_IN_BACKGROUND, false);
         return;
       }
       if (removed != AgentDaemon.Outcome.REFUSED) {

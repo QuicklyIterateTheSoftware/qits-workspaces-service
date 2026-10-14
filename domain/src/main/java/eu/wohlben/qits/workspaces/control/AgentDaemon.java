@@ -36,7 +36,13 @@ public interface AgentDaemon {
     /** The daemon refused (409): another worktree holds the branch, or no harness sign-in. */
     REFUSED,
     /** No tunnel, a timeout or a 5xx: try again later. */
-    UNREACHABLE
+    UNREACHABLE,
+    /**
+     * A removal without force refused (409) because the agent's harness still has background work
+     * running — a background task or subagent after its main turn ended (qits-1233). Not leftover
+     * work: try again once it is done.
+     */
+    BUSY
   }
 
   /** A start's answer. */
@@ -47,8 +53,18 @@ public interface AgentDaemon {
     }
   }
 
-  /** The cleanup check (D5): {@code clean}, the dirty repositories and the unpushed branches. */
-  record CleanupCheck(boolean clean, List<String> dirty, List<Unpushed> unpushed) {
+  /**
+   * The cleanup check (D5): {@code clean}, the dirty repositories and the unpushed branches, and
+   * whether the harness is {@code busy} with background work (qits-1233). {@code clean} is about
+   * git only, so a busy agent is never described as holding leftover work; a daemon that does not
+   * say {@code busy} reads as not busy.
+   */
+  record CleanupCheck(boolean clean, List<String> dirty, List<Unpushed> unpushed, boolean busy) {
+
+    /** A check that says nothing about background work: not busy. */
+    public CleanupCheck(boolean clean, List<String> dirty, List<Unpushed> unpushed) {
+      this(clean, dirty, unpushed, false);
+    }
 
     /** Commits on {@code branch} (null: a detached HEAD) of {@code repository} that never left. */
     public record Unpushed(String repository, String branch, int commits) {}
@@ -100,7 +116,8 @@ public interface AgentDaemon {
 
   /**
    * {@code DELETE agent-worktrees/{id}}. {@link Outcome#REFUSED} means leftover work and {@code
-   * force} false; {@link Outcome#UNKNOWN_AGENT} means there is nothing to remove.
+   * force} false; {@link Outcome#BUSY} a refusal because the harness has background work running;
+   * {@link Outcome#UNKNOWN_AGENT} means there is nothing to remove.
    */
   Outcome remove(Long workspaceRowId, String agentId, boolean force);
 }

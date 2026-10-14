@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The daemon's cleanup-check answer (qits-1152, D5) as {@link DaemonAgentClient} reads it: {@code
- * {clean, dirty: [repository], unpushed: [{repository, branch|null, commits}]}}, and what its
+ * {clean, dirty: [repository], unpushed: [{repository, branch|null, commits}], busy?}}, and what its
  * status says (qits-1233): 200 a check, 404 an agent the daemon does not know, anything else none.
  */
 class DaemonAgentClientAnswersTest {
@@ -24,6 +24,23 @@ class DaemonAgentClientAnswersTest {
             new JsonObject("{\"clean\":true,\"dirty\":[],\"unpushed\":[]}"));
     assertTrue(check.clean());
     assertEquals(List.of(), check.dirty());
+  }
+
+  @Test
+  void busyIsReadAndADaemonThatDoesNotSayItIsNotBusy() {
+    // qits-1233: optional on the wire, so the daemon and this service release in either order.
+    assertTrue(
+        DaemonAgentClient.cleanupCheckOf(
+                new JsonObject("{\"clean\":true,\"dirty\":[],\"unpushed\":[],\"busy\":true}"))
+            .busy());
+    assertFalse(
+        DaemonAgentClient.cleanupCheckOf(
+                new JsonObject("{\"clean\":true,\"dirty\":[],\"unpushed\":[],\"busy\":false}"))
+            .busy());
+    assertFalse(
+        DaemonAgentClient.cleanupCheckOf(
+                new JsonObject("{\"clean\":true,\"dirty\":[],\"unpushed\":[]}"))
+            .busy());
   }
 
   @Test
