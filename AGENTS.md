@@ -994,11 +994,19 @@ makes every daemon call, one pass at a time, kicked after each door and every
    left alone — so a start after a lost `started` map never gives an agent a second harness.
    A refused start (409) is stored on the row once per distinct detail (`start_refusal`,
    `start_refused_at`, `AgentDto.startRefusal`/`startRefusedAt`) and tried again every pass; the
-   next accepted start clears it (qits-1217).
+   next accepted start clears it (qits-1217). A RUNNING agent whose workspace is FAILED with no
+   daemon (it never came up: `RunnerClaims.awaitDaemon`, or a failed launch) is queued for another
+   workspace, the reason stored as its start refusal; `WorkspaceUnqueued` kicks the pass that does
+   it, and a FAILED workspace is never offered as a slot. A second failure in a row holds the agent
+   back from placement 1 min, doubling to 30 min, until an accepted start (qits-1233).
 5. **Clean up** (D4, D5, D7) — an OBSOLETE agent whose item is VERIFIED (the status the entity door
    stores) and that has been idle for `qits.workspace.agent.cleanup-idle` (30 s) is checked
    (`cleanup-check`): clean → `DELETE agent-worktrees/{id}`, token deleted, REMOVED; leftover work →
    the D7 prompt is its next turn, never a deletion. It is prompted again only after it has worked.
+   A check that says `busy` (background work in the harness after its main turn ended) is neither
+   removed nor prompted, nor is a removal the daemon refuses as busy; a check answered 404 is an
+   agent the daemon no longer knows, and the row is REMOVED. Every pass that leaves an agent alone
+   logs why, once per agent and reason (qits-1233).
 6. **Remove empty workspaces** (D2) — a slot whose agents are all REMOVED is discarded: container,
    volume and daemon credential.
 
