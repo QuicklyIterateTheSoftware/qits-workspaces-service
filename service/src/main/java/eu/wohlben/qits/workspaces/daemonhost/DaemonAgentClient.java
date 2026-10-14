@@ -130,12 +130,21 @@ public class DaemonAgentClient implements AgentDaemon {
       return Started.of(
           answer.status() >= 500 ? Outcome.UNREACHABLE : Outcome.REFUSED, answer.body());
     }
-    JsonObject json = json(answer.body());
+    return startedOf(json(answer.body()));
+  }
+
+  /**
+   * An accepted start's body (null: none, or not JSON). {@code launched} absent reads as true, what
+   * a daemon that does not send it did before qits-1225: the instruction was taken. Package-private
+   * for its test.
+   */
+  static Started startedOf(JsonObject json) {
     return new Started(
         Outcome.OK,
         json == null ? null : blankToNull(json.getString("commandId")),
         json == null ? null : blankToNull(json.getString("sessionId")),
         json != null && Boolean.TRUE.equals(json.getBoolean("resumed")),
+        json == null || !Boolean.FALSE.equals(json.getValue("launched")),
         null);
   }
 

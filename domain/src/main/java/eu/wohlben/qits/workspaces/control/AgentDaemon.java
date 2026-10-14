@@ -45,11 +45,22 @@ public interface AgentDaemon {
     BUSY
   }
 
-  /** A start's answer. */
-  record Started(Outcome outcome, String commandId, String sessionId, boolean resumed, String detail) {
+  /**
+   * A start's answer. {@code launched} is the daemon's flag: whether this start launched a
+   * harness, with the instruction as its opening turn. False when the agent's harness still ran (a
+   * restart of this service, a reconnect of the daemon): the daemon attached to it and ignored the
+   * instruction, so the turn is still to be said (qits-1225).
+   */
+  record Started(
+      Outcome outcome,
+      String commandId,
+      String sessionId,
+      boolean resumed,
+      boolean launched,
+      String detail) {
 
     public static Started of(Outcome outcome, String detail) {
-      return new Started(outcome, null, null, false, detail);
+      return new Started(outcome, null, null, false, false, detail);
     }
   }
 

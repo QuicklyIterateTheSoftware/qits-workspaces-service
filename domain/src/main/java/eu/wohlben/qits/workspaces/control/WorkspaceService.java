@@ -21,6 +21,7 @@ import eu.wohlben.qits.workspaces.gitmirror.MirrorWorktree;
 import eu.wohlben.qits.workspaces.gitmirror.PushOutcome;
 import eu.wohlben.qits.workspaces.gitmirror.PushSpec;
 import eu.wohlben.qits.workspaces.gitmirror.RepoMirror;
+import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceEventRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
@@ -451,6 +452,11 @@ public class WorkspaceService {
 
   @Inject GitIdentity gitIdentity;
 
+  /**
+   * The agent rows (qits-1152): a branch an ACTIVE agent holds as its {@code wrapperBranch} is never
+   * cleaned up (qits-1232), although {@link #findWorkspaceByBranch} never sees it.
+   */
+  @Inject AgentWorktreeRepository agentWorktrees;
 
   /**
    * Creates {@code branch} from {@code parentBranch} — <b>as a push</b>, through the git host.
@@ -1209,13 +1215,16 @@ public class WorkspaceService {
   /**
    * Whether {@code branch} — workspace-backed or plain — can be removed with no data loss: it is
    * not its own parent (the main branch can't be cleaned up), has no unmerged commits ({@code ahead
-   * == 0} against its parent), a clean working tree when workspace-backed, and no other workspace
-   * forks from it. A plain branch's parent is the repository's main branch; a workspace's is its
-   * fork point. This is the single criterion the UI, the cleanup endpoint and post-integrate
-   * cleanup all use.
+   * == 0} against its parent), a clean working tree when workspace-backed, no other workspace
+   * forks from it, and it is not an ACTIVE agent's wrapper branch (qits-1232). A plain branch's
+   * parent is the repository's main branch; a workspace's is its fork point. This is the single
+   * criterion the UI, the cleanup endpoint and post-integrate cleanup all use.
    */
   public boolean canCleanupBranch(String repoId, String branch, String mainBranch) {
     if (branch == null || branch.isBlank() || branch.startsWith("-")) {
+      return false;
+    }
+    if (hasActiveAgentWrapperBranch(repoId, branch)) {
       return false;
     }
     Workspace wt = findWorkspaceByBranch(repoId, branch);
@@ -1431,6 +1440,18 @@ public class WorkspaceService {
       }
     }
     return null;
+  }
+
+  /**
+   * Whether an ACTIVE agent's worktree (qits-1152) stands on {@code branch} as its {@code
+   * wrapperBranch}. Agents live in {@code agent_worktree}, a table {@link #findWorkspaceByBranch}
+   * never reads, so a wrapper branch created at main's head for a dispatched agent would otherwise
+   * read as merged and unclaimed the moment it is pushed, before the agent has had any chance to
+   * release it. Only ACTIVE protects: an OBSOLETE or REMOVED agent's branch is exactly the kind of
+   * leftover {@link #sweepMergedBranches} exists to take.
+   */
+  private boolean hasActiveAgentWrapperBranch(String repoId, String branch) {
+    return branch != null && !agentWorktrees.findActiveByWrapperBranch(repoId, branch).isEmpty();
   }
 
   /**
@@ -2864,6 +2885,12 @@ public class WorkspaceService {
    *       provisioned workspace with nothing committed yet is "fully merged", and its owner would
    *       find their container gone by morning. An automated run removes only what no active
    *       workspace stands on.
+   *   <li><b>An ACTIVE agent's wrapper branch</b> (qits-1232) — the same reasoning, for the table
+   *       that replaced it: a dispatched agent's wrapper branch is pushed at main's head and reads
+   *       as fully merged the instant it exists, long before the agent has done anything to
+   *       release it. {@link #hasActiveAgentWrapperBranch} is read beside {@link
+   *       #findWorkspaceByBranch} because agents live in {@code agent_worktree}, a table that
+   *       lookup never sees.
    * </ul>
    *
    * <p>Everything that survives those refusals still goes through {@link #canCleanupBranch} — the
@@ -2903,7 +2930,8 @@ public class WorkspaceService {
         if (branch.isBlank()
             || branch.equals(repository.mainBranch())
             || protectedPrefixes.stream().anyMatch(branch::startsWith)
-            || findWorkspaceByBranch(repository.id(), branch) != null) {
+            || findWorkspaceByBranch(repository.id(), branch) != null
+            || hasActiveAgentWrapperBranch(repository.id(), branch)) {
           continue;
         }
         try {

@@ -565,6 +565,81 @@ public class AgentServiceTest {
     liveness.markDead(slot);
   }
 
+  /**
+   * A restart of this service while the daemon keeps the harness (qits-1225): the drive starts the
+   * running agent again, the daemon attaches to the harness and ignores the instruction, so the
+   * pending turn stays on the row and the next pass says it as a turn.
+   */
+  @Test
+  void aServiceRestartWithASurvivingHarnessSaysThePendingTurnAsATurn()
+      throws InterruptedException {
+    AgentService.Dispatch dispatched = dispatch("w-attach", true, null);
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    service.reconcile();
+    assertEquals(1, startsOf(agentId));
+    Thread.sleep(100);
+    setPendingText(id, "a turn");
+
+    service.forgetStarted();
+    service.driveRunning();
+
+    assertTrue(service.isStarted(id));
+    assertEquals(2, startsOf(agentId));
+    assertEquals("a turn", lastStartOf(agentId).instruction(), "the start still offers it");
+    assertEquals("a turn", row(agentId).pendingText, "an attach launched nothing: still pending");
+    assertFalse(
+        daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("turn ")),
+        "the start's pass says nothing more");
+
+    service.driveRunning();
+
+    assertTrue(daemon.callsFor(agentId).contains("turn " + slot + " " + agentId + " a turn"));
+    assertNull(row(agentId).pendingText);
+    assertEquals(2, startsOf(agentId), "said in the harness it kept: no third start");
+    liveness.markDead(slot);
+  }
+
+  /**
+   * A daemon restart takes the harness (qits-1225): the start launches a new one with the pending
+   * turn as its opening turn, the row's text is cleared and no separate turn follows.
+   */
+  @Test
+  void aDaemonRestartStartsTheAgentWithItsPendingTurn() throws InterruptedException {
+    AgentService.Dispatch dispatched = dispatch("w-relaunch", true, null);
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    service.reconcile();
+    assertEquals(1, startsOf(agentId));
+    Thread.sleep(100);
+    setPendingText(id, "a turn");
+
+    daemon.restart();
+    service.forgetStarted();
+    service.driveRunning();
+
+    assertTrue(service.isStarted(id));
+    assertEquals(2, startsOf(agentId));
+    assertEquals("a turn", lastStartOf(agentId).instruction());
+    assertNull(row(agentId).pendingText, "the new harness took it as its opening turn");
+
+    service.driveRunning();
+
+    assertFalse(
+        daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("turn ")),
+        "the turn is not said twice");
+    assertEquals(2, startsOf(agentId));
+    liveness.markDead(slot);
+  }
+
+  private void setPendingText(UUID id, String text) {
+    QuarkusTransaction.requiringNew().run(() -> agents.findById(id).pendingText = text);
+  }
+
   /** Only a written yield is a yield (qits-1212): a row that is no longer RUNNING yields nothing. */
   @Test
   void aYieldIsWrittenOnlyOverARunningAgent() {

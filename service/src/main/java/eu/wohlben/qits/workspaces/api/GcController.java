@@ -24,9 +24,9 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
  * says so, rather than guessing at an enumeration this service does not own.
  *
  * <p><b>What a sweep may touch is decided in {@link WorkspaceService#sweepMergedBranches}</b>, and
- * the hard refusals — the main branch, anything an active workspace stands on — live there rather
- * than here, so no caller shapes a request around them. {@code keepPrefixes} here can only widen
- * the protection.
+ * the hard refusals — the main branch, anything a legacy workspace row or an ACTIVE agent's
+ * wrapper branch (qits-1152) stands on — live there rather than here, so no caller shapes a
+ * request around them. {@code keepPrefixes} here can only widen the protection.
  *
  * <p>{@code qits:system} beside the admin role, unlike {@link BranchController}: the scheduled
  * caller is a machine. A dry run examines and judges exactly as a real one does and deletes
