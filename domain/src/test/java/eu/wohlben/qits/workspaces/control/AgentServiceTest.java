@@ -88,6 +88,18 @@ public class AgentServiceTest {
 
   @AfterEach
   void tearDown() {
+    // Every agent of this test's wrapper is retired: a QUEUED or placed one outlives the class and
+    // is placed by a later pass, eating runner capacity another test sized (qits-1233 made an agent
+    // in a FAILED workspace queue again rather than strand there, which is how this showed).
+    List<UUID> left =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () ->
+                    agents.list("repositoryId = ?1 and state <> ?2", repoId, AgentState.REMOVED)
+                        .stream()
+                        .map(a -> a.id)
+                        .toList());
+    left.forEach(id -> service.markRemoved(id, "the test is over"));
     commissioner.reset();
     QuarkusTransaction.requiringNew()
         .run(
