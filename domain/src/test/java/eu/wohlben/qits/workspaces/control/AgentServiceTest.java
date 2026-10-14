@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 import java.util.logging.Handler;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
@@ -1030,6 +1031,62 @@ public class AgentServiceTest {
 
     AgentDto discarded = service.discard(UUID.fromString(agentId), true);
     assertEquals(AgentState.REMOVED, discarded.state());
+  }
+
+  /**
+   * An admin agent started in its slot, whose daemon stays live, then released, its item VERIFIED
+   * and idle: what the sweep cleans up. {@code script} runs before the item closes, so no
+   * background pass reaches the agent unscripted.
+   */
+  private String sweepable(String workId, Consumer<String> script) {
+    AgentService.Dispatch dispatched = dispatch(workId, true, null);
+    String agentId = dispatched.agent().agentId();
+    liveness.markLive(dispatched.agent().workspaceRowId());
+    service.reconcile();
+    script.accept(agentId);
+    releaseWrapperOf(agentId);
+    service.markEntity(workId, new EntityFacts(null, "VERIFIED", false), null);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                agents.findById(UUID.fromString(agentId)).lastActivityAt =
+                    Instant.now().minusSeconds(3600));
+    return agentId;
+  }
+
+  @Test
+  void anAgentWhoseRemovalWasNeverConfirmedIsRemovedOnceItsDaemonNoLongerKnowsIt() {
+    // qits-1233 (qits-1229's agent): the daemon removed the agent but its OK never arrived, and
+    // every later cleanup check answered 404 — which read as "no answer", so the sweep stalled.
+    String agentId =
+        sweepable("w-lost", id -> daemon.removesAnswer(id, AgentDaemon.Outcome.UNREACHABLE));
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.cleanUp();
+      assertEquals(AgentState.OBSOLETE, row(agentId).state, "no answer to the remove: it stays");
+
+      daemon.forget(agentId);
+      service.cleanUp();
+
+      assertEquals(AgentState.REMOVED, row(agentId).state);
+      assertNull(row(agentId).commissionedTokenId, "the credential went with it");
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aPersonsDiscardOfAnAgentItsDaemonForgotNeedsNoForce() {
+    AgentService.Dispatch dispatched = dispatch("w-forgotten", true, null);
+    String agentId = dispatched.agent().agentId();
+    daemon.forget(agentId);
+
+    AgentDto discarded = service.discard(UUID.fromString(agentId), false);
+
+    assertEquals(AgentState.REMOVED, discarded.state());
+    assertFalse(
+        daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("remove ")),
+        "nothing is left to remove");
   }
 
   @Test

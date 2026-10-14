@@ -2,7 +2,6 @@ package eu.wohlben.qits.workspaces.control;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * The workspace daemon's per-agent surface (qits-1152): {@code agent-worktrees} on its HTTP API,
@@ -55,6 +54,35 @@ public interface AgentDaemon {
     public record Unpushed(String repository, String branch, int commits) {}
   }
 
+  /**
+   * The cleanup check's answer (qits-1233), one of three: {@link Outcome#OK} with the {@code
+   * check}; {@link Outcome#UNKNOWN_AGENT}, the daemon answered 404 because it no longer knows the
+   * agent (its worktree and harness are already gone); or {@link Outcome#UNREACHABLE} — no tunnel,
+   * no answer, a 5xx or any other answer that is no check — with what happened in {@code detail}.
+   */
+  record CleanupAnswer(Outcome outcome, CleanupCheck check, String detail) {
+
+    public static CleanupAnswer found(CleanupCheck check) {
+      return new CleanupAnswer(Outcome.OK, check, null);
+    }
+
+    public static CleanupAnswer unknownAgent() {
+      return new CleanupAnswer(Outcome.UNKNOWN_AGENT, null, "the daemon does not know the agent");
+    }
+
+    public static CleanupAnswer unreachable(String detail) {
+      return new CleanupAnswer(Outcome.UNREACHABLE, null, detail);
+    }
+
+    public boolean isFound() {
+      return outcome == Outcome.OK && check != null;
+    }
+
+    public boolean isUnknownAgent() {
+      return outcome == Outcome.UNKNOWN_AGENT;
+    }
+  }
+
   /** Whether the workspace's daemon can be reached at all (its tunnel is up). */
   boolean reachable(Long workspaceRowId);
 
@@ -67,8 +95,8 @@ public interface AgentDaemon {
   /** {@code POST agent-worktrees/{id}/entity}: the work item's title, status and blocked flag. */
   Outcome entity(Long workspaceRowId, String agentId, EntityFacts facts, String blockSource);
 
-  /** {@code GET agent-worktrees/{id}/cleanup-check}; empty when the daemon could not be asked. */
-  Optional<CleanupCheck> cleanupCheck(Long workspaceRowId, String agentId);
+  /** {@code GET agent-worktrees/{id}/cleanup-check}: found, unknown agent (404) or unreachable. */
+  CleanupAnswer cleanupCheck(Long workspaceRowId, String agentId);
 
   /**
    * {@code DELETE agent-worktrees/{id}}. {@link Outcome#REFUSED} means leftover work and {@code

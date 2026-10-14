@@ -60,6 +60,9 @@ public class DaemonAgentClient implements AgentDaemon {
 
   static final String BASE = "agent-worktrees";
 
+  /** The daemon's 404 {@code message} for a path it does not serve, as opposed to an unknown agent. */
+  static final String NO_SUCH_ENDPOINT = "No such endpoint";
+
   @Inject WorkspaceTunnels tunnels;
 
   @ConfigProperty(name = "qits.workspace.daemon-api-token", defaultValue = "qits-workspace-daemon")
@@ -159,16 +162,40 @@ public class DaemonAgentClient implements AgentDaemon {
   }
 
   @Override
-  public Optional<CleanupCheck> cleanupCheck(Long workspaceRowId, String agentId) {
+  public CleanupAnswer cleanupCheck(Long workspaceRowId, String agentId) {
     Route route = route(workspaceRowId);
     if (route == null) {
-      return Optional.empty();
+      return CleanupAnswer.unreachable("the daemon is not connected");
     }
     Answer answer = send(route, HttpMethod.GET, path(agentId, "cleanup-check"), null);
-    if (answer == null || answer.status() != 200) {
-      return Optional.empty();
+    if (answer == null) {
+      return CleanupAnswer.unreachable("the daemon did not answer");
     }
-    return Optional.ofNullable(cleanupCheckOf(json(answer.body())));
+    return cleanupAnswerOf(answer.status(), answer.body());
+  }
+
+  /**
+   * A cleanup check's answer read (qits-1233). A 404 is the daemon saying it does not know the
+   * agent — its {@code UnknownAgentException}, which is what a daemon that already removed the
+   * agent answers — unless its body says the endpoint itself is missing. Any other answer that is
+   * no check (a 5xx, another 4xx, a body that does not parse) is unreachable, with the status in
+   * the detail. Package-private for its test.
+   */
+  static CleanupAnswer cleanupAnswerOf(int status, String body) {
+    if (status == 404) {
+      JsonObject error = json(body);
+      if (error != null && NO_SUCH_ENDPOINT.equals(error.getString("message"))) {
+        return CleanupAnswer.unreachable("the daemon has no cleanup check (404 No such endpoint)");
+      }
+      return CleanupAnswer.unknownAgent();
+    }
+    if (status != 200) {
+      return CleanupAnswer.unreachable("the daemon answered " + status);
+    }
+    CleanupCheck check = cleanupCheckOf(json(body));
+    return check == null
+        ? CleanupAnswer.unreachable("the daemon's answer is no cleanup check")
+        : CleanupAnswer.found(check);
   }
 
   @Override

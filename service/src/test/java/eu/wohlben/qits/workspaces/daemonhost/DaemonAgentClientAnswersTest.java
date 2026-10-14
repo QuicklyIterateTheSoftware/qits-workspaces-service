@@ -12,7 +12,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The daemon's cleanup-check answer (qits-1152, D5) as {@link DaemonAgentClient} reads it: {@code
- * {clean, dirty: [repository], unpushed: [{repository, branch|null, commits}]}}.
+ * {clean, dirty: [repository], unpushed: [{repository, branch|null, commits}]}}, and what its
+ * status says (qits-1233): 200 a check, 404 an agent the daemon does not know, anything else none.
  */
 class DaemonAgentClientAnswersTest {
 
@@ -40,6 +41,37 @@ class DaemonAgentClientAnswersTest {
             new AgentDaemon.CleanupCheck.Unpushed("wrapper", "ticket/qits-1", 1),
             new AgentDaemon.CleanupCheck.Unpushed("qits-ci-service", null, 3)),
         check.unpushed());
+  }
+
+  @Test
+  void aCheckAnswered404IsAnUnknownAgentNotAnUnreachableDaemon() {
+    // qits-1233: the daemon answers 404 for an agent it already removed.
+    AgentDaemon.CleanupAnswer answer =
+        DaemonAgentClient.cleanupAnswerOf(404, "{\"message\":\"Unknown agent: a1\"}");
+    assertTrue(answer.isUnknownAgent());
+    assertFalse(answer.isFound());
+  }
+
+  @Test
+  void aMissingEndpointA5xxOrAnUnreadableBodyIsUnreachable() {
+    for (AgentDaemon.CleanupAnswer answer :
+        List.of(
+            DaemonAgentClient.cleanupAnswerOf(404, "{\"message\":\"No such endpoint\"}"),
+            DaemonAgentClient.cleanupAnswerOf(503, "{\"message\":\"Starting\"}"),
+            DaemonAgentClient.cleanupAnswerOf(401, null),
+            DaemonAgentClient.cleanupAnswerOf(200, "not json"))) {
+      assertEquals(AgentDaemon.Outcome.UNREACHABLE, answer.outcome(), answer.toString());
+      assertFalse(answer.isFound());
+      assertFalse(answer.isUnknownAgent());
+    }
+  }
+
+  @Test
+  void aCheckAnswered200IsFound() {
+    AgentDaemon.CleanupAnswer answer =
+        DaemonAgentClient.cleanupAnswerOf(200, "{\"clean\":true,\"dirty\":[],\"unpushed\":[]}");
+    assertTrue(answer.isFound());
+    assertTrue(answer.check().clean());
   }
 
   @Test

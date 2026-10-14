@@ -629,6 +629,8 @@ public class AgentService {
   /**
    * A person removes an agent now (the agent page's discard). Leftover work refuses with 409 and
    * the cleanup check, unless {@code force}; an unreachable daemon refuses too, unless {@code force}.
+   * A daemon that answers it does not know the agent has nothing left to remove: no refusal
+   * (qits-1233).
    */
   public AgentDto discard(UUID id, boolean force) {
     AgentWorktree agent = require(id);
@@ -637,26 +639,26 @@ public class AgentService {
     }
     if (agent.workspaceId != null && daemon.isResolvable()) {
       AgentDaemon port = daemon.get();
-      Optional<AgentDaemon.CleanupCheck> check =
+      AgentDaemon.CleanupAnswer answer =
           port.reachable(agent.workspaceId)
               ? port.cleanupCheck(agent.workspaceId, id.toString())
-              : Optional.empty();
+              : AgentDaemon.CleanupAnswer.unreachable("the daemon is not connected");
       if (!force) {
-        if (check.isEmpty()) {
+        if (!answer.isFound() && !answer.isUnknownAgent()) {
           throw new ConflictException(
               "AGENT_DAEMON_UNREACHABLE",
               "The agent's workspace daemon does not answer, so its worktrees cannot be checked;"
                   + " discard with force to remove the agent anyway.");
         }
-        if (!check.get().clean()) {
+        if (answer.isFound() && !answer.check().clean()) {
           throw new ConflictException(
               "AGENT_HAS_LEFTOVER_WORK",
               "The agent's worktrees hold work that never reached the git host: "
-                  + describe(check.get())
+                  + describe(answer.check())
                   + ". Discard with force to throw it away.");
         }
       }
-      if (check.isPresent()) {
+      if (answer.isFound()) {
         port.remove(agent.workspaceId, id.toString(), true);
       }
     }
@@ -1582,11 +1584,17 @@ public class AgentService {
       return;
     }
     AgentDaemon port = daemon.get();
-    Optional<AgentDaemon.CleanupCheck> check = port.cleanupCheck(workspace.id, agent.id.toString());
-    if (check.isEmpty()) {
+    AgentDaemon.CleanupAnswer answer = port.cleanupCheck(workspace.id, agent.id.toString());
+    if (answer.isUnknownAgent()) {
+      // Removed already: a remove whose OK never arrived, or a daemon that lost it (qits-1233).
+      markRemoved(agent.id, "its daemon no longer knows it");
       return;
     }
-    if (check.get().clean()) {
+    if (!answer.isFound()) {
+      return;
+    }
+    AgentDaemon.CleanupCheck check = answer.check();
+    if (check.clean()) {
       AgentDaemon.Outcome removed = port.remove(workspace.id, agent.id.toString(), false);
       if (removed == AgentDaemon.Outcome.OK || removed == AgentDaemon.Outcome.UNKNOWN_AGENT) {
         markRemoved(agent.id, "released, idle and clean");
@@ -1604,7 +1612,7 @@ public class AgentService {
     if (!promptAgain) {
       return;
     }
-    String prompt = CLEANUP_PROMPT + "\n\nWhat the check found: " + describe(check.get()) + ".";
+    String prompt = CLEANUP_PROMPT + "\n\nWhat the check found: " + describe(check) + ".";
     QuarkusTransaction.requiringNew()
         .run(
             () -> {

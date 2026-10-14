@@ -5,13 +5,14 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A scripted {@link AgentDaemon} (qits-1152): every call is recorded, every workspace is reachable
  * unless marked otherwise, and the cleanup check answers clean unless a test scripts leftover work.
- * {@link #reset} between tests.
+ * A test can make the daemon {@linkplain #forget forget} an agent (its 404, qits-1233) or script
+ * what a removal answers. {@link #reset} between tests.
  */
 @ApplicationScoped
 public class FakeAgentDaemon implements AgentDaemon {
@@ -29,6 +30,12 @@ public class FakeAgentDaemon implements AgentDaemon {
 
   private final Map<String, CleanupCheck> checks = new ConcurrentHashMap<>();
 
+  /** The agents the daemon no longer knows: the check and every removal answer 404. */
+  private final Set<String> forgotten = ConcurrentHashMap.newKeySet();
+
+  /** What a removal of an agent answers, whatever its check says. */
+  private final Map<String, Outcome> removeAnswers = new ConcurrentHashMap<>();
+
   private volatile Outcome turnAnswer = Outcome.OK;
 
   /** The refusal every start answers with; null: starts are accepted. */
@@ -38,6 +45,8 @@ public class FakeAgentDaemon implements AgentDaemon {
     calls.clear();
     starts.clear();
     checks.clear();
+    forgotten.clear();
+    removeAnswers.clear();
     turnAnswer = Outcome.OK;
     startRefusal = null;
   }
@@ -53,6 +62,16 @@ public class FakeAgentDaemon implements AgentDaemon {
 
   public void leftover(String agentId, CleanupCheck check) {
     checks.put(agentId, check);
+  }
+
+  /** The daemon removed the agent, or lost it: it answers 404 for it from now on. */
+  public void forget(String agentId) {
+    forgotten.add(agentId);
+  }
+
+  /** Every removal of {@code agentId} answers {@code outcome} until {@link #reset}. */
+  public void removesAnswer(String agentId, Outcome outcome) {
+    removeAnswers.put(agentId, outcome);
   }
 
   public void turnsAnswer(Outcome outcome) {
@@ -94,14 +113,25 @@ public class FakeAgentDaemon implements AgentDaemon {
   }
 
   @Override
-  public Optional<CleanupCheck> cleanupCheck(Long workspaceRowId, String agentId) {
+  public CleanupAnswer cleanupCheck(Long workspaceRowId, String agentId) {
     calls.add("cleanup-check " + workspaceRowId + " " + agentId);
-    return Optional.of(checks.getOrDefault(agentId, new CleanupCheck(true, List.of(), List.of())));
+    if (forgotten.contains(agentId)) {
+      return CleanupAnswer.unknownAgent();
+    }
+    return CleanupAnswer.found(
+        checks.getOrDefault(agentId, new CleanupCheck(true, List.of(), List.of())));
   }
 
   @Override
   public Outcome remove(Long workspaceRowId, String agentId, boolean force) {
     calls.add("remove " + workspaceRowId + " " + agentId + " force=" + force);
+    if (forgotten.contains(agentId)) {
+      return Outcome.UNKNOWN_AGENT;
+    }
+    Outcome scripted = removeAnswers.get(agentId);
+    if (scripted != null) {
+      return scripted;
+    }
     CleanupCheck check = checks.get(agentId);
     return check != null && !check.clean() && !force ? Outcome.REFUSED : Outcome.OK;
   }

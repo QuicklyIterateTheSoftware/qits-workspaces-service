@@ -126,7 +126,7 @@ public class WorkspaceDaemonConsumerPactTest {
         Trigger.schedule("AgentService.cleanUp"),
         null,
         List.of("$.clean", "$.dirty", "$.unpushed"),
-        (row, agentId) -> assertTrue(client.cleanupCheck(row, agentId).isPresent()));
+        (row, agentId) -> assertTrue(client.cleanupCheck(row, agentId).isFound()));
   }
 
   // --- support -----------------------------------------------------------------------------------
