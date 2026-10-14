@@ -260,7 +260,59 @@ class GoldenMasterRecordingTest {
               200,
               null)
               .fixing("$.pinnedVersion")
-              .as("qits:system"));
+              .as("qits:system"),
+          // The landing app's workspace pages (epic qits-1230). The project's page: the wrapper's
+          // slots, and every agent (it keeps the wrapper's). Other tests share the store, so both
+          // lists keep only this state's rows.
+          Interaction.read(
+              ProviderStates.A_PROJECT_WITH_WORKSPACE_SLOTS,
+              "listWorkspaces",
+              WORKSPACES + "/workspaces?repositoryId={repositoryId}",
+              "$.entries"),
+          Interaction.read(
+              ProviderStates.A_PROJECT_WITH_WORKSPACE_SLOTS,
+              "listAgents",
+              WORKSPACES + "/agents",
+              "$.agents"),
+          // The slot's page: the slot, its agents and what is starting its container (nothing).
+          Interaction.read(
+              ProviderStates.A_WORKSPACE_SLOT_HOSTING_AGENTS,
+              "getWorkspace",
+              WORKSPACES + "/workspaces/{workspaceId}",
+              null),
+          Interaction.read(
+              ProviderStates.A_WORKSPACE_SLOT_HOSTING_AGENTS,
+              "listAgents",
+              WORKSPACES + "/agents?workspaceId={workspaceId}",
+              null),
+          Interaction.read(
+              ProviderStates.A_WORKSPACE_SLOT_HOSTING_AGENTS,
+              "getWorkspaceActiveProcess",
+              WORKSPACES + "/workspaces/{workspaceId}/active-process",
+              null),
+          // An item's agent page while its slot's container comes up: the item's agents, the slot
+          // and the start it follows.
+          Interaction.read(
+              ProviderStates.AN_AGENT_WHOSE_WORKSPACE_IS_STARTING,
+              "listAgents",
+              WORKSPACES + "/agents?workId={bugTicketId}",
+              null),
+          Interaction.read(
+              ProviderStates.AN_AGENT_WHOSE_WORKSPACE_IS_STARTING,
+              "getWorkspace",
+              WORKSPACES + "/workspaces/{workspaceId}",
+              null),
+          Interaction.read(
+              ProviderStates.AN_AGENT_WHOSE_WORKSPACE_IS_STARTING,
+              "getWorkspaceActiveProcess",
+              WORKSPACES + "/workspaces/{workspaceId}/active-process",
+              null));
+
+  /**
+   * The params that hold a workspace row id. Frozen like the answers' row ids, so the index names
+   * the same number on every run; a consumer sends it as a provider-state expression.
+   */
+  static final Set<String> ROW_ID_PARAMS = Set.of("workspaceId");
 
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final Pattern TEMPLATE_PARAM = Pattern.compile("\\{([^}]+)}");
@@ -442,7 +494,11 @@ class GoldenMasterRecordingTest {
       freezer.markString(fixed.getKey());
     }
     ObjectNode frozenParams = JsonNodeFactory.instance.objectNode();
-    params.forEach((k, v) -> frozenParams.put(k, freezer.freezeParam(v)));
+    params.forEach(
+        (k, v) ->
+            frozenParams.put(
+                k,
+                ROW_ID_PARAMS.contains(k) ? freezer.freezeRowIdParam(v) : freezer.freezeParam(v)));
     return new Recorded(freezer.freeze(body), frozenParams, freezer);
   }
 

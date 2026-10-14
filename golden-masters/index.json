@@ -133,6 +133,75 @@
       ]
     },
     {
+      "name": "a project with workspace slots hosting agents",
+      "slug": "a-project-with-workspace-slots-hosting-agents",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "bugTicketQualifiedId": "contract-00000001-10",
+        "epicId": "00000000-0000-4000-8000-000000000006",
+        "featureId": "00000000-0000-4000-8000-000000000007",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000b",
+        "improvementTicketQualifiedId": "contract-00000001-11",
+        "projectId": "00000000-0000-4000-8000-00000000000f",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "taskId": "00000000-0000-4000-8000-000000000011"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listAgents",
+          "method": "GET",
+          "path": "/workspaces/api/agents",
+          "status": 200,
+          "file": "a-project-with-workspace-slots-hosting-agents/listAgents.json",
+          "frozen": {
+            "ids": [
+              "$.agents[*].agentId",
+              "$.agents[*].repositoryId",
+              "$.agents[*].workId",
+              "$.agents[*].ticketId",
+              "$.agents[*].epicId"
+            ],
+            "instants": [
+              "$.agents[*].lastActivityAt",
+              "$.agents[*].createdAt",
+              "$.agents[*].waitingOnSince"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.agents[*].workspaceRowId"
+            ],
+            "listFilteredTo": "$.agents"
+          }
+        },
+        {
+          "operationId": "listWorkspaces",
+          "method": "GET",
+          "path": "/workspaces/api/workspaces",
+          "query": {
+            "repositoryId": "{repositoryId}"
+          },
+          "status": 200,
+          "file": "a-project-with-workspace-slots-hosting-agents/listWorkspaces.json",
+          "frozen": {
+            "ids": [
+              "$.entries[*].workspace.runner.id"
+            ],
+            "instants": [
+              "$.entries[*].workspace.createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.entries[*].workspace.id"
+            ],
+            "listFilteredTo": "$.entries"
+          }
+        }
+      ]
+    },
+    {
       "name": "a project with workspaces bound to work items",
       "slug": "a-project-with-workspaces-bound-to-work-items",
       "params": {
@@ -260,6 +329,90 @@
       ]
     },
     {
+      "name": "a workspace slot hosting agents",
+      "slug": "a-workspace-slot-hosting-agents",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "bugTicketQualifiedId": "contract-00000001-10",
+        "epicId": "00000000-0000-4000-8000-000000000006",
+        "featureId": "00000000-0000-4000-8000-000000000007",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000b",
+        "improvementTicketQualifiedId": "contract-00000001-11",
+        "projectId": "00000000-0000-4000-8000-00000000000f",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "taskId": "00000000-0000-4000-8000-000000000011",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "getWorkspace",
+          "method": "GET",
+          "path": "/workspaces/api/workspaces/{workspaceId}",
+          "status": 200,
+          "file": "a-workspace-slot-hosting-agents/getWorkspace.json",
+          "frozen": {
+            "ids": [
+              "$.workspace.runner.id"
+            ],
+            "instants": [
+              "$.workspace.createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.workspace.id"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "getWorkspaceActiveProcess",
+          "method": "GET",
+          "path": "/workspaces/api/workspaces/{workspaceId}/active-process",
+          "status": 200,
+          "file": "a-workspace-slot-hosting-agents/getWorkspaceActiveProcess.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "listAgents",
+          "method": "GET",
+          "path": "/workspaces/api/agents",
+          "query": {
+            "workspaceId": "{workspaceId}"
+          },
+          "status": 200,
+          "file": "a-workspace-slot-hosting-agents/listAgents.json",
+          "frozen": {
+            "ids": [
+              "$.agents[*].agentId",
+              "$.agents[*].repositoryId",
+              "$.agents[*].workId",
+              "$.agents[*].ticketId",
+              "$.agents[*].epicId"
+            ],
+            "instants": [
+              "$.agents[*].waitingOnSince",
+              "$.agents[*].lastActivityAt",
+              "$.agents[*].createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.agents[*].workspaceRowId"
+            ],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "a wrapper repository and a ticket to dispatch",
       "slug": "a-wrapper-repository-and-a-ticket-to-dispatch",
       "params": {
@@ -339,6 +492,85 @@
             "instants": [],
             "strings": [],
             "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "an agent whose workspace is starting",
+      "slug": "an-agent-whose-workspace-is-starting",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "bugTicketQualifiedId": "contract-00000001-10",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "getWorkspace",
+          "method": "GET",
+          "path": "/workspaces/api/workspaces/{workspaceId}",
+          "status": 200,
+          "file": "an-agent-whose-workspace-is-starting/getWorkspace.json",
+          "frozen": {
+            "ids": [
+              "$.workspace.runner.id"
+            ],
+            "instants": [
+              "$.workspace.createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.workspace.id"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "getWorkspaceActiveProcess",
+          "method": "GET",
+          "path": "/workspaces/api/workspaces/{workspaceId}/active-process",
+          "status": 200,
+          "file": "an-agent-whose-workspace-is-starting/getWorkspaceActiveProcess.json",
+          "frozen": {
+            "ids": [
+              "$.technicalProcessId"
+            ],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "listAgents",
+          "method": "GET",
+          "path": "/workspaces/api/agents",
+          "query": {
+            "workId": "{bugTicketId}"
+          },
+          "status": 200,
+          "file": "an-agent-whose-workspace-is-starting/listAgents.json",
+          "frozen": {
+            "ids": [
+              "$.agents[*].agentId",
+              "$.agents[*].repositoryId",
+              "$.agents[*].workId",
+              "$.agents[*].ticketId"
+            ],
+            "instants": [
+              "$.agents[*].waitingOnSince",
+              "$.agents[*].lastActivityAt",
+              "$.agents[*].createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.agents[*].workspaceRowId"
+            ],
             "listFilteredTo": null
           }
         }

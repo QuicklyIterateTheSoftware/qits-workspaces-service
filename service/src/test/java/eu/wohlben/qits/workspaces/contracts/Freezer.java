@@ -71,6 +71,15 @@ public final class Freezer {
     return freezeIds(value);
   }
 
+  /**
+   * A param that holds a workspace row id ({@code workspaceId}), frozen as the answers freeze one:
+   * its place in the state's write order.
+   */
+  public String freezeRowIdParam(String value) {
+    long row = Long.parseLong(value);
+    return String.valueOf(rowIds.computeIfAbsent(row, k -> (long) (rowIds.size() + 1)));
+  }
+
   /** Records that the value at {@code path} was replaced by a fixed one before freezing. */
   public void markString(String path) {
     stringPaths.add(path);
