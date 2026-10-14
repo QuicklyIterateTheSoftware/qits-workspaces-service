@@ -139,8 +139,9 @@ public class AgentController {
   @APIResponse(
       responseCode = "409",
       description =
-          "AGENT_HAS_LEFTOVER_WORK (uncommitted or unpushed work, named) or"
-              + " AGENT_DAEMON_UNREACHABLE; nothing was removed. Send `force: true` to remove anyway.",
+          "AGENT_BUSY (harness still working in the background), AGENT_HAS_LEFTOVER_WORK"
+              + " (uncommitted or unpushed work, named) or AGENT_DAEMON_UNREACHABLE; nothing was"
+              + " removed. Send `force: true` to remove anyway.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @Operation(operationId = "discardAgent")
   public AgentDto discard(@PathParam("id") String id, DiscardAgentRequest request) {

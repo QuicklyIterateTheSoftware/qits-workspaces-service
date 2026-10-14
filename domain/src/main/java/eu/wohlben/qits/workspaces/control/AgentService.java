@@ -668,10 +668,10 @@ public class AgentService {
   }
 
   /**
-   * A person removes an agent now (the agent page's discard). Leftover work refuses with 409 and
-   * the cleanup check, unless {@code force}; an unreachable daemon refuses too, unless {@code force}.
-   * A daemon that answers it does not know the agent has nothing left to remove: no refusal
-   * (qits-1233).
+   * A person removes an agent now (the agent page's discard). A busy harness refuses with 409
+   * unless {@code force} (qits-1238); leftover work refuses with 409 and the cleanup check, unless
+   * {@code force}; an unreachable daemon refuses too, unless {@code force}. A daemon that answers
+   * it does not know the agent has nothing left to remove: no refusal (qits-1233).
    */
   public AgentDto discard(UUID id, boolean force) {
     AgentWorktree agent = require(id);
@@ -691,6 +691,12 @@ public class AgentService {
               "AGENT_DAEMON_UNREACHABLE",
               "The agent's workspace daemon does not answer, so its worktrees cannot be checked;"
                   + " discard with force to remove the agent anyway.");
+        }
+        if (answer.isFound() && answer.check().busy()) {
+          throw new ConflictException(
+              "AGENT_BUSY",
+              "The agent's harness is still working in the background (a subagent, a monitor or a"
+                  + " background shell); discard with force to stop it anyway.");
         }
         if (answer.isFound() && !answer.check().clean()) {
           throw new ConflictException(
