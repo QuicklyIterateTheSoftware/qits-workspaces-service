@@ -1,6 +1,8 @@
 package eu.wohlben.qits.workspaces.contracts;
 
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.TechnicalProcess;
+import eu.wohlben.qits.workspaces.control.TechnicalProcessRegistry;
 import eu.wohlben.qits.workspaces.control.TestGit;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes;
@@ -95,6 +97,14 @@ public class ProviderStates {
   public static final String A_CONNECTED_RUNNER = "a connected runner";
   public static final String A_QUARANTINED_RUNNER = "a quarantined runner";
 
+  // The landing app's workspace pages (epic qits-1230): a project's slots and their agents, one
+  // slot, and one item's agent while its slot's container comes up.
+  public static final String A_PROJECT_WITH_WORKSPACE_SLOTS =
+      "a project with workspace slots hosting agents";
+  public static final String A_WORKSPACE_SLOT_HOSTING_AGENTS = "a workspace slot hosting agents";
+  public static final String AN_AGENT_WHOSE_WORKSPACE_IS_STARTING =
+      "an agent whose workspace is starting";
+
   static final String PROJECT_ID = "00000000-0000-4000-8000-00000000000f";
   static final String BUG_TICKET_ID = "00000000-0000-4000-8000-000000000001";
   static final String EPIC_ID = "00000000-0000-4000-8000-000000000006";
@@ -153,6 +163,7 @@ public class ProviderStates {
   @Inject FakeRepositoryLookup repositories;
   @Inject WorkspaceRunners runners;
   @Inject WorkspaceRunnerRegistry runnerRegistry;
+  @Inject TechnicalProcessRegistry technicalProcesses;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String originsDir;
@@ -162,6 +173,9 @@ public class ProviderStates {
 
   /** The connection {@link #A_CONNECTED_RUNNER} admitted, closed again by {@link #cleanUp}. */
   private volatile WorkspaceRunnerRegistry.Session runnerSession;
+
+  /** The start {@link #AN_AGENT_WHOSE_WORKSPACE_IS_STARTING} left open, ended by {@link #cleanUp}. */
+  private volatile TechnicalProcess startingProcess;
 
   public Set<String> names() {
     return Set.of(
@@ -178,7 +192,10 @@ public class ProviderStates {
         NO_RUNNERS,
         AN_UNREGISTERED_RUNNER,
         A_CONNECTED_RUNNER,
-        A_QUARANTINED_RUNNER);
+        A_QUARANTINED_RUNNER,
+        A_PROJECT_WITH_WORKSPACE_SLOTS,
+        A_WORKSPACE_SLOT_HOSTING_AGENTS,
+        AN_AGENT_WHOSE_WORKSPACE_IS_STARTING);
   }
 
   public Map<String, String> params(String state) {
@@ -202,14 +219,17 @@ public class ProviderStates {
       case AN_UNREGISTERED_RUNNER -> unregisteredRunner();
       case A_CONNECTED_RUNNER -> connectedRunner();
       case A_QUARANTINED_RUNNER -> quarantinedRunner();
+      case A_PROJECT_WITH_WORKSPACE_SLOTS -> slotsHostingAgents(false);
+      case A_WORKSPACE_SLOT_HOSTING_AGENTS -> slotsHostingAgents(true);
+      case AN_AGENT_WHOSE_WORKSPACE_IS_STARTING -> agentWhoseWorkspaceIsStarting();
       default -> throw new IllegalArgumentException("No provider state named '" + state + "'");
     };
   }
 
   /** Removes every row a state writes, and tears down every workspace a git-backed state made. */
   public void cleanUp() {
+    endStartingProcess();
     tearDownGitWorkspaces();
-    removeRunners();
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
@@ -224,6 +244,8 @@ public class ProviderStates {
                   HAND_MADE_LABEL);
               workspaces.delete("repositoryId in ?1", GIT_REPOSITORIES);
             });
+    // After the rows: a runner that still holds an ACTIVE workspace refuses its delete.
+    removeRunners();
   }
 
   /**
@@ -463,26 +485,118 @@ public class ProviderStates {
               Long slot = slot(WorkspaceRuntimeStatus.QUEUED);
               ids.add(slot);
               agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
-              AgentWait wait = new AgentWait();
-              wait.id = UUID.fromString(OPEN_WAIT_ID);
-              wait.agentId = UUID.fromString(AGENT_ACTIVE_ID);
-              wait.label = "release-request " + RELEASE_REQUEST_ID;
-              wait.selection =
-                  EventSelection.of(
-                          "ReleaseRequestStateChanged",
-                          EventSelection.Condition.exact("releaseRequestId", RELEASE_REQUEST_ID),
-                          EventSelection.Condition.exact("state", "FINALIZED"))
-                      .toJson();
-              wait.eventName = "ReleaseRequestStateChanged";
-              wait.createdAt = Instant.now();
-              wait.expiresAt = wait.createdAt.plusSeconds(7200);
-              agentWaits.persist(wait);
+              openWait();
             });
     Map<String, String> params = new TreeMap<>();
     params.put("agentId", AGENT_ACTIVE_ID);
     params.put("releaseRequestId", RELEASE_REQUEST_ID);
     params.put("waitId", OPEN_WAIT_ID);
     return new Setup(params, List.copyOf(ids));
+  }
+
+  /** The bug ticket's agent waits on a release request: one OPEN wait, two hours to run. */
+  private void openWait() {
+    AgentWait wait = new AgentWait();
+    wait.id = UUID.fromString(OPEN_WAIT_ID);
+    wait.agentId = UUID.fromString(AGENT_ACTIVE_ID);
+    wait.label = "release-request " + RELEASE_REQUEST_ID;
+    wait.selection =
+        EventSelection.of(
+                "ReleaseRequestStateChanged",
+                EventSelection.Condition.exact("releaseRequestId", RELEASE_REQUEST_ID),
+                EventSelection.Condition.exact("state", "FINALIZED"))
+            .toJson();
+    wait.eventName = "ReleaseRequestStateChanged";
+    wait.createdAt = Instant.now();
+    wait.expiresAt = wait.createdAt.plusSeconds(7200);
+    agentWaits.persist(wait);
+  }
+
+  // --- the landing app's workspace pages (epic qits-1230) -----------------------------------------
+
+  static final String AGENT_EPIC_ID = "00000000-0000-4000-8000-0000000000a4";
+  static final String AGENT_QUEUED_ID = "00000000-0000-4000-8000-0000000000a5";
+
+  /**
+   * The wrapper's one slot, RUNNING on the connected runner {@code localhost}, hosting two ACTIVE
+   * agents: the bug ticket's, which holds the slot and waits on a release request (a declared wait,
+   * so nobody is waiting on a person), and the epic's, which yielded it. The improvement ticket's
+   * agent is QUEUED: no slot was free, so it names none.
+   *
+   * <p>{@code withSlot} adds the slot's row id as {@code workspaceId}, for the reads addressed by
+   * it. The project's reads leave it out: a listing filtered to the state's params would keep
+   * every entry whose text holds that small number.
+   */
+  private Setup slotsHostingAgents(boolean withSlot) {
+    connectedRunner();
+    repositories.register(WRAPPER_REPOSITORY_ID);
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Long slot = slot(WorkspaceRuntimeStatus.RUNNING, UUID.fromString(RUNNER_ID));
+              ids.add(slot);
+              agent(AGENT_EPIC_ID, slot, AgentState.ACTIVE, AgentRunState.YIELDED, EPIC);
+              agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
+              openWait();
+              agent(
+                  AGENT_QUEUED_ID,
+                  null,
+                  AgentState.ACTIVE,
+                  AgentRunState.QUEUED,
+                  IMPROVEMENT_TICKET);
+            });
+    Map<String, String> params = params();
+    params.put("agentId", AGENT_ACTIVE_ID);
+    params.put("runnerId", RUNNER_ID);
+    if (withSlot) {
+      params.put("workspaceId", String.valueOf(ids.get(0)));
+    }
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /**
+   * The bug ticket's agent, waiting on a release request, in the wrapper's slot while that slot's
+   * container comes up on {@code localhost}: the slot is PROVISIONING and its start is a live
+   * technical process, past its {@code queued} segment and in its {@code container} one.
+   */
+  private Setup agentWhoseWorkspaceIsStarting() {
+    connectedRunner();
+    repositories.register(WRAPPER_REPOSITORY_ID);
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Long slot = slot(WorkspaceRuntimeStatus.PROVISIONING, UUID.fromString(RUNNER_ID));
+              ids.add(slot);
+              agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
+              openWait();
+            });
+    TechnicalProcess start =
+        technicalProcesses.begin(WRAPPER_REPOSITORY_ID, SLOT_LABEL, ids.get(0));
+    start.openSegment("queued");
+    start.appendLine("queued", "waiting for a slot on " + RUNNER_NAME);
+    start.settleSegment("queued", true);
+    start.openSegment("container");
+    start.appendLine("container", "pulling the workspace image");
+    startingProcess = start;
+    Map<String, String> params = new TreeMap<>();
+    params.put("agentId", AGENT_ACTIVE_ID);
+    params.put("bugTicketId", BUG_TICKET_ID);
+    params.put("bugTicketQualifiedId", "contract-00000001-10");
+    params.put("repositoryId", WRAPPER_REPOSITORY_ID);
+    params.put("runnerId", RUNNER_ID);
+    params.put("workspaceId", String.valueOf(ids.get(0)));
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /** Ends the start {@link #agentWhoseWorkspaceIsStarting} left open, so no slot shows it. */
+  private void endStartingProcess() {
+    TechnicalProcess start = startingProcess;
+    startingProcess = null;
+    if (start != null) {
+      technicalProcesses.end(start.id(), "the contract state was cleaned up");
+    }
   }
 
   /**
@@ -508,7 +622,13 @@ public class ProviderStates {
 
   /** A slot workspace of the wrapper, on a runner, naming no branch (qits-1152). */
   private Long slot(WorkspaceRuntimeStatus runtime) {
+    return slot(runtime, null);
+  }
+
+  /** A slot workspace of the wrapper, placed on {@code runnerId} (null: no runner took it yet). */
+  private Long slot(WorkspaceRuntimeStatus runtime, UUID runnerId) {
     Workspace row = new Workspace();
+    row.runnerId = runnerId;
     row.repositoryId = WRAPPER_REPOSITORY_ID;
     row.workspaceId = SLOT_LABEL;
     row.status = WorkspaceStatus.ACTIVE;
@@ -521,21 +641,41 @@ public class ProviderStates {
   }
 
   private void agent(String id, Long slot, AgentState state, AgentRunState runState) {
+    agent(id, slot, state, runState, BUG_TICKET);
+  }
+
+  /** A work item an agent works on, as qits-projects' "… in detail" states record it. */
+  record Item(String workId, String qualifiedId, boolean epic, String title) {}
+
+  static final Item BUG_TICKET =
+      new Item(BUG_TICKET_ID, "contract-00000001-10", false, "Invoice totals are off by one cent");
+  static final Item EPIC =
+      new Item(EPIC_ID, "contract-00000001-2", true, "Export invoices for the accountants");
+  static final Item IMPROVEMENT_TICKET =
+      new Item(
+          IMPROVEMENT_TICKET_ID, "contract-00000001-11", false, "Remember the last export format");
+
+  private void agent(String id, Long slot, AgentState state, AgentRunState runState, Item item) {
+    String wrapperBranch = (item.epic() ? "epic/" : "ticket/") + item.qualifiedId();
     AgentWorktree agent = new AgentWorktree();
     agent.id = UUID.fromString(id);
     agent.workspaceId = slot;
     agent.repositoryId = WRAPPER_REPOSITORY_ID;
-    agent.workId = BUG_TICKET_ID;
-    agent.entityId = "contract-00000001-10";
-    agent.ticketId = BUG_TICKET_ID;
-    agent.wrapperBranch = WRAPPER_BRANCH;
+    agent.workId = item.workId();
+    agent.entityId = item.qualifiedId();
+    if (item.epic()) {
+      agent.epicId = item.workId();
+    } else {
+      agent.ticketId = item.workId();
+    }
+    agent.wrapperBranch = wrapperBranch;
     agent.state = state;
     agent.runState = runState;
-    agent.entityTitle = "Invoice totals are off by one cent";
+    agent.entityTitle = item.title();
     agent.entityStatus = state == AgentState.ACTIVE ? "IMPLEMENTING" : "VERIFIED";
     agent.entityBlocked = false;
     agent.commissionedTokenSubject = CONTRACT_CALLER;
-    agent.gitRefs = "[\"refs/heads/" + WRAPPER_BRANCH + "\",\"refs/heads/" + WRAPPER_BRANCH + "-*\"]";
+    agent.gitRefs = "[\"refs/heads/" + wrapperBranch + "\",\"refs/heads/" + wrapperBranch + "-*\"]";
     // Apart by state, so a listing newest first is the same order on every run.
     agent.createdAt = Instant.now().minusSeconds(60L * state.ordinal());
     agent.lastActivityAt = Instant.now();

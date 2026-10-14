@@ -17,6 +17,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import java.util.List;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -64,6 +65,7 @@ public class WorkspaceController {
   // method-level list replaces the class's, so each read states the admin role again.
   @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
+  @Operation(operationId = "listWorkspaces", summary = "A repository's ACTIVE workspaces")
   public ListWorkspacesRequest.Response list(@QueryParam("repositoryId") String repositoryId) {
     var entries =
         workspaceService.listWorkspaces(repositoryId).stream()
@@ -110,6 +112,7 @@ public class WorkspaceController {
       responseCode = "404",
       description = "No such ACTIVE workspace.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "getWorkspace")
   public GetWorkspaceRequest.Response get(@PathParam("id") Long id) {
     return new GetWorkspaceRequest.Response(workspaceService.getWorkspace(id));
   }
@@ -173,6 +176,7 @@ public class WorkspaceController {
   @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   @Path("/{id}/active-process")
+  @Operation(operationId = "getWorkspaceActiveProcess")
   public ActiveProcessRequest.Response activeProcess(
       @PathParam("id") Long id) {
     return new ActiveProcessRequest.Response(

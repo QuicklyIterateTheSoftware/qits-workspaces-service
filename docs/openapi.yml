@@ -2845,6 +2845,8 @@ paths:
         - qits:agent
   /workspaces/api/workspaces:
     get:
+      summary: A repository's ACTIVE workspaces
+      operationId: listWorkspaces
       parameters:
       - name: repositoryId
         in: query
@@ -2861,7 +2863,6 @@ paths:
           description: Not Authorized
         "403":
           description: Not Allowed
-      summary: List
       tags:
       - Workspace Controller
       security:
@@ -2871,6 +2872,7 @@ paths:
         - qits:agent
   /workspaces/api/workspaces/{id}:
     get:
+      operationId: getWorkspace
       parameters:
       - name: id
         in: path
@@ -2905,6 +2907,7 @@ paths:
         - qits:agent
   /workspaces/api/workspaces/{id}/active-process:
     get:
+      operationId: getWorkspaceActiveProcess
       parameters:
       - name: id
         in: path
@@ -3089,4 +3092,4 @@ paths:
         - qits:admin-agent
 info:
   title: qits-workspaces API
-  version: 2026.1014.123033
+  version: 2026.1014.143757

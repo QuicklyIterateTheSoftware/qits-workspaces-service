@@ -1,0 +1,38 @@
+{
+  "entries": [
+    {
+      "workspace": {
+        "id": 1,
+        "workspaceId": "ws-contract",
+        "parent": null,
+        "branch": null,
+        "repositoryMainBranch": "master",
+        "ahead": 0,
+        "behind": 0,
+        "conflictsWithParent": false,
+        "status": "ACTIVE",
+        "runtimeStatus": "RUNNING",
+        "runtimeError": null,
+        "clean": null,
+        "agentActivity": null,
+        "preamble": null,
+        "ticketId": null,
+        "epicId": null,
+        "result": null,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "resolvedAt": null,
+        "daemonConnectedAt": null,
+        "daemonVersion": null,
+        "daemonBuildTime": null,
+        "daemonOutdated": null,
+        "admin": false,
+        "placement": "RUNNER",
+        "runner": {
+          "id": "00000000-0000-4000-8000-000000000020",
+          "name": "localhost"
+        },
+        "queuedAt": null
+      }
+    }
+  ]
+}

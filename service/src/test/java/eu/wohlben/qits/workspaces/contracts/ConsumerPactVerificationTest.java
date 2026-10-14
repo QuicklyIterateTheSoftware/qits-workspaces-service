@@ -154,4 +154,19 @@ class ConsumerPactVerificationTest {
   Map<String, String> aQuarantinedRunner() {
     return states.params(ProviderStates.A_QUARANTINED_RUNNER);
   }
+
+  @State(ProviderStates.A_PROJECT_WITH_WORKSPACE_SLOTS)
+  Map<String, String> aProjectWithWorkspaceSlots() {
+    return states.params(ProviderStates.A_PROJECT_WITH_WORKSPACE_SLOTS);
+  }
+
+  @State(ProviderStates.A_WORKSPACE_SLOT_HOSTING_AGENTS)
+  Map<String, String> aWorkspaceSlotHostingAgents() {
+    return states.params(ProviderStates.A_WORKSPACE_SLOT_HOSTING_AGENTS);
+  }
+
+  @State(ProviderStates.AN_AGENT_WHOSE_WORKSPACE_IS_STARTING)
+  Map<String, String> anAgentWhoseWorkspaceIsStarting() {
+    return states.params(ProviderStates.AN_AGENT_WHOSE_WORKSPACE_IS_STARTING);
+  }
 }
