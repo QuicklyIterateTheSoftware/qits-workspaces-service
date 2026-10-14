@@ -132,55 +132,8 @@ COPY . .
 # flip `skipITs` — its *IT.java are the docker-backed `extended` suite — so there is nothing at
 # `verify` that `package` misses here.
 #
-# The two `package-manager-install` flags give this stage a node: the Mandrel builder image ships
-# none at all, and Quinoa shells out to npm regardless. They live here rather than in
-# application.properties on purpose — a local or CI `mvnw` build must use the node on PATH, so that
-# no build silently downloads a toolchain. The version is the PLATFORM pin (22.22.0), not "whatever
-# nodejs.org calls current", and it is deliberately not the step container's node: the pipeline's
-# image is node-docker-base (node 24) and that is where the bundle is actually built. The two do not
-# have to agree, because this stage does not build the bundle.
-#
-# --- the three command overrides, and why the client is NOT built here ---------------------------
-#
-# service/src/main/webui is qits-spa-workspaces, and since it adopted QitsMainLayout it depends on
-# @qits/ui-components. That package exists ONLY on the platform's own npm registry (qits-artifacts),
-# and the SPA commits an .npmrc pointing at the edge's registry vhost — right for a developer on the
-# deployment host, and an address a build has never had. npm ranks a project .npmrc above ~/.npmrc,
-# and its answer to a registry that never connects is `Exit handler never called!`, its own
-# internal-error text, naming neither the registry nor the address. That is what an install here
-# looks like when it goes wrong; it is not a hint that anything is retryable.
-#
-# THE ADDRESS HALF OF THAT ARGUMENT CHANGED AND THE ARRANGEMENT DID NOT. It used to read "a RUN
-# reaches the platform registry by NO address" — true while a build ran on the host daemon, and no
-# longer true: under the platform builder a RUN executes on qits-net, where the aliases resolve. The
-# install still does not belong here, for the reasons that did not move — the committed .npmrc, the
-# lockfile's host-published origins that the pipeline rewrites, and a builder stage with no node in
-# it — so the bundle stays something the step container produces and this stage only packages.
-#
-# The bundle is therefore built BEFORE this image, by the first half of the image step in
-# .config/qits/ci-event-release-request.yml and ci-event-release.yml, which runs on qits-net where
-# the registry is reachable, and arrives in the build context as
-# service/src/main/webui/dist/ (see .dockerignore, which stops
-# excluding exactly that path for this reason). `--version` is the null command: it proves the
-# package manager is really there and does nothing else.
-#
-# THIS DOES NOT FAIL QUIETLY. The `test -f` below stops a context with no bundle before the
-# multi-minute native compile, and Quinoa's own build-dir check would stop it after. A forgotten
-# `npm run build` in the step is a red build, not a service that ships without its client. The same
-# guard covers the case this comment used to describe on its own: a context whose webui submodule is
-# NOT initialised has no bundle either, and stops here rather than at Quinoa's `No package.json
-# found in Web UI directory`.
-#
-# --- and why the bundle is copied onto itself first ----------------------------------------------
-# Quinoa does not copy build-dir into target/quinoa/build, it MOVES it, and overlayfs cannot rename
-# a directory that still lives in a LOWER image layer. It answers EXDEV, the JDK falls back to its
-# cross-file-store path, and that path refuses a non-empty directory — the build dies seconds in
-# with `DirectoryNotEmptyException: …/dist/qits-spa-workspaces/browser`, which names the source and
-# explains nothing. A builder stage that *creates* dist itself is immune by accident, because dist
-# is then already in the upper layer; ours arrives by COPY, so it is not.
-#
-# One `cp` re-materialises it in the layer that is about to move it. It has to be in THIS `RUN` and
-# not a tidier one of its own — a layer boundary is exactly what it is undoing.
+# There is no node in this stage and none is needed: the service serves no web client (qits-1245 —
+# the workspace pages are qits-landing-app's), so there is no Quinoa, no bundle and no npm.
 #
 # --- where the platform's own Maven artifacts come from -------------------------------------------
 # Both platform hosts are code plus one input, the public domain:
@@ -211,13 +164,6 @@ ARG QITS_DOMAIN=wohlben.eu
 # the first 401 with Maven naming the host.
 RUN --mount=type=secret,id=qits-client-id \
     --mount=type=secret,id=qits-client-secret \
-    d=service/src/main/webui/dist/qits-spa-workspaces/browser; \
-    test -f "$d/index.html" || { \
-      echo "No built client SPA at $d." >&2; \
-      echo "The build context must carry one: run 'npm ci && npm run build'" >&2; \
-      echo "in service/src/main/webui first — this stage cannot, see the Quinoa flags above." >&2; \
-      exit 1; }; \
-    cp -a "$d" "$d.layer" && rm -rf "$d" && mv "$d.layer" "$d" && \
     QITS_MAVEN_AUTH_USR="$(cat /run/secrets/qits-client-id 2>/dev/null || true)" \
     QITS_MAVEN_AUTH_PSW="$(cat /run/secrets/qits-client-secret 2>/dev/null || true)" \
     QITS_MAVEN_REPOSITORY_URL="https://registry.qits.$QITS_DOMAIN/artifacts/maven/maven" \
@@ -225,11 +171,6 @@ RUN --mount=type=secret,id=qits-client-id \
     ./mvnw -B -ntp -s .qits-maven-settings.xml -pl service -am package -Dnative -DskipTests \
       -Dqits.maven.repository.url="https://registry.qits.$QITS_DOMAIN/artifacts/maven/maven" \
       -Dquarkus.native.native-image-xmx=4g \
-      -Dquarkus.quinoa.package-manager-install=true \
-      -Dquarkus.quinoa.package-manager-install.node-version=22.22.0 \
-      -Dquarkus.quinoa.package-manager-command.install=--version \
-      -Dquarkus.quinoa.package-manager-command.ci=--version \
-      -Dquarkus.quinoa.package-manager-command.build=--version \
       org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom \
       -DoutputFormat=json -DoutputName=sbom -DschemaVersion=1.6 \
       -Dcyclonedx.skipNotDeployed=false

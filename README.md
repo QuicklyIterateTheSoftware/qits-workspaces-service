@@ -3,8 +3,8 @@
 The **host side** of qits workspaces: workspaces and the agents that run in them, their scheduling
 and lifecycle, container orchestration, host-side git through a mirror of each repository, the
 workspace-daemon registry, the technical-process framework, prompt composition, feature capture, and
-the routes over all of it — the machine surface at `/workspaces`, its segment, and the client at the
-root of `workspaces.<env>.<domain>`.
+the routes over all of it — the machine surface at `/workspaces`, its segment. It serves no web
+client; the workspace pages are qits-landing-app's.
 
 Since epic qits-1152 a **workspace** is a slot: one container on a workspace runner (an admin one on
 the platform host), scoped to a project's wrapper, holding one long-lived clone. An **agent** is one
@@ -26,21 +26,10 @@ qits-githost and lands a tag. AGENTS.md, "Agents and the workspaces they run in"
 | `domain/` | `eu.wohlben.qits.workspaces.*` — entity, persistence, dto, mapper, control, and the framework-free SPIs the daemon implements. No web, no JAX-RS. |
 | `service/` | `eu.wohlben.qits.workspaces.{api,daemonhost}` — JAX-RS routes, the SSE channels, and the daemon control socket + registry. |
 | — | The daemon wire contract is no longer a module here. It is the released `eu.wohlben.qits:qits-workspace-daemon-protocol`, and **its version is the `qits/workspace` image this service starts** — see AGENTS.md, "The protocol is a dependency, and its version is the workspace image". |
-| `service/src/main/webui/` | The SPA — a **submodule**, [qits-workspaces-frontend](https://github.com/QuicklyIterateTheSoftware/qits-workspaces-frontend). Quinoa builds it into the artifact and serves it at `/`. |
 
-So a checkout needs one command a plain clone does not give you:
-
-    git submodule update --init
-
-Skip it and the web build stops at `No package.json found in Web UI directory` — `git clone` materialises
-a gitlink as an empty directory, and that is the one state Quinoa treats as a misconfiguration rather
-than as "no UI here". A checkout with the `webui` directory *absent* builds fine, with a warning.
-
-Quinoa shells out to `npm`, so a build here also wants **node on `PATH`** — the machine's own, which
-is the point: nothing in `application.properties` asks Quinoa to download one, so `./mvnw package`
-never fetches a node tarball behind your back. The one environment with no node is the Mandrel
-builder stage in `docker/Dockerfile`, and that is where the two
-`-Dquarkus.quinoa.package-manager-install…` flags live, on the command line and pinned to a version.
+**No web client.** The service serves no SPA: the workspace pages are qits-landing-app's (epic
+qits-1230), and the qits-workspaces-frontend submodule that used to sit at `service/src/main/webui/`
+went with Quinoa in qits-1245. A plain clone is a complete checkout, and a build needs no node.
 
 `domain/` is a library jar. **`service/` is the application** — it carries
 `<packaging>quarkus</packaging>` and produces a process, as a JVM fast-jar or as a native binary.
@@ -398,8 +387,8 @@ whatever no live workspace container claims. That reconcile, not a TTL, is what 
 
 ## Where it answers
 
-This service has a **host of its own** — `workspaces.<env>.<domain>` — and serves two things on it.
-The **client is at `/`**, and every **machine** route stays under `/workspaces`, its segment. The
+This service has a **host of its own** — `workspaces.<env>.<domain>` — and serves only the
+**machine** surface on it, every route under `/workspaces`, its segment. The
 edge routes `/workspaces/*` **verbatim by prefix** on that host and on every other one, with no
 rewriting, so the service serves the prefixed path itself and there is no unprefixed form, on the
 edge or on `qits-net`.
@@ -411,19 +400,9 @@ edge or on `qits-net`.
 | `/workspaces/daemon/{id}` | the daemon's dial-home control socket | `DaemonControlSocket`, literal |
 | `/workspaces/container/{id}/*` | the workspace-daemon reverse proxy | `ContainerProxyPath.PREFIX`, literal |
 | `/workspaces/daemon/stream/{nonce}` | where a daemon's tunnel dial-back lands | `WorkspaceTunnels.STREAM_PATH_PREFIX`, literal |
-| `/` | the SPA, and every client-side route under it — its own paths and the scoped `/<project>/<category>/<repo>/…` | `quarkus.quinoa.ui-root-path` + `enable-spa-routing` |
+| anything else — `/`, `/workspaces`, `/workspaces/` included | **404**. The SPA that answered here is gone (qits-1245); the workspace pages are qits-landing-app's, at `/projects/<slug>/workspaces…` on the apex domain | — |
 
 **The web editor's vhost is gone** with the editor (qits-1152; epic qits-1150).
-
-The `/` row is a **fallback over the whole port**, and the six above it are what it must not
-swallow. Quinoa derives its skip list from `quarkus.rest.path` and
-`quarkus.http.non-application-root-path` only, so the four literal routes would be outside it. The
-key is set instead, to one **absolute** entry — `quarkus.quinoa.ignored-path-prefixes=/workspaces` —
-which prefix-matches all six rows at once. The values used to be relative to the UI root (`/api`
-rather than `/workspaces/api`); stripping a UI root of `/` changes nothing, so they are now what the
-request spells. Without the key a mistyped `/workspaces/daemon…` answers `200 text/html` with
-`index.html`, which a machine client parses as data; with it, it answers 404. Add a **root-level**
-route, add its prefix.
 
 These are second-level segments beside `api` because none is a JSON API, and all are
 literals for the same reason: **raw Vert.x routes and `@WebSocket` paths do not follow

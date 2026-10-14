@@ -13,18 +13,10 @@ That is why: the poms duplicate versions instead of inheriting them, the daemon 
 vendored, tests build their own git origins (`TestOrigin`) instead of using fixtures, and the
 container runtime is faked in tests rather than reaching a real one.
 
-The SPA is the sole submodule and an image build needs it.
-
-    git submodule update --init
-
-`service/src/main/webui/` is initialised explicitly by the pipeline. qits-eventstream is a normal
-Maven dependency and must not return as a gitlink or reactor module.
-
-The one thing beyond `.sdkmanrc`'s GraalVM a build wants is **node on `PATH`** — Quinoa shells out
-to npm for the Angular client. `mvn verify` does not need it (Quinoa is disabled by default in
-tests), `./mvnw package` does, and it is deliberately the machine's OWN node: nothing in
-`application.properties` asks Quinoa to install one, so no build silently downloads a toolchain.
-Only `docker/Dockerfile`'s Mandrel stage, which has no node at all, passes the install flags.
+**No submodules and no web client** (qits-1245). The qits-workspaces-frontend SPA that sat at
+`service/src/main/webui/` is gone with Quinoa; the workspace pages are qits-landing-app's. A plain
+clone is a complete checkout, and no build needs node. qits-eventstream is a normal Maven dependency
+and must not return as a gitlink or reactor module.
 
 **`service/` compiles to a GraalVM native image**, the rule qits-workspace-daemon and qits-gateway
 already carry. `.sdkmanrc` names `25.0.2-graalce`, so `sdk env` is the whole toolchain and
@@ -375,8 +367,8 @@ have no control socket until recreated.
 
 ## Where this service answers
 
-Two surfaces on one host. The **client is at `/`** — this service has a host of its own,
-`workspaces.<env>.<domain>`, and the SPA is what it answers with. Every **machine** route is
+One surface. This service has a host of its own, `workspaces.<env>.<domain>`, but serves **no web
+client** there any more (qits-1245): `/`, `/workspaces` and `/workspaces/` are plain 404s. Every route is
 `/workspaces/<second level>/…`, always: the edge routes **verbatim by prefix**, so the service serves
 the prefixed path itself, on its own host and on every other one; there is no unprefixed form, on the
 edge or on `qits-net`. `README.md` has the table.
@@ -451,22 +443,10 @@ literal and must carry `/workspaces` itself. Four do, each for its own reason:
 `quarkus.http.non-application-root-path`. `quarkus.swagger-ui.path` is relative and follows on its
 own — do not pin it.
 
-**`quarkus.quinoa.ignored-path-prefixes` is what keeps the SPA fallback off all of that, and it is
-now one entry: `/workspaces`.** The values are **absolute** — Quinoa strips `ui-root-path` before
-matching, and stripping `/` leaves the path as it is — so a prefix match on `/workspaces` covers the
-JAX-RS routes, `/workspaces/q` and all three literals above at once. They used to be **relative**
-(`/api`, never `/workspaces/api`), because the client was rooted at the segment; that is the one line
-of this paragraph that inverted with the move to a host of its own, and an entry left in the old
-spelling matches nothing and looks exactly like an unset key.
-
-The key cannot go back to being unset. Quinoa derives its skip list from `quarkus.rest.path` and
-`quarkus.http.non-application-root-path` only, and with the client at `/` the fallback sees every
-path this service does not otherwise serve. Measured on the packaged fast-jar before the key was set,
-`GET /workspaces/daemon`, `/workspaces/daemon/` and `/workspaces/daemon/{id}` — a plain GET, since
-websockets-next claims only the upgrade — each answered **200 `text/html`** with the SPA's
-`index.html`. A machine client parses a web page as data; the correct answer is a 404. Add a route
-under `/workspaces` and there is nothing to do here; add a **root-level** one and add its prefix in
-the same commit. `application.properties` carries the reasoning.
+**There is no SPA fallback any more**, so nothing has to be kept off it: a path under
+`/workspaces` that no route claims is a 404 on its own. The `quarkus.quinoa.ignored-path-prefixes`
+key, and the `WebUiRedirect` that sent the bare `/workspaces` to the client, went with Quinoa
+(qits-1245). `WebUiGoneTest` pins the 404s.
 
 **A workspace is not a sub-resource of a repository.** This context holds a repository id as a
 string, in another database, with no FK — so collections filter by `?repositoryId=` and an item is
@@ -1719,7 +1699,7 @@ build-time key; it would silently take the default, which is this repo's own wor
 has one run per module and flipping it would turn the five docker-backed `Daemon*IT` back on with
 it. Run it — and the composed QA pipeline's verify runs it — as a comma list:
 
-    ./mvnw verify -DskipITs=false -Dquarkus.quinoa=false \
+    ./mvnw verify -DskipITs=false \
       -Dit.test=TokenValidationBootstrapIT,WorkspaceProvisionIT,OperatorReadsIT,MergeDoorRefusalIT
 
 Adding a story class means adding it there **and** in `.config/qits/userflow-stories`, which is

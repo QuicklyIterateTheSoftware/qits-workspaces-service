@@ -51,8 +51,7 @@ import org.jboss.logging.Logger;
  *
  * <p><b>The path literal carries {@code /workspaces} itself</b>: a {@code @WebSocket} path does not
  * follow {@code quarkus.rest.path}. It is the protocol jar's {@link
- * WorkspacesRunnerProtocol#SOCKET_PATH}, the one spelling the register door hands out; {@code
- * quarkus.quinoa.ignored-path-prefixes=/workspaces} already keeps the SPA fallback off it. {@link
+ * WorkspacesRunnerProtocol#SOCKET_PATH}, the one spelling the register door hands out. {@link
  * SocketBearerLifetime} keeps the connection past its bearer's {@code exp}.
  *
  * <p>Frames are handled on virtual threads, and an undecodable one is dropped and logged rather than

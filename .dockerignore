@@ -15,20 +15,6 @@
 **/target
 **/target-ide
 
-# The SPA's node artefacts. `node_modules` alone is tens of thousands of files and the builder stage
-# never installs (see docker/Dockerfile's Quinoa flags); `.quinoa` is Quinoa's own node installation,
-# regenerated inside the stage.
-**/node_modules
-**/.quinoa
-
-# service/src/main/webui/dist is deliberately NOT excluded, and used to be. It is `ng build` output,
-# so the SPA's .gitignore keeps it out of git — which docker does not read — but it is now the one
-# artefact the image build CONSUMES rather than produces: @qits/ui-components lives only on the
-# platform's npm registry, which a RUN step in a docker build can reach by no address, so the bundle
-# is built by .config/qits/ci-event-release.yml beforehand — and by ci-event-release-request.yml
-# when the QA pipeline builds a fold — and has to survive into the context.
-# Re-adding the exclusion turns the image build red at the `test -f` guard.
-
 # Agent scratch, and the one entry the sibling repos do not carry: `.claude/worktrees/` holds full
 # checkouts of this repo, each with its own target/. Untracked and machine-local, so it is invisible
 # in a diff and unbounded in size — without this line the context is dominated by copies of the very

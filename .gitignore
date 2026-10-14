@@ -2,14 +2,6 @@
 target/
 target-ide/
 
-# Quinoa's own node installation, from the `-Dquarkus.quinoa.package-manager-install=true` that only
-# docker/Dockerfile's builder stage passes — so a local build never creates this, and that is exactly
-# why it is easy to commit by accident from a machine that once did. It stays listed because the
-# entry costs nothing and `.dockerignore` keeping it out of the build CONTEXT is the part that
-# matters. Unanchored because install-dir is resolved against the *project root Quinoa finds*, which
-# is the first ancestor of the module's target/ holding a src/main — `service/`, not the repo root.
-.quinoa/
-
 # IDE
 .vscode/
 .idea/

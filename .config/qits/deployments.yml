@@ -8,9 +8,9 @@
 # are gone: deployment follows the `SoftwareRelease` event now, and qits-projects makes the
 # deployable/non-deployable call off this file at the released tag.
 #
-# The path prefix the edge routes here on EVERY host, browser and machine alike. The client itself
-# is served at `/` on this service's own host (workspaces.<env>.<domain>), so this covers the machine
-# surface only: /workspaces/api, /workspaces/q and the four literal wire routes under it.
+# The path prefix the edge routes here on EVERY host, browser and machine alike. This service serves
+# no web client (qits-1245), so this is its whole surface: /workspaces/api, /workspaces/q and the
+# literal wire routes under it.
 routes: /workspaces
 
 # WHAT THIS REPOSITORY DEPLOYS AS, held still across the repository rename. The repository is
@@ -23,39 +23,10 @@ routes: /workspaces
 # again.
 application: qits-workspaces
 
-# Where this application appears in the chrome's navigation tree. `<slot>.<Label>:<position>[=subpath]`,
-# and the slot is what places it. `<category>.details` is a child of a repository in scope, so Workspaces
-# shows up under a repository of any kind; `project.detail` is a child of the Project node, where it
-# means the project wrapper's own workspaces — the aggregate ones, which is what this service exists
-# for. Positions are per slot: 8 is Workspaces' place in the platform's fixed order of the
-# per-repository applications (Api Docs 1, Docs 2, Release Requests 3, Code 4, CI 5, Artifacts 6,
-# Configuration 7, Workspaces 8); under `project.detail` this application owns 3 (Workspaces) and
-# 4 (Editor).
-#
-# THE PROJECT PAIR MOVED 2,3 -> 3,4 ON 2026-09-07, and nothing about this application changed
-# either time. qits-projects put a Tickets row at position 2, directly below Epics — the work items
-# the plan breaks down into, which belong next to the plan and above everything that merely acts on
-# it — so the pair below it shifted down one again: Epics 1, Tickets 2, Workspaces 3, Editor 4,
-# Release Requests 5. The reasoning for spelling the order in integers is the same one the two moves
-# below record, and it is what makes a shift like this a one-line edit per file rather than a
-# rendering surprise.
-#
-# THE PROJECT PAIR MOVED 1,2 -> 2,3 ON 2026-09-02, and nothing about this application changed.
-# qits-projects put an Epics row at position 1 — the project's plan, which is what a project is
-# mostly for and therefore the first thing under the Project node — so the whole group shifted down
-# one: Epics 1, Workspaces 2, Editor 3, Release Requests 4. The same reasoning as the 7 -> 8 move
-# below: the order is stated in integers rather than shared with the row above and left to the
-# edge's position-then-label tie-break, because a tie makes the order an accident of the LABEL and
-# renaming a row would silently reorder the group.
-#
-# WORKSPACES MOVED 7 -> 8 ON 2026-09-01, and nothing about this application changed. qits-projects
-# put a Release Requests row at position 3, above Code, and every entry from Code down moved up one
-# in the same change — this file, qits-githost, qits-ci, qits-artifacts and qits-configuration, one
-# line each. The order is stated in integers rather than left to the edge's position-then-label
-# tie-break so that renaming a row cannot silently reorder the group.
-#
-# THE EDITOR ROW WENT WITH THE EDITOR (qits-1152; rethought in epic qits-1150).
-navigation-entries: services.details.Workspaces:8, daemons.details.Workspaces:8, libs.details.Workspaces:8, apps.details.Workspaces:8, frontends.details.Workspaces:8, cli.details.Workspaces:8, images.details.Workspaces:8, project.detail.Workspaces:3
+# NO `navigation-entries:` (qits-1245). The Workspaces rows under every repository kind and under
+# the Project node pointed at this service's own host, where the qits-workspaces-frontend SPA used to
+# answer. The SPA is gone and the workspace pages are qits-landing-app's
+# (`/projects/<slug>/workspaces…` on the apex domain), so a row here would lead to a 404.
 
 # ONE KEY, AND IT ASKS FOR TWO DATABASES, because two jars in this deployable each own one.
 #
