@@ -705,6 +705,79 @@ public class AgentServiceTest {
     }
   }
 
+  /**
+   * An admin slot of this test's wrapper, made by hand, that never came up: FAILED with the
+   * runner's wording, status still ACTIVE (qits-1233). By hand, because a slot a pass creates is
+   * started in the background, and that start would overwrite the status.
+   */
+  private Long failedSlot() {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              Workspace row = new Workspace();
+              row.repositoryId = repoId;
+              row.workspaceId = "ws-" + UUID.randomUUID().toString().substring(0, 8);
+              row.status = WorkspaceStatus.ACTIVE;
+              row.runtimeStatus = WorkspaceRuntimeStatus.FAILED;
+              row.runtimeError = "no workspace-daemon dialed home within 30000ms";
+              row.placement = WorkspacePlacement.DIRECT;
+              row.admin = true;
+              workspaces.persist(row);
+              return row.id;
+            });
+  }
+
+  @Test
+  void anAgentWhoseWorkspaceNeverCameUpIsQueuedForAnotherAndSaysWhy() {
+    // qits-1233: the workspace went FAILED (status still ACTIVE) and the agent stayed RUNNING in
+    // it, never started and with no refusal, until a person discarded it.
+    Long failed = failedSlot();
+    UUID id = agentIn(failed, true, AgentRunState.RUNNING);
+    createdAgents.add(id);
+    String agentId = id.toString();
+
+    service.reconcile();
+
+    AgentWorktree requeued = row(agentId);
+    assertNotEquals(failed, requeued.workspaceId, "taken out of the workspace that never came up");
+    assertNotNull(requeued.startRefusal, "its view says why it does not run");
+    assertTrue(requeued.startRefusal.contains("did not come up"), requeued.startRefusal);
+    assertTrue(
+        requeued.startRefusal.contains("no workspace-daemon dialed home"), requeued.startRefusal);
+
+    service.reconcile();
+
+    AgentWorktree placed = row(agentId);
+    assertEquals(AgentRunState.RUNNING, placed.runState);
+    assertNotNull(placed.workspaceId);
+    assertNotEquals(failed, placed.workspaceId, "the empty FAILED workspace is offered as no slot");
+
+    // The FAILED slot, empty now, is retired once past the orphan grace (created_at is not
+    // updatable through the entity).
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaces
+                    .getEntityManager()
+                    .createNativeQuery("update workspace set created_at = ?1 where id = ?2")
+                    .setParameter(1, Instant.now().minusSeconds(3600))
+                    .setParameter(2, failed)
+                    .executeUpdate());
+    service.removeEmptyWorkspaces();
+    assertEquals(WorkspaceStatus.ABANDONED, workspace(failed).status);
+
+    // A second workspace that fails in a row: queued again, but not placed again at once.
+    Long second = failedSlot();
+    QuarkusTransaction.requiringNew().run(() -> agents.findById(id).workspaceId = second);
+    service.reconcile();
+    service.reconcile();
+
+    AgentWorktree held = row(agentId);
+    assertEquals(AgentRunState.QUEUED, held.runState, "a runner that keeps failing is not hammered");
+    assertNull(held.workspaceId);
+    assertTrue(held.startRefusal.contains("failure 2 in a row"), held.startRefusal);
+  }
+
   @Test
   void aReleasedBranchMakesItsAgentsObsoleteAndTheSweepRemovesThemOnceVerifiedAndIdle() {
     AgentService.Dispatch dispatched = dispatch("w-release", true, null);

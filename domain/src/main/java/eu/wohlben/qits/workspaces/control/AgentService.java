@@ -23,6 +23,8 @@ import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
+import jakarta.enterprise.event.TransactionPhase;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import java.time.Duration;
@@ -82,7 +84,9 @@ import org.jboss.logging.Logger;
  *       its credential lives only in daemon memory) and is told what it has still to hear. A placed
  *       YIELDED agent is started too when this process has not started it on its daemon's current
  *       connection — after a reconnect or a restart of this service — but only started: it stays
- *       YIELDED and hears nothing until it is RUNNING again (qits-1212).
+ *       YIELDED and hears nothing until it is RUNNING again (qits-1212). A RUNNING agent whose
+ *       workspace is FAILED with no daemon — it never came up — is queued for another workspace,
+ *       the reason stored as its start refusal (qits-1233).
  *   <li><b>Clean up</b> (D4, D5, D7): an OBSOLETE agent whose work item is closed (VERIFIED,
  *       DONE or DROPPED) and that has been idle for {@code qits.workspace.agent.cleanup-idle} is
  *       removed if its worktrees are clean and pushed; otherwise it is handed the cleanup prompt
@@ -239,6 +243,23 @@ public class AgentService {
 
   /** The last refusal logged per agent, so a refusing daemon is logged once and not every pass. */
   private final Map<UUID, String> lastRefusal = new ConcurrentHashMap<>();
+
+  /** The first wait before an agent whose workspace failed again is placed again (qits-1233). */
+  static final Duration REQUEUE_BACKOFF = Duration.ofMinutes(1);
+
+  /** The longest wait before such an agent is placed again: it doubles up to this. */
+  static final Duration REQUEUE_BACKOFF_MAX = Duration.ofMinutes(30);
+
+  /** An agent taken out of a workspace that never came up: how often in a row, and when it may be placed. */
+  private record Requeued(int times, Instant notBefore) {}
+
+  /**
+   * The agents taken out of a FAILED workspace (qits-1233), by id. The first time the agent is
+   * placed again at once; every further time in a row waits {@link #REQUEUE_BACKOFF}, doubled up to
+   * {@link #REQUEUE_BACKOFF_MAX}, so a runner that keeps failing is not handed a new workspace every
+   * pass. An accepted start ends the row. In memory: a restart places it again at once.
+   */
+  private final Map<UUID, Requeued> requeued = new ConcurrentHashMap<>();
 
   /**
    * The queued agents whose wait for a runner slot was logged, so it is logged once and not every
@@ -868,6 +889,15 @@ public class AgentService {
     kick();
   }
 
+  /**
+   * A workspace's start ended other than by a launch — among others a runner workspace whose daemon
+   * never dialed home is FAILED (qits-1233). A pass now, so {@link #drive} takes its agents out of
+   * it on the next pass rather than on the next timer. After the firing transaction committed.
+   */
+  void onUnqueued(@Observes(during = TransactionPhase.AFTER_SUCCESS) WorkspaceUnqueued unqueued) {
+    kick();
+  }
+
   /** What a fresh process knows: no agent started anywhere. Tests stand for a service restart with it. */
   void forgetStarted() {
     started.clear();
@@ -960,7 +990,12 @@ public class AgentService {
     synchronized (placeLock) {
       List<AgentWorktree> queued = QuarkusTransaction.requiringNew().call(() -> agents.findQueued());
       waitingForCapacity.retainAll(queued.stream().map(a -> a.id).toList());
+      Instant now = Instant.now();
       for (AgentWorktree agent : queued) {
+        Requeued held = requeued.get(agent.id);
+        if (held != null && held.notBefore().isAfter(now)) {
+          continue;
+        }
         Long slot = QuarkusTransaction.requiringNew().call(() -> emptySlotFor(agent));
         RunnerCapacity capacity = null;
         if (slot == null) {
@@ -1018,7 +1053,7 @@ public class AgentService {
   }
 
   /**
-   * An ACTIVE workspace of the agent's wrapper and posture that hosts no live agent — so none that
+   * An ACTIVE, not FAILED workspace of the agent's wrapper and posture that hosts no live agent — so none that
    * holds its wrapper branch either ({@link #holdsBranchOf}).
    */
   private Long emptySlotFor(AgentWorktree agent) {
@@ -1070,10 +1105,18 @@ public class AgentService {
                     && Objects.equals(a.wrapperBranch, agent.wrapperBranch));
   }
 
-  /** The ACTIVE slot workspaces (no branch of their own) of an agent's wrapper and posture. */
+  /**
+   * The ACTIVE slot workspaces (no branch of their own) of an agent's wrapper and posture. A FAILED
+   * one is none (qits-1233): nothing restarts it, so an agent placed there would never start; it
+   * is retired once empty.
+   */
   private List<Workspace> slotsOf(AgentWorktree agent) {
     return workspaceRepository.findActiveByRepositoryId(agent.repositoryId).stream()
-        .filter(w -> w.branch == null && w.admin == agent.admin)
+        .filter(
+            w ->
+                w.branch == null
+                    && w.admin == agent.admin
+                    && w.runtimeStatus != WorkspaceRuntimeStatus.FAILED)
         .toList();
   }
 
@@ -1254,6 +1297,10 @@ public class AgentService {
       started.remove(agent.id);
       return;
     }
+    if (workspace.runtimeStatus == WorkspaceRuntimeStatus.FAILED && !daemonLive(workspace.id)) {
+      requeueFromFailed(agent, workspace);
+      return;
+    }
     if (!daemonLive(workspace.id) || !daemon.isResolvable()) {
       return;
     }
@@ -1311,6 +1358,60 @@ public class AgentService {
   }
 
   /**
+   * The agent's workspace never came up, or failed to start again: FAILED, with no daemon (qits-1233).
+   * Nothing will ever start the agent there — the scheduler does not restart a FAILED workspace,
+   * and nobody else is told — so it is queued for another one, as for a workspace that is gone, and
+   * the reason is stored as its start refusal for its view to show. The empty FAILED slot is then
+   * retired by {@link #removeEmptyWorkspaces}, and {@link #slotsOf} never offers it again. A second
+   * failure in a row waits before the agent is placed again ({@link #requeued}).
+   */
+  private void requeueFromFailed(AgentWorktree agent, Workspace workspace) {
+    boolean taken =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  AgentWorktree row = agents.findById(agent.id);
+                  if (row == null || !Objects.equals(row.workspaceId, workspace.id)) {
+                    return false;
+                  }
+                  row.workspaceId = null;
+                  row.runState = AgentRunState.QUEUED;
+                  return true;
+                });
+    started.remove(agent.id);
+    if (!taken) {
+      return;
+    }
+    Instant now = Instant.now();
+    Requeued again =
+        requeued.merge(
+            agent.id,
+            new Requeued(1, now),
+            (before, first) -> {
+              int times = before.times() + 1;
+              Duration wait = REQUEUE_BACKOFF.multipliedBy(1L << Math.min(times - 2, 10));
+              return new Requeued(
+                  times, now.plus(wait.compareTo(REQUEUE_BACKOFF_MAX) > 0 ? REQUEUE_BACKOFF_MAX : wait));
+            });
+    String why =
+        workspace.runtimeError == null || workspace.runtimeError.isBlank()
+            ? "it failed to start"
+            : workspace.runtimeError;
+    recordRefusal(
+        workspace.id,
+        agent,
+        "Workspace "
+            + workspace.id
+            + " did not come up ("
+            + why
+            + "); the agent is queued for another workspace"
+            + (again.times() > 1
+                ? ", not before " + again.notBefore() + " (failure " + again.times() + " in a row)"
+                : "")
+            + ".");
+  }
+
+  /**
    * Start the agent on {@code workspace}'s daemon and record it in {@link #started}. With {@code
    * withTurn}, a RUNNING agent's pending text is its instruction and is taken off the row once the
    * daemon accepted it. Without (a YIELDED agent, qits-1212), the start carries no instruction and
@@ -1345,6 +1446,7 @@ public class AgentService {
       return;
     }
     lastRefusal.remove(agent.id);
+    requeued.remove(agent.id);
     started.put(agent.id, workspace.id);
     QuarkusTransaction.requiringNew()
         .run(
@@ -1373,7 +1475,7 @@ public class AgentService {
   /**
    * A refused start (qits-1217): logged and stored on the row once per distinct detail, so the
    * agent's view says why it does not run while the scheduler keeps trying every pass. The next
-   * accepted start clears it.
+   * accepted start clears it. A workspace that never came up is stored the same way (qits-1233).
    */
   private void recordRefusal(Long workspaceId, AgentWorktree agent, String detail) {
     String said =
@@ -1615,6 +1717,7 @@ public class AgentService {
                 });
     started.remove(id);
     pendingSince.remove(id);
+    requeued.remove(id);
     if (tokenId == null) {
       return;
     }
