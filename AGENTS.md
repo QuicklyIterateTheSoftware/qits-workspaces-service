@@ -1148,9 +1148,11 @@ The rules they keep:
   the `lastSkip` throttle, which is keyed on the reason WORD, so a detail that moves under one reason
   (the workspace's runtime status, the item's status) is neither a new log line nor a new event.
 - **`harnessStopped` is true exactly when `AgentDaemon.remove` answered OK** for that removal.
-- **`AgentHarnessExited` is not wired yet.** The record and `AgentService.onHarnessExited` exist; the
-  daemon frame that reports a harness exit is being added to qits-workspace-daemon's protocol, and
-  `daemonhost` calls `onHarnessExited` once this service builds against that protocol jar.
+- **`AgentHarnessExited` is wired from the daemon's `AgentHarnessExit` frame** (capability 11):
+  `WorkspaceDaemonRegistry.onMessage` dispatches it to `AgentService.onHarnessExited` on
+  `sinkDispatch`, never the socket thread, skipping a null `agentId` (the sign-in terminal, which no
+  agent of this service owns). An older daemon simply never sends the frame, so the event never
+  fires for it — nothing here falls back to inferring an exit any other way.
 - **Off the caller's thread, in order.** `EventstreamLifecycleAnnouncer` reads the causation scope on
   the caller's thread and publishes on one thread of its own (qits-ci's `RunnerLifecycleAnnouncer`),
   with a request context activated for the outbox's fallback. `bus/EventWireReflection` registers

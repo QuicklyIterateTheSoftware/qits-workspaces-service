@@ -21,6 +21,7 @@ import eu.wohlben.qits.workspaces.control.WorkspaceChangePublisher;
 import eu.wohlben.qits.workspacedaemon.protocol.Ack;
 import eu.wohlben.qits.workspacedaemon.protocol.AgentActivity;
 import eu.wohlben.qits.workspacedaemon.protocol.AgentBranchPushed;
+import eu.wohlben.qits.workspacedaemon.protocol.AgentHarnessExit;
 import eu.wohlben.qits.workspacedaemon.protocol.CommandChunk;
 import eu.wohlben.qits.workspacedaemon.protocol.CommandExit;
 import eu.wohlben.qits.workspacedaemon.protocol.ConfigView;
@@ -376,6 +377,8 @@ public class WorkspaceDaemonRegistry
       case GitStatus status -> onGitStatus(workspaceId, client, status);
       case AgentActivity activity -> onAgentActivity(workspaceId, client, activity);
       case AgentBranchPushed pushed -> onBranchPushed(workspaceId, pushed);
+      // qits-1236: a harness exit frame (capability 11) — relayed to the agent row's own event.
+      case AgentHarnessExit exit -> onAgentHarnessExit(workspaceId, exit);
       case WorkspaceChanged changed -> onWorkspaceChanged(workspaceId, client, changed);
       // Everything else is ignored: qits -> workspace-daemon requests are never received here, and
       // a pre-qits-947 daemon's service frames (ServiceTransition, and its `service:` output
@@ -548,6 +551,36 @@ public class WorkspaceDaemonRegistry
                 pushed.agentId(), pushed.repository(), pushed.branch(), pushed.sha());
           } catch (RuntimeException e) {
             LOG.warnf(e, "could not record agent %s's push of %s (workspace %s)", pushed.agentId(), pushed.branch(), workspaceId);
+          }
+        });
+  }
+
+  /**
+   * A harness's exit (qits-1236, capability 11), recorded on {@link #sinkDispatch} like every other
+   * agent frame — never the socket thread. Skipped for a null {@code agentId}: that is the sign-in
+   * terminal, which no agent of this service owns.
+   */
+  private void onAgentHarnessExit(Long workspaceId, AgentHarnessExit exit) {
+    if (exit.agentId() == null) {
+      return;
+    }
+    sinkDispatch.execute(
+        () -> {
+          try {
+            agentService.onHarnessExited(
+                workspaceId,
+                exit.agentId(),
+                exit.commandId(),
+                exit.status(),
+                exit.exitCode(),
+                exit.stoppedBy(),
+                exit.at() == null ? 0 : exit.at().toEpochMilli());
+          } catch (RuntimeException e) {
+            LOG.warnf(
+                e,
+                "could not record agent %s's harness exit (workspace %s)",
+                exit.agentId(),
+                workspaceId);
           }
         });
   }
