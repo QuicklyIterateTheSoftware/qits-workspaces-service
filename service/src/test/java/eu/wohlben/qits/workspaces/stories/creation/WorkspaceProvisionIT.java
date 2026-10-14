@@ -358,12 +358,18 @@ public class WorkspaceProvisionIT {
         StoryIdentities.DAEMON,
         "ack");
 
-    // SIXTEEN across four planes: three doors, one registry read, two git reads, one commission,
-    // one token, three container calls, one dial and four frames. The count is what would notice a
-    // peer call creeping into a path that is supposed to be finished — a status poll after the
-    // ensure, say, which the design deliberately does not make because the wait is on the socket
-    // instead.
-    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, PROVISIONED_SLUG, 16);
+    // The lifecycle on the bus (qits-1236): the agent placed and started, the workspace running —
+    // one PUT per event to qits-events, and one arrow, the id scrubbed out of the label.
+    to(
+        StoryPeers.EVENTS,
+        StoryPeers.label("PUT", StoryPeers.EVENTS_PATH + java.util.UUID.randomUUID(), 201));
+
+    // SEVENTEEN across four planes: three doors, one registry read, two git reads, one commission,
+    // one token, three container calls, one event publish, one dial and four frames. The count is
+    // what would notice a peer call creeping into a path that is supposed to be finished — a status
+    // poll after the ensure, say, which the design deliberately does not make because the wait is
+    // on the socket instead.
+    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, PROVISIONED_SLUG, 17);
     ReportAssertions.assertOnlyEdgesFrom(
         CATEGORY_SLUG,
         PROVISIONED_SLUG,
