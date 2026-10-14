@@ -35,7 +35,8 @@ import org.junit.jupiter.api.Test;
  * repository root, published as {@code @qits/workspaces-golden-masters} (and its maven twin) for
  * consumers to write their pacts against. The format is qits-projects': one {@code
  * golden-masters/<state-slug>/<operationId>.json} per (state, operation), and {@code index.json}
- * describing them. One addition: {@code frozen.numbers} lists the paths of frozen row ids.
+ * describing them. One addition: {@code frozen.numbers} lists the paths of frozen row ids. An answer
+ * with no body (a 204, a bare 202) records {@code file: null} and no file, as qits-githost's does.
  *
  * <p>It compares by default and fails with a diff per differing file, including a committed file
  * no interaction records any more. {@code -Dgolden.update=true} (or {@code QITS_GOLDEN_UPDATE=true})
@@ -86,6 +87,25 @@ class GoldenMasterRecordingTest {
     static Interaction write(
         String state, String operationId, String path, int status, String requestBody) {
       return new Interaction(state, operationId, "POST", path, status, null, requestBody, Map.of(), null);
+    }
+
+    /** A call with another method than GET or POST. */
+    static Interaction call(
+        String state,
+        String operationId,
+        String method,
+        String path,
+        int status,
+        String requestBody) {
+      return new Interaction(
+          state, operationId, method, path, status, null, requestBody, Map.of(), null);
+    }
+
+    /** A read that answers {@code status} rather than 200 — a refusal, or a 204. */
+    Interaction answering(int answered) {
+      return new Interaction(
+          state, operationId, method, path, answered, listFilteredTo, requestBody, fixedStrings,
+          callerRole);
     }
 
     /** This interaction, with the version at {@code path} recorded as {@link #FIXED_VERSION}. */
@@ -306,7 +326,226 @@ class GoldenMasterRecordingTest {
               ProviderStates.AN_AGENT_WHOSE_WORKSPACE_IS_STARTING,
               "getWorkspaceActiveProcess",
               WORKSPACES + "/workspaces/{workspaceId}/active-process",
-              null));
+              null),
+          // The agent page's chat (qits-1241): the agent, its prompt draft and a turn sent to it.
+          Interaction.read(
+              ProviderStates.AN_AGENT_WITH_A_SAVED_PROMPT_DRAFT,
+              "getAgent",
+              WORKSPACES + "/agents/{agentId}",
+              null),
+          Interaction.read(
+              ProviderStates.AN_AGENT_WITH_A_SAVED_PROMPT_DRAFT,
+              "getAgentPromptDraft",
+              WORKSPACES + "/agents/{agentId}/prompt-draft",
+              null),
+          Interaction.call(
+              ProviderStates.AN_AGENT_WITH_A_SAVED_PROMPT_DRAFT,
+              "saveAgentPromptDraft",
+              "PUT",
+              WORKSPACES + "/agents/{agentId}/prompt-draft",
+              200,
+              "{\"content\":\"{\\\"text\\\":\\\"Check the rounding, then the totals.\\\","
+                  + "\\\"picked\\\":[]}\","
+                  + "\"serializedPrompt\":\"Check the rounding, then the totals.\"}"),
+          Interaction.call(
+              ProviderStates.AN_AGENT_WITH_A_SAVED_PROMPT_DRAFT,
+              "deleteAgentPromptDraft",
+              "DELETE",
+              WORKSPACES + "/agents/{agentId}/prompt-draft",
+              204,
+              null),
+          Interaction.read(
+                  ProviderStates.AN_AGENT_WITH_NO_PROMPT_DRAFT,
+                  "getAgentPromptDraft",
+                  WORKSPACES + "/agents/{agentId}/prompt-draft",
+                  null)
+              .answering(404),
+          // The draft's content is the client's own blob, and must be well-formed JSON.
+          Interaction.call(
+              ProviderStates.AN_AGENT_WITH_NO_PROMPT_DRAFT,
+              "saveAgentPromptDraft",
+              "PUT",
+              WORKSPACES + "/agents/{agentId}/prompt-draft",
+              400,
+              "{\"content\":\"Check the rounding\",\"serializedPrompt\":\"Check the rounding\"}"),
+          Interaction.read(
+                  ProviderStates.NO_AGENT_WITH_THAT_ID, "getAgent", WORKSPACES + "/agents/{agentId}", null)
+              .answering(404),
+          // A turn for an item nobody works on any more is answered, not refused: agentId null.
+          Interaction.write(
+              ProviderStates.A_WORK_ITEM_WITH_NO_WORKSPACES,
+              "deliverAgentTurn",
+              WORKSPACES + "/agent-dispatches/delivery",
+              200,
+              "{\"workId\":\"{improvementTicketId}\",\"text\":\"Remember the CSV format too.\","
+                  + "\"compactFirst\":false}"),
+          // The agent page's actions and the create form (qits-1243).
+          Interaction.write(
+                  ProviderStates.A_TICKET_TO_DISPATCH,
+                  "createAgent",
+                  WORKSPACES + "/agents",
+                  200,
+                  "{\"repositoryId\":\"{repositoryId}\",\"workId\":\"{ticketId}\","
+                      + "\"entityId\":\"{ticketQualifiedId}\",\"kind\":\"TICKET\","
+                      + "\"admin\":false,\"harness\":\"CLAUDE\","
+                      + "\"instruction\":\"Fix contract-00000001-10.\"}")
+              .fixing("$.agentIdentity", "contract-agent-token-subject"),
+          // A second press answers the item's ACTIVE agent (fresh: false).
+          Interaction.write(
+              ProviderStates.A_WORKSPACE_SLOT_HOSTING_AGENTS,
+              "createAgent",
+              WORKSPACES + "/agents",
+              200,
+              "{\"repositoryId\":\"{repositoryId}\",\"workId\":\"{bugTicketId}\","
+                  + "\"entityId\":\"{bugTicketQualifiedId}\",\"kind\":\"TICKET\","
+                  + "\"admin\":false}"),
+          Interaction.write(
+              ProviderStates.AN_AGENT_WAITING_FOR_A_SLOT,
+              "discardAgent",
+              WORKSPACES + "/agents/{agentId}/discard",
+              200,
+              "{\"force\":false}"),
+          Interaction.write(
+              ProviderStates.AN_AGENT_WHOSE_DAEMON_IS_NOT_CONNECTED,
+              "discardAgent",
+              WORKSPACES + "/agents/{agentId}/discard",
+              409,
+              "{\"force\":false}"),
+          Interaction.write(
+              ProviderStates.AN_AGENT_WITH_LEFTOVER_WORK,
+              "discardAgent",
+              WORKSPACES + "/agents/{agentId}/discard",
+              409,
+              "{\"force\":false}"),
+          // The slot's container buttons.
+          Interaction.write(
+              ProviderStates.A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE,
+              "ensureWorkspaceContainer",
+              WORKSPACES + "/workspaces/{workspaceId}/ensure-container",
+              200,
+              null),
+          Interaction.write(
+              ProviderStates.A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE,
+              "stopWorkspaceContainer",
+              WORKSPACES + "/workspaces/{workspaceId}/stop-container",
+              200,
+              null),
+          // Its tree is unknowable with no daemon reporting, so a recreate is refused.
+          Interaction.write(
+              ProviderStates.AN_AGENT_WHOSE_DAEMON_IS_NOT_CONNECTED,
+              "recreateWorkspaceContainer",
+              WORKSPACES + "/workspaces/{workspaceId}/recreate-container",
+              400,
+              null),
+          // The messages name the row id, which a fixed text records as the frozen one.
+          Interaction.write(
+                  ProviderStates.A_SLOT_ON_A_DISCONNECTED_RUNNER,
+                  "ensureWorkspaceContainer",
+                  WORKSPACES + "/workspaces/{workspaceId}/ensure-container",
+                  409,
+                  null)
+              .fixing(
+                  "$.message",
+                  "Workspace 1 is on a runner that is offline; it cannot start until the runner is"
+                      + " back"),
+          Interaction.write(
+                  ProviderStates.A_SLOT_ON_A_DISCONNECTED_RUNNER,
+                  "stopWorkspaceContainer",
+                  WORKSPACES + "/workspaces/{workspaceId}/stop-container",
+                  409,
+                  null)
+              .fixing(
+                  "$.message",
+                  "Workspace 1 is on a runner that is offline; it cannot stop until the runner is"
+                      + " back"),
+          // A resolved slot's record: what is left once its container and volume are gone.
+          Interaction.read(
+              ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION,
+              "getWorkspaceHistory",
+              WORKSPACES + "/history/{workspaceId}",
+              null),
+          Interaction.read(
+              ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION,
+              "listWorkspaceAgentSessions",
+              WORKSPACES + "/history/{workspaceId}/agent-sessions",
+              null),
+          Interaction.read(
+              ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION,
+              "getWorkspaceAgentTranscript",
+              WORKSPACES + "/history/{workspaceId}/agent-sessions/{sessionId}/transcript",
+              null),
+          // The runners page (qits-1244).
+          Interaction.read(ProviderStates.A_RUNNER_IN_SERVICE, "listRunners", WORKSPACES + "/runners", "$")
+              .fixing("$[*].pinnedVersion")
+              .fixing("$[*].version")
+              .fixing("$[*].loginCommand", ProviderStates.CLAUDE_LOGIN_COMMAND)
+              .fixing("$[*].kimiLoginCommand", ProviderStates.KIMI_LOGIN_COMMAND),
+          Interaction.read(
+              ProviderStates.A_RUNNER_IN_SERVICE,
+              "getRunnerHealth",
+              WORKSPACES + "/runners/{runnerId}/health",
+              null),
+          Interaction.write(
+              ProviderStates.A_RUNNER_IN_SERVICE,
+              "requestRunnerHealthcheck",
+              WORKSPACES + "/runners/{runnerId}/healthcheck",
+              202,
+              null),
+          Interaction.write(
+              ProviderStates.A_RUNNER_IN_SERVICE,
+              "requestRunnerLoginCheck",
+              WORKSPACES + "/runners/{runnerId}/login-check",
+              202,
+              null),
+          Interaction.call(
+                  ProviderStates.A_RUNNER_IN_SERVICE,
+                  "patchRunner",
+                  "PATCH",
+                  WORKSPACES + "/runners/{runnerId}",
+                  200,
+                  "{\"slots\":2,\"description\":\"The build machine under the desk\","
+                      + "\"workspaceMemoryLimit\":\"8g\",\"workspaceMemorySwapLimit\":\"8g\"}")
+              .fixing("$.pinnedVersion")
+              .fixing("$.version")
+              .fixing("$.loginCommand", ProviderStates.CLAUDE_LOGIN_COMMAND)
+              .fixing("$.kimiLoginCommand", ProviderStates.KIMI_LOGIN_COMMAND),
+          Interaction.read(
+                  ProviderStates.AN_UNREGISTERED_RUNNER,
+                  "getRunnerHealth",
+                  WORKSPACES + "/runners/{runnerId}/health",
+                  null)
+              .answering(204),
+          Interaction.write(
+              ProviderStates.AN_UNREGISTERED_RUNNER,
+              "requestRunnerHealthcheck",
+              WORKSPACES + "/runners/{runnerId}/healthcheck",
+              409,
+              null),
+          Interaction.write(
+              ProviderStates.AN_UNREGISTERED_RUNNER,
+              "requestRunnerLoginCheck",
+              WORKSPACES + "/runners/{runnerId}/login-check",
+              409,
+              null),
+          Interaction.call(
+              ProviderStates.AN_UNREGISTERED_RUNNER,
+              "deleteRunner",
+              "DELETE",
+              WORKSPACES + "/runners/{runnerId}",
+              204,
+              null),
+          // A runner a workspace is placed on is not deleted from under it.
+          Interaction.call(
+                  ProviderStates.A_WORKSPACE_SLOT_HOSTING_AGENTS,
+                  "deleteRunner",
+                  "DELETE",
+                  WORKSPACES + "/runners/{runnerId}",
+                  409,
+                  null)
+              .fixing(
+                  "$.message",
+                  "RUNNER_OWNS_WORKSPACES: runner localhost owns 1 active workspace(s) [1]; resolve"
+                      + " them before deleting it"));
 
   /**
    * The params that hold a workspace row id. Frozen like the answers' row ids, so the index names
@@ -399,8 +638,13 @@ class GoldenMasterRecordingTest {
         failures.add("Duplicate interaction " + file);
       }
 
-      written.add(file);
-      check(dir.resolve(file), GoldenJson.render(recorded.body()), update, failures);
+      // No file for an answer with no JSON body (a 204, a bare 202): qits-githost's convention.
+      if (recorded.body() == null) {
+        operation.putNull("file");
+      } else {
+        written.add(file);
+        check(dir.resolve(file), GoldenJson.render(recorded.body()), update, failures);
+      }
     }
 
     ObjectNode index = JsonNodeFactory.instance.objectNode();
@@ -484,12 +728,15 @@ class GoldenMasterRecordingTest {
               + ": "
               + raw);
     }
-    JsonNode body = JSON.readTree(raw);
-    if (interaction.listFilteredTo() != null) {
+    JsonNode body = raw.isBlank() ? null : JSON.readTree(raw);
+    if (body != null && interaction.listFilteredTo() != null) {
       body = filtered(body, interaction.listFilteredTo(), params.values());
     }
     Freezer freezer = new Freezer().rowIds(setup.rowIds());
     for (Map.Entry<String, String> fixed : interaction.fixedStrings().entrySet()) {
+      if (body == null) {
+        throw new AssertionError(interaction.operationId() + " answered no body to fix");
+      }
       fix(body, fixed.getKey().substring(1), fixed.getValue());
       freezer.markString(fixed.getKey());
     }
@@ -499,7 +746,7 @@ class GoldenMasterRecordingTest {
             frozenParams.put(
                 k,
                 ROW_ID_PARAMS.contains(k) ? freezer.freezeRowIdParam(v) : freezer.freezeParam(v)));
-    return new Recorded(freezer.freeze(body), frozenParams, freezer);
+    return new Recorded(body == null ? null : freezer.freeze(body), frozenParams, freezer);
   }
 
   /** Sets every string at {@code rest} (a {@code .a[*].b} path below {@code node}) to {@code value}. */

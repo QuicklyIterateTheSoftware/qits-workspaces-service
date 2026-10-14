@@ -1,0 +1,14 @@
+{
+  "message": "RUNNER_OWNS_WORKSPACES: runner localhost owns 1 active workspace(s) [1]; resolve them before deleting it",
+  "code": "RUNNER_OWNS_WORKSPACES",
+  "workspaceIds": [
+    1
+  ],
+  "workspaces": [
+    {
+      "id": 1,
+      "repositoryId": "00000000-0000-4000-8000-000000000013",
+      "branch": null
+    }
+  ]
+}

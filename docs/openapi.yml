@@ -1941,6 +1941,7 @@ paths:
         - qits:agent
   /workspaces/api/agents/{id}/prompt-draft:
     put:
+      operationId: saveAgentPromptDraft
       parameters:
       - name: id
         in: path
@@ -1990,6 +1991,7 @@ paths:
         - qits:admin
         - qits:admin-agent
     get:
+      operationId: getAgentPromptDraft
       parameters:
       - name: id
         in: path
@@ -2022,6 +2024,7 @@ paths:
         - qits:admin-agent
         - qits:agent
     delete:
+      operationId: deleteAgentPromptDraft
       parameters:
       - name: id
         in: path
@@ -2281,6 +2284,7 @@ paths:
         - qits:admin
         - qits:admin-agent
     get:
+      operationId: getWorkspaceHistory
       parameters:
       - name: id
         in: path
@@ -2309,6 +2313,7 @@ paths:
         - qits:agent
   /workspaces/api/history/{id}/agent-sessions:
     get:
+      operationId: listWorkspaceAgentSessions
       parameters:
       - name: id
         in: path
@@ -2337,6 +2342,7 @@ paths:
         - qits:agent
   /workspaces/api/history/{id}/agent-sessions/{sessionId}/transcript:
     get:
+      operationId: getWorkspaceAgentTranscript
       parameters:
       - name: id
         in: path
@@ -2488,6 +2494,7 @@ paths:
     patch:
       summary: "Change a workspace runner's slots, description or workspace memory\
         \ limits"
+      operationId: patchRunner
       parameters:
       - name: id
         in: path
@@ -2554,6 +2561,7 @@ paths:
         - qits:agent
     delete:
       summary: Decommission a workspace runner and give its credentials back
+      operationId: deleteRunner
       parameters:
       - name: id
         in: path
@@ -2616,6 +2624,7 @@ paths:
   /workspaces/api/runners/{id}/health:
     get:
       summary: "A workspace runner's newest health check, every check's data included"
+      operationId: getRunnerHealth
       parameters:
       - name: id
         in: path
@@ -2648,6 +2657,7 @@ paths:
   /workspaces/api/runners/{id}/healthcheck:
     post:
       summary: Ask a connected workspace runner for a health check
+      operationId: requestRunnerHealthcheck
       parameters:
       - name: id
         in: path
@@ -2684,6 +2694,7 @@ paths:
   /workspaces/api/runners/{id}/login-check:
     post:
       summary: Ask a connected workspace runner to re-check its node's agent login
+      operationId: requestRunnerLoginCheck
       parameters:
       - name: id
         in: path
@@ -3003,6 +3014,7 @@ paths:
         - qits:admin-agent
   /workspaces/api/workspaces/{id}/ensure-container:
     post:
+      operationId: ensureWorkspaceContainer
       parameters:
       - name: id
         in: path
@@ -3038,6 +3050,7 @@ paths:
         - qits:admin-agent
   /workspaces/api/workspaces/{id}/recreate-container:
     post:
+      operationId: recreateWorkspaceContainer
       parameters:
       - name: id
         in: path
@@ -3065,6 +3078,7 @@ paths:
         - qits:admin-agent
   /workspaces/api/workspaces/{id}/stop-container:
     post:
+      operationId: stopWorkspaceContainer
       parameters:
       - name: id
         in: path

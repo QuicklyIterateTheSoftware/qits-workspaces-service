@@ -1,0 +1,4 @@
+{
+  "message": "The agent's workspace daemon does not answer, so its worktrees cannot be checked; discard with force to remove the agent anyway.",
+  "code": "AGENT_DAEMON_UNREACHABLE"
+}

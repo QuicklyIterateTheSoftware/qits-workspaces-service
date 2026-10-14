@@ -29,7 +29,8 @@ import java.util.regex.Pattern;
  *   <li><b>Row ids.</b> A workspace's generated row id (a number in a field named {@code id},
  *       {@code workspaceRowId} or {@code workspaceId}) becomes its place in the state's write order,
  *       1 for the first row written. A row the call itself made (a dispatch) takes the next number
- *       at its first appearance. Listed in {@link #numberPaths}.
+ *       at its first appearance. So does each number in a list of them ({@code workspaceIds}, a
+ *       refused runner delete's). Listed in {@link #numberPaths}.
  *   <li><b>Instants.</b> Every ISO-8601 instant becomes {@value #FROZEN_INSTANT}.
  * </ul>
  */
@@ -47,6 +48,9 @@ public final class Freezer {
 
   /** The fields that hold a workspace row id. */
   static final Set<String> ROW_ID_FIELDS = Set.of("id", "workspaceRowId", "workspaceId");
+
+  /** The fields that hold a list of workspace row ids. */
+  static final Set<String> ROW_ID_LIST_FIELDS = Set.of("workspaceIds");
 
   private final Map<Long, Long> rowIds = new HashMap<>();
   private final Map<String, String> ids = new HashMap<>();
@@ -108,7 +112,9 @@ public final class Freezer {
     if (node.isTextual()) {
       return TextNode.valueOf(freezeText(node.asText(), path));
     }
-    if (node.isIntegralNumber() && field != null && ROW_ID_FIELDS.contains(field)) {
+    if (node.isIntegralNumber()
+        && field != null
+        && (ROW_ID_FIELDS.contains(field) || ROW_ID_LIST_FIELDS.contains(field))) {
       Long frozen = rowIds.computeIfAbsent(node.asLong(), k -> (long) (rowIds.size() + 1));
       numberPaths.add(path);
       return LongNode.valueOf(frozen);
@@ -116,7 +122,11 @@ public final class Freezer {
     if (node.isArray()) {
       ArrayNode out = JsonNodeFactory.instance.arrayNode();
       for (JsonNode element : node) {
-        out.add(freeze(element, path + "[*]", null));
+        out.add(
+            freeze(
+                element,
+                path + "[*]",
+                field != null && ROW_ID_LIST_FIELDS.contains(field) ? field : null));
       }
       return out;
     }

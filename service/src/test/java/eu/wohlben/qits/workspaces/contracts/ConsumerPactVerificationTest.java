@@ -169,4 +169,59 @@ class ConsumerPactVerificationTest {
   Map<String, String> anAgentWhoseWorkspaceIsStarting() {
     return states.params(ProviderStates.AN_AGENT_WHOSE_WORKSPACE_IS_STARTING);
   }
+
+  @State(ProviderStates.AN_AGENT_WITH_A_SAVED_PROMPT_DRAFT)
+  Map<String, String> anAgentWithASavedPromptDraft() {
+    return states.params(ProviderStates.AN_AGENT_WITH_A_SAVED_PROMPT_DRAFT);
+  }
+
+  @State(ProviderStates.AN_AGENT_WITH_NO_PROMPT_DRAFT)
+  Map<String, String> anAgentWithNoPromptDraft() {
+    return states.params(ProviderStates.AN_AGENT_WITH_NO_PROMPT_DRAFT);
+  }
+
+  @State(ProviderStates.NO_AGENT_WITH_THAT_ID)
+  Map<String, String> noAgentWithThatId() {
+    return states.params(ProviderStates.NO_AGENT_WITH_THAT_ID);
+  }
+
+  @State(ProviderStates.AN_AGENT_WAITING_FOR_A_SLOT)
+  Map<String, String> anAgentWaitingForASlot() {
+    return states.params(ProviderStates.AN_AGENT_WAITING_FOR_A_SLOT);
+  }
+
+  @State(ProviderStates.AN_AGENT_WHOSE_DAEMON_IS_NOT_CONNECTED)
+  Map<String, String> anAgentWhoseDaemonIsNotConnected() {
+    return states.params(ProviderStates.AN_AGENT_WHOSE_DAEMON_IS_NOT_CONNECTED);
+  }
+
+  @State(ProviderStates.AN_AGENT_WITH_LEFTOVER_WORK)
+  Map<String, String> anAgentWithLeftoverWork() {
+    return states.params(ProviderStates.AN_AGENT_WITH_LEFTOVER_WORK);
+  }
+
+  @State(ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION)
+  Map<String, String> aResolvedSlotWithAnArchivedSession() {
+    return states.params(ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION);
+  }
+
+  @State(ProviderStates.A_RUNNER_IN_SERVICE)
+  Map<String, String> aRunnerInService() {
+    return states.params(ProviderStates.A_RUNNER_IN_SERVICE);
+  }
+
+  @State(ProviderStates.A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE)
+  Map<String, String> aSlotRunningOnARunnerInService() {
+    return states.params(ProviderStates.A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE);
+  }
+
+  @State(ProviderStates.A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE)
+  Map<String, String> aStoppedSlotOnARunnerInService() {
+    return states.params(ProviderStates.A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE);
+  }
+
+  @State(ProviderStates.A_SLOT_ON_A_DISCONNECTED_RUNNER)
+  Map<String, String> aSlotOnADisconnectedRunner() {
+    return states.params(ProviderStates.A_SLOT_ON_A_DISCONNECTED_RUNNER);
+  }
 }

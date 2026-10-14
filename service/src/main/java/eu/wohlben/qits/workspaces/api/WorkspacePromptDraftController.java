@@ -15,6 +15,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -65,6 +66,7 @@ public class WorkspacePromptDraftController {
       responseCode = "404",
       description = "No such ACTIVE workspace, or it has no saved draft.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "getAgentPromptDraft")
   public GetPromptDraftRequest.Response get(@PathParam("id") String id) {
     return new GetPromptDraftRequest.Response(promptDraftMapper.toDto(promptDrafts.getDraft(AgentController.agentId(id))));
   }
@@ -108,6 +110,7 @@ public class WorkspacePromptDraftController {
       responseCode = "413",
       description = "The draft exceeds the configured byte cap.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "saveAgentPromptDraft")
   public SavePromptDraftRequest.Response save(
       @PathParam("id") String id, @Valid SavePromptDraftRequest request) {
     return new SavePromptDraftRequest.Response(
@@ -126,6 +129,7 @@ public class WorkspacePromptDraftController {
       responseCode = "404",
       description = "No such ACTIVE workspace.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "deleteAgentPromptDraft")
   public Response delete(@PathParam("id") String id) {
     promptDrafts.deleteDraft(AgentController.agentId(id));
     return Response.noContent().build();

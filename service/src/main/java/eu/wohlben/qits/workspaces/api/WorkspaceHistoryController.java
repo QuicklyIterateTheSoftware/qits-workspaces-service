@@ -14,6 +14,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import java.util.List;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 
 /**
  * The workspace history for a repository: every workspace (active + resolved) as a browsable record
@@ -57,6 +58,7 @@ public class WorkspaceHistoryController {
   @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   @Path("/{id}")
+  @Operation(operationId = "getWorkspaceHistory")
   public GetHistoryRequest.Response get(@PathParam("id") Long id) {
     return new GetHistoryRequest.Response(workspaceHistoryService.get(id));
   }
@@ -78,6 +80,7 @@ public class WorkspaceHistoryController {
   @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   @Path("/{id}/agent-sessions")
+  @Operation(operationId = "listWorkspaceAgentSessions")
   public ListAgentSessionsRequest.Response agentSessions(@PathParam("id") Long id) {
     return new ListAgentSessionsRequest.Response(workspaceHistoryService.agentSessions(id));
   }
@@ -97,6 +100,7 @@ public class WorkspaceHistoryController {
   @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
   @GET
   @Path("/{id}/agent-sessions/{sessionId}/transcript")
+  @Operation(operationId = "getWorkspaceAgentTranscript")
   public GetAgentTranscriptRequest.Response agentTranscript(
       @PathParam("id") Long id, @PathParam("sessionId") String sessionId) {
     return new GetAgentTranscriptRequest.Response(

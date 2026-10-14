@@ -1,0 +1,6 @@
+{
+  "lines": [
+    "{\"type\":\"user\",\"gitBranch\":\"ticket/contract-00000001-10\",\"timestamp\":\"2026-01-01T00:05:00Z\",\"message\":{\"content\":\"Fix the rounding in the invoice totals.\"}}",
+    "{\"type\":\"assistant\",\"gitBranch\":\"ticket/contract-00000001-10\",\"timestamp\":\"2026-01-01T00:06:00Z\",\"message\":{\"content\":\"Rounded each line before summing; the totals match now.\"}}"
+  ]
+}

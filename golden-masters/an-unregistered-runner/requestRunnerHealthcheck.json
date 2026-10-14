@@ -1,0 +1,4 @@
+{
+  "message": "Runner localhost is not connected, so it cannot run a health check now",
+  "code": "RUNNER_UNAVAILABLE"
+}

@@ -1,0 +1,11 @@
+{
+  "draft": {
+    "content": "{\"text\":\"Check the rounding, then the totals.\",\"picked\":[]}",
+    "serializedPrompt": "Check the rounding, then the totals.",
+    "promptVersion": 2,
+    "lastRunAt": null,
+    "lastRunPromptVersion": null,
+    "lastRunCommandId": null,
+    "updatedAt": "2026-01-01T00:00:00Z"
+  }
+}

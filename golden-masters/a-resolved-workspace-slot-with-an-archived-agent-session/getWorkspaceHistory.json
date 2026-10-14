@@ -1,0 +1,14 @@
+{
+  "workspace": {
+    "id": 1,
+    "workspaceId": "ws-contract",
+    "parent": null,
+    "status": "ABANDONED",
+    "preamble": null,
+    "result": "Removed: its last agent was removed (qits-1152, D2).",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "resolvedAt": "2026-01-01T00:00:00Z",
+    "events": [],
+    "placement": "RUNNER"
+  }
+}

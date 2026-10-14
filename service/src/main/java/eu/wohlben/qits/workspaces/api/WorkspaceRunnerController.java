@@ -308,6 +308,7 @@ public class WorkspaceRunnerController {
   @Consumes(MediaType.APPLICATION_JSON)
   @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE})
   @Operation(
+      operationId = "patchRunner",
       summary = "Change a workspace runner's slots, description or workspace memory limits")
   @APIResponse(responseCode = "200", description = "The runner as it now is")
   @APIResponse(
@@ -405,7 +406,9 @@ public class WorkspaceRunnerController {
   @DELETE
   @Path("/{id}")
   @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE})
-  @Operation(summary = "Decommission a workspace runner and give its credentials back")
+  @Operation(
+      operationId = "deleteRunner",
+      summary = "Decommission a workspace runner and give its credentials back")
   @APIResponse(responseCode = "204", description = "Gone")
   @APIResponse(responseCode = "404", description = "No such runner")
   @APIResponse(
@@ -464,7 +467,9 @@ public class WorkspaceRunnerController {
   @POST
   @Path("/{id}/healthcheck")
   @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE, AGENT_ROLE})
-  @Operation(summary = "Ask a connected workspace runner for a health check")
+  @Operation(
+      operationId = "requestRunnerHealthcheck",
+      summary = "Ask a connected workspace runner for a health check")
   @APIResponse(
       responseCode = "202",
       description = "Sent, or one is pending already; its requestId",
@@ -487,7 +492,9 @@ public class WorkspaceRunnerController {
   @GET
   @Path("/{id}/health")
   @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE, SYSTEM_ROLE, AGENT_ROLE})
-  @Operation(summary = "A workspace runner's newest health check, every check's data included")
+  @Operation(
+      operationId = "getRunnerHealth",
+      summary = "A workspace runner's newest health check, every check's data included")
   @APIResponse(
       responseCode = "200",
       description = "The newest health check",
@@ -503,7 +510,9 @@ public class WorkspaceRunnerController {
   @POST
   @Path("/{id}/login-check")
   @RolesAllowed({ADMIN_ROLE, ADMIN_AGENT_ROLE})
-  @Operation(summary = "Ask a connected workspace runner to re-check its node's agent login")
+  @Operation(
+      operationId = "requestRunnerLoginCheck",
+      summary = "Ask a connected workspace runner to re-check its node's agent login")
   @APIResponse(responseCode = "202", description = "Sent")
   @APIResponse(responseCode = "404", description = "No such runner")
   @APIResponse(

@@ -1,0 +1,3 @@
+{
+  "message": "Cannot recreate workspace 'ws-contract': its working tree must be clean, but its reported state is unknown. Commit or discard changes, and ensure its daemon is connected, first."
+}

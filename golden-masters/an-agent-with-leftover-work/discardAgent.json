@@ -1,0 +1,4 @@
+{
+  "message": "The agent's worktrees hold work that never reached the git host: uncommitted changes in qits-ci-service; 1 unpushed commit(s) in wrapper on ticket/contract-00000001-10. Discard with force to throw it away.",
+  "code": "AGENT_HAS_LEFTOVER_WORK"
+}

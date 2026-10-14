@@ -297,6 +297,229 @@
       ]
     },
     {
+      "name": "a resolved workspace slot with an archived agent session",
+      "slug": "a-resolved-workspace-slot-with-an-archived-agent-session",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "sessionId": "00000000-0000-4000-8000-0000000000d1",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "getWorkspaceAgentTranscript",
+          "method": "GET",
+          "path": "/workspaces/api/history/{workspaceId}/agent-sessions/{sessionId}/transcript",
+          "status": 200,
+          "file": "a-resolved-workspace-slot-with-an-archived-agent-session/getWorkspaceAgentTranscript.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "getWorkspaceHistory",
+          "method": "GET",
+          "path": "/workspaces/api/history/{workspaceId}",
+          "status": 200,
+          "file": "a-resolved-workspace-slot-with-an-archived-agent-session/getWorkspaceHistory.json",
+          "frozen": {
+            "ids": [],
+            "instants": [
+              "$.workspace.createdAt",
+              "$.workspace.resolvedAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.workspace.id"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "listWorkspaceAgentSessions",
+          "method": "GET",
+          "path": "/workspaces/api/history/{workspaceId}/agent-sessions",
+          "status": 200,
+          "file": "a-resolved-workspace-slot-with-an-archived-agent-session/listWorkspaceAgentSessions.json",
+          "frozen": {
+            "ids": [
+              "$.sessions[*].sessionId"
+            ],
+            "instants": [
+              "$.sessions[*].startedAt",
+              "$.sessions[*].endedAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a runner in service",
+      "slug": "a-runner-in-service",
+      "params": {
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "getRunnerHealth",
+          "method": "GET",
+          "path": "/workspaces/api/runners/{runnerId}/health",
+          "status": 200,
+          "file": "a-runner-in-service/getRunnerHealth.json",
+          "frozen": {
+            "ids": [
+              "$.requestId"
+            ],
+            "instants": [
+              "$.at"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "listRunners",
+          "method": "GET",
+          "path": "/workspaces/api/runners",
+          "status": 200,
+          "file": "a-runner-in-service/listRunners.json",
+          "frozen": {
+            "ids": [
+              "$[*].id"
+            ],
+            "instants": [
+              "$[*].login.checkedAt",
+              "$[*].registeredAt",
+              "$[*].lastSeenAt",
+              "$[*].lastHealthCheckAt",
+              "$[*].createdAt",
+              "$[*].connectedSince",
+              "$[*].health.at"
+            ],
+            "strings": [
+              "$[*].kimiLoginCommand",
+              "$[*].loginCommand",
+              "$[*].pinnedVersion",
+              "$[*].version"
+            ],
+            "numbers": [],
+            "listFilteredTo": "$"
+          }
+        },
+        {
+          "operationId": "patchRunner",
+          "method": "PATCH",
+          "path": "/workspaces/api/runners/{runnerId}",
+          "body": {
+            "slots": 2,
+            "description": "The build machine under the desk",
+            "workspaceMemoryLimit": "8g",
+            "workspaceMemorySwapLimit": "8g"
+          },
+          "status": 200,
+          "file": "a-runner-in-service/patchRunner.json",
+          "frozen": {
+            "ids": [
+              "$.id"
+            ],
+            "instants": [
+              "$.login.checkedAt",
+              "$.registeredAt",
+              "$.lastSeenAt",
+              "$.lastHealthCheckAt",
+              "$.createdAt",
+              "$.connectedSince",
+              "$.health.at"
+            ],
+            "strings": [
+              "$.kimiLoginCommand",
+              "$.loginCommand",
+              "$.pinnedVersion",
+              "$.version"
+            ],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "requestRunnerHealthcheck",
+          "method": "POST",
+          "path": "/workspaces/api/runners/{runnerId}/healthcheck",
+          "status": 202,
+          "file": "a-runner-in-service/requestRunnerHealthcheck.json",
+          "frozen": {
+            "ids": [
+              "$.requestId"
+            ],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "requestRunnerLoginCheck",
+          "method": "POST",
+          "path": "/workspaces/api/runners/{runnerId}/login-check",
+          "status": 202,
+          "file": null,
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a stopped workspace slot on a runner in service",
+      "slug": "a-stopped-workspace-slot-on-a-runner-in-service",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "ensureWorkspaceContainer",
+          "method": "POST",
+          "path": "/workspaces/api/workspaces/{workspaceId}/ensure-container",
+          "status": 200,
+          "file": "a-stopped-workspace-slot-on-a-runner-in-service/ensureWorkspaceContainer.json",
+          "frozen": {
+            "ids": [
+              "$.workspace.runner.id",
+              "$.technicalProcessId"
+            ],
+            "instants": [
+              "$.workspace.createdAt",
+              "$.workspace.queuedAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.workspace.id"
+            ],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "a work item with no workspaces",
       "slug": "a-work-item-with-no-workspaces",
       "params": {
@@ -312,6 +535,25 @@
       },
       "dependsOn": [],
       "operations": [
+        {
+          "operationId": "deliverAgentTurn",
+          "method": "POST",
+          "path": "/workspaces/api/agent-dispatches/delivery",
+          "body": {
+            "workId": "{improvementTicketId}",
+            "text": "Remember the CSV format too.",
+            "compactFirst": false
+          },
+          "status": 200,
+          "file": "a-work-item-with-no-workspaces/deliverAgentTurn.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
         {
           "operationId": "listWorkItemWorkspaces",
           "method": "GET",
@@ -347,6 +589,59 @@
       },
       "dependsOn": [],
       "operations": [
+        {
+          "operationId": "createAgent",
+          "method": "POST",
+          "path": "/workspaces/api/agents",
+          "body": {
+            "repositoryId": "{repositoryId}",
+            "workId": "{bugTicketId}",
+            "entityId": "{bugTicketQualifiedId}",
+            "kind": "TICKET",
+            "admin": false
+          },
+          "status": 200,
+          "file": "a-workspace-slot-hosting-agents/createAgent.json",
+          "frozen": {
+            "ids": [
+              "$.agent.agentId",
+              "$.agent.repositoryId",
+              "$.agent.workId",
+              "$.agent.ticketId"
+            ],
+            "instants": [
+              "$.agent.waitingOnSince",
+              "$.agent.lastActivityAt",
+              "$.agent.createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.agent.workspaceRowId"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "deleteRunner",
+          "method": "DELETE",
+          "path": "/workspaces/api/runners/{runnerId}",
+          "status": 409,
+          "file": "a-workspace-slot-hosting-agents/deleteRunner.json",
+          "frozen": {
+            "ids": [
+              "$.workspaces[*].repositoryId"
+            ],
+            "instants": [],
+            "strings": [
+              "$.message"
+            ],
+            "numbers": [
+              "$.workspaceIds[*]",
+              "$.workspaces[*].id"
+            ],
+            "listFilteredTo": null
+          }
+        },
         {
           "operationId": "getWorkspace",
           "method": "GET",
@@ -413,6 +708,86 @@
       ]
     },
     {
+      "name": "a workspace slot on a disconnected runner",
+      "slug": "a-workspace-slot-on-a-disconnected-runner",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "ensureWorkspaceContainer",
+          "method": "POST",
+          "path": "/workspaces/api/workspaces/{workspaceId}/ensure-container",
+          "status": 409,
+          "file": "a-workspace-slot-on-a-disconnected-runner/ensureWorkspaceContainer.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [
+              "$.message"
+            ],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "stopWorkspaceContainer",
+          "method": "POST",
+          "path": "/workspaces/api/workspaces/{workspaceId}/stop-container",
+          "status": 409,
+          "file": "a-workspace-slot-on-a-disconnected-runner/stopWorkspaceContainer.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [
+              "$.message"
+            ],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a workspace slot running on a runner in service",
+      "slug": "a-workspace-slot-running-on-a-runner-in-service",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "stopWorkspaceContainer",
+          "method": "POST",
+          "path": "/workspaces/api/workspaces/{workspaceId}/stop-container",
+          "status": 200,
+          "file": "a-workspace-slot-running-on-a-runner-in-service/stopWorkspaceContainer.json",
+          "frozen": {
+            "ids": [
+              "$.runner.id"
+            ],
+            "instants": [
+              "$.createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.id"
+            ],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "a wrapper repository and a ticket to dispatch",
       "slug": "a-wrapper-repository-and-a-ticket-to-dispatch",
       "params": {
@@ -423,6 +798,38 @@
       },
       "dependsOn": [],
       "operations": [
+        {
+          "operationId": "createAgent",
+          "method": "POST",
+          "path": "/workspaces/api/agents",
+          "body": {
+            "repositoryId": "{repositoryId}",
+            "workId": "{ticketId}",
+            "entityId": "{ticketQualifiedId}",
+            "kind": "TICKET",
+            "admin": false,
+            "harness": "CLAUDE",
+            "instruction": "Fix contract-00000001-10."
+          },
+          "status": 200,
+          "file": "a-wrapper-repository-and-a-ticket-to-dispatch/createAgent.json",
+          "frozen": {
+            "ids": [
+              "$.agent.agentId",
+              "$.agent.repositoryId",
+              "$.agent.workId",
+              "$.agent.ticketId"
+            ],
+            "instants": [
+              "$.agent.createdAt"
+            ],
+            "strings": [
+              "$.agentIdentity"
+            ],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
         {
           "operationId": "dispatchAgent",
           "method": "POST",
@@ -489,6 +896,86 @@
             "ids": [
               "$.agentIds[*]"
             ],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "an agent waiting for a workspace slot",
+      "slug": "an-agent-waiting-for-a-workspace-slot",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a5",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000b"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "discardAgent",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/discard",
+          "body": {
+            "force": false
+          },
+          "status": 200,
+          "file": "an-agent-waiting-for-a-workspace-slot/discardAgent.json",
+          "frozen": {
+            "ids": [
+              "$.agentId",
+              "$.repositoryId",
+              "$.workId",
+              "$.ticketId"
+            ],
+            "instants": [
+              "$.lastActivityAt",
+              "$.createdAt",
+              "$.removedAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "an agent whose workspace daemon is not connected",
+      "slug": "an-agent-whose-workspace-daemon-is-not-connected",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "discardAgent",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/discard",
+          "body": {
+            "force": false
+          },
+          "status": 409,
+          "file": "an-agent-whose-workspace-daemon-is-not-connected/discardAgent.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "recreateWorkspaceContainer",
+          "method": "POST",
+          "path": "/workspaces/api/workspaces/{workspaceId}/recreate-container",
+          "status": 400,
+          "file": "an-agent-whose-workspace-daemon-is-not-connected/recreateWorkspaceContainer.json",
+          "frozen": {
+            "ids": [],
             "instants": [],
             "strings": [],
             "numbers": [],
@@ -571,6 +1058,92 @@
             "numbers": [
               "$.agents[*].workspaceRowId"
             ],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "an agent with a saved prompt draft",
+      "slug": "an-agent-with-a-saved-prompt-draft",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "deleteAgentPromptDraft",
+          "method": "DELETE",
+          "path": "/workspaces/api/agents/{agentId}/prompt-draft",
+          "status": 204,
+          "file": null,
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "getAgent",
+          "method": "GET",
+          "path": "/workspaces/api/agents/{agentId}",
+          "status": 200,
+          "file": "an-agent-with-a-saved-prompt-draft/getAgent.json",
+          "frozen": {
+            "ids": [
+              "$.agentId",
+              "$.repositoryId",
+              "$.workId",
+              "$.ticketId"
+            ],
+            "instants": [
+              "$.lastActivityAt",
+              "$.createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.workspaceRowId"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "getAgentPromptDraft",
+          "method": "GET",
+          "path": "/workspaces/api/agents/{agentId}/prompt-draft",
+          "status": 200,
+          "file": "an-agent-with-a-saved-prompt-draft/getAgentPromptDraft.json",
+          "frozen": {
+            "ids": [],
+            "instants": [
+              "$.draft.updatedAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "saveAgentPromptDraft",
+          "method": "PUT",
+          "path": "/workspaces/api/agents/{agentId}/prompt-draft",
+          "body": {
+            "content": "{\"text\":\"Check the rounding, then the totals.\",\"picked\":[]}",
+            "serializedPrompt": "Check the rounding, then the totals."
+          },
+          "status": 200,
+          "file": "an-agent-with-a-saved-prompt-draft/saveAgentPromptDraft.json",
+          "frozen": {
+            "ids": [],
+            "instants": [
+              "$.draft.updatedAt"
+            ],
+            "strings": [],
+            "numbers": [],
             "listFilteredTo": null
           }
         }
@@ -680,6 +1253,79 @@
       ]
     },
     {
+      "name": "an agent with leftover work",
+      "slug": "an-agent-with-leftover-work",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "discardAgent",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/discard",
+          "body": {
+            "force": false
+          },
+          "status": 409,
+          "file": "an-agent-with-leftover-work/discardAgent.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "an agent with no prompt draft",
+      "slug": "an-agent-with-no-prompt-draft",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "getAgentPromptDraft",
+          "method": "GET",
+          "path": "/workspaces/api/agents/{agentId}/prompt-draft",
+          "status": 404,
+          "file": "an-agent-with-no-prompt-draft/getAgentPromptDraft.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "saveAgentPromptDraft",
+          "method": "PUT",
+          "path": "/workspaces/api/agents/{agentId}/prompt-draft",
+          "body": {
+            "content": "Check the rounding",
+            "serializedPrompt": "Check the rounding"
+          },
+          "status": 400,
+          "file": "an-agent-with-no-prompt-draft/saveAgentPromptDraft.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "an agent working on a ticket",
       "slug": "an-agent-working-on-a-ticket",
       "params": {
@@ -762,6 +1408,34 @@
       "dependsOn": [],
       "operations": [
         {
+          "operationId": "deleteRunner",
+          "method": "DELETE",
+          "path": "/workspaces/api/runners/{runnerId}",
+          "status": 204,
+          "file": null,
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "getRunnerHealth",
+          "method": "GET",
+          "path": "/workspaces/api/runners/{runnerId}/health",
+          "status": 204,
+          "file": null,
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
           "operationId": "listRunners",
           "method": "GET",
           "path": "/workspaces/api/runners",
@@ -782,6 +1456,34 @@
           }
         },
         {
+          "operationId": "requestRunnerHealthcheck",
+          "method": "POST",
+          "path": "/workspaces/api/runners/{runnerId}/healthcheck",
+          "status": 409,
+          "file": "an-unregistered-runner/requestRunnerHealthcheck.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "requestRunnerLoginCheck",
+          "method": "POST",
+          "path": "/workspaces/api/runners/{runnerId}/login-check",
+          "status": 409,
+          "file": "an-unregistered-runner/requestRunnerLoginCheck.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
           "operationId": "rotateRunnerRegistrationToken",
           "method": "POST",
           "path": "/workspaces/api/runners/{runnerId}/registration-token",
@@ -797,6 +1499,30 @@
             "strings": [
               "$.runner.pinnedVersion"
             ],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "no agent with that id",
+      "slug": "no-agent-with-that-id",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a9"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "getAgent",
+          "method": "GET",
+          "path": "/workspaces/api/agents/{agentId}",
+          "status": 404,
+          "file": "no-agent-with-that-id/getAgent.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
             "numbers": [],
             "listFilteredTo": null
           }

@@ -1,0 +1,4 @@
+{
+  "message": "Runner localhost is not connected, so it cannot check its login now",
+  "code": "RUNNER_UNAVAILABLE"
+}

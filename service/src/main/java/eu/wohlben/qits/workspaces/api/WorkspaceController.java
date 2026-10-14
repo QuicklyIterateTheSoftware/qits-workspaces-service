@@ -155,6 +155,7 @@ public class WorkspaceController {
               + " open. `code` is WORKSPACE_STOPPED_DURING_START and the message names the process;"
               + " retry once it has ended.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "ensureWorkspaceContainer")
   public EnsureContainerRequest.Response ensureContainer(
       @PathParam("id") Long id) {
     String technicalProcessId = workspaceService.beginEnsureContainer(id);
@@ -192,6 +193,7 @@ public class WorkspaceController {
    */
   @POST
   @Path("/{id}/stop-container")
+  @Operation(operationId = "stopWorkspaceContainer")
   public WorkspaceDto stopContainer(
       @PathParam("id") Long id) {
     workspaceService.stopContainer(id);
@@ -233,6 +235,7 @@ public class WorkspaceController {
    */
   @POST
   @Path("/{id}/recreate-container")
+  @Operation(operationId = "recreateWorkspaceContainer")
   public RecreateContainerRequest.Response recreateContainer(
       @PathParam("id") Long id) {
     String technicalProcessId = workspaceService.beginRecreateContainer(id);
