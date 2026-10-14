@@ -125,7 +125,7 @@
              ConsumerPactVerificationTest loads every such resource off the test classpath. Test
              scope at the declaration site; a pin in <properties> like every other qits jar, so
              qits-maintenance bumps it when the consumer releases a changed pact. -->
-        <qits.landing-app-pacts-qits-workspaces-service.version>2026.1011.154708</qits.landing-app-pacts-qits-workspaces-service.version>
+        <qits.landing-app-pacts-qits-workspaces-service.version>2026.1014.203803</qits.landing-app-pacts-qits-workspaces-service.version>
         <!-- qits-projects' consumer pact against this service (qits-1152). PLACEHOLDER: no release
              of qits-projects-service has published this jar yet; its first release that does
              moves this pin, and until then a build needs a locally installed jar. -->
