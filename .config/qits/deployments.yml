@@ -13,6 +13,13 @@
 # literal wire routes under it.
 routes: /workspaces
 
+# THE BROWSER HOST IS STATED, because nothing else asks for it any more (qits-1245). It used to be
+# derived from `navigation-entries:`; with those gone qits-deployments published no browserHost and
+# the edge stopped routing workspaces.<env>.<domain> at all, while qits-landing-app reaches this
+# service there (`PlatformOrigins.api('workspaces')`): its REST, its event streams and the container
+# proxy's terminal and chat sockets.
+host: workspaces
+
 # WHAT THIS REPOSITORY DEPLOYS AS, held still across the repository rename. The repository is
 # qits-workspaces-service now; the application is still qits-workspaces, so nothing that is running
 # moves: the swarm service and its wire alias, the container, the image qits/qits-workspaces the
