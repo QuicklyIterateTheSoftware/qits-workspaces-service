@@ -90,7 +90,7 @@
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
         <qits.arch-rules.version>2026.1011.185745</qits.arch-rules.version>
         <qits.auth-core.version>2026.1012.173247</qits.auth-core.version>
-        <qits.containers-client.version>2026.1012.63518</qits.containers-client.version>
+        <qits.containers-client.version>2026.1015.33250</qits.containers-client.version>
         <!-- CallerServerFilter/CallerClientFilter: jandex-indexed filters that record inbound
              X-Qits-Caller as the qits.caller span attribute and stamp it on outgoing REST-client
              calls. Also published by qits-integrations-quarkus. -->
