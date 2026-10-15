@@ -14,9 +14,16 @@ import au.com.dius.pact.provider.junitsupport.loader.PactSource;
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import java.io.IOException;
 import java.net.URL;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.apache.hc.core5.http.ClassicHttpRequest;
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.HttpEntity;
+import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,6 +40,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * <p>Every {@code @State} method delegates to {@link ProviderStates}. {@link #target} fails a state
  * this provider does not answer for, and an interaction without {@code comments.references.qits-call}
  * and {@code qits-trigger}.
+ *
+ * <p><b>State-param stand-ins in the body are this run's values</b> ({@link
+ * StateParamRequestBody}, qits-1230): a request body string that is exactly the golden masters'
+ * {@code "{name}"} placeholder, or exactly a param's pinned example, becomes what the {@code @State}
+ * returned before the request is sent. A consumer replays the recorded body as the golden masters
+ * hold it ({@code createRunner}'s {@code "name": "{runnerName}"}), and pact-jvm's own {@code
+ * ProviderState} generators reach only a path or a value the consumer marked. Nothing else about
+ * the request, and nothing about the response or a matching rule, is touched.
  */
 @QuarkusTest
 @Provider(ConsumerPactVerificationTest.PROVIDER)
@@ -82,11 +97,40 @@ class ConsumerPactVerificationTest {
 
   @TestTemplate
   @ExtendWith(PactVerificationInvocationContextProvider.class)
-  void consumerPactHolds(PactVerificationContext context) {
+  void consumerPactHolds(PactVerificationContext context, ClassicHttpRequest request)
+      throws IOException {
     try {
+      withThisRunsStateParams(context, request);
       context.verifyInteraction();
     } finally {
       states.cleanUp();
+    }
+  }
+
+  /** The body's state-param stand-ins, swapped for this run's values — see the class comment. */
+  private static void withThisRunsStateParams(
+      PactVerificationContext context, ClassicHttpRequest request) throws IOException {
+    HttpEntity entity = request.getEntity();
+    if (entity == null) {
+      return;
+    }
+    Map<String, Object> pinned = new HashMap<>();
+    context.getInteraction().getProviderStates().forEach(state -> pinned.putAll(state.getParams()));
+    Map<String, Object> executed = context.getExecutionContext();
+    Object returned = executed == null ? null : executed.get("providerState");
+    if (!(returned instanceof Map<?, ?> stateValues)) {
+      return;
+    }
+    @SuppressWarnings("unchecked")
+    Map<String, ?> values = (Map<String, ?>) stateValues;
+    var rewritten = StateParamRequestBody.rewrite(EntityUtils.toByteArray(entity), pinned, values);
+    if (rewritten != null) {
+      request.setEntity(
+          new ByteArrayEntity(
+              rewritten.body(),
+              entity.getContentType() == null
+                  ? ContentType.APPLICATION_JSON
+                  : ContentType.parse(entity.getContentType())));
     }
   }
 
