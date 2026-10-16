@@ -225,6 +225,11 @@ public class DirectWorkspaceTokenTest {
     Long rowId = adminRow();
     workspaceService.ensureContainer(rowId);
     Workspace before = read(rowId);
+    // The first start's event is delivered asynchronously: drain it before clearing, or it can
+    // land after the clear and pass for the recreate's own start before the new token is written.
+    assertTrue(
+        startedRecorder.awaitCount(before.repositoryId, "feat", 1, 10_000),
+        "the first start is delivered");
     startedRecorder.clear();
 
     workspaceService.beginRecreateContainer(rowId);

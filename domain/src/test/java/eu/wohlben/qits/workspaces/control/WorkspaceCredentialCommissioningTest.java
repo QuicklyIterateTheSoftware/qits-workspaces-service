@@ -130,6 +130,10 @@ public class WorkspaceCredentialCommissioningTest {
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     WorkspaceCredential first = credentialOf(repoId, "feat").orElseThrow();
+    // Drain the first start's async event, or it can land after the clear and pass for the
+    // recreate's own start.
+    assertTrue(
+        startedRecorder.awaitCount(repoId, "feat", 1, 10_000), "the first start is delivered");
     startedRecorder.clear();
 
     workspaceService.beginRecreateContainer(workspaceIds.of(repoId, "feat"));

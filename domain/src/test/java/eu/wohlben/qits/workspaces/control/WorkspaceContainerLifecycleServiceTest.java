@@ -621,6 +621,10 @@ public class WorkspaceContainerLifecycleServiceTest {
     // No agent on the workspace: recreate's gate has nothing of anybody's to protect.
     assertTrue(
         workspaceVolumeExists("feat"), "precondition: the workspace has a persistent volume");
+    // Drain the first start's async event, or it can land after the clear and pass for the
+    // recreate's own start.
+    assertTrue(
+        startedRecorder.awaitCount(repoId, "feat", 1, 5_000), "the first start is delivered");
     startedRecorder.clear();
 
     // An image-update recreate tears the container down and provisions a fresh one — but must KEEP
