@@ -491,7 +491,7 @@ the two tolerances kept for daemons built before the removal.
 themselves.
 
 Still host-side but *should* follow the file/detection work into the daemon: `containerGit` and its
-callers (`fast-forward`, `update-from-parent`, `pushBranch`, `isFullyPushed`) still shell git into
+callers (`fast-forward`, `update-from-parent`, `pushBranch`) still shell git into
 the container. Migrating them needs new wire messages on both sides, so it was kept out of the
 extraction rather than smuggled into it.
 

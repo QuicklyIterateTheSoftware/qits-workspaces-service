@@ -36,18 +36,17 @@ import java.time.Instant;
  *     turn apart from one that completed: the container still runs and {@code agentActivity} can
  *     only say ENDED. Cleared when the container is re-provisioned or an agent there starts a turn
  *     again
- * @param clean whether the workspace's in-container working tree is clean ({@code true}) or has
- *     uncommitted changes ({@code false}), as last reported by {@code workspace-daemon} over its
- *     socket; {@code null} when unknown — the daemon only reports while its socket is live, which is
- *     {@code runtimeStatus} RUNNING, or UNAVAILABLE on a RUNNER row whose runner has gone offline
- *     while the session is still up through the edge. A STOPPED workspace (or one whose daemon
- *     hasn't reported yet) carries no clean/dirty badge
+ * @param clean always {@code null} (no clean/dirty badge) since qits-1263: it was the slot-wide
+ *     working-tree state a {@code GitStatus} frame carried, and no daemon sends that frame since
+ *     protocol 10 (qits-1152), where agents work in worktrees of their own. Kept in the view so its
+ *     consumers' contract holds; what a slot would lose is asked per agent by the destructive verbs
+ *     instead
  * @param agentActivity the live coding-agent activity rollup for this workspace
  *     (BUSY/WAITING/IDLE/ENDED, in that precedence), as last reported by {@code workspace-daemon}
  *     hearing the agent's lifecycle hooks; {@code null} when no tracked agent is running (or the
- *     daemon's socket isn't live / none has reported yet) — same daemon-socket-live, self-healing
- *     lifecycle as {@code clean}: known under RUNNING, and under UNAVAILABLE on a RUNNER row whose
- *     runner is offline while the session is still up through the edge. {@code ENDED} means every
+ *     daemon's socket isn't live / none has reported yet) — daemon-socket-live and self-healing:
+ *     known under RUNNING, and under UNAVAILABLE on a RUNNER row whose runner is offline while the
+ *     session is still up through the edge. {@code ENDED} means every
  *     tracked session in this workspace has finished
  *     <em>recently</em>: the host holds it for {@code qits.workspace.agent-activity.ended-ttl-ms}
  *     and then lets it fall back to {@code null}. It is a real value and not a transient — the
@@ -67,10 +66,10 @@ import java.time.Instant;
  * @param resolvedAt when the workspace was resolved (null while ACTIVE)
  * @param daemonConnectedAt when the workspace's in-container {@code workspace-daemon} registered
  *     its control socket — the workspace's "connected since" (docs/epics/qits-workspace-registry/).
- *     {@code null} when unknown: like {@code clean}, the registry only knows it while the daemon's
- *     socket is live — {@code runtimeStatus} RUNNING, or UNAVAILABLE on a RUNNER row whose runner is
- *     offline while the session is still up through the edge — and it resets on each daemon
- *     (re)connect (it is not a durable first-registered time)
+ *     {@code null} when unknown: like {@code agentActivity}, the registry only knows it while the
+ *     daemon's socket is live — {@code runtimeStatus} RUNNING, or UNAVAILABLE on a RUNNER row whose
+ *     runner is offline while the session is still up through the edge — and it resets on each
+ *     daemon (re)connect (it is not a durable first-registered time)
  * @param daemonVersion the release version of the daemon binary the running container is on (Maven
  *     {@code project.version}); {@code null} when unknown (no live daemon, or an older daemon image
  *     that announced none)

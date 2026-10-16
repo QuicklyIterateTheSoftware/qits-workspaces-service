@@ -13,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * is {@link Optional#empty()} and {@link #all} is empty) until a test {@linkplain #report reports}
  * one, so by default every {@code @QuarkusTest} sees no registry facts and {@code WorkspaceDto}'s
  * daemon fields (including {@code daemonOutdated}) stay null. Mirrors {@link
- * FakeWorkspaceGitStatus}; drives the "latest agent version"/outdated computation in {@link
+ * FakeWorkspaceAgentActivity}; drives the "latest agent version"/outdated computation in {@link
  * WorkspaceService#listWorkspaces}.
  */
 @Mock

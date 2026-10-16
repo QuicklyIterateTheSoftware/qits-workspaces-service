@@ -15,8 +15,11 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -41,7 +44,8 @@ public class WorkspaceContainerLifecycleServiceTest {
   @Inject FakeContainerRuntime fakeContainers;
   @Inject WorkspaceContainerStartedRecorder startedRecorder;
   @Inject WorkspaceContainerStoppingRecorder stoppingRecorder;
-  @Inject FakeWorkspaceGitStatus gitStatus;
+  @Inject FakeAgentDaemon agentDaemon;
+  @Inject TestAgents agents;
   @Inject FakeWorkspaceAgentActivity agentActivity;
 
   @ConfigProperty(name = "qits.test.origins-dir")
@@ -56,6 +60,27 @@ public class WorkspaceContainerLifecycleServiceTest {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
     return repoId;
+  }
+
+  @BeforeEach
+  void resetDaemon() {
+    agentDaemon.reset();
+  }
+
+  @AfterEach
+  void retireAgents() {
+    agents.retireAll();
+    agentDaemon.reset();
+  }
+
+  /**
+   * An agent on the workspace whose worktree holds uncommitted changes — what a destructive verb
+   * now refuses (qits-1263), where it used to refuse a GitStatus frame reporting dirty.
+   */
+  private void anAgentWithUncommittedWork(String repoId, String workspaceId) {
+    java.util.UUID agent = agents.placeOn(repoId, workspaceIds.of(repoId, workspaceId), "qits-42");
+    agentDaemon.leftover(
+        agent.toString(), new AgentDaemon.CleanupCheck(false, List.of("qits-ci"), List.of()));
   }
 
   private WorkspaceDto workspaceDto(String repoId, String workspaceId) {
@@ -96,29 +121,19 @@ public class WorkspaceContainerLifecycleServiceTest {
         "the provisioned container has the branch checked out");
   }
 
+  /**
+   * The clean/dirty badge was the slot-wide GitStatus frame, which no daemon sends since protocol
+   * 10; the field stays in the view, always null, rather than a value nothing can fill (qits-1263).
+   */
   @Test
-  public void cleanFlagIsSurfacedOnlyWhileRunningAndReported() throws Exception {
+  public void cleanFlagIsNeverSurfaced() throws Exception {
     String repoId = clonedRepo();
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
+    assertNull(workspaceDto(repoId, "feat").clean(), "no clean/dirty badge while STOPPED");
 
-    // STOPPED (not provisioned): the daemon can't be connected, so clean stays unknown even if a
-    // stale value were reported.
-    gitStatus.report(workspaceIds.of(repoId, "feat"), false);
-    assertEquals(WorkspaceRuntimeStatus.STOPPED, workspaceDto(repoId, "feat").runtimeStatus());
-    assertNull(workspaceDto(repoId, "feat").clean(), "no clean/dirty badge while not RUNNING");
-
-    // RUNNING + reported dirty → clean == false.
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     assertEquals(WorkspaceRuntimeStatus.RUNNING, workspaceDto(repoId, "feat").runtimeStatus());
-    assertEquals(Boolean.FALSE, workspaceDto(repoId, "feat").clean());
-
-    // RUNNING + reported clean → clean == true.
-    gitStatus.report(workspaceIds.of(repoId, "feat"), true);
-    assertEquals(Boolean.TRUE, workspaceDto(repoId, "feat").clean());
-
-    // RUNNING but the daemon hasn't reported (yet) → unknown (null), not a stale value.
-    gitStatus.forget(workspaceIds.of(repoId, "feat"));
-    assertNull(workspaceDto(repoId, "feat").clean(), "RUNNING but unreported ⇒ unknown");
+    assertNull(workspaceDto(repoId, "feat").clean(), "no clean/dirty badge while RUNNING");
   }
 
   @Test
@@ -435,7 +450,6 @@ public class WorkspaceContainerLifecycleServiceTest {
     String repoId = clonedRepo();
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
-    gitStatus.report(workspaceIds.of(repoId, "feat"), true); // a discard is destructive: only an explicit CLEAN permits it
     stoppingRecorder.clear();
 
     workspaceService.discardWorkspace(workspaceIds.of(repoId, "feat"));
@@ -453,7 +467,6 @@ public class WorkspaceContainerLifecycleServiceTest {
     String repoId = clonedRepo();
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
-    gitStatus.report(workspaceIds.of(repoId, "feat"), true);
     String container = containers.containerName("feat", repoId);
     fakeContainers.clearTeardownCalls();
 
@@ -471,7 +484,6 @@ public class WorkspaceContainerLifecycleServiceTest {
     String repoId = clonedRepo();
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
-    gitStatus.report(workspaceIds.of(repoId, "feat"), true);
     String container = containers.containerName("feat", repoId);
     fakeContainers.throwOnNextStop(container);
 
@@ -530,7 +542,7 @@ public class WorkspaceContainerLifecycleServiceTest {
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     makeDirty(containers.containerName("feat", repoId));
-    gitStatus.report(workspaceIds.of(repoId, "feat"), false); // the daemon is what tells the host a tree is dirty
+    anAgentWithUncommittedWork(repoId, "feat"); // an agent's worktree is what a verb can lose
 
     BadRequestException ex =
         assertThrows(
@@ -549,7 +561,7 @@ public class WorkspaceContainerLifecycleServiceTest {
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     makeDirty(containers.containerName("feat", repoId));
-    gitStatus.report(workspaceIds.of(repoId, "feat"), false); // the daemon is what tells the host a tree is dirty
+    anAgentWithUncommittedWork(repoId, "feat"); // an agent's worktree is what a verb can lose
 
     BadRequestException ex =
         assertThrows(
@@ -573,7 +585,7 @@ public class WorkspaceContainerLifecycleServiceTest {
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     makeDirty(containers.containerName("feat", repoId));
-    gitStatus.report(workspaceIds.of(repoId, "feat"), false);
+    anAgentWithUncommittedWork(repoId, "feat");
     Long id = workspaceIds.of(repoId, "feat");
 
     assertThrows(BadRequestException.class, () -> workspaceService.discardWorkspace(id));
@@ -590,7 +602,6 @@ public class WorkspaceContainerLifecycleServiceTest {
     String repoId = clonedRepo();
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
-    gitStatus.report(workspaceIds.of(repoId, "feat"), true); // "clean" is now a daemon report, not a host git status
 
     // A clean working tree passes the guard: abandon proceeds and drops the workspace off the list.
     workspaceService.discardWorkspace(workspaceIds.of(repoId, "feat"));
@@ -607,8 +618,7 @@ public class WorkspaceContainerLifecycleServiceTest {
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     String container = containers.containerName("feat", repoId);
     String head = commitInContainer(container, "keep.txt"); // committed ⇒ working tree clean
-    // Recreate's gate admits only an explicit-clean daemon report; a committed tree qualifies.
-    gitStatus.report(workspaceIds.of(repoId, "feat"), true);
+    // No agent on the workspace: recreate's gate has nothing of anybody's to protect.
     assertTrue(
         workspaceVolumeExists("feat"), "precondition: the workspace has a persistent volume");
     startedRecorder.clear();
@@ -654,7 +664,6 @@ public class WorkspaceContainerLifecycleServiceTest {
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     assertTrue(
         workspaceVolumeExists("feat"), "precondition: the workspace has a persistent volume");
-    gitStatus.report(workspaceIds.of(repoId, "feat"), true); // a discard is destructive: only an explicit CLEAN permits it
 
     // Abandon (discard) throws the work away: container + branch + volume all go.
     workspaceService.discardWorkspace(workspaceIds.of(repoId, "feat"));

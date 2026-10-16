@@ -37,6 +37,9 @@ public class WorkspaceControllerTest {
   @jakarta.inject.Inject
   eu.wohlben.qits.workspaces.persistence.WorkspaceRepository workspaceRepository;
 
+  @jakarta.inject.Inject
+  eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository agentWorktrees;
+
   /** An ISO-8601 instant, the shape every {@code Instant} in {@code WorkspaceDto} serializes to. */
   private static final String ISO_INSTANT = "\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z";
 
@@ -319,20 +322,51 @@ public class WorkspaceControllerTest {
     assertRuntimeStatus(repoId, "wt-run", "RUNNING");
   }
 
+  /**
+   * Recreate asks the slot's agents whether their worktrees hold unpushed work (qits-1263). No
+   * workspace-daemon is connected in a @QuarkusTest, so an agent on the slot cannot be checked —
+   * recreate must refuse (an unknowable worktree is not a safe basis to destroy a container) with
+   * the 400 it has always answered, naming the agent and saying why in {@code code}.
+   */
   @Test
-  public void recreateContainerRejectsAWorkspaceWhoseCleanlinessIsUnknown() {
+  public void recreateContainerRejectsAWorkspaceWhoseAgentsCannotBeChecked() {
     String repoId = createProjectAndRepository();
     createWorkspace(repoId, "rc-unknown", "master", "rc-unknown-branch");
-
-    // No workspace-daemon is connected in a @QuarkusTest, so the registry reports the working tree
-    // as UNKNOWN — recreate must refuse it (unknown is not a safe basis to destroy a container),
-    // surfacing the domain BadRequestException as a 400.
-    given()
-        .contentType(ContentType.JSON)
-        .when()
-        .post("/workspaces/api/workspaces/" + workspaceIds.of(repoId, "rc-unknown") + "/recreate-container")
-        .then()
-        .statusCode(Response.Status.BAD_REQUEST.getStatusCode());
+    Long rowId = workspaceIds.of(repoId, "rc-unknown");
+    java.util.UUID agentId = java.util.UUID.randomUUID();
+    io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              eu.wohlben.qits.workspaces.entity.AgentWorktree agent =
+                  new eu.wohlben.qits.workspaces.entity.AgentWorktree();
+              agent.id = agentId;
+              agent.repositoryId = repoId;
+              agent.workId = "w-" + agentId;
+              agent.entityId = "qits-1263";
+              agent.wrapperBranch = "ticket/w-" + agentId;
+              agent.workspaceId = rowId;
+              agent.runState = eu.wohlben.qits.workspaces.entity.AgentRunState.RUNNING;
+              agent.createdAt = java.time.Instant.now();
+              agent.gitRefs = "[]";
+              agentWorktrees.persist(agent);
+            });
+    try {
+      given()
+          .contentType(ContentType.JSON)
+          .when()
+          .post("/workspaces/api/workspaces/" + rowId + "/recreate-container")
+          .then()
+          .statusCode(Response.Status.BAD_REQUEST.getStatusCode())
+          .body("code", equalTo("AGENT_DAEMON_UNREACHABLE"))
+          .body("message", containsString("agent " + agentId + " (work item qits-1263)"));
+    } finally {
+      io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  agentWorktrees.findByIdOptional(agentId)
+                      .ifPresent(
+                          a -> a.state = eu.wohlben.qits.workspaces.entity.AgentState.REMOVED));
+    }
   }
 
   @Test

@@ -199,6 +199,9 @@ public class AgentService {
   /** The daemons' agent surface. Absent: no agent is ever started. */
   @Inject Instance<AgentDaemon> daemon;
 
+  /** The cleanup check one agent's discard asks, shared with the workspace verbs (qits-1263). */
+  @Inject AgentWorktreeGuard worktrees;
+
   /** The agent credential's issuer. Absent: agents carry no credential of their own. */
   @Inject Instance<CredentialCommissioner> commissioner;
 
@@ -681,10 +684,7 @@ public class AgentService {
     boolean harnessStopped = false;
     if (agent.workspaceId != null && daemon.isResolvable()) {
       AgentDaemon port = daemon.get();
-      AgentDaemon.CleanupAnswer answer =
-          port.reachable(agent.workspaceId)
-              ? port.cleanupCheck(agent.workspaceId, id.toString())
-              : AgentDaemon.CleanupAnswer.unreachable("the daemon is not connected");
+      AgentDaemon.CleanupAnswer answer = worktrees.check(agent.workspaceId, id.toString());
       if (!force) {
         if (!answer.isFound() && !answer.isUnknownAgent()) {
           throw new ConflictException(

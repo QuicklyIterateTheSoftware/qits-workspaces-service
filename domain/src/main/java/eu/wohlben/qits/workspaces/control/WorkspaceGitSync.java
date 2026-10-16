@@ -13,8 +13,7 @@ package eu.wohlben.qits.workspaces.control;
  * the backend (e.g. {@code cli}, tests). A no-op when no daemon is live — the checkout then syncs
  * on its next host git op, so a missed notification never loses data.
  *
- * <p>The complement of {@link WorkspaceGitStatus}: that surfaces the daemon's outbound clean/dirty
- * reports, this drives the daemon's inbound sync. The daemon's <em>auto-push</em> half (committed
+ * <p>This drives the daemon's inbound sync. The daemon's <em>auto-push</em> half (committed
  * work flowing container → origin) needs no host SPI — it is daemon-autonomous.
  */
 public interface WorkspaceGitSync {

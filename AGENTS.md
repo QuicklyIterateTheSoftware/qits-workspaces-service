@@ -662,11 +662,10 @@ Four things about it are decided rather than incidental:
   stated no-op instead of a silent one, the reading `ensureContainer`'s branch-gone abandon already
   makes. The flag and not a second sequence because the ORDER is the part worth having one of
   (`fireStopping` before `rm` is pinned by `WorkspaceContainerStoppingRecorder`).
-- **A dirty container is LOGGED, never refused.** This is the one place this service knowingly
-  discards uncommitted work: there is nothing left to push to, and an immortal workspace on a deleted
-  branch is worse. The *unpushed* half is not probed, because it cannot be — `isFullyPushed` compares
-  the container's head against the branch's ref on the git host, which is exactly what the release
-  deleted. It is deliberately **not** routed through `cleanupBranch`/`canCleanupBranch`/
+- **An agent's leftover work is LOGGED, never refused.** This is the one place this service
+  knowingly discards uncommitted work: there is nothing left to push to, and an immortal workspace on
+  a deleted branch is worse. The probe is the agents' cleanup check (`AgentWorktreeGuard`, qits-1263),
+  and an agent it cannot check counts as holding work. It is deliberately **not** routed through `cleanupBranch`/`canCleanupBranch`/
   `sweepMergedBranches`: those decide whether a branch *may* be deleted and fail closed on a ref they
   cannot resolve, and here the deletion already happened.
 
@@ -1142,6 +1141,18 @@ The rules they keep:
   `LifecycleEventsTest` and `RunnerClaimsTest` drive the transitions;
   `workspaces-events/…/LifecycleEventsContractTest` pins every wire name and payload field.
 
+**What a slot would lose is asked per agent** (qits-1263, `AgentWorktreeGuard`). The daemon sends
+no `GitStatus` frame since protocol 10, so there is no slot-wide clean/dirty any more:
+`WorkspaceDto.clean` is always null, and `WorkspaceGitStatus` is gone. Every verb that destroys a
+container — recreate (both placements), abandon, integrate's source check, branch cleanup, a
+release's resolution (which only logs) — asks the cleanup check of each live (ACTIVE or OBSOLETE)
+agent on the slot, the check an agent's discard asks. A slot with no live agent passes whatever its
+daemon's state; an agent the daemon does not know (404) holds nothing. Leftover work, a busy harness
+and a live agent whose daemon cannot be asked refuse with a 400 naming the agent, `code`
+`AGENT_HAS_LEFTOVER_WORK`, `AGENT_BUSY` or `AGENT_DAEMON_UNREACHABLE` — 400 and not discard's 409,
+because recreate has always refused with 400 and qits-landing-app's pact pins it. Abandon,
+integrate and cleanup ask only when a DIRECT container exists, as before; recreate always asks.
+
 **Capture files a ticket and stops** (D25): `POST /workspaces/api/capture` asks qits-projects `POST
 /projects/api/work` for an IMPROVEMENT ticket in the captured repository's project (`WorkFiler`,
 `wiring/HttpWorkFiler`) and answers `{work: {id, qualifiedId}}`. No workspace, branch or agent.
@@ -1371,7 +1382,7 @@ every DIRECT branch before `ContainerRuntime` is touched: the top of `beginEnsur
 `beginRecreateContainer`, `stopContainer`, `deleteContainer` and `doDiscard`; the ensure ladder's
 snapshot; `ensureContainer(Long)`, the bootstrap runner's manual-run entry, which leaves a
 RUNNING runner row to its runner and asks a stopped one to start first (400); the listing's per-row DIRECT status; `directContainerExists`
-behind `isFullyPushed`, `isWorkspaceClean` and the integration source check (a RUNNER row answers
+behind `isWorkspaceClean` and the integration source check (a RUNNER row answers
 false there with no call, as the by-name lookup always did); and `DaemonProxyTargets.resolve`. A
 regular row there is an ERROR `direct
 placement refused for regular workspace <id>` and an `IllegalStateException`. The listing asks

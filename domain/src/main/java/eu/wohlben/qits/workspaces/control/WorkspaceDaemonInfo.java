@@ -8,12 +8,12 @@ import java.util.Optional;
  * The workspace registry's live view of a workspace's in-container {@code workspace-daemon}
  * (docs/epics/qits-workspace-registry/): when its control socket registered, and the build identity
  * it announced in its {@link eu.wohlben.qits.workspacedaemon.protocol.Hello}. Framework-free (no
- * websockets type) so it lives in {@code domain}, the sibling of {@link WorkspaceGitStatus}; the
- * {@code service} module implements it over {@code WorkspaceDaemonRegistry}, and {@link
+ * websockets type) so it lives in {@code domain}, the sibling of {@link WorkspaceAgentActivity};
+ * the {@code service} module implements it over {@code WorkspaceDaemonRegistry}, and {@link
  * WorkspaceService} reads it as an {@code Instance<>} that is simply empty in apps without the
  * backend (e.g. {@code cli}, tests).
  *
- * <p>Like clean/dirty, this is in-memory only and known only while the daemon is connected (the
+ * <p>Like agent activity, this is in-memory only and known only while the daemon is connected (the
  * container is RUNNING): {@link #lookup} is {@link Optional#empty()} for a workspace with no live
  * daemon, and {@code connectedAt} resets each time the socket (re)connects — it is "connected
  * since", not a durable first-registered timestamp. This is the extensible seam for further

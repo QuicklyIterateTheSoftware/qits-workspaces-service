@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Test double for {@link WorkspaceAgentActivity}: a workspace's agent activity is unknown ({@link
  * Optional#empty()}) until a test {@linkplain #report reports} it, so by default every
  * {@code @QuarkusTest} sees no daemon-reported activity and {@code WorkspaceDto.agentActivity} is
- * null. Mirrors {@link FakeWorkspaceGitStatus}.
+ * null. Mirrors {@link FakeWorkspaceDaemonInfo}.
  */
 @Mock
 @ApplicationScoped

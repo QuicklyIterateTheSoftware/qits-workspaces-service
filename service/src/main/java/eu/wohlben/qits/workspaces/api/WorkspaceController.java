@@ -229,9 +229,11 @@ public class WorkspaceController {
    * workspace-daemon build once its version badge shows it is outdated
    * (docs/epics/qits-workspace-registry/). The old container is torn down and a fresh one
    * provisioned from the durable branch; the work streams over the returned technical process like
-   * {@code ensure-container}. Refuses with 400 unless the working tree is provably clean — a dirty
-   * or unknown (no live daemon) state is rejected, since recreating would risk losing work. 404
-   * only when the workspace itself is unknown.
+   * {@code ensure-container}. Refuses with 400 when an agent on the workspace would lose work: its
+   * worktrees hold uncommitted or unpushed work ({@code AGENT_HAS_LEFTOVER_WORK}), its harness is
+   * busy in the background ({@code AGENT_BUSY}), or its daemon cannot be asked ({@code
+   * AGENT_DAEMON_UNREACHABLE}); the message names the agent. A workspace with no agent is
+   * recreated whatever its daemon's state. 404 only when the workspace itself is unknown.
    */
   @POST
   @Path("/{id}/recreate-container")

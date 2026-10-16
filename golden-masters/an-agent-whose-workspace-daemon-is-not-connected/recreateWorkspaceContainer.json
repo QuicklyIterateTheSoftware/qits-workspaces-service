@@ -1,3 +1,4 @@
 {
-  "message": "Cannot recreate workspace 'ws-contract': its working tree must be clean, but its reported state is unknown. Commit or discard changes, and ensure its daemon is connected, first."
+  "message": "Cannot recreate workspace 'ws-contract': its daemon cannot be asked whether the worktrees of agent 00000000-0000-4000-8000-0000000000a1 (work item contract-00000001-10) (the daemon is not connected) hold unpushed work. Wait for the daemon to connect, or discard the agent, first.",
+  "code": "AGENT_DAEMON_UNREACHABLE"
 }

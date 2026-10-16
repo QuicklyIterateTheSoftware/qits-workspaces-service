@@ -9,13 +9,13 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * Test double for {@link WorkspaceGitSync}: records every {@link #pullFromOrigin} call instead of
  * touching a real daemon, so a test can assert that a host-side merge/integration into a
  * workspace-backed target fired the incoming-pull notification. Always present (like {@link
- * FakeWorkspaceGitStatus}), so {@code WorkspaceService.gitSync} is satisfied in every
+ * FakeWorkspaceAgentActivity}), so {@code WorkspaceService.gitSync} is satisfied in every
  * {@code @QuarkusTest}; the recording starts empty.
  *
  * <p>The recorded list is reached only through {@link #pulls()}/{@link #clear()} <b>methods</b>,
  * never a public field: this is an {@code @ApplicationScoped} bean, so a test injects a client
  * proxy — a field read would hit the proxy's empty copy, while a method call delegates to the real
- * instance that {@link #pullFromOrigin} mutated (the same reason {@link FakeWorkspaceGitStatus}
+ * instance that {@link #pullFromOrigin} mutated (the same reason {@link FakeAgentDaemon}
  * exposes methods only).
  */
 @Mock

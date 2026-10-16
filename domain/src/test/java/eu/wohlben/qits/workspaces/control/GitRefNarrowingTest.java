@@ -36,7 +36,6 @@ public class GitRefNarrowingTest {
 
   @Inject FakeRepositoryLookup repositories;
   @Inject FakeCredentialCommissioner commissioner;
-  @Inject FakeWorkspaceGitStatus gitStatus;
   @Inject WorkspaceIds workspaceIds;
   @Inject WorkspaceService workspaceService;
   @Inject WorkspaceRepository workspaceRepository;
@@ -362,7 +361,6 @@ public class GitRefNarrowingTest {
         repoId, "task-e-a", "epic/e", "task/e/a", null, false, false, true);
     Long task = workspaceIds.of(repoId, "task-e-a");
     workspaceService.ensureContainer(task);
-    gitStatus.report(task, true); // a discard needs an explicit clean report
 
     workspaceService.discardWorkspace(task);
 

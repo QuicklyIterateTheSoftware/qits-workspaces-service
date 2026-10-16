@@ -135,20 +135,19 @@ public class WorkspaceService {
   @Inject Instance<WorkspaceDaemonLiveness> clientLiveness;
 
   /**
-   * The in-container workspace-daemon's last-reported working-tree cleanliness (clean/dirty),
-   * surfaced as {@link WorkspaceDto#clean}. {@code Instance<>} for the same reason as {@link
-   * #clientLiveness}: apps without the backend impl (cli, tests) have no {@link WorkspaceGitStatus}
-   * bean and simply see it empty. Only consulted for RUNNING workspaces — the daemon reports only
-   * while connected.
+   * What the slot's agents would lose if its container went away (qits-1263): the per-agent
+   * cleanup check every destructive verb here asks before it tears a container down. It replaced
+   * the slot-wide clean/dirty a {@code GitStatus} frame carried, which no daemon sends since
+   * protocol 10.
    */
-  @Inject Instance<WorkspaceGitStatus> gitStatus;
+  @Inject AgentWorktreeGuard agentWorktreeGuard;
 
   /**
    * The in-container workspace-daemon's last-reported coding-agent activity rollup, surfaced as
    * {@link WorkspaceDto#agentActivity}. {@code Instance<>} for the same reason as {@link
-   * #gitStatus}: apps without the backend impl (cli, tests) have no {@link WorkspaceAgentActivity}
-   * bean and simply see it empty. Only consulted for RUNNING workspaces — the daemon reports only
-   * while connected.
+   * #clientLiveness}: apps without the backend impl (cli, tests) have no {@link
+   * WorkspaceAgentActivity} bean and simply see it empty. Only consulted for RUNNING workspaces —
+   * the daemon reports only while connected.
    */
   @Inject Instance<WorkspaceAgentActivity> agentActivity;
 
@@ -156,17 +155,17 @@ public class WorkspaceService {
    * The workspace registry's live view of each workspace's daemon — connected-since + the daemon
    * binary's build identity, surfaced as {@link WorkspaceDto#daemonConnectedAt}/{@code
    * daemonVersion}/{@code daemonBuildTime} (docs/epics/qits-workspace-registry/). {@code
-   * Instance<>} for the same reason as {@link #gitStatus}: apps without the backend impl (cli,
-   * tests) have no {@link WorkspaceDaemonInfo} bean and simply see it empty. Only consulted for
-   * RUNNING workspaces.
+   * Instance<>} for the same reason as {@link #clientLiveness}: apps without the backend impl
+   * (cli, tests) have no {@link WorkspaceDaemonInfo} bean and simply see it empty. Only consulted
+   * for RUNNING workspaces.
    */
   @Inject Instance<WorkspaceDaemonInfo> daemonInfo;
 
   /**
    * Notifies a target workspace's in-container daemon to pull an incoming merge/integration this
    * host just pushed to its branch (docs/epics/qits-workspace-daemon/ bidirectional auto-sync).
-   * {@code Instance<>} for the same reason as {@link #gitStatus}: apps without the backend impl
-   * (cli, tests) have no {@link WorkspaceGitSync} bean and simply skip the notification — the
+   * {@code Instance<>} for the same reason as {@link #clientLiveness}: apps without the backend
+   * impl (cli, tests) have no {@link WorkspaceGitSync} bean and simply skip the notification — the
    * checkout then syncs on its next host git op, so nothing is lost.
    */
   @Inject Instance<WorkspaceGitSync> gitSync;
@@ -1068,18 +1067,18 @@ public class WorkspaceService {
               boolean daemonReadable =
                   runtime == WorkspaceRuntimeStatus.RUNNING
                       || runtime == WorkspaceRuntimeStatus.UNAVAILABLE;
-              // Clean/dirty stays null (unknown ⇒ no badge) whenever the daemon isn't readable. The
-              // daemon re-reports on reconnect.
-              Boolean clean =
-                  daemonReadable && gitStatus.isResolvable()
-                      ? gitStatus.get().isClean(wt.id).orElse(null)
-                      : null;
-              // Agent activity shares clean/dirty's daemon-readable, self-healing contract.
+              // Clean/dirty is always null (no badge): it was the slot-wide GitStatus frame, which
+              // no daemon sends since protocol 10 (qits-1152). The field stays in the view for its
+              // consumers; what a slot would lose is now asked per agent, on demand, by the
+              // destructive verbs (AgentWorktreeGuard) — one daemon call per agent, too dear for a
+              // listing (qits-1263).
+              Boolean clean = null;
+              // Agent activity is known only while the daemon's socket is live, and self-heals.
               AgentActivityState activity =
                   daemonReadable && agentActivity.isResolvable()
                       ? agentActivity.get().activityFor(wt.id).orElse(null)
                       : null;
-              // Registry facts (connected-since + daemon build identity) share clean/dirty's
+              // Registry facts (connected-since + daemon build identity) share agent activity's
               // daemon-readable, in-memory contract: known only while the daemon's socket is live.
               WorkspaceDaemonInfo.Info info =
                   daemonReadable && daemonInfo.isResolvable()
@@ -1278,49 +1277,14 @@ public class WorkspaceService {
       return false;
     }
     if (wt != null) {
-      // The working tree lives in the container; a dirty tree or unpushed commits (which the
-      // origin-side ahead/behind above cannot see) both mean cleanup could destroy work.
-      if (!isWorkspaceClean(repoId, wt) || !isFullyPushed(mirror, wt)) {
+      // The agents' worktrees live in the container; uncommitted changes or unpushed commits
+      // there (which the origin-side ahead/behind above cannot see) both mean cleanup could
+      // destroy work.
+      if (!isWorkspaceClean(wt)) {
         return false;
       }
     }
     return !hasChildren(repoId, branch);
-  }
-
-  /**
-   * Whether the container's HEAD equals the branch's ref in the origin — i.e. every commit made
-   * inside the container has been pushed. The origin-side ahead/behind can't see container-local
-   * commits, so without this a "safe" cleanup could delete unpushed work. A missing container means
-   * nothing is left to lose, so treat it as pushed.
-   */
-  private boolean isFullyPushed(RepoMirror mirror, Workspace wt) {
-    if (!directContainerExists(wt)) {
-      return true;
-    }
-    String branch = wt.branch;
-    Long rowId = wt.id;
-    if (branch == null || branch.isBlank()) {
-      return true;
-    }
-    // The daemon reports its head on every GitStatus frame and auto-pushes committed work, so
-    // comparing that against the origin's ref answers this without reaching into the container.
-    // Unknown — no live daemon, nothing reported yet, or no registry bean at all (cli, tests) — is
-    // NOT "in sync": refuse, exactly as an unreadable container used to.
-    Optional<String> reportedHead =
-        gitStatus.isUnsatisfied() ? Optional.empty() : gitStatus.get().head(rowId);
-    if (reportedHead.isEmpty()) {
-      return false;
-    }
-    try {
-      // ls-remote, not the mirror: this compares a container's HEAD against what the git host holds
-      // right now, and a cached answer here would call unpushed work pushed.
-      return mirror
-          .remoteBranchSha(branch)
-          .map(sha -> reportedHead.get().trim().equals(sha))
-          .orElse(false);
-    } catch (GitMirrorException e) {
-      return false;
-    }
   }
 
   /** The parent a branch is compared against and how far it is ahead/behind it. */
@@ -1350,38 +1314,35 @@ public class WorkspaceService {
   }
 
   /**
-   * True when the workspace container's working tree has no staged or unstaged changes. The
-   * container <em>is</em> the working tree, so no container means there is nothing uncommitted to
-   * destroy — clean, symmetric with {@link #isFullyPushed}'s absent-means-pushed. A failed status
-   * probe on a live container stays dirty: that state is genuinely unknown, never delete blindly.
+   * True when tearing the workspace's container down loses no agent's work: every live agent on it
+   * answers its cleanup check clean (or is unknown to its daemon), or it hosts none ({@link
+   * AgentWorktreeGuard}, qits-1263). No container means there is nothing left in one to destroy.
+   * Fail-closed: a live agent whose daemon cannot be asked counts as holding work.
    */
-  private boolean isWorkspaceClean(String repoId, Workspace wt) {
+  private boolean isWorkspaceClean(Workspace wt) {
     if (!directContainerExists(wt)) {
       return true;
     }
-    // Only an explicit CLEAN from the daemon counts. Unknown — no live daemon, none reported yet,
-    // or no registry bean at all — is treated as dirty and refuses the operation. The host has no
-    // second opinion to fall back on any more: the `docker exec git status` this used to run went
-    // into the daemon with the rest of the in-container git.
-    return !gitStatus.isUnsatisfied() && gitStatus.get().isClean(wt.id).orElse(false);
+    return agentWorktreeGuard.nothingToLose(wt.id);
   }
 
   /**
-   * Refuses an operation that would clobber or silently discard uncommitted work: throws a 400 when
-   * the workspace's container has a dirty working tree. The daemon-reported Clean/Dirty state
-   * already hides/reroutes these actions in the UI; this is the matching server-side guard so a
-   * direct API call can't bypass it. Symmetric with {@link #isWorkspaceClean} — an absent container
-   * is clean (nothing uncommitted to lose), so a stopped workspace is never blocked here.
+   * Refuses an operation that would clobber or silently discard an agent's work: throws a 400 when
+   * an agent on the workspace's container holds uncommitted or unpushed work, is busy, or cannot be
+   * checked ({@link AgentWorktreeGuard}). The matching server-side guard, so a direct API call
+   * can't bypass the UI. Symmetric with {@link #isWorkspaceClean} — an absent container is clean
+   * (nothing left in one to lose), so a stopped workspace is never blocked here.
    */
-  private void requireCleanWorkingTree(String repoId, Workspace wt, String operation) {
-    if (!isWorkspaceClean(repoId, wt)) {
-      throw new BadRequestException(
-          "Cannot "
-              + operation
-              + " workspace '"
-              + wt.workspaceId
-              + "': it has uncommitted changes. Commit or discard them first.");
+  private void requireCleanWorkingTree(Workspace wt, String operation) {
+    if (!directContainerExists(wt)) {
+      return;
     }
+    agentWorktreeGuard
+        .refusal(wt.id, wt.workspaceId, operation)
+        .ifPresent(
+            refusal -> {
+              throw new BadRequestException(refusal.code(), refusal.message());
+            });
   }
 
   /**
@@ -1413,11 +1374,11 @@ public class WorkspaceService {
     if (sourceWorkspace == null || !directContainerExists(sourceWorkspace)) {
       return;
     }
-    // No push from here: requireCleanWorkingTree has just established the daemon reports CLEAN,
-    // and the daemon auto-pushes committed work as it goes, so origin already has the source
-    // branch. The `docker exec git push` this used to run was a host-side second opinion on state
-    // the daemon owns.
-    requireCleanWorkingTree(repoId, sourceWorkspace, "integrate");
+    // No push from here: requireCleanWorkingTree establishes that no agent on the source holds
+    // uncommitted or unpushed work, and the daemon auto-pushes committed work as it goes, so origin
+    // already has the source branch. The `docker exec git push` this used to run was a host-side
+    // second opinion on state the daemon owns.
+    requireCleanWorkingTree(sourceWorkspace, "integrate");
   }
 
   /**
@@ -2268,15 +2229,15 @@ public class WorkspaceService {
    * Recreate is still the operation that applies a new image; it just applies the one this release
    * was tested with.
    *
-   * <p><b>Requires a provably clean working tree.</b> Recreating is lossy for uncommitted work, so
-   * the gate is stricter than {@link #requireCleanWorkingTree}: it consults the daemon-reported
-   * tri-state ({@link WorkspaceGitStatus#isClean}) and admits only an explicit clean. A dirty tree
-   * and an UNKNOWN state (no live daemon, or none has reported yet) are <em>both</em> rejected with
-   * a 400 — an unknowable tree is not a safe basis to destroy a container. The gate runs
+   * <p><b>Requires that no agent's work can be lost</b> ({@link #requireCleanForRecreate},
+   * qits-1263). What a recreate can destroy is the slot's agent worktrees, so each live agent on it
+   * is checked with its daemon: leftover work, a busy harness, or a live agent whose daemon cannot
+   * be asked each refuse with a 400 naming the agent. A slot with no live agent is recreated
+   * whatever its daemon's state — the wrapper checkout is nobody's work. The gate runs
    * synchronously so a bad request fails fast; the teardown+reprovision then streams like {@link
-   * #beginEnsureContainer}: best-effort push (preserve committed work) → settle services gracefully
-   * → {@code rm} the old container → {@link #ensureContainer} provisions a fresh one from the
-   * durable branch (whose absent-container path re-runs {@link #provisionContainer}).
+   * #beginEnsureContainer}: settle services gracefully → {@code rm} the old container → {@link
+   * #ensureContainer} provisions a fresh one from the durable branch (whose absent-container path
+   * re-runs {@link #provisionContainer}).
    */
   public String beginRecreateContainer(Long id) {
     Workspace resolved = QuarkusTransaction.requiringNew().call(() -> requireActive(id));
@@ -2303,9 +2264,9 @@ public class WorkspaceService {
     processExecutor.submit(
         () -> {
           try {
-            // No backup push: requireCleanForRecreate established the daemon reports CLEAN, and
-            // the daemon pushes committed work as it lands, so origin is already current. There is
-            // nothing for the host to preserve that the daemon has not already sent.
+            // No backup push: requireCleanForRecreate established that every agent's worktrees are
+            // clean and pushed (or that the slot hosts no agent), and the daemon pushes committed
+            // work as it lands, so there is nothing for the host to preserve.
             // Settle live services gracefully so their disappearance reads as deliberate, not a
             // crash
             // the restart policy would resurrect — the same courtesy stopContainer/discard extend.
@@ -2327,25 +2288,23 @@ public class WorkspaceService {
   }
 
   /**
-   * Recreate's registry-only clean gate: the daemon-reported tri-state must be an <em>explicit</em>
-   * clean. Unlike {@link #requireCleanWorkingTree} (which execs git and folds unknown→dirty and
-   * absent→clean), recreate must reject UNKNOWN in its own right — a workspace with no live daemon
-   * reporting has an unknowable tree, and destroying its container could silently lose work — so
-   * both dirty ({@code Optional.of(false)}) and unknown ({@code Optional.empty()}) throw 400; only
-   * {@code Optional.of(true)} passes.
+   * Recreate's gate, on both placements (qits-1263): every live agent on the slot must answer its
+   * cleanup check clean, or be unknown to its daemon ({@link AgentWorktreeGuard}). Unlike {@link
+   * #requireCleanWorkingTree} it does not ask whether a container exists — a RUNNER row's container
+   * is not on this host, and its volume goes with the recreate too — so a slot whose agents cannot
+   * be checked is refused whatever its placement. A refusal is a 400 — the status recreate has
+   * always refused with, and the one qits-landing-app's pact pins — carrying {@code
+   * AGENT_HAS_LEFTOVER_WORK}, {@code AGENT_BUSY} or {@code AGENT_DAEMON_UNREACHABLE}, the codes an
+   * agent's own discard answers with (as 409s). A slot with no live agent passes even with no
+   * daemon connected: nothing of anybody's would be lost.
    */
   private void requireCleanForRecreate(String workspaceId, Long rowId) {
-    Optional<Boolean> clean =
-        gitStatus.isResolvable() ? gitStatus.get().isClean(rowId) : Optional.empty();
-    if (!clean.equals(Optional.of(Boolean.TRUE))) {
-      String state = clean.map(c -> c ? "clean" : "dirty").orElse("unknown");
-      throw new BadRequestException(
-          "Cannot recreate workspace '"
-              + workspaceId
-              + "': its working tree must be clean, but its reported state is "
-              + state
-              + ". Commit or discard changes, and ensure its daemon is connected, first.");
-    }
+    agentWorktreeGuard
+        .refusal(rowId, workspaceId, "recreate")
+        .ifPresent(
+            refusal -> {
+              throw new BadRequestException(refusal.code(), refusal.message());
+            });
   }
 
   /**
@@ -3059,7 +3018,7 @@ public class WorkspaceService {
     repositories.require(repoId);
 
     if (!force) {
-      requireCleanWorkingTree(repoId, workspace, "abandon");
+      requireCleanWorkingTree(workspace, "abandon");
     }
     doDiscard(repoId, workspace, WorkspaceStatus.ABANDONED, result);
   }
@@ -3102,16 +3061,13 @@ public class WorkspaceService {
    * wrong is the workspace a whole repository is worked in. An ordinary discard still resolves such
    * a row, but {@link #doDiscard} keeps its branch on the same two belts (qits-780).
    *
-   * <p><b>A dirty or unpushed container is LOGGED and never refused.</b> This is the one place this
+   * <p><b>An agent's leftover work is LOGGED and never refused.</b> This is the one place this
    * service knowingly discards uncommitted work, and it is still the better answer: the branch is
    * gone, so there is nothing left to push to and no ref the work could be recovered from, while the
    * alternative is an immortal ACTIVE workspace on a deleted branch holding a container and a
    * credential nobody will reclaim. The WARN names the workspace and says a release consumed its
-   * branch, so the loss is at least on the record. The <em>unpushed</em> half is not probed
-   * separately for the reason it cannot be: {@link #isFullyPushed} compares the container's head
-   * against the branch's ref on the git host, and that ref is precisely what the release deleted —
-   * it would answer "gone" and be read as "unpushed" every time. The clean probe, which already
-   * treats unknown as dirty, is the whole of it.
+   * branch, so the loss is at least on the record. The probe is the agents' cleanup check ({@link
+   * #isWorkspaceClean}), which already treats an agent it cannot check as holding work.
    *
    * <p>The teardown is {@link #doDiscard}'s with the branch deletion skipped, and it is deliberately
    * <b>not</b> routed through {@link #cleanupBranch}/{@link #canCleanupBranch}/{@link
@@ -3156,11 +3112,11 @@ public class WorkspaceService {
               + " a release does not resolve it.");
     }
 
-    if (!isWorkspaceClean(repoId, workspace)) {
+    if (!isWorkspaceClean(workspace)) {
       LOG.warnf(
-          "Resolving workspace %s (row %s, branch '%s') although its container reports uncommitted"
-              + " or unreported work: a release consumed the branch, so there is nothing left to"
-              + " push to.",
+          "Resolving workspace %s (row %s, branch '%s') although an agent on its container holds"
+              + " uncommitted, unpushed or uncheckable work: a release consumed the branch, so"
+              + " there is nothing left to push to.",
           workspace.workspaceId, workspace.id, branch);
     }
 
@@ -3713,10 +3669,10 @@ public class WorkspaceService {
   }
 
   /**
-   * Recreate, for a RUNNER row: the clean-tree gate first, exactly the DIRECT one (an unknown tree —
-   * no daemon reporting — refuses with 400), then {@link #deleteOnRunner} (container and volume
-   * gone, the workspace token deleted, the runner cleared), then the start, which mints a fresh
-   * token and queues the row for any runner (qits-625).
+   * Recreate, for a RUNNER row: the agent-worktree gate first, exactly the DIRECT one (a live agent
+   * with leftover work, busy, or uncheckable refuses with 400), then {@link #deleteOnRunner}
+   * (container and volume gone, the workspace token deleted, the runner cleared), then the start,
+   * which mints a fresh token and queues the row for any runner (qits-625).
    */
   private String beginRunnerRecreate(Workspace row) {
     requireCleanForRecreate(row.workspaceId, row.id);

@@ -10,9 +10,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A scripted {@link AgentDaemon} (qits-1152): every call is recorded, every workspace is reachable
- * unless marked otherwise, and the cleanup check answers clean unless a test scripts leftover work.
- * A test can make the daemon {@linkplain #forget forget} an agent (its 404, qits-1233) or script
- * what a removal answers. {@link #reset} between tests.
+ * unless {@linkplain #disconnect disconnected}, and the cleanup check answers clean unless a test
+ * scripts leftover work. A test can make the daemon {@linkplain #forget forget} an agent (its 404,
+ * qits-1233) or script what a removal answers. {@link #reset} between tests.
  *
  * <p>Harnesses survive like the daemon's (qits-1225): the first start of an agent launches one with
  * the instruction as its opening turn; a later start finds it running and answers {@code
@@ -35,6 +35,9 @@ public class FakeAgentDaemon implements AgentDaemon {
 
   private final Map<String, CleanupCheck> checks = new ConcurrentHashMap<>();
 
+  /** The workspaces whose daemon cannot be reached (no tunnel). */
+  private final Set<Long> unreachable = ConcurrentHashMap.newKeySet();
+
   /** The agents the daemon no longer knows: the check and every removal answer 404. */
   private final Set<String> forgotten = ConcurrentHashMap.newKeySet();
 
@@ -53,6 +56,7 @@ public class FakeAgentDaemon implements AgentDaemon {
     starts.clear();
     checks.clear();
     forgotten.clear();
+    unreachable.clear();
     removeAnswers.clear();
     harnesses.clear();
     turnAnswer = Outcome.OK;
@@ -75,6 +79,11 @@ public class FakeAgentDaemon implements AgentDaemon {
 
   public void leftover(String agentId, CleanupCheck check) {
     checks.put(agentId, check);
+  }
+
+  /** The workspace's daemon is not connected: {@link #reachable} is false until {@link #reset}. */
+  public void disconnect(Long workspaceRowId) {
+    unreachable.add(workspaceRowId);
   }
 
   /** The daemon removed the agent, or lost it: it answers 404 for it from now on. */
@@ -100,7 +109,7 @@ public class FakeAgentDaemon implements AgentDaemon {
 
   @Override
   public boolean reachable(Long workspaceRowId) {
-    return true;
+    return !unreachable.contains(workspaceRowId);
   }
 
   @Override

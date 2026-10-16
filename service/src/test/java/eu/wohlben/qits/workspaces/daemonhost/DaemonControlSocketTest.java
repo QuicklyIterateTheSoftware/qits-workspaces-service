@@ -28,6 +28,7 @@ import eu.wohlben.qits.workspacedaemon.protocol.Hello;
 import eu.wohlben.qits.workspacedaemon.protocol.PullBranch;
 import eu.wohlben.qits.workspacedaemon.protocol.RunCommand;
 import eu.wohlben.qits.workspacedaemon.protocol.Stream;
+import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceChanged;
 import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceInfo;
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -367,57 +368,27 @@ class DaemonControlSocketTest {
     assertFalse(registry.isDaemonLive(WORKSPACE_ROW_ID));
   }
 
+  /**
+   * No daemon sends {@code GitStatus} since protocol 10 (qits-1152), and nothing here waits on it
+   * any more (qits-1263): a stray one from an old daemon is ignored — no hint, no cache — and the
+   * socket stays up. The {@code WorkspaceChanged} after it is the marker that the frame was read.
+   */
   @Test
-  void gitStatusReportCachesTheFlagAndFiresFilesAndGitStatusHints() throws Exception {
+  void aStrayGitStatusFrameIsIgnored() throws Exception {
     try (FakePeer peer = connect()) {
       await(() -> registry.isDaemonLive(WORKSPACE_ROW_ID));
       hints.clear();
 
       peer.ws().writeTextMessage(codec.encode(new GitStatus(WORKSPACE_ID, false, "abc123")));
+      peer.ws()
+          .writeTextMessage(
+              codec.encode(new WorkspaceChanged(WORKSPACE_ID, Topic.COMMANDS.name())));
 
-      // The flag is cached for the DTO read path.
-      await(() -> registry.isClean(WORKSPACE_ROW_ID).isPresent());
-      assertEquals(Optional.of(false), registry.isClean(WORKSPACE_ROW_ID));
-      // Every report re-homes the old host watcher's FILES trigger (workspace channel)…
-      await(() -> hints.has(Topic.FILES, "repo-1", WORKSPACE_ROW_ID));
-      assertTrue(hints.has(Topic.FILES, "repo-1", WORKSPACE_ROW_ID), hints.toString());
-      // …and a flag change nudges the branch-tree badge on the repository channel (repoId, null).
-      await(() -> hints.has(Topic.GIT_STATUS, "repo-1", (Long) null));
-      assertTrue(hints.has(Topic.GIT_STATUS, "repo-1", (Long) null), hints.toString());
-    }
-  }
-
-  @Test
-  void unchangedGitStatusFiresFilesButNotGitStatus() throws Exception {
-    try (FakePeer peer = connect()) {
-      await(() -> registry.isDaemonLive(WORKSPACE_ROW_ID));
-
-      // First report establishes clean=true (fires FILES + GIT_STATUS).
-      peer.ws().writeTextMessage(codec.encode(new GitStatus(WORKSPACE_ID, true, "abc123")));
-      await(() -> registry.isClean(WORKSPACE_ROW_ID).equals(Optional.of(true)));
-      hints.clear();
-
-      // A second report with the SAME flag (a dirty→dirty content edit would look like this): the
-      // marker moved on the daemon, so FILES must fire again, but the badge flag didn't change so
-      // GIT_STATUS must NOT.
-      peer.ws().writeTextMessage(codec.encode(new GitStatus(WORKSPACE_ID, true, "abc123")));
-      await(() -> hints.has(Topic.FILES, "repo-1", WORKSPACE_ROW_ID));
-      assertTrue(hints.has(Topic.FILES, "repo-1", WORKSPACE_ROW_ID), hints.toString());
+      await(() -> hints.has(Topic.COMMANDS, "repo-1", WORKSPACE_ROW_ID));
+      assertFalse(hints.has(Topic.FILES, "repo-1", WORKSPACE_ROW_ID), hints.toString());
       assertFalse(hints.has(Topic.GIT_STATUS, "repo-1", (Long) null), hints.toString());
+      assertTrue(registry.isDaemonLive(WORKSPACE_ROW_ID), "the frame does not cost the socket");
     }
-  }
-
-  @Test
-  void disconnectEvictsTheCachedGitStatus() throws Exception {
-    FakePeer peer = connect();
-    await(() -> registry.isDaemonLive(WORKSPACE_ROW_ID));
-    peer.ws().writeTextMessage(codec.encode(new GitStatus(WORKSPACE_ID, false, "abc123")));
-    await(() -> registry.isClean(WORKSPACE_ROW_ID).isPresent());
-
-    peer.close();
-
-    await(() -> registry.isClean(WORKSPACE_ROW_ID).isEmpty());
-    assertTrue(registry.isClean(WORKSPACE_ROW_ID).isEmpty(), "cache cleared on disconnect (unknown)");
   }
 
   @Test

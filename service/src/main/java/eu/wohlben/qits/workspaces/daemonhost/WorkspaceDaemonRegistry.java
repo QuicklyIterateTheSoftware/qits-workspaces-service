@@ -14,7 +14,6 @@ import eu.wohlben.qits.workspaces.control.WorkspaceConfigView;
 import eu.wohlben.qits.workspaces.control.WorkspaceDaemonInfo;
 import eu.wohlben.qits.workspaces.control.WorkspaceDaemonLiveness;
 import eu.wohlben.qits.workspaces.control.WorkspaceDaemonProvisioner;
-import eu.wohlben.qits.workspaces.control.WorkspaceGitStatus;
 import eu.wohlben.qits.workspaces.control.WorkspaceGitSync;
 import eu.wohlben.qits.workspaces.control.WorkspaceChangeHint;
 import eu.wohlben.qits.workspaces.control.WorkspaceChangePublisher;
@@ -30,7 +29,6 @@ import eu.wohlben.qits.workspacedaemon.protocol.DaemonMessage;
 import eu.wohlben.qits.workspacedaemon.protocol.DaemonProtocol;
 import eu.wohlben.qits.workspacedaemon.protocol.Describe;
 import eu.wohlben.qits.workspacedaemon.protocol.DescribeConfig;
-import eu.wohlben.qits.workspacedaemon.protocol.GitStatus;
 import eu.wohlben.qits.workspacedaemon.protocol.Heartbeat;
 import eu.wohlben.qits.workspacedaemon.protocol.Hello;
 import eu.wohlben.qits.workspacedaemon.protocol.ProvisionFailed;
@@ -90,7 +88,6 @@ public class WorkspaceDaemonRegistry
     implements WorkspaceDaemonLiveness,
         WorkspaceDaemonProvisioner,
         WorkspaceConfigReader,
-        WorkspaceGitStatus,
         WorkspaceAgentActivity,
         WorkspaceDaemonInfo,
         WorkspaceGitSync,
@@ -148,24 +145,9 @@ public class WorkspaceDaemonRegistry
   static final String KILLED_EVENT = "Killed";
 
   /**
-   * Last working-tree cleanliness each live daemon reported ({@link GitStatus}). In-memory only —
-   * known while the daemon is connected (container RUNNING), cleared on {@link #unregister}, and
-   * re-reported by the daemon on reconnect. Surfaced through {@link WorkspaceGitStatus#isClean}.
-   */
-  private final ConcurrentHashMap<Long, Boolean> gitClean = new ConcurrentHashMap<>();
-
-  /**
-   * Last commit each live daemon reported on the same {@link GitStatus} frame as {@link #gitClean}.
-   * Same lifetime and same eviction — in-memory only, dropped on {@link #unregister}, re-reported
-   * on reconnect. Surfaced through {@link WorkspaceGitStatus#head}, which the host compares against
-   * the origin's ref instead of running {@code git rev-parse} inside the container.
-   */
-  private final ConcurrentHashMap<Long, String> gitHead = new ConcurrentHashMap<>();
-
-  /**
    * Last coding-agent activity each live daemon reported ({@link AgentActivity}), keyed by {@code
-   * commandId} (multiple agents can run per workspace). In-memory only — same lifecycle as {@link
-   * #gitClean}: populated while the daemon is connected, evicted on {@link #unregister},
+   * commandId} (multiple agents can run per workspace). In-memory only: populated while the
+   * daemon is connected, evicted on {@link #unregister},
    * re-reported on reconnect. Surfaced as a per-workspace rollup through {@link
    * WorkspaceAgentActivity#activityFor}.
    *
@@ -258,11 +240,8 @@ public class WorkspaceDaemonRegistry
     clients.computeIfPresent(
         workspaceId,
         (id, existing) -> existing.connection.id().equals(connection.id()) ? null : existing);
-    // The daemon is gone: its cached working-tree status is unknown until it reconnects and
-    // re-reports (RUNNING-only semantics; the UI shows no badge in the meantime).
-    gitClean.remove(workspaceId);
-    gitHead.remove(workspaceId);
-    // Likewise drop every tracked agent activity for this workspace (re-reported on reconnect).
+    // The daemon is gone: drop every tracked agent activity for this workspace (re-reported on
+    // reconnect).
     agentActivity.values().removeIf(entry -> entry.workspaceId().equals(workspaceId));
     agentActivityById.values().removeIf(entry -> entry.workspaceId().equals(workspaceId));
     sinkDispatch.execute(() -> agentService.onDaemonConnection(workspaceId));
@@ -374,17 +353,18 @@ public class WorkspaceDaemonRegistry
           completeProvision(workspaceId, ProvisionResult.ok(provisioned.head()));
       case ProvisionFailed failed ->
           completeProvision(workspaceId, ProvisionResult.failed(failed.message()));
-      case GitStatus status -> onGitStatus(workspaceId, client, status);
       case AgentActivity activity -> onAgentActivity(workspaceId, client, activity);
       case AgentBranchPushed pushed -> onBranchPushed(workspaceId, pushed);
       // qits-1236: a harness exit frame (capability 11) — relayed to the agent row's own event.
       case AgentHarnessExit exit -> onAgentHarnessExit(workspaceId, exit);
       case WorkspaceChanged changed -> onWorkspaceChanged(workspaceId, client, changed);
-      // Everything else is ignored: qits -> workspace-daemon requests are never received here, and
-      // a pre-qits-947 daemon's service frames (ServiceTransition, and its `service:` output
-      // chunks, which fall through to the command buffer above and match no command) have no host
-      // left to read them. A default arm rather than named cases, so this compiles against the
-      // protocol both before and after those records leave the sealed interface.
+      // Everything else is ignored: qits -> workspace-daemon requests are never received here; a
+      // GitStatus frame is sent by no daemon since protocol 10 (qits-1152), and the per-agent
+      // cleanup check replaced what it carried (qits-1263); and a pre-qits-947 daemon's service
+      // frames (ServiceTransition, and its `service:` output chunks, which fall through to the
+      // command buffer above and match no command) have no host left to read them. A default arm
+      // rather than named cases, so this compiles against the protocol both before and after
+      // those records leave the sealed interface.
       default -> {}
     }
   }
@@ -412,37 +392,6 @@ public class WorkspaceDaemonRegistry
       return;
     }
     changePublisher.fire(client != null ? client.repoId : null, workspaceId, topic);
-  }
-
-  /**
-   * Cache a working-tree status report and fan out its two consequences. Every report means the
-   * daemon's working-tree marker moved, so it re-homes the old host watcher's trigger: a {@link
-   * WorkspaceChangeHint.Topic#FILES} hint on the workspace channel makes the detail view re-fetch
-   * {@code /files} + {@code /detection}. The {@code clean} flag is cached for {@link #isClean}, and
-   * a {@link WorkspaceChangeHint.Topic#GIT_STATUS} hint on the repository channel refreshes the
-   * branch-tree dirty badge — but only when the flag actually flipped, so a dirty→dirty content
-   * edit nudges {@code FILES} without re-invalidating the whole workspace list.
-   */
-  private void onGitStatus(Long workspaceId, DaemonConnection client, GitStatus status) {
-    String repoId = client != null ? client.repoId : null;
-    changePublisher.fire(repoId, workspaceId, WorkspaceChangeHint.Topic.FILES);
-    if (status.head() != null) {
-      gitHead.put(workspaceId, status.head());
-    }
-    Boolean previous = gitClean.put(workspaceId, status.clean());
-    if (previous == null || previous != status.clean()) {
-      changePublisher.fire(repoId, null, WorkspaceChangeHint.Topic.GIT_STATUS);
-    }
-  }
-
-  @Override
-  public Optional<Boolean> isClean(Long workspaceId) {
-    return Optional.ofNullable(gitClean.get(workspaceId));
-  }
-
-  @Override
-  public Optional<String> head(Long workspaceId) {
-    return Optional.ofNullable(gitHead.get(workspaceId));
   }
 
   /**

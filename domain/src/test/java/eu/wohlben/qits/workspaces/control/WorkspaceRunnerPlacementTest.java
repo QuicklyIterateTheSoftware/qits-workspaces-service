@@ -58,7 +58,8 @@ public class WorkspaceRunnerPlacementTest {
   @Inject WorkspaceIds workspaceIds;
   @Inject TechnicalProcessRegistry processes;
   @Inject FakeCredentialCommissioner commissioner;
-  @Inject FakeWorkspaceGitStatus gitStatus;
+  @Inject FakeAgentDaemon agentDaemon;
+  @Inject TestAgents agents;
   @Inject FakeWorkspaceAgentActivity agentActivity;
   @Inject FakeWorkspaceDaemonInfo daemonInfo;
 
@@ -99,7 +100,8 @@ public class WorkspaceRunnerPlacementTest {
                             .filter(w -> w.status == WorkspaceStatus.ACTIVE)
                             .ifPresent(w -> w.status = WorkspaceStatus.ABANDONED)));
     QuarkusTransaction.requiringNew().run(() -> createdRunners.forEach(runnerRepository::deleteById));
-    rows.forEach(gitStatus::forget);
+    agents.retireAll();
+    agentDaemon.reset();
     rows.forEach(agentActivity::forget);
     rows.forEach(daemonInfo::forget);
     rows.clear();
@@ -552,8 +554,9 @@ public class WorkspaceRunnerPlacementTest {
   }
 
   /**
-   * RUNNER recreate: the clean-tree gate passes, the container is deleted on its runner (token
-   * deleted, runner cleared), then the start mints a fresh token and queues the row for any runner.
+   * RUNNER recreate: the agent-worktree gate passes (no agent on the slot), the container is
+   * deleted on its runner (token deleted, runner cleared), then the start mints a fresh token and
+   * queues the row for any runner.
    */
   @Test
   public void recreateDeletesTheContainerAndItsTokenThenStartsWithAFreshOne() throws Exception {
@@ -563,7 +566,6 @@ public class WorkspaceRunnerPlacementTest {
     Workspace created = stoppedRunnerRow(repoId, "recr");
     String first = read(created.id).commissionedTokenId;
     running(created.id, runner.id);
-    gitStatus.report(created.id, true);
 
     String processId = workspaceService.beginRecreateContainer(created.id);
 
@@ -575,6 +577,36 @@ public class WorkspaceRunnerPlacementTest {
     assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
     assertNull(row.runnerId, "it may land on another runner");
     assertEquals(commissioner.tokensMinted().get(1).token().tokenId(), row.commissionedTokenId);
+  }
+
+  /**
+   * RUNNER recreate takes the DIRECT gate (qits-1263): an agent on the slot holding unpushed work
+   * is refused with 400, named, and nothing reaches the runner — its volume, which holds the
+   * worktree, stays.
+   */
+  @Test
+  public void recreateRefusesAnAgentWithLeftoverWorkBeforeTheRunnerIsAsked() throws Exception {
+    WorkspaceRunner runner = eligibleRunner();
+    placement.connect(runner.id);
+    String repoId = repo();
+    Workspace created = stoppedRunnerRow(repoId, "recr-held");
+    running(created.id, runner.id);
+    UUID agent = agents.placeOn(repoId, created.id, "qits-77");
+    agentDaemon.leftover(
+        agent.toString(),
+        new AgentDaemon.CleanupCheck(
+            false,
+            List.of(),
+            List.of(new AgentDaemon.CleanupCheck.Unpushed("qits-ci", "ticket/qits-77", 1))));
+
+    BadRequestException ex =
+        assertThrows(
+            BadRequestException.class, () -> workspaceService.beginRecreateContainer(created.id));
+
+    assertEquals("AGENT_HAS_LEFTOVER_WORK", ex.code());
+    assertTrue(ex.getMessage().contains("agent " + agent), ex.getMessage());
+    assertFalse(placement.calls().contains("delete:" + created.id), placement.calls().toString());
+    assertEquals(WorkspaceRuntimeStatus.RUNNING, read(created.id).runtimeStatus);
   }
 
   /** A resolution deletes the row's token with the rest of the container's teardown. */
@@ -593,16 +625,25 @@ public class WorkspaceRunnerPlacementTest {
     assertNull(read(created.id).commissionedTokenId);
   }
 
+  /**
+   * Fail-closed on the RUNNER path (qits-1263): an agent on the slot whose daemon is not connected
+   * cannot be checked, so the recreate is refused before its runner is asked to delete anything.
+   * (With no agent, the same disconnected daemon refuses nothing: see the recreate above.)
+   */
   @Test
-  public void recreateIsRefusedByTheCleanTreeGateWithNoDaemon() throws Exception {
+  public void recreateIsRefusedWhenTheSlotsAgentsCannotBeChecked() throws Exception {
     WorkspaceRunner runner = eligibleRunner();
     placement.connect(runner.id);
     String repoId = repo();
     Workspace created = stoppedRunnerRow(repoId, "recreate");
     running(created.id, runner.id);
+    agents.placeOn(repoId, created.id, "qits-78");
+    agentDaemon.disconnect(created.id);
 
-    assertThrows(
-        BadRequestException.class, () -> workspaceService.beginRecreateContainer(created.id));
+    BadRequestException ex =
+        assertThrows(
+            BadRequestException.class, () -> workspaceService.beginRecreateContainer(created.id));
+    assertEquals("AGENT_DAEMON_UNREACHABLE", ex.code());
     assertFalse(placement.calls().stream().anyMatch(c -> c.startsWith("delete:")));
     assertEquals(WorkspaceRuntimeStatus.RUNNING, read(created.id).runtimeStatus);
   }
@@ -678,7 +719,7 @@ public class WorkspaceRunnerPlacementTest {
   }
 
   /**
-   * Clean/dirty, agent activity and the daemon's identity are known while the daemon's SOCKET is
+   * Agent activity and the daemon's identity are known while the daemon's SOCKET is
    * live, not only while the row reads RUNNING (qits-949): a RUNNER row's UNAVAILABLE overlay is
    * only its runner being unreachable, and the in-container daemon dials in through the edge rather
    * than through the runner, so the registry ports can still answer underneath it. The row is
@@ -691,7 +732,6 @@ public class WorkspaceRunnerPlacementTest {
     String repoId = repo();
     Workspace created = stoppedRunnerRow(repoId, "daemon-live");
     running(created.id, runner.id);
-    gitStatus.report(created.id, false);
     agentActivity.report(created.id, AgentActivityState.BUSY);
     Instant buildTime = Instant.now();
     daemonInfo.report(created.id, "1.2.3", buildTime);
@@ -700,7 +740,7 @@ public class WorkspaceRunnerPlacementTest {
 
     assertEquals(
         WorkspaceRuntimeStatus.UNAVAILABLE, dto.runtimeStatus(), "the runner is unreachable");
-    assertEquals(Boolean.FALSE, dto.clean(), "the daemon's socket is still live through the edge");
+    assertNull(dto.clean(), "no daemon reports clean/dirty since protocol 10 (qits-1263)");
     assertEquals(AgentActivityState.BUSY, dto.agentActivity());
     assertNotNull(dto.daemonConnectedAt());
     assertEquals("1.2.3", dto.daemonVersion());

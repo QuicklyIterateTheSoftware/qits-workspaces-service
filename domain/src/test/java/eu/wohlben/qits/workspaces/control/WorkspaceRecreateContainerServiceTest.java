@@ -1,27 +1,33 @@
 package eu.wohlben.qits.workspaces.control;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import eu.wohlben.qits.workspaces.error.BadRequestException;
-import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
+import eu.wohlben.qits.workspaces.error.BadRequestException;
+import eu.wohlben.qits.workspaces.error.NotFoundException;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
-import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
  * Recreate-container: the operation that rolls a workspace onto a newer workspace-daemon build by
  * tearing its container down and re-provisioning it from the durable branch
- * (docs/epics/qits-workspace-registry/). Verifies the registry-only clean gate (only a
- * daemon-reported clean tree passes; dirty <em>and</em> unknown are both rejected 400) and the
- * teardown+reprovision mechanic (a fresh container onto the current image; the persistent
- * /workspace volume — and committed work pushed before teardown — carry the checkout across).
+ * (docs/epics/qits-workspace-registry/). Verifies the agent-worktree gate (qits-1263: every live
+ * agent on the slot must answer its cleanup check clean; leftover work, a busy harness and an
+ * agent whose daemon cannot be asked are each refused 400 naming the agent; a slot with no agent
+ * passes even with no daemon connected) and the teardown+reprovision mechanic (a fresh container
+ * onto the current image; the persistent /workspace volume — and committed work pushed before
+ * teardown — carry the checkout across).
  */
 @QuarkusTest
 public class WorkspaceRecreateContainerServiceTest {
@@ -33,7 +39,8 @@ public class WorkspaceRecreateContainerServiceTest {
   @Inject ContainerRuntime containers;
   @Inject FakeContainerRuntime fakeContainers;
   @Inject WorkspaceContainerStartedRecorder startedRecorder;
-  @Inject FakeWorkspaceGitStatus gitStatus;
+  @Inject FakeAgentDaemon agentDaemon;
+  @Inject TestAgents agents;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -43,6 +50,17 @@ public class WorkspaceRecreateContainerServiceTest {
    * clone-the-submodule-fixture setup, which needed the repositories context and a
    * build-time fixture-derivation step, neither of which exists here.
    */
+  @BeforeEach
+  void resetDaemon() {
+    agentDaemon.reset();
+  }
+
+  @AfterEach
+  void retireAgents() {
+    agents.retireAll();
+    agentDaemon.reset();
+  }
+
   private String clonedRepo() throws Exception {
     String repoId = TestOrigin.create(dataDir);
     repositories.register(repoId);
@@ -81,8 +99,7 @@ public class WorkspaceRecreateContainerServiceTest {
         0,
         containers.exec(container, "/workspace", Map.of(), "test", "-f", "marker.txt").exitCode());
 
-    // Daemon reports the tree clean → the gate passes and recreate runs.
-    gitStatus.report(workspaceIds.of(repoId, "feat"), true);
+    // No agent on the slot → nothing of anybody's to lose: the gate passes and recreate runs.
     workspaceService.beginRecreateContainer(workspaceIds.of(repoId, "feat"));
     assertTrue(
         startedRecorder.awaitCount(repoId, "feat", 1, 5_000),
@@ -103,7 +120,6 @@ public class WorkspaceRecreateContainerServiceTest {
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     ensureRunning(repoId, "feat");
     String container = containers.containerName("feat", repoId);
-    gitStatus.report(workspaceIds.of(repoId, "feat"), true);
     fakeContainers.clearTeardownCalls();
 
     workspaceService.beginRecreateContainer(workspaceIds.of(repoId, "feat"));
@@ -122,7 +138,6 @@ public class WorkspaceRecreateContainerServiceTest {
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     ensureRunning(repoId, "feat");
     String container = containers.containerName("feat", repoId);
-    gitStatus.report(workspaceIds.of(repoId, "feat"), true);
     fakeContainers.throwOnNextStop(container);
 
     workspaceService.beginRecreateContainer(workspaceIds.of(repoId, "feat"));
@@ -138,21 +153,81 @@ public class WorkspaceRecreateContainerServiceTest {
   // already pushed anything committed. Unowned here; belongs with the daemon's auto-push.
 
 
+  /**
+   * The qits-1263 regression: the slot hosts no agent and its daemon is not connected — what every
+   * slot looked like to the old gate, which waited on a GitStatus frame no daemon sends and refused
+   * them all as "unknown". Nothing of anybody's is in the container, so the recreate runs.
+   */
   @Test
-  public void recreateRefusesADirtyWorkspace() throws Exception {
+  public void recreateRunsOnASlotWithNoAgentsEvenWithItsDaemonDisconnected() throws Exception {
     String repoId = clonedRepo();
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     ensureRunning(repoId, "feat");
+    Long rowId = workspaceIds.of(repoId, "feat");
+    agentDaemon.disconnect(rowId);
+
+    workspaceService.beginRecreateContainer(rowId);
+
+    assertTrue(
+        startedRecorder.awaitCount(repoId, "feat", 1, 5_000),
+        "a slot with no agent is recreated whatever its daemon's state");
+  }
+
+  /**
+   * Agents whose worktrees answer clean — or that the daemon does not know, so they have no
+   * worktree there — hold nothing the recreate could lose. Each one was asked.
+   */
+  @Test
+  public void recreateRunsWhenEveryAgentOnTheSlotIsClean() throws Exception {
+    String repoId = clonedRepo();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
+    ensureRunning(repoId, "feat");
+    Long rowId = workspaceIds.of(repoId, "feat");
+    UUID clean = agents.placeOn(repoId, rowId, "qits-1");
+    UUID unknown = agents.placeOn(repoId, rowId, "qits-2");
+    agentDaemon.forget(unknown.toString());
+
+    workspaceService.beginRecreateContainer(rowId);
+
+    assertTrue(startedRecorder.awaitCount(repoId, "feat", 1, 5_000), "recreate re-provisions");
+    assertTrue(
+        agentDaemon.callsFor(clean.toString()).contains("cleanup-check " + rowId + " " + clean),
+        agentDaemon.callsFor(clean.toString()).toString());
+    assertTrue(
+        agentDaemon.callsFor(unknown.toString()).contains("cleanup-check " + rowId + " " + unknown),
+        agentDaemon.callsFor(unknown.toString()).toString());
+  }
+
+  @Test
+  public void recreateRefusesAnAgentWithLeftoverWorkAndNamesIt() throws Exception {
+    String repoId = clonedRepo();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
+    ensureRunning(repoId, "feat");
+    Long rowId = workspaceIds.of(repoId, "feat");
     String container = containers.containerName("feat", repoId);
     containers.exec(container, "/workspace", Map.of(), "bash", "-lc", "echo wip > marker.txt");
+    agents.placeOn(repoId, rowId, "qits-7");
+    UUID holding = agents.placeOn(repoId, rowId, "qits-8");
+    agentDaemon.leftover(
+        holding.toString(),
+        new AgentDaemon.CleanupCheck(
+            false,
+            List.of("qits-ci"),
+            List.of(new AgentDaemon.CleanupCheck.Unpushed("qits-ci", "ticket/qits-8", 2))));
 
-    gitStatus.report(workspaceIds.of(repoId, "feat"), false);
     BadRequestException ex =
         assertThrows(
-            BadRequestException.class,
-            () -> workspaceService.beginRecreateContainer(workspaceIds.of(repoId, "feat")));
-    assertTrue(ex.getMessage().contains("dirty"), ex.getMessage());
+            BadRequestException.class, () -> workspaceService.beginRecreateContainer(rowId));
 
+    assertEquals(400, ex.statusCode());
+    assertEquals("AGENT_HAS_LEFTOVER_WORK", ex.code());
+    assertTrue(ex.getMessage().contains("agent " + holding), ex.getMessage());
+    assertTrue(ex.getMessage().contains("work item qits-8"), ex.getMessage());
+    assertTrue(ex.getMessage().contains("uncommitted changes in qits-ci"), ex.getMessage());
+    assertTrue(
+        ex.getMessage().contains("2 unpushed commit(s) in qits-ci on ticket/qits-8"),
+        ex.getMessage());
+    assertFalse(ex.getMessage().contains("work item qits-7"), "the clean agent is not named");
     // The rejected recreate never touched the container — the marker (and the container) survive.
     assertEquals(
         0,
@@ -161,22 +236,48 @@ public class WorkspaceRecreateContainerServiceTest {
     assertEquals(WorkspaceRuntimeStatus.RUNNING, workspaceDto(repoId, "feat").runtimeStatus());
   }
 
+  /** Recreate kills the container, and with it a harness still working in the background. */
   @Test
-  public void recreateRefusesAnUnknownWorkingTree() throws Exception {
+  public void recreateRefusesAnAgentBusyInTheBackground() throws Exception {
     String repoId = clonedRepo();
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     ensureRunning(repoId, "feat");
-    String container = containers.containerName("feat", repoId);
-    containers.exec(container, "/workspace", Map.of(), "bash", "-lc", "echo wip > marker.txt");
+    Long rowId = workspaceIds.of(repoId, "feat");
+    UUID busy = agents.placeOn(repoId, rowId, "qits-9");
+    agentDaemon.leftover(
+        busy.toString(), new AgentDaemon.CleanupCheck(true, List.of(), List.of(), true));
 
-    // No daemon has reported cleanliness → UNKNOWN, which recreate must reject just like dirty:
-    // an unknowable tree is not a safe basis to destroy a container.
-    gitStatus.forget(workspaceIds.of(repoId, "feat"));
     BadRequestException ex =
         assertThrows(
-            BadRequestException.class,
-            () -> workspaceService.beginRecreateContainer(workspaceIds.of(repoId, "feat")));
-    assertTrue(ex.getMessage().contains("unknown"), ex.getMessage());
+            BadRequestException.class, () -> workspaceService.beginRecreateContainer(rowId));
+
+    assertEquals("AGENT_BUSY", ex.code());
+    assertTrue(ex.getMessage().contains("agent " + busy), ex.getMessage());
+  }
+
+  /**
+   * Fail-closed: the slot hosts an agent, and its daemon cannot be asked whether that agent's
+   * worktrees hold unpushed work. An unknowable worktree is not a safe basis to destroy a
+   * container.
+   */
+  @Test
+  public void recreateRefusesWhenTheAgentsCannotBeChecked() throws Exception {
+    String repoId = clonedRepo();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
+    ensureRunning(repoId, "feat");
+    Long rowId = workspaceIds.of(repoId, "feat");
+    String container = containers.containerName("feat", repoId);
+    containers.exec(container, "/workspace", Map.of(), "bash", "-lc", "echo wip > marker.txt");
+    UUID agent = agents.placeOn(repoId, rowId, "qits-10");
+    agentDaemon.disconnect(rowId);
+
+    BadRequestException ex =
+        assertThrows(
+            BadRequestException.class, () -> workspaceService.beginRecreateContainer(rowId));
+
+    assertEquals("AGENT_DAEMON_UNREACHABLE", ex.code());
+    assertTrue(ex.getMessage().contains("agent " + agent), ex.getMessage());
+    assertTrue(ex.getMessage().contains("not connected"), ex.getMessage());
     assertEquals(
         0,
         containers.exec(container, "/workspace", Map.of(), "test", "-f", "marker.txt").exitCode(),

@@ -44,7 +44,6 @@ public class DirectWorkspaceTokenTest {
   @Inject WorkspaceService workspaceService;
   @Inject WorkspaceRepository workspaceRepository;
   @Inject ContainerRuntime containers;
-  @Inject FakeWorkspaceGitStatus gitStatus;
   @Inject WorkspaceContainerStartedRecorder startedRecorder;
 
   @ConfigProperty(name = "qits.test.origins-dir")
@@ -212,7 +211,6 @@ public class DirectWorkspaceTokenTest {
     Long rowId = adminRow();
     workspaceService.ensureContainer(rowId);
     String tokenId = read(rowId).commissionedTokenId;
-    gitStatus.report(rowId, true); // a discard needs an explicit clean
 
     workspaceService.discardWorkspace(rowId);
 
@@ -227,7 +225,6 @@ public class DirectWorkspaceTokenTest {
     Long rowId = adminRow();
     workspaceService.ensureContainer(rowId);
     Workspace before = read(rowId);
-    gitStatus.report(rowId, true); // recreate admits only an explicit-clean daemon report
     startedRecorder.clear();
 
     workspaceService.beginRecreateContainer(rowId);

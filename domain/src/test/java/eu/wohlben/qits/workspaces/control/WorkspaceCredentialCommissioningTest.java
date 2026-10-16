@@ -38,7 +38,6 @@ public class WorkspaceCredentialCommissioningTest {
   @Inject WorkspaceIds workspaceIds;
   @Inject WorkspaceService workspaceService;
   @Inject ContainerRuntime containers;
-  @Inject FakeWorkspaceGitStatus gitStatus;
   @Inject WorkspaceContainerStartedRecorder startedRecorder;
 
   @ConfigProperty(name = "qits.test.origins-dir")
@@ -131,8 +130,6 @@ public class WorkspaceCredentialCommissioningTest {
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     WorkspaceCredential first = credentialOf(repoId, "feat").orElseThrow();
-    // Recreate admits only an explicit-clean daemon report.
-    gitStatus.report(workspaceIds.of(repoId, "feat"), true);
     startedRecorder.clear();
 
     workspaceService.beginRecreateContainer(workspaceIds.of(repoId, "feat"));
@@ -176,7 +173,6 @@ public class WorkspaceCredentialCommissioningTest {
     workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
     WorkspaceCredential credential = credentialOf(repoId, "feat").orElseThrow();
-    gitStatus.report(workspaceIds.of(repoId, "feat"), true); // a discard needs an explicit clean
 
     workspaceService.discardWorkspace(workspaceIds.of(repoId, "feat"));
 
