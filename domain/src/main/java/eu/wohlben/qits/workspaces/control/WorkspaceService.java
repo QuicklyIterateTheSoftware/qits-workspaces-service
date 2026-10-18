@@ -3350,6 +3350,12 @@ public class WorkspaceService {
     if (row.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
         || row.runtimeStatus == WorkspaceRuntimeStatus.PROVISIONING
         || row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
+      // A runner that missed this row's backlog signal (a ledger race fixed elsewhere, qits-1275)
+      // can sit idle on a QUEUED row it could take. A start here answers the caller's press either
+      // way, but it is also a nudge: re-push the backlog so an idle runner gets another look.
+      if (row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED && runnerPlacement.isResolvable()) {
+        runnerPlacement.get().backlogChanged(row);
+      }
       Optional<WorkspaceProcessTracker.Handle> open = runnerClaims.trackedStart(row.id);
       if (open.isPresent()) {
         return narrate ? open.get().id() : null;

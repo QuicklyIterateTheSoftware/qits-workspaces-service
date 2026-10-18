@@ -338,6 +338,76 @@ public class WorkspaceRunnerPlacementTest {
     assertFalse(placement.calls().stream().anyMatch(c -> c.startsWith("backlog:")));
   }
 
+  /**
+   * A start on a row that is already QUEUED is still a no-op for the row itself — it stays QUEUED
+   * and answers the open process — but it re-pushes the backlog (qits-1275): a runner that missed
+   * the signal (the ledger race fixed elsewhere) is woken by the next start rather than left idle
+   * beside a row it could take.
+   */
+  @Test
+  public void startOnAQueuedRowRePushesTheBacklog() throws Exception {
+    eligibleRunner();
+    String repoId = repo();
+    Workspace created = stoppedRunnerRow(repoId, "requeue");
+    String firstProcessId = workspaceService.beginEnsureContainer(created.id);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(created.id).runtimeStatus);
+    placement.clearCalls();
+
+    String secondProcessId = workspaceService.beginEnsureContainer(created.id);
+
+    assertEquals(firstProcessId, secondProcessId, "joins the open start's process");
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(created.id).runtimeStatus);
+    assertEquals(List.of("backlog:" + created.id), placement.calls());
+  }
+
+  /**
+   * The same nudge on the no-op process path: a create's own queue is unnarrated and tracks no
+   * process ({@code aRunnerWorkspaceIsWrittenQueuedOnNoRunnerAndTheBacklogTold} asserts as much), so
+   * a start pressed on it finds nothing to join and opens a fresh no-op process — which still
+   * answers "already queued" and still re-pushes the backlog.
+   */
+  @Test
+  public void startOnAQueuedRowWithNoOpenProcessStillRePushesTheBacklog() throws Exception {
+    eligibleRunner();
+    String repoId = repo();
+    Workspace created = createRunnerRow(repoId, "requeue-settled", false);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(created.id).runtimeStatus);
+    assertTrue(claims.trackedStart(created.id).isEmpty(), "the create tracked no process");
+    placement.clearCalls();
+
+    String processId = workspaceService.beginEnsureContainer(created.id);
+
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(created.id).runtimeStatus);
+    assertEquals(List.of("backlog:" + created.id), placement.calls());
+    assertNotNull(processId);
+    TechnicalProcess process = processes.find(processId).orElseThrow();
+    assertTrue(process.isTerminal(), "the no-op process settled at once");
+    List<TechnicalProcessFrame> frames = new ArrayList<>();
+    process.attach(
+        new TechnicalProcess.Listener() {
+          @Override
+          public void onFrame(TechnicalProcessFrame frame) {
+            frames.add(frame);
+          }
+
+          @Override
+          public void onDone() {}
+
+          @Override
+          public boolean isOpen() {
+            return true;
+          }
+        });
+    assertTrue(
+        frames.stream()
+            .anyMatch(
+                f ->
+                    RunnerClaims.QUEUED_SEGMENT.equals(f.segment())
+                        && TechnicalProcessFrame.KIND_LINE.equals(f.kind())
+                        && f.line().startsWith("Already queued")),
+        frames.toString());
+  }
+
   @Test
   public void startOnAnUnavailableRowIs409() throws Exception {
     WorkspaceRunner runner = eligibleRunner();
