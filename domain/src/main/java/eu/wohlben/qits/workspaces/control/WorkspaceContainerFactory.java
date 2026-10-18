@@ -38,7 +38,7 @@ public class WorkspaceContainerFactory {
 
   /**
    * The registry host and path of the image every workspace container runs — the released toolchain
-   * with the workspace-daemon as its entrypoint ({@code registry.dev.localhost:8080/qits/workspace}).
+   * with the workspace-daemon as its entrypoint ({@code registry.qits.<domain>/qits/workspace}).
    * It is the fixed half of the reference: {@link #imageVersion} carries the calver tag, and {@link
    * #image()} joins them as {@code <repo>:<version>}.
    *
@@ -434,7 +434,7 @@ public class WorkspaceContainerFactory {
   /** The edge address containers use for Git; direct githost traffic is Bearer-only. */
   @ConfigProperty(
       name = "qits.workspace.container-git-url",
-      defaultValue = "http://${QITS_ENVIRONMENT:dev}-qits-platform-edge:8080")
+      defaultValue = "http://${QITS_ENVIRONMENT:dev}-qits-edge:8080")
   String containerGitUrl;
 
   /**
