@@ -288,10 +288,9 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <!-- What this service's real use of qits-containers-client asks qits-containers
-                 (qits-1163): the kit behind ContainersClientPactTest and
-                 pacts/qits-workspaces-service_qits-containers-service.json. After the golden-master
-                 jars, so their order on the classpath is unchanged. -->
+            <!-- The qits-containers-client kit (qits-1163): ContainersContract's qits-via
+                 reference (ContainersClientPact.VIA) and OutboundCallsGuardTest's ClientUsage scan.
+                 After the golden-master jars, so their order on the classpath is unchanged. -->
             <groupId>${project.groupId}</groupId>
             <artifactId>qits-containers-client-contracts</artifactId>
             <scope>test</scope>

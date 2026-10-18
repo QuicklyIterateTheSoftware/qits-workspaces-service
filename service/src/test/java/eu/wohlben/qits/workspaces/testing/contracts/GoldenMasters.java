@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import eu.wohlben.qits.pact.consumer.Via;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -99,6 +100,10 @@ public final class GoldenMasters {
 
   /** qits-idp: the commission doors for clients and tokens. */
   public static final Provider IDP = new Provider("qits-idp-service", "qits-idp");
+
+  /** qits-containers: the place and volume doors behind {@code qits-containers-client}. */
+  public static final Provider CONTAINERS =
+      new Provider("qits-containers-service", "qits-containers");
 
   /** qits-workspace-daemon: the agent surface every workspace container serves. */
   public static final Provider WORKSPACE_DAEMON =
@@ -438,6 +443,23 @@ public final class GoldenMasters {
       Trigger trigger,
       Request sent,
       List<String> consumes) {
+    return interaction(builder, provider, state, operationId, trigger, sent, consumes, null);
+  }
+
+  /**
+   * As above, with a {@code qits-via} reference after {@code qits-trigger} when {@code via} is not
+   * null: the library that makes the call on this service's behalf (qits-1163), the group
+   * qits-pact-consumer's {@code ConsumerPact.via} writes.
+   */
+  public static PactBuilder interaction(
+      PactBuilder builder,
+      Provider provider,
+      String state,
+      String operationId,
+      Trigger trigger,
+      Request sent,
+      List<String> consumes,
+      Via via) {
     Objects.requireNonNull(trigger, "trigger: every interaction names the entry point that makes it");
     Objects.requireNonNull(sent, "sent: Request.NONE for a call that sends nothing");
     Objects.requireNonNull(consumes, "consumes: name what the consumer reads, or List.of()");
@@ -455,6 +477,9 @@ public final class GoldenMasters {
     call.put("operationId", operationId);
     references.put("qits-call", call);
     references.put("qits-trigger", trigger.reference());
+    if (via != null) {
+      references.put("qits-via", via.reference());
+    }
     return builder.expectsToReceiveHttpInteraction(
         description(operationId, trigger),
         http -> {

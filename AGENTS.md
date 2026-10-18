@@ -1573,23 +1573,27 @@ what the eventstream library asks qits-events for this service, written by
 `wiring/EventstreamPactTest` from the pinned `qits-eventstream-contracts` kit and declared in
 `release.yml` as `qits-events-service`; a library's pact file is three-part, the provider last.
 
-Since qits-1163 `pacts/qits-workspaces-service_qits-containers-service.json` is likewise written
-from the client's own kit: `containershost/ContainersClientPactTest` runs
-`eu.wohlben.qits:qits-containers-client-contracts` (pinned at `qits.containers-client.version`, the
-same release as the client — the kit refuses another), which scans `service/target/classes` for
-`ContainersClient` calls, drives the real client against the recorded states and stamps `qits-via`
-on every interaction. The pact file keeps the two-part name because the client ships from the
-provider's own repository.
-
-**The other two providers (qits-1149)** are tables of `testing/contracts/ContractRow`s —
-`wiring/IdpContract`, `daemonhost/WorkspaceDaemonContract` —
+**The other three providers (qits-1149)** are tables of `testing/contracts/ContractRow`s —
+`wiring/IdpContract`, `containershost/ContainersContract`, `daemonhost/WorkspaceDaemonContract` —
 each bound to that provider's pinned golden masters (`qits.<app>-golden-masters.version` in the root
 pom). A table's consumer test runs every live row against a mock server of its own;
 `testing/contracts/ConsumerPactFilesTest` compares the committed files, and fails when a pending row
 (`.waiting()`, a state the provider has not recorded yet) is recorded after a pin moves — switch it
 on then. `wiring/OutboundCallsGuardTest` reads the calls off the code (the REST client interfaces,
-`DaemonAgentClient`'s `AgentDaemon` methods, every
+`ContainersClient` references in the bytecode, `DaemonAgentClient`'s `AgentDaemon` methods, every
 class holding an HTTP client, the oidc config) and fails on one without a row.
+
+**qits-containers, via its client (qits-1163).** `ContainersContract` keeps this service's own rows —
+the `workspace` workload, its place and its real launch spec, against qits-containers'
+workspace-place recordings — and takes two things from the client's kit,
+`eu.wohlben.qits:qits-containers-client-contracts` (test scope, pinned at
+`qits.containers-client.version`, the same release as the client): `ContainersClientPact.VIA`, which
+stamps `qits-via` (the client's repository, artifact and version) on every interaction through
+`ContractTable.via`; and `ClientUsage.scan`, which `OutboundCallsGuardTest` uses to read the
+`ContainersClient` calls off `target/classes`. The committed file is compared with the via version
+masked, so a client bump alone is no contract change. The file keeps the two-part name, because the
+client ships from the provider's own repository. The kit's own fixed rows (the `editor` workload, a
+minimal ensure body) are not used: they pact requests this service never sends.
 
 ## Tests
 

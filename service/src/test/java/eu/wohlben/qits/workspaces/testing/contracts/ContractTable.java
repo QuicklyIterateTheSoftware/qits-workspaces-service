@@ -12,6 +12,7 @@ import au.com.dius.pact.core.model.PactSpecVersion;
 import au.com.dius.pact.core.model.V4Pact;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import eu.wohlben.qits.pact.consumer.Via;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -31,10 +32,21 @@ import java.util.Set;
  * <p><b>Pending rows</b> ({@link ContractRow#waiting}) are in neither the pact nor the run; {@link
  * #needs} says what each waits for, and {@link #recordedPending} names the ones whose provider has
  * recorded the state since, so they are switched on.
+ *
+ * <p><b>{@link #via}</b> (qits-1163): when a library makes the calls on this service's behalf —
+ * {@code qits-containers-client} — every interaction also carries {@code qits-via}, naming that
+ * library's repository, artifact and version (the kit's own {@code Via}, as qits-pact-consumer's
+ * {@code ConsumerPact.via} writes it). The committed file is compared with the via version masked,
+ * so a client bump alone is not a contract change; the rewrite under {@code -Dgolden.update=true}
+ * still writes the version.
  */
-public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> rows) {
+public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> rows, Via via) {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
+
+  public ContractTable(GoldenMasters.Provider provider, List<ContractRow> rows) {
+    this(provider, rows, null);
+  }
 
   public ContractTable {
     rows = List.copyOf(rows);
@@ -45,6 +57,11 @@ public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> r
             "two rows share description and state: " + row.description() + " [" + row.state() + "]");
       }
     }
+  }
+
+  /** The same table, every interaction stamped {@code qits-via} with {@code library}. */
+  public ContractTable via(Via library) {
+    return new ContractTable(provider, rows, library);
   }
 
   /** {@code qits-workspaces-service_<provider repository>.json}. */
@@ -87,7 +104,8 @@ public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> r
           row.operationId(),
           row.trigger(),
           row.request(),
-          row.consumes());
+          row.consumes(),
+          via);
     }
     return builder.toPact();
   }
@@ -136,7 +154,7 @@ public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> r
 
   /** The committed pact file against the live rows' pact. */
   public void compareOrWritePactFile() throws IOException {
-    PactFiles.compareOrWrite(file(), pact());
+    PactFiles.compareOrWrite(file(), pact(), via == null ? s -> s : PactFiles::maskViaVersions);
   }
 
   /**
@@ -165,6 +183,9 @@ public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> r
           !trigger.path(keyOfKind.get(kind)).asText().isBlank(),
           description + ": qits-trigger." + keyOfKind.get(kind));
       assertEquals(GoldenMasters.CONSUMER, trigger.path("app").asText(), description);
+      if (via != null) {
+        assertEquals(MAPPER.valueToTree(via.reference()), references.path("qits-via"), description + ": qits-via");
+      }
     }
   }
 

@@ -2,6 +2,9 @@ package eu.wohlben.qits.workspaces.wiring;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import eu.wohlben.qits.containers.client.ContainersClient;
+import eu.wohlben.qits.containers.client.contracts.ClientUsage;
+import eu.wohlben.qits.workspaces.containershost.ContainersContract;
 import eu.wohlben.qits.workspaces.control.AgentDaemon;
 import eu.wohlben.qits.workspaces.daemonhost.DaemonAgentClient;
 import eu.wohlben.qits.workspaces.daemonhost.WorkspaceDaemonContract;
@@ -25,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Stream;
 import jakarta.ws.rs.HttpMethod;
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
@@ -40,11 +44,14 @@ import org.junit.jupiter.api.Test;
  *       names the provider, its {@code @Path}s the route. It needs a row (live or pending) whose
  *       operation the provider records under that method and route, in {@link ProjectsContract} or
  *       {@link IdpContract}.
+ *   <li><b>{@code qits-containers-client}</b>: every {@link ContainersClient} method this module's
+ *       compiled classes reference — read by the client kit's own {@link ClientUsage#scan}
+ *       (qits-1163) — needs a {@link ContainersContract} row for its operation, and one the kit
+ *       cannot name fails outright.
  *   <li><b>{@link DaemonAgentClient}</b>: every {@link AgentDaemon} method it implements needs a
  *       {@link WorkspaceDaemonContract} row for its operation.
- *   <li><b>JDK and Vert.x HTTP clients</b>: every class here that holds one is {@link
- *       DaemonAgentClient}, {@code ContainersClientProducer} (whose client the containers kit
- *       pacts, below) or a named exclusion.
+ *   <li><b>JDK and Vert.x HTTP clients</b>: every class here that holds one is one of the two above
+ *       or a named exclusion.
  *   <li><b>quarkus-oidc</b>: a named {@code quarkus-oidc-client} client needs the token mint row, and
  *       the tenant its signing-key row, in {@link IdpContract}.
  * </ul>
@@ -52,15 +59,11 @@ import org.junit.jupiter.api.Test;
  * <p><b>Named exclusions</b>, each with its reason: {@code ContainerProxyRoute} (the proxy hands a
  * caller's own request to a daemon verbatim, so the caller's pact against qits-workspace-daemon is
  * that call's contract); {@code WorkspaceTunnels} (the byte tunnel under every daemon call, and no
- * call of its own); and {@link AgentDaemon#reachable} (asks the tunnel registry, never the daemon).
- * Not seen by this guard, because the call is made inside a library rather than by a class of this
- * module: the qits-eventstream publisher and catch-up reader (qits-events, qits-1163's library-made
- * pacts) and the OpenTelemetry exporter.
- *
- * <p><b>Nor the {@code qits-containers-client} calls</b> (qits-1163): {@code
- * containershost/ContainersClientPactTest} pacts them from the client's own kit, whose scan of this
- * module's compiled classes picks the rows from every {@code ContainersClient} method referenced —
- * and fails on one it has no rows for — so that scan is the guard for them now.
+ * call of its own); {@link AgentDaemon#reachable} (asks the tunnel registry, never the daemon); and
+ * {@code ContainersClient.touch} (WorkspaceContainers keeps the verb, but nothing has called it since
+ * the editor keepalive left, qits-1152). Not seen by this guard, because the call is made inside a
+ * library rather than by a class of this module: the qits-eventstream publisher and catch-up reader
+ * (qits-events, qits-1163's library-made pacts) and the OpenTelemetry exporter.
  */
 class OutboundCallsGuardTest {
 
@@ -71,6 +74,19 @@ class OutboundCallsGuardTest {
           "qits-projects", new Base(GoldenMasters.PROJECTS, ""));
 
   private record Base(GoldenMasters.Provider provider, String prefix) {}
+
+  /** The provider operation each {@link ContainersClient} method calls. */
+  private static final Map<String, String> CONTAINERS_OPERATIONS =
+      Map.of(
+          "ensure", "ensureContainer",
+          "status", "getContainer",
+          "list", "listWorkloadContainers",
+          "stop", "stopContainer",
+          "delete", "deleteContainer",
+          "ensureVolume", "ensureVolume",
+          "deleteVolume", "deleteVolume");
+
+  private static final Set<String> CONTAINERS_EXCLUDED = Set.of("touch");
 
   /** The daemon operation each {@link AgentDaemon} method calls. */
   private static final Map<String, String> DAEMON_OPERATIONS =
@@ -87,7 +103,7 @@ class OutboundCallsGuardTest {
   private static final Map<String, String> HTTP_CLIENT_HOLDERS =
       Map.of(
           "eu/wohlben/qits/workspaces/containers/ContainersClientProducer",
-              "builds ContainersClient: containershost/ContainersClientPactTest",
+              "builds ContainersClient: ContainersContract",
           "eu/wohlben/qits/workspaces/daemonhost/DaemonAgentClient", "WorkspaceDaemonContract",
           "eu/wohlben/qits/workspaces/api/ContainerProxyRoute",
               "excluded: a caller's own daemon request, proxied verbatim",
@@ -138,6 +154,35 @@ class OutboundCallsGuardTest {
     }
     assertTrue(seen > 0, "no REST client method found: is the scan reading the main classes?");
     assertTrue(missing.isEmpty(), "calls without a contract row:\n  " + String.join("\n  ", missing));
+  }
+
+  @Test
+  void everyContainersClientCallHasARow() {
+    // The client kit's own scan of this module's compiled classes: every ContainersClient method
+    // referenced from the main code, keyed name + descriptor, and the ones it cannot name.
+    ClientUsage usage = ClientUsage.scan(List.of(Path.of("target/classes")));
+    Set<String> invoked = new TreeSet<>();
+    usage.calls().keySet().forEach(call -> invoked.add(call.substring(0, call.indexOf('('))));
+    invoked.remove("<init>");
+    assertTrue(!invoked.isEmpty(), "no ContainersClient call found: is the scan reading the main classes?");
+    List<String> missing = new ArrayList<>();
+    for (String call : usage.unknown()) {
+      if (!call.startsWith("<init>(")) {
+        missing.add("ContainersClient." + call + " is called and the client kit names no feature for it");
+      }
+    }
+    for (String method : invoked) {
+      if (CONTAINERS_EXCLUDED.contains(method)) {
+        continue;
+      }
+      String operationId = CONTAINERS_OPERATIONS.get(method);
+      if (operationId == null) {
+        missing.add("ContainersClient." + method + " is called and maps to no qits-containers operation");
+      } else if (!hasRow(ContainersContract.TABLE, operationId)) {
+        missing.add("ContainersClient." + method + " (" + operationId + ") has no row");
+      }
+    }
+    assertTrue(missing.isEmpty(), String.join("\n", missing));
   }
 
   @Test

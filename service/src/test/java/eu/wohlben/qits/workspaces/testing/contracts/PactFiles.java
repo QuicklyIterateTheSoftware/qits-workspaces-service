@@ -17,6 +17,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.UnaryOperator;
 
 /**
  * <b>A committed consumer pact, as this repository writes it</b>: pact-jvm's own writer, then
@@ -45,11 +46,40 @@ public final class PactFiles {
    * -Dgolden.update=true}.
    */
   public static void compareOrWrite(String file, V4Pact pact) throws IOException {
+    compareOrWrite(file, pact, UnaryOperator.identity());
+  }
+
+  /** As {@link #compareOrWrite(String, V4Pact)}, comparing both sides through {@code comparable}. */
+  public static void compareOrWrite(String file, V4Pact pact, UnaryOperator<String> comparable)
+      throws IOException {
     String raw = written(pact);
     Path scratch = Path.of("target", "pacts", file);
     Files.createDirectories(scratch.getParent());
     Files.writeString(scratch, raw);
-    GoldenFiles.compareOrWrite(GoldenFiles.repositoryRoot().resolve("pacts").resolve(file), normalise(raw));
+    GoldenFiles.compareOrWrite(
+        GoldenFiles.repositoryRoot().resolve("pacts").resolve(file), normalise(raw), comparable);
+  }
+
+  /**
+   * The pact with every {@code qits-via.version} as {@code ?} (qits-1163): the library's version is
+   * where the call came from, not what it asks, so a bump of it alone compares equal — the masking
+   * qits-pact-consumer's {@code ConsumerPact} applies to its own files.
+   */
+  public static String maskViaVersions(String pact) {
+    try {
+      JsonNode root = MAPPER.readTree(pact);
+      root.path("interactions")
+          .forEach(
+              i -> {
+                if (i.path("comments").path("references").path("qits-via") instanceof ObjectNode via
+                    && via.has("version")) {
+                  via.put("version", "?");
+                }
+              });
+      return normalise(MAPPER.writeValueAsString(root));
+    } catch (IOException e) {
+      throw new java.io.UncheckedIOException(e);
+    }
   }
 
   /** Sorted, version-stripped, 2-space indented, one trailing newline. */
