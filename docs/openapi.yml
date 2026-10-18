@@ -2726,6 +2726,7 @@ paths:
     post:
       summary: Register a workspace runner with its registration token; answers its
         client
+      operationId: registerRunner
       parameters:
       - name: id
         in: path
@@ -3106,4 +3107,4 @@ paths:
         - qits:admin-agent
 info:
   title: qits-workspaces API
-  version: 2026.1014.143757
+  version: 2026.1018.113154

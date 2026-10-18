@@ -9,4 +9,9 @@ contracts:
   golden-masters: { from: golden-masters/, packages: [maven, npm] }
   pacts:
     qits-projects-service: { packages: [maven] }
+    # qits-1149: this service's pacts against qits-idp, qits-containers and its workspace daemons
+    # (testing/contracts/ConsumerPactFilesTest keeps each file current).
+    qits-idp-service: { packages: [maven] }
+    qits-containers-service: { packages: [maven] }
+    qits-workspace-daemon: { packages: [maven] }
 userflows: qits-workspaces

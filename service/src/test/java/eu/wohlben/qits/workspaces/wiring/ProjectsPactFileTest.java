@@ -5,24 +5,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import au.com.dius.pact.consumer.dsl.PactBuilder;
-import au.com.dius.pact.core.model.DefaultPactWriter;
 import au.com.dius.pact.core.model.PactSpecVersion;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenFiles;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenMasters;
+import eu.wohlben.qits.workspaces.testing.contracts.PactFiles;
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -129,65 +121,11 @@ public class ProjectsPactFileTest {
 
   /** The pact as pact-jvm's own writer serialises it. */
   static String written() {
-    StringWriter out = new StringWriter();
-    try (PrintWriter writer = new PrintWriter(out)) {
-      DefaultPactWriter.INSTANCE.writePact(ProjectsContract.pact(), writer, PactSpecVersion.V4);
-    }
-    return out.toString();
+    return PactFiles.written(ProjectsContract.pact());
   }
 
-  /** Sorted, version-stripped, 2-space indented, one trailing newline. */
+  /** Sorted, version-stripped, 2-space indented, one trailing newline: {@link PactFiles#normalise}. */
   static String normalise(String raw) throws IOException {
-    ObjectNode pact = (ObjectNode) MAPPER.readTree(raw);
-    JsonNode metadata = pact.path("metadata");
-    if (metadata instanceof ObjectNode meta) {
-      meta.remove("pact-jvm");
-    }
-    if (pact.path("interactions") instanceof ArrayNode interactions) {
-      List<JsonNode> sorted = new ArrayList<>();
-      interactions.forEach(sorted::add);
-      sorted.sort(
-          Comparator.comparing((JsonNode i) -> i.path("description").asText())
-              .thenComparing(i -> i.path("providerStates").path(0).path("name").asText()));
-      interactions.removeAll();
-      sorted.forEach(interactions::add);
-    }
-    StringBuilder out = new StringBuilder();
-    print(pact, "", out);
-    return out.append('\n').toString();
-  }
-
-  /** {@code JSON.stringify(value, null, 2)}: no space before a colon, empty containers as {} / []. */
-  private static void print(JsonNode node, String indent, StringBuilder out) throws IOException {
-    String inner = indent + "  ";
-    if (node.isObject()) {
-      if (node.isEmpty()) {
-        out.append("{}");
-        return;
-      }
-      out.append("{\n");
-      Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
-      while (fields.hasNext()) {
-        Map.Entry<String, JsonNode> field = fields.next();
-        out.append(inner).append(MAPPER.writeValueAsString(field.getKey())).append(": ");
-        print(field.getValue(), inner, out);
-        out.append(fields.hasNext() ? ",\n" : "\n");
-      }
-      out.append(indent).append('}');
-    } else if (node.isArray()) {
-      if (node.isEmpty()) {
-        out.append("[]");
-        return;
-      }
-      out.append("[\n");
-      for (int i = 0; i < node.size(); i++) {
-        out.append(inner);
-        print(node.get(i), inner, out);
-        out.append(i < node.size() - 1 ? ",\n" : "\n");
-      }
-      out.append(indent).append(']');
-    } else {
-      out.append(MAPPER.writeValueAsString(node));
-    }
+    return PactFiles.normalise(raw);
   }
 }

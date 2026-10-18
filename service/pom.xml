@@ -259,6 +259,24 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <!-- The other providers' recorded answers, each index told apart by its `provider`
+                 field (GoldenMasters.Provider): qits-idp, qits-containers, qits-workspace-daemon.
+                 Pinned in the root pom. -->
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-idp-golden-masters</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-containers-golden-masters</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-workspace-daemon-golden-masters</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <!-- The consumer half of the qits-projects contract: ProjectsConsumerPactTest, plain
                  JUnit 5 with no Quarkus boot. Test scope, so its Kotlin/ktor/netty tree never
                  reaches the application classpath or the native image. -->
