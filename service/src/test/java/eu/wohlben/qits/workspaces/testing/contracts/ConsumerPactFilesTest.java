@@ -2,7 +2,6 @@ package eu.wohlben.qits.workspaces.testing.contracts;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import eu.wohlben.qits.workspaces.containershost.ContainersContract;
 import eu.wohlben.qits.workspaces.daemonhost.WorkspaceDaemonContract;
 import eu.wohlben.qits.workspaces.wiring.IdpContract;
 import java.io.IOException;
@@ -14,9 +13,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * <b>The committed consumer pacts against qits-idp, qits-containers and qits-workspace-daemon</b>
- * (qits-1149), one {@link ContractTable} each. Plain JUnit: building and writing a pact needs no
- * application. qits-projects' file is {@code ProjectsPactFileTest}'s.
+ * <b>The committed consumer pacts against qits-idp and qits-workspace-daemon</b> (qits-1149), one
+ * {@link ContractTable} each. Plain JUnit: building and writing a pact needs no application.
+ * qits-projects' file is {@code ProjectsPactFileTest}'s; qits-containers' is written by {@code
+ * containershost/ContainersClientPactTest} from the qits-containers-client kit (qits-1163).
  *
  * <p>Per table: the committed {@code pacts/qits-workspaces-service_<provider>.json} is what the live
  * rows write (compared by default, rewritten under {@code -Dgolden.update=true}); every interaction
@@ -27,7 +27,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class ConsumerPactFilesTest {
 
   static Stream<ContractTable> tables() {
-    return Stream.of(IdpContract.TABLE, ContainersContract.TABLE, WorkspaceDaemonContract.TABLE);
+    return Stream.of(IdpContract.TABLE, WorkspaceDaemonContract.TABLE);
   }
 
   @ParameterizedTest

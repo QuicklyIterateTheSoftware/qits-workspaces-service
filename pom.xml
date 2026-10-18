@@ -456,6 +456,14 @@
                 <artifactId>qits-containers-client</artifactId>
                 <version>${qits.containers-client.version}</version>
             </dependency>
+            <dependency>
+                <!-- The consumer pact kit for the client above (qits-1163): the rows and drives behind
+                     pacts/qits-workspaces-service_qits-containers-service.json. Same release, same
+                     property, as the client: the kit refuses a client of another version. -->
+                <groupId>${project.groupId}</groupId>
+                <artifactId>qits-containers-client-contracts</artifactId>
+                <version>${qits.containers-client.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 

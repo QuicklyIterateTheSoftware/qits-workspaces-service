@@ -100,10 +100,6 @@ public final class GoldenMasters {
   /** qits-idp: the commission doors for clients and tokens. */
   public static final Provider IDP = new Provider("qits-idp-service", "qits-idp");
 
-  /** qits-containers: the place and volume doors behind {@code qits-containers-client}. */
-  public static final Provider CONTAINERS =
-      new Provider("qits-containers-service", "qits-containers");
-
   /** qits-workspace-daemon: the agent surface every workspace container serves. */
   public static final Provider WORKSPACE_DAEMON =
       new Provider("qits-workspace-daemon", "qits-workspace-daemon");

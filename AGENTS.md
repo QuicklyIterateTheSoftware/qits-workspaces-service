@@ -1573,14 +1573,22 @@ what the eventstream library asks qits-events for this service, written by
 `wiring/EventstreamPactTest` from the pinned `qits-eventstream-contracts` kit and declared in
 `release.yml` as `qits-events-service`; a library's pact file is three-part, the provider last.
 
-**The other three providers (qits-1149)** are tables of `testing/contracts/ContractRow`s —
-`wiring/IdpContract`, `containershost/ContainersContract`, `daemonhost/WorkspaceDaemonContract` —
+Since qits-1163 `pacts/qits-workspaces-service_qits-containers-service.json` is likewise written
+from the client's own kit: `containershost/ContainersClientPactTest` runs
+`eu.wohlben.qits:qits-containers-client-contracts` (pinned at `qits.containers-client.version`, the
+same release as the client — the kit refuses another), which scans `service/target/classes` for
+`ContainersClient` calls, drives the real client against the recorded states and stamps `qits-via`
+on every interaction. The pact file keeps the two-part name because the client ships from the
+provider's own repository.
+
+**The other two providers (qits-1149)** are tables of `testing/contracts/ContractRow`s —
+`wiring/IdpContract`, `daemonhost/WorkspaceDaemonContract` —
 each bound to that provider's pinned golden masters (`qits.<app>-golden-masters.version` in the root
 pom). A table's consumer test runs every live row against a mock server of its own;
 `testing/contracts/ConsumerPactFilesTest` compares the committed files, and fails when a pending row
 (`.waiting()`, a state the provider has not recorded yet) is recorded after a pin moves — switch it
 on then. `wiring/OutboundCallsGuardTest` reads the calls off the code (the REST client interfaces,
-`ContainersClient` invocations in the bytecode, `DaemonAgentClient`'s `AgentDaemon` methods, every
+`DaemonAgentClient`'s `AgentDaemon` methods, every
 class holding an HTTP client, the oidc config) and fails on one without a row.
 
 ## Tests
