@@ -311,6 +311,45 @@
       ]
     },
     {
+      "name": "a registered runner",
+      "slug": "a-registered-runner",
+      "params": {
+        "authorization": "Bearer qits_tok_contract-registration",
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "registerRunner",
+          "method": "POST",
+          "path": "/workspaces/api/runners/{runnerId}/register",
+          "headers": {
+            "Authorization": "{authorization}"
+          },
+          "body": {
+            "capabilities": {
+              "docker": true,
+              "arch": "amd64",
+              "os": "linux",
+              "labels": {
+                "site": "home"
+              }
+            }
+          },
+          "status": 409,
+          "file": "a-registered-runner/registerRunner.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "a resolved workspace slot with an archived agent session",
       "slug": "a-resolved-workspace-slot-with-an-archived-agent-session",
       "params": {
@@ -1445,6 +1484,7 @@
       "name": "an unregistered runner",
       "slug": "an-unregistered-runner",
       "params": {
+        "authorization": "Bearer qits_tok_contract-registration",
         "runnerId": "00000000-0000-4000-8000-000000000020",
         "runnerName": "localhost"
       },
@@ -1514,6 +1554,33 @@
             ],
             "numbers": [],
             "listFilteredTo": "$"
+          }
+        },
+        {
+          "operationId": "registerRunner",
+          "method": "POST",
+          "path": "/workspaces/api/runners/{runnerId}/register",
+          "headers": {
+            "Authorization": "{authorization}"
+          },
+          "body": {
+            "capabilities": {
+              "docker": true,
+              "arch": "amd64",
+              "os": "linux",
+              "labels": {
+                "site": "home"
+              }
+            }
+          },
+          "status": 200,
+          "file": "an-unregistered-runner/registerRunner.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
           }
         },
         {

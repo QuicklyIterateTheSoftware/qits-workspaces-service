@@ -1556,11 +1556,16 @@ written JSON. `ProjectsPactFileTest.everyInteractionCarriesBothReferences` is wh
 pact-jvm upgrade stops writing it. `trigger` is required: a null one throws.
 
 **Published only on change.** `release.yml` declares one `contracts.pacts` entry per provider
-(`qits-projects-service`, `qits-idp-service`, `qits-containers-service`, `qits-workspace-daemon`), and
+(`qits-events-service`, `qits-projects-service`, `qits-idp-service`, `qits-containers-service`,
+`qits-workspace-daemon`), and
 qits-ci packages each `pacts/qits-workspaces-service_<provider>.json` as
 `eu.wohlben.qits:qits-workspaces-service-pacts-<provider>`, published only when it changed since the
 newest published jar — there is no repository-side gate or module anymore; `pacts-jar/` and
-`published-tree-changed.sh` are gone.
+`published-tree-changed.sh` are gone. Since qits-1163
+`pacts/` also holds `qits-workspaces-service_qits-eventstream-javalib_qits-events-service.json`,
+what the eventstream library asks qits-events for this service, written by
+`wiring/EventstreamPactTest` from the pinned `qits-eventstream-contracts` kit and declared in
+`release.yml` as `qits-events-service`; a library's pact file is three-part, the provider last.
 
 **The other three providers (qits-1149)** are tables of `testing/contracts/ContractRow`s —
 `wiring/IdpContract`, `containershost/ContainersContract`, `daemonhost/WorkspaceDaemonContract` —
