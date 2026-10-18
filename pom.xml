@@ -90,7 +90,7 @@
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
         <qits.arch-rules.version>2026.1011.185745</qits.arch-rules.version>
         <qits.auth-core.version>2026.1012.173247</qits.auth-core.version>
-        <qits.containers-client.version>2026.1015.33250</qits.containers-client.version>
+        <qits.containers-client.version>2026.1018.185227</qits.containers-client.version>
         <!-- CallerServerFilter/CallerClientFilter: jandex-indexed filters that record inbound
              X-Qits-Caller as the qits.caller span attribute and stamp it on outgoing REST-client
              calls. Also published by qits-integrations-quarkus. -->
@@ -120,8 +120,8 @@
              (wiring/IdpContract); qits-containers' for the place and volume doors
              (containershost/ContainersContract); qits-workspace-daemon's for the agent-worktree
              doors DaemonAgentClient calls (daemonhost/WorkspaceDaemonContract). -->
-        <qits.idp-golden-masters.version>2026.1018.165736</qits.idp-golden-masters.version>
-        <qits.containers-golden-masters.version>2026.1010.134141</qits.containers-golden-masters.version>
+        <qits.idp-golden-masters.version>2026.1018.175524</qits.idp-golden-masters.version>
+        <qits.containers-golden-masters.version>2026.1018.185227</qits.containers-golden-masters.version>
         <qits.workspace-daemon-golden-masters.version>2026.1018.152111</qits.workspace-daemon-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
