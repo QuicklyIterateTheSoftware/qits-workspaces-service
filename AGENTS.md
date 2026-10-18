@@ -857,6 +857,12 @@ each read METHOD — every `GET`, the three event streams — and never on a cla
 a class later does not inherit the agent role. A method-level list replaces the class's, so each one
 repeats the class's roles beside `qits:agent`. `AgentReadAccessTest` has one test per class. The
 raw Vert.x proxy routes carry no role list here and are not part of this rule.
+**The daemon proxy is bound, not open to every agent** (qits-1386): `/workspaces/container/{id}/*`
+opens a shell and writes files, so `ContainerProxyRoute` checks the caller itself.
+`quarkus.http.auth.permission.container-proxy` keeps anonymous out (upgrades included; the path is
+relative so it follows `quarkus.http.root-path`). `qits:system`, `qits:admin` and `qits:admin-agent`
+reach any workspace; `qits:agent` only one whose `boundSubject` is its `sub`, or that holds a live
+agent whose token subject it is; anything else is 403. `ContainerProxyAuthorizationTest` pins it.
 **The one agent write door: declared waits** (qits-1153, W4). `qits:agent` and `qits:admin-agent` may
 create, list and cancel waits on `/workspaces/api/agents/{agentId}/waits`, but only for the agent
 their token belongs to: the principal must equal the agent row's `commissioned_token_subject`.

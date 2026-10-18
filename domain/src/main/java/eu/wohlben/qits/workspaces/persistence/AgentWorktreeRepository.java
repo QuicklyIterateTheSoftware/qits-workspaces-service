@@ -68,6 +68,23 @@ public class AgentWorktreeRepository implements PanacheRepositoryBase<AgentWorkt
         "workspaceId = ?1 and state <> ?2 order by createdAt", workspaceId, AgentState.REMOVED);
   }
 
+  /**
+   * Whether a live agent placed in this workspace holds a token whose subject is {@code subject}:
+   * the binding {@code ContainerProxyRoute} admits an agent's own credential by (qits-1386). A
+   * REMOVED agent's token is deleted with it, so it binds nothing; a blank subject never matches.
+   */
+  public boolean existsLiveInWorkspaceWithTokenSubject(Long workspaceId, String subject) {
+    if (workspaceId == null || subject == null || subject.isBlank()) {
+      return false;
+    }
+    return count(
+            "workspaceId = ?1 and commissionedTokenSubject = ?2 and state <> ?3",
+            workspaceId,
+            subject,
+            AgentState.REMOVED)
+        > 0;
+  }
+
   /** ACTIVE agents waiting for a slot, oldest first. */
   public List<AgentWorktree> findQueued() {
     return list(
