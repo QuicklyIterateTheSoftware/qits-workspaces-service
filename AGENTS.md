@@ -1555,15 +1555,27 @@ every key, so `GoldenMasters.interaction` puts the group there directly; no post
 written JSON. `ProjectsPactFileTest.everyInteractionCarriesBothReferences` is what notices if a
 pact-jvm upgrade stops writing it. `trigger` is required: a null one throws.
 
-**Published only on change.** `release.yml` declares
-`contracts: { application: qits-workspaces, pacts: { qits-projects: { from: pacts/, packages: [maven] } } }`.
-qits-ci packages `pacts/` itself as `eu.wohlben.qits:qits-workspaces-pacts-qits-projects` and
-publishes it only when the tree changed since the newest published jar — there is no repository-side
-gate or module anymore; `pacts-jar/` and `published-tree-changed.sh` are gone. Since qits-1163
+**Published only on change.** `release.yml` declares one `contracts.pacts` entry per provider
+(`qits-events-service`, `qits-projects-service`, `qits-idp-service`, `qits-containers-service`,
+`qits-workspace-daemon`), and
+qits-ci packages each `pacts/qits-workspaces-service_<provider>.json` as
+`eu.wohlben.qits:qits-workspaces-service-pacts-<provider>`, published only when it changed since the
+newest published jar — there is no repository-side gate or module anymore; `pacts-jar/` and
+`published-tree-changed.sh` are gone. Since qits-1163
 `pacts/` also holds `qits-workspaces-service_qits-eventstream-javalib_qits-events-service.json`,
 what the eventstream library asks qits-events for this service, written by
 `wiring/EventstreamPactTest` from the pinned `qits-eventstream-contracts` kit and declared in
 `release.yml` as `qits-events-service`; a library's pact file is three-part, the provider last.
+
+**The other three providers (qits-1149)** are tables of `testing/contracts/ContractRow`s —
+`wiring/IdpContract`, `containershost/ContainersContract`, `daemonhost/WorkspaceDaemonContract` —
+each bound to that provider's pinned golden masters (`qits.<app>-golden-masters.version` in the root
+pom). A table's consumer test runs every live row against a mock server of its own;
+`testing/contracts/ConsumerPactFilesTest` compares the committed files, and fails when a pending row
+(`.waiting()`, a state the provider has not recorded yet) is recorded after a pin moves — switch it
+on then. `wiring/OutboundCallsGuardTest` reads the calls off the code (the REST client interfaces,
+`ContainersClient` invocations in the bytecode, `DaemonAgentClient`'s `AgentDaemon` methods, every
+class holding an HTTP client, the oidc config) and fails on one without a row.
 
 ## Tests
 

@@ -1,0 +1,1850 @@
+{
+  "consumer": {
+    "name": "qits-workspaces-service"
+  },
+  "interactions": [
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionClient"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: commissionClient",
+      "key": "6aee462a",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a service client with the system role",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "clientSecret": "test-broad-secret"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "claims": {
+              "project": "a-project"
+            },
+            "contextId": "7",
+            "contextKind": "workspace",
+            "gitRefs": [
+              "refs/heads/ws/7"
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.claims.project": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.gitRefs[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/idp/api/clients"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "clientId": "opaque",
+            "secret": "opaque"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.clientId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.secret": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionToken"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: commissionToken",
+      "key": "1bfd916e",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a service client with the system role",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "clientSecret": "test-broad-secret"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "claims": {
+              "project": "a-project"
+            },
+            "contextId": "7",
+            "contextKind": "workspace",
+            "gitRefs": [
+              "refs/heads/ws/7"
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.claims.project": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.gitRefs[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/idp/api/tokens"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "subject": "opaque",
+            "token": "opaque",
+            "tokenId": "00000000-0000-4000-8000-000000000001"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.subject": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.tokenId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "issueToken"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: issueToken",
+      "key": "3817cc2f",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a service client calling its peers",
+          "params": {
+            "audience": "qits-platform",
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": "grant_type=client_credentials&audience=qits-platform",
+          "contentType": "application/x-www-form-urlencoded",
+          "contentTypeHint": "DEFAULT",
+          "encoded": false
+        },
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "Content-Type": [
+            "application/x-www-form-urlencoded"
+          ],
+          "content-type": [
+            "application/x-www-form-urlencoded"
+          ]
+        },
+        "method": "POST",
+        "path": "/idp/token"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "access_token": "opaque"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.access_token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "decommissionClient"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "CommissionReconciler.reconcile"
+          }
+        }
+      },
+      "description": "CommissionReconciler.reconcile: decommissionClient",
+      "key": "3f1a7ebc",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a commissioned client",
+          "params": {
+            "audience": "qits-platform",
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "clientId": "dyn-contract-run-1-0000000000000000000001",
+            "clientSecret": "0000000000000000000000000000000000000000002",
+            "secret": "0000000000000000000000000000000000000000002"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          },
+          "path": {
+            "dataType": "RAW",
+            "expression": "/idp/api/clients/${clientId}",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ]
+        },
+        "method": "DELETE",
+        "path": "/idp/api/clients/dyn-contract-run-1-0000000000000000000001"
+      },
+      "response": {
+        "status": 204
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "decommissionClient"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "CommissionReconciler.reconcile"
+          }
+        }
+      },
+      "description": "CommissionReconciler.reconcile: decommissionClient",
+      "key": "7cf9a8c2",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "no commissioned client with the given id",
+          "params": {
+            "audience": "qits-platform",
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "clientId": "dyn-contract-unknown",
+            "clientSecret": "contract-unknown-secret",
+            "secret": "contract-unknown-secret"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          },
+          "path": {
+            "dataType": "RAW",
+            "expression": "/idp/api/clients/${clientId}",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ]
+        },
+        "method": "DELETE",
+        "path": "/idp/api/clients/dyn-contract-unknown"
+      },
+      "response": {
+        "status": 404
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "deleteToken"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "CommissionReconciler.reconcile"
+          }
+        }
+      },
+      "description": "CommissionReconciler.reconcile: deleteToken",
+      "key": "972dfd27",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a commissioned token",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "token": "qits_tok_0000000000000000000000000000000000000000001",
+            "tokenId": "00000000-0000-4000-8000-000000000001"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          },
+          "path": {
+            "dataType": "RAW",
+            "expression": "/idp/api/tokens/${tokenId}",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ]
+        },
+        "method": "DELETE",
+        "path": "/idp/api/tokens/00000000-0000-4000-8000-000000000001"
+      },
+      "response": {
+        "status": 204
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "deleteToken"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "CommissionReconciler.reconcile"
+          }
+        }
+      },
+      "description": "CommissionReconciler.reconcile: deleteToken",
+      "key": "f265955c",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "no commissioned token with the given id",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "token": "qits_tok_contract-unknown",
+            "tokenId": "00000000-0000-4000-8000-000000000001"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          },
+          "path": {
+            "dataType": "RAW",
+            "expression": "/idp/api/tokens/${tokenId}",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ]
+        },
+        "method": "DELETE",
+        "path": "/idp/api/tokens/00000000-0000-4000-8000-000000000001"
+      },
+      "response": {
+        "status": 404
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "listClients"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "CommissionReconciler.reconcile"
+          }
+        }
+      },
+      "description": "CommissionReconciler.reconcile: listClients",
+      "key": "5ba004bf",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a commissioned client",
+          "params": {
+            "audience": "qits-platform",
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "clientId": "dyn-contract-run-1-0000000000000000000001",
+            "clientSecret": "0000000000000000000000000000000000000000002",
+            "secret": "0000000000000000000000000000000000000000002"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ]
+        },
+        "method": "GET",
+        "path": "/idp/api/clients"
+      },
+      "response": {
+        "body": {
+          "content": [
+            {
+              "clientId": "dyn-contract-run-1-0000000000000000000001",
+              "contextId": "run-1",
+              "contextKind": "contract"
+            }
+          ],
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].clientId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].contextId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].contextKind": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "listTokens"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "CommissionReconciler.reconcile"
+          }
+        }
+      },
+      "description": "CommissionReconciler.reconcile: listTokens",
+      "key": "5ec8bc3",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a commissioned token",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "token": "qits_tok_0000000000000000000000000000000000000000001",
+            "tokenId": "00000000-0000-4000-8000-000000000001"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ]
+        },
+        "method": "GET",
+        "path": "/idp/api/tokens"
+      },
+      "response": {
+        "body": {
+          "content": [
+            {
+              "contextId": "run-1",
+              "contextKind": "contract",
+              "createdAt": "2026-01-01T00:00:00Z",
+              "tokenId": "00000000-0000-4000-8000-000000000001"
+            }
+          ],
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].contextId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].contextKind": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+                }
+              ]
+            },
+            "$[*].tokenId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "replaceClientGitRefs"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "CommissionReconciler.reconcile"
+          }
+        }
+      },
+      "description": "CommissionReconciler.reconcile: replaceClientGitRefs",
+      "key": "ec7f2d50",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a commissioned client",
+          "params": {
+            "audience": "qits-platform",
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "clientId": "dyn-contract-run-1-0000000000000000000001",
+            "clientSecret": "0000000000000000000000000000000000000000002",
+            "secret": "0000000000000000000000000000000000000000002"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "gitRefs": [
+              "refs/heads/ws/7"
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          },
+          "path": {
+            "dataType": "RAW",
+            "expression": "/idp/api/clients/${clientId}/git-refs",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.gitRefs[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "PUT",
+        "path": "/idp/api/clients/dyn-contract-run-1-0000000000000000000001/git-refs"
+      },
+      "response": {
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "replaceClientGitRefs"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "CommissionReconciler.reconcile"
+          }
+        }
+      },
+      "description": "CommissionReconciler.reconcile: replaceClientGitRefs",
+      "key": "2a5e5756",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "no commissioned client with the given id",
+          "params": {
+            "audience": "qits-platform",
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "clientId": "dyn-contract-unknown",
+            "clientSecret": "contract-unknown-secret",
+            "secret": "contract-unknown-secret"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "gitRefs": [
+              "refs/heads/ws/7"
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          },
+          "path": {
+            "dataType": "RAW",
+            "expression": "/idp/api/clients/${clientId}/git-refs",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.gitRefs[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "PUT",
+        "path": "/idp/api/clients/dyn-contract-unknown/git-refs"
+      },
+      "response": {
+        "status": 404
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "replaceTokenGitRefs"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "CommissionReconciler.reconcile"
+          }
+        }
+      },
+      "description": "CommissionReconciler.reconcile: replaceTokenGitRefs",
+      "key": "25d0ea5c",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a commissioned token",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "token": "qits_tok_0000000000000000000000000000000000000000001",
+            "tokenId": "00000000-0000-4000-8000-000000000001"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "gitRefs": [
+              "refs/heads/ws/7"
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          },
+          "path": {
+            "dataType": "RAW",
+            "expression": "/idp/api/tokens/${tokenId}/git-refs",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.gitRefs[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "PUT",
+        "path": "/idp/api/tokens/00000000-0000-4000-8000-000000000001/git-refs"
+      },
+      "response": {
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "replaceTokenGitRefs"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "CommissionReconciler.reconcile"
+          }
+        }
+      },
+      "description": "CommissionReconciler.reconcile: replaceTokenGitRefs",
+      "key": "81088291",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "no commissioned token with the given id",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "token": "qits_tok_contract-unknown",
+            "tokenId": "00000000-0000-4000-8000-000000000001"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "gitRefs": [
+              "refs/heads/ws/7"
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          },
+          "path": {
+            "dataType": "RAW",
+            "expression": "/idp/api/tokens/${tokenId}/git-refs",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.gitRefs[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "PUT",
+        "path": "/idp/api/tokens/00000000-0000-4000-8000-000000000001/git-refs"
+      },
+      "response": {
+        "status": 404
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "getJwks"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "event": "StartupEvent",
+            "kind": "event"
+          }
+        }
+      },
+      "description": "StartupEvent: getJwks",
+      "key": "30aa1a6f",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a published signing key",
+          "params": {
+            "kid": "contract-signing-key"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/idp/jwks"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "keys": [
+              {
+                "alg": "RS256",
+                "e": "AQAB",
+                "kid": "contract-signing-key",
+                "kty": "RSA",
+                "n": "w22O_ObglnNG60PveaNoDYurV2UhwvgMnL91tE4wBuWFY1yaEujIejjq2Qy-zvOuwYm2QKvHU-KhQ4nXWGJ8I-lXRaCPlmoFYXFXelBMp7abSkerNqBf_Bpc_Zj_cW7r4e69gDkK-3cChOTpsUhXzyuNanKh-h840YqhAPld9lz2Akr4T5hTMlgjjOagWaX_BkIMPmudiMQ8Uv5ppR2pETcAUi2D35L2OwVMBzqjQyykBcIIZgHM9qNUSQmJy-NjdSM4MJfjguxR23Yn4Dpp5HknGbhTOQ-Z90_neU8UVOKhhzDl_tUbpT9Q9ihqJmRmXsIySx2hXECmChLIoOqMlw",
+                "use": "sig"
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.keys": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.keys[*].alg": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.keys[*].e": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.keys[*].kid": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.keys[*].kty": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.keys[*].n": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.keys[*].use": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionToken"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "createRunner"
+          }
+        }
+      },
+      "description": "createRunner: commissionToken",
+      "key": "7488e7fa",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a service client with the system role",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "clientSecret": "test-broad-secret"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "contextId": "00000000-0000-4000-8000-000000000020",
+            "contextKind": "workspaces-runner-registration"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "method": "POST",
+        "path": "/idp/api/tokens"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "subject": "opaque",
+            "token": "opaque",
+            "tokenId": "00000000-0000-4000-8000-000000000001"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.subject": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.tokenId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionToken"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "dispatchAgent"
+          }
+        }
+      },
+      "description": "dispatchAgent: commissionToken",
+      "key": "69289785",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a service client with the system role",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "clientSecret": "test-broad-secret"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "claims": {
+              "agent": "00000000-0000-4000-8000-0000000000a1",
+              "project": "a-project"
+            },
+            "contextId": "agent-00000000-0000-4000-8000-0000000000a1",
+            "contextKind": "workspace",
+            "gitRefs": [
+              "refs/heads/ticket/a",
+              "refs/heads/ticket/a-*"
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.claims.project": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.gitRefs[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.gitRefs[1]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/idp/api/tokens"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "subject": "opaque",
+            "token": "opaque",
+            "tokenId": "00000000-0000-4000-8000-000000000001"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.subject": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.tokenId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionClient"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "registerRunner"
+          }
+        }
+      },
+      "description": "registerRunner: commissionClient",
+      "key": "7101604b",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a service client with the system role",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "clientSecret": "test-broad-secret"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "claims": null,
+            "contextId": "00000000-0000-4000-8000-000000000020",
+            "contextKind": "workspaces-runner"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "method": "POST",
+        "path": "/idp/api/clients"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "clientId": "opaque",
+            "secret": "opaque"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.clientId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.secret": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "deleteToken"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "registerRunner"
+          }
+        }
+      },
+      "description": "registerRunner: deleteToken",
+      "key": "7b0336bb",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a commissioned token",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "token": "qits_tok_0000000000000000000000000000000000000000001",
+            "tokenId": "00000000-0000-4000-8000-000000000001"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          },
+          "path": {
+            "dataType": "RAW",
+            "expression": "/idp/api/tokens/${tokenId}",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ]
+        },
+        "method": "DELETE",
+        "path": "/idp/api/tokens/00000000-0000-4000-8000-000000000001"
+      },
+      "response": {
+        "status": 204
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionToken"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "rotateRunnerRegistrationToken"
+          }
+        }
+      },
+      "description": "rotateRunnerRegistrationToken: commissionToken",
+      "key": "554b0737",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a service client with the system role",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "clientSecret": "test-broad-secret"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "contextId": "00000000-0000-4000-8000-000000000020",
+            "contextKind": "workspaces-runner-registration"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "method": "POST",
+        "path": "/idp/api/tokens"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "subject": "opaque",
+            "token": "opaque",
+            "tokenId": "00000000-0000-4000-8000-000000000001"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.subject": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.tokenId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      },
+      "type": "Synchronous/HTTP"
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "4.0"
+    },
+    "plugins": []
+  },
+  "provider": {
+    "name": "qits-idp-service"
+  }
+}

@@ -18,8 +18,8 @@ class GoldenMastersTest {
 
   private static final GoldenMasters.Operation OP =
       new GoldenMasters.Operation(
-          GoldenMasters.IDP, "a state", Map.of(), "listClients", "GET", "/idp/api/clients", 200,
-          "f.json", Set.of(), Set.of(), Set.of(), null);
+          GoldenMasters.IDP, "a state", Map.of(), "listClients", "GET", "/idp/api/clients",
+          Map.of(), 200, "f.json", Set.of(), Set.of(), Set.of(), null);
 
   @Test
   void onlyTheConsumedPathsAndTheirParentsAreKept() throws Exception {
@@ -77,13 +77,14 @@ class GoldenMastersTest {
   }
 
   @Test
-  void anotherProvidersIndexIsNotTakenForQitsProjects() {
+  void anotherProvidersIndexIsNotTakenForAProviderWithNone() {
+    // Every pinned provider's index is on the classpath (qits-1149), so the provider asked for is
+    // one that pins none.
+    GoldenMasters.Provider unpinned = new GoldenMasters.Provider("qits-nowhere-service", "qits-nowhere");
     IllegalStateException refused =
-        assertThrows(
-            IllegalStateException.class,
-            () -> GoldenMasters.params(GoldenMasters.IDP, "anything"));
+        assertThrows(IllegalStateException.class, () -> GoldenMasters.params(unpinned, "anything"));
 
-    assertTrue(refused.getMessage().contains("qits-idp-golden-masters"), refused.getMessage());
+    assertTrue(refused.getMessage().contains("qits-nowhere-golden-masters"), refused.getMessage());
     assertTrue(refused.getMessage().contains("qits-projects"), "it names what it found instead");
   }
 

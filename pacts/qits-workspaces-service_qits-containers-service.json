@@ -1,0 +1,146 @@
+{
+  "consumer": {
+    "name": "qits-workspaces-service"
+  },
+  "interactions": [
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-containers-service",
+            "operationId": "deleteVolume"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: deleteVolume",
+      "key": "95f27b33",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a claimed volume",
+          "params": {
+            "name": "contract-home",
+            "owner": "qits-workspaces"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/containers/api/volumes/${owner}/${name}",
+            "type": "ProviderState"
+          }
+        },
+        "method": "DELETE",
+        "path": "/containers/api/volumes/qits-workspaces/contract-home"
+      },
+      "response": {
+        "body": {
+          "content": {},
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-containers-service",
+            "operationId": "ensureVolume"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: ensureVolume",
+      "key": "376e8a69",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "no volume",
+          "params": {
+            "name": "contract-home",
+            "owner": "qits-workspaces"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/containers/api/volumes/${owner}/${name}",
+            "type": "ProviderState"
+          }
+        },
+        "method": "PUT",
+        "path": "/containers/api/volumes/qits-workspaces/contract-home"
+      },
+      "response": {
+        "body": {
+          "content": {},
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "4.0"
+    },
+    "plugins": []
+  },
+  "provider": {
+    "name": "qits-containers-service"
+  }
+}

@@ -59,6 +59,20 @@
             "numbers": [],
             "listFilteredTo": "$"
           }
+        },
+        {
+          "operationId": "rotateRunnerRegistrationToken",
+          "method": "POST",
+          "path": "/workspaces/api/runners/{runnerId}/registration-token",
+          "status": 409,
+          "file": "a-connected-runner/rotateRunnerRegistrationToken.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
         }
       ]
     },
@@ -422,6 +436,35 @@
               "$.at"
             ],
             "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "greenlightRunner",
+          "method": "POST",
+          "path": "/workspaces/api/runners/{runnerId}/greenlight",
+          "status": 200,
+          "file": "a-runner-in-service/greenlightRunner.json",
+          "frozen": {
+            "ids": [
+              "$.id"
+            ],
+            "instants": [
+              "$.login.checkedAt",
+              "$.registeredAt",
+              "$.lastSeenAt",
+              "$.lastHealthCheckAt",
+              "$.createdAt",
+              "$.connectedSince",
+              "$.health.at"
+            ],
+            "strings": [
+              "$.kimiLoginCommand",
+              "$.loginCommand",
+              "$.pinnedVersion",
+              "$.version"
+            ],
             "numbers": [],
             "listFilteredTo": null
           }
@@ -1448,6 +1491,24 @@
       "dependsOn": [],
       "operations": [
         {
+          "operationId": "createRunner",
+          "method": "POST",
+          "path": "/workspaces/api/runners",
+          "body": {
+            "name": "{runnerName}",
+            "slots": 1
+          },
+          "status": 409,
+          "file": "an-unregistered-runner/createRunner.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
           "operationId": "deleteRunner",
           "method": "DELETE",
           "path": "/workspaces/api/runners/{runnerId}",
@@ -1626,6 +1687,62 @@
               "$.runner.pinnedVersion",
               "$.installLine"
             ],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "deleteRunner",
+          "method": "DELETE",
+          "path": "/workspaces/api/runners/{runnerId}",
+          "status": 404,
+          "file": "no-runners/deleteRunner.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "getRunnerHealth",
+          "method": "GET",
+          "path": "/workspaces/api/runners/{runnerId}/health",
+          "status": 404,
+          "file": "no-runners/getRunnerHealth.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "greenlightRunner",
+          "method": "POST",
+          "path": "/workspaces/api/runners/{runnerId}/greenlight",
+          "status": 404,
+          "file": "no-runners/greenlightRunner.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "rotateRunnerRegistrationToken",
+          "method": "POST",
+          "path": "/workspaces/api/runners/{runnerId}/registration-token",
+          "status": 404,
+          "file": "no-runners/rotateRunnerRegistrationToken.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
             "numbers": [],
             "listFilteredTo": null
           }

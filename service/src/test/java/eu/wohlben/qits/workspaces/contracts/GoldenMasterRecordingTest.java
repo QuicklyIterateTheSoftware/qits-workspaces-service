@@ -597,7 +597,58 @@ class GoldenMasterRecordingTest {
               .fixing(
                   "$.message",
                   "RUNNER_OWNS_WORKSPACES: runner localhost owns 1 active workspace(s) [1]; resolve"
-                      + " them before deleting it"));
+                      + " them before deleting it"),
+          // The runner doors' other answers (qits-1149), for qits-bootstrap-cli's runner phases and
+          // qits-platform-access-cli's `qits workspaces runners`: a taken name, a rotation for a
+          // runner that already registered, a greenlight of a runner in service (answered as it
+          // is), and the doors on a runner id nobody declared.
+          Interaction.write(
+              ProviderStates.AN_UNREGISTERED_RUNNER,
+              "createRunner",
+              WORKSPACES + "/runners",
+              409,
+              "{\"name\":\"{runnerName}\",\"slots\":1}"),
+          Interaction.write(
+              ProviderStates.A_CONNECTED_RUNNER,
+              "rotateRunnerRegistrationToken",
+              WORKSPACES + "/runners/{runnerId}/registration-token",
+              409,
+              null),
+          Interaction.write(
+                  ProviderStates.A_RUNNER_IN_SERVICE,
+                  "greenlightRunner",
+                  WORKSPACES + "/runners/{runnerId}/greenlight",
+                  200,
+                  null)
+              .fixing("$.pinnedVersion")
+              .fixing("$.version")
+              .fixing("$.loginCommand", ProviderStates.CLAUDE_LOGIN_COMMAND)
+              .fixing("$.kimiLoginCommand", ProviderStates.KIMI_LOGIN_COMMAND),
+          Interaction.read(
+                  ProviderStates.NO_RUNNERS,
+                  "getRunnerHealth",
+                  WORKSPACES + "/runners/{runnerId}/health",
+                  null)
+              .answering(404),
+          Interaction.write(
+              ProviderStates.NO_RUNNERS,
+              "rotateRunnerRegistrationToken",
+              WORKSPACES + "/runners/{runnerId}/registration-token",
+              404,
+              null),
+          Interaction.write(
+              ProviderStates.NO_RUNNERS,
+              "greenlightRunner",
+              WORKSPACES + "/runners/{runnerId}/greenlight",
+              404,
+              null),
+          Interaction.call(
+              ProviderStates.NO_RUNNERS,
+              "deleteRunner",
+              "DELETE",
+              WORKSPACES + "/runners/{runnerId}",
+              404,
+              null));
 
   /**
    * The params that hold a workspace row id. Frozen like the answers' row ids, so the index names

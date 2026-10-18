@@ -152,12 +152,17 @@ public final class GoldenMasters {
       String operationId,
       String method,
       String path,
+      Map<String, String> query,
       int status,
       String file,
       Set<String> ids,
       Set<String> instants,
       Set<String> strings,
       String listFilteredTo) {
+
+    public Operation {
+      query = query == null ? Map.of() : java.util.Collections.unmodifiableMap(new LinkedHashMap<>(query));
+    }
 
     /** The path with every {@code {param}} replaced by the state's frozen example. */
     public String examplePath() {
@@ -167,6 +172,21 @@ public final class GoldenMasters {
     /** The path as a provider-state expression: {@code {param}} becomes {@code ${param}}. */
     public String expressionPath() {
       return substitute(path, name -> "${" + name + "}");
+    }
+
+    /** {@code value} with every {@code {param}} replaced by the state's frozen example. */
+    public String example(String value) {
+      return substitute(value, name -> params.get(name));
+    }
+
+    /** {@code value} as a provider-state expression: {@code {param}} becomes {@code ${param}}. */
+    public String expression(String value) {
+      return substitute(value, name -> "${" + name + "}");
+    }
+
+    /** Whether {@code value} names a state param. */
+    public static boolean namesParam(String value) {
+      return value != null && PARAM.matcher(value).find();
     }
 
     private String substitute(String template, java.util.function.Function<String, String> value) {
@@ -213,6 +233,15 @@ public final class GoldenMasters {
       if (operationId.equals(op.path("operationId").asText())) {
         JsonNode frozen = op.path("frozen");
         JsonNode filtered = frozen.path("listFilteredTo");
+        // The recorded query, its own object beside the route (qits-1149): one value per name.
+        Map<String, String> query = new LinkedHashMap<>();
+        op.path("query")
+            .fields()
+            .forEachRemaining(
+                e ->
+                    query.put(
+                        e.getKey(),
+                        e.getValue().isArray() ? e.getValue().path(0).asText() : e.getValue().asText()));
         return new Operation(
             provider,
             state,
@@ -220,6 +249,7 @@ public final class GoldenMasters {
             operationId,
             op.path("method").asText(),
             op.path("path").asText(),
+            query,
             op.path("status").asInt(),
             op.path("file").asText(),
             strings(frozen.path("ids")),
@@ -231,6 +261,22 @@ public final class GoldenMasters {
     throw new IllegalArgumentException(
         provider.application() + "'s golden masters record no operation " + operationId
             + " in state '" + state + "'");
+  }
+
+  /**
+   * The method and route {@code provider} records {@code operationId} under, in whichever state
+   * records it first; empty when no state does. For a guard that asks what a row's call is, pending
+   * rows included.
+   */
+  public static java.util.Optional<Operation> anyOperation(Provider provider, String operationId) {
+    for (JsonNode state : index(provider).root().path("states")) {
+      for (JsonNode op : state.path("operations")) {
+        if (operationId.equals(op.path("operationId").asText())) {
+          return java.util.Optional.of(operation(provider, state.path("name").asText(), operationId));
+        }
+      }
+    }
+    return java.util.Optional.empty();
   }
 
   /** qits-projects' {@link #body(Provider, String, String)}. */
@@ -345,7 +391,59 @@ public final class GoldenMasters {
       Trigger trigger,
       DslPart requestBody,
       List<String> consumes) {
+    return interaction(
+        builder, provider, state, operationId, trigger, Request.json(requestBody), consumes);
+  }
+
+  /**
+   * What this consumer sends besides the method, the path and the recorded query: a JSON body (its
+   * OWN expectation, never the recording's request), or a form body, and headers. A {@code {param}}
+   * in a header value or in the form is a provider-state expression, so the verifier sends what
+   * the provider state returned — qits-idp's Basic {@code Authorization} (its {@code authorization}
+   * param) comes this way.
+   *
+   * @param json the JSON body, or null
+   * @param form an {@code application/x-www-form-urlencoded} body, or null
+   * @param headers the headers, by name
+   */
+  public record Request(DslPart json, String form, Map<String, String> headers) {
+    public Request {
+      headers = headers == null ? Map.of() : java.util.Collections.unmodifiableMap(new LinkedHashMap<>(headers));
+      if (json != null && form != null) {
+        throw new IllegalArgumentException("a request has one body: json or form");
+      }
+    }
+
+    /** No body and no header. */
+    public static final Request NONE = new Request(null, null, Map.of());
+
+    public static Request json(DslPart body) {
+      return new Request(body, null, Map.of());
+    }
+
+    public static Request form(String body) {
+      return new Request(null, body, Map.of());
+    }
+
+    /** The same request, also sending {@code name: value}. */
+    public Request header(String name, String value) {
+      Map<String, String> all = new LinkedHashMap<>(headers);
+      all.put(name, value);
+      return new Request(json, form, all);
+    }
+  }
+
+  /** {@link #interaction(PactBuilder, Provider, String, String, Trigger, DslPart, List)}, sending {@code request}. */
+  public static PactBuilder interaction(
+      PactBuilder builder,
+      Provider provider,
+      String state,
+      String operationId,
+      Trigger trigger,
+      Request sent,
+      List<String> consumes) {
     Objects.requireNonNull(trigger, "trigger: every interaction names the entry point that makes it");
+    Objects.requireNonNull(sent, "sent: Request.NONE for a call that sends nothing");
     Objects.requireNonNull(consumes, "consumes: name what the consumer reads, or List.of()");
     Operation op = operation(provider, state, operationId);
     DslPart body = consumes.isEmpty() ? null : responseBody(op, consumes);
@@ -353,7 +451,8 @@ public final class GoldenMasters {
     Operation pathOnly =
         new Operation(
             op.provider(), op.state(), op.params(), op.operationId(), op.method(), pathAndQuery[0],
-            op.status(), op.file(), op.ids(), op.instants(), op.strings(), op.listFilteredTo());
+            op.query(), op.status(), op.file(), op.ids(), op.instants(), op.strings(),
+            op.listFilteredTo());
     Map<String, Object> references = new LinkedHashMap<>();
     Map<String, String> call = new LinkedHashMap<>();
     call.put("app", provider.repository());
@@ -382,7 +481,33 @@ public final class GoldenMasters {
                     request.queryParameter(kv[0], kv.length > 1 ? kv[1] : "");
                   }
                 }
-                return requestBody == null ? request : request.body(requestBody);
+                op.query()
+                    .forEach(
+                        (name, value) -> {
+                          if (Operation.namesParam(value)) {
+                            request.queryParameter(
+                                name,
+                                Matchers.fromProviderState(op.expression(value), op.example(value)));
+                          } else {
+                            request.queryParameter(name, value);
+                          }
+                        });
+                sent.headers()
+                    .forEach(
+                        (name, value) -> {
+                          if (Operation.namesParam(value)) {
+                            request.header(
+                                name,
+                                Matchers.fromProviderState(op.expression(value), op.example(value)));
+                          } else {
+                            request.header(name, value);
+                          }
+                        });
+                if (sent.form() != null) {
+                  String type = "application/x-www-form-urlencoded";
+                  return request.header("Content-Type", type).body(op.example(sent.form()), type);
+                }
+                return sent.json() == null ? request : request.body(sent.json());
               });
           http.willRespondWith(
               response -> {
@@ -410,7 +535,7 @@ public final class GoldenMasters {
       String operationId,
       Trigger trigger,
       List<String> consumes) {
-    return interaction(builder, provider, state, operationId, trigger, null, consumes);
+    return interaction(builder, provider, state, operationId, trigger, Request.NONE, consumes);
   }
 
   /** The recorded body cut to {@code consumes}, with the index's matchers. */

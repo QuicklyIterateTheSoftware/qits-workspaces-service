@@ -3107,4 +3107,4 @@ paths:
         - qits:admin-agent
 info:
   title: qits-workspaces API
-  version: 2026.1014.143757
+  version: 2026.1018.113154
