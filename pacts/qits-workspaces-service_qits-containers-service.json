@@ -8,6 +8,80 @@
         "references": {
           "qits-call": {
             "app": "qits-containers-service",
+            "operationId": "deleteContainer"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: deleteContainer",
+      "key": "b65f2348",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a running workspace container",
+          "params": {
+            "owner": "qits-workspaces",
+            "ref": "contract-1",
+            "workload": "workspace"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/containers/api/containers/${owner}/${workload}/${ref}",
+            "type": "ProviderState"
+          }
+        },
+        "method": "DELETE",
+        "path": "/containers/api/containers/qits-workspaces/workspace/contract-1",
+        "query": {
+          "logs": [
+            "false"
+          ],
+          "volumes": [
+            "false"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "content": {},
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-containers-service",
             "operationId": "deleteVolume"
           },
           "qits-trigger": {
@@ -73,6 +147,169 @@
         "references": {
           "qits-call": {
             "app": "qits-containers-service",
+            "operationId": "ensureContainer"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: ensureContainer",
+      "key": "7607f8d9",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "no workspace container at the place",
+          "params": {
+            "owner": "qits-workspaces",
+            "ref": "contract-1",
+            "workload": "workspace"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "policy": {
+              "type": "EXPLICIT"
+            },
+            "recreate": "ifChanged",
+            "spec": {
+              "addHosts": [
+                "host.docker.internal:host-gateway"
+              ],
+              "env": {
+                "CLAUDE_CONFIG_DIR": "/claude-home/.claude",
+                "GIT_AUTHOR_EMAIL": "qits@local",
+                "GIT_AUTHOR_NAME": "qits",
+                "GIT_COMMITTER_EMAIL": "qits@local",
+                "GIT_COMMITTER_NAME": "qits",
+                "KIMI_CODE_HOME": "/claude-home/.kimi-code",
+                "MAVEN_OPTS": "-Dmaven.repo.local=/caches/m2",
+                "QITS_PLATFORM_MCP_URL": "http://dev-qits-platform-access-mcp-service:8080/mcp",
+                "QITS_WORKSPACE_DAEMON_API_BASE_PATH": "/workspaces/container/1/",
+                "QITS_WORKSPACE_DAEMON_API_TOKEN": "qits-workspace-daemon",
+                "QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED": "true",
+                "QITS_WORKSPACE_DAEMON_GIT_BASE_URL": "http://qits-platform-edge:8080/git",
+                "QITS_WORKSPACE_DAEMON_PROJECT_ID": "proj-1",
+                "QITS_WORKSPACE_DAEMON_REPOSITORY_ID": "repo12345678abc",
+                "QITS_WORKSPACE_DAEMON_REPO_NAME": "my-repo",
+                "QITS_WORKSPACE_DAEMON_URL": "ws://qits:8080/workspaces/daemon/1",
+                "QITS_WORKSPACE_DAEMON_WORKSPACE_ID": "work",
+                "TZ": "UTC",
+                "npm_config_store_dir": "/caches/pnpm/store"
+              },
+              "explicitName": "qits-ws-work-repo1234",
+              "extraLabels": {
+                "qits.branch": "main",
+                "qits.parent": "0parent",
+                "qits.project": "proj-1",
+                "qits.repository": "repo12345678abc",
+                "qits.workspace": "work"
+              },
+              "hostDockerSocket": false,
+              "image": "localhost:8081/qits/workspace:2026.101.1",
+              "init": true,
+              "network": "qits-net",
+              "pullPolicy": "MISSING",
+              "security": {
+                "capDropAll": false,
+                "memory": "4g",
+                "memorySwap": "8g",
+                "noNewPrivileges": false,
+                "oomScoreAdj": 600
+              },
+              "sharedMounts": [
+                {
+                  "containerPath": "/claude-home",
+                  "sharedName": "qits_shared_dot_claude"
+                },
+                {
+                  "containerPath": "/caches/m2",
+                  "sharedName": "qits_shared_m2"
+                },
+                {
+                  "containerPath": "/caches/pnpm",
+                  "sharedName": "qits_shared_pnpm"
+                }
+              ],
+              "user": "0",
+              "volumeMounts": [
+                {
+                  "containerPath": "/workspace",
+                  "volumeName": "qits_workspace_work"
+                }
+              ]
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/containers/api/containers/${owner}/${workload}/${ref}",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "method": "PUT",
+        "path": "/containers/api/containers/qits-workspaces/workspace/contract-1"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "detail": null,
+            "state": {
+              "observed": "RUNNING"
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.state.observed": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-containers-service",
             "operationId": "ensureVolume"
           },
           "qits-trigger": {
@@ -104,6 +341,255 @@
         },
         "method": "PUT",
         "path": "/containers/api/volumes/qits-workspaces/contract-home"
+      },
+      "response": {
+        "body": {
+          "content": {},
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-containers-service",
+            "operationId": "getContainer"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "ensureWorkspaceContainer"
+          }
+        }
+      },
+      "description": "ensureWorkspaceContainer: getContainer",
+      "key": "6aa72c91",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a running workspace container",
+          "params": {
+            "owner": "qits-workspaces",
+            "ref": "contract-1",
+            "workload": "workspace"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/containers/api/containers/${owner}/${workload}/${ref}",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/containers/api/containers/qits-workspaces/workspace/contract-1"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "state": {
+              "observed": "RUNNING"
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.state.observed": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-containers-service",
+            "operationId": "listWorkloadContainers"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "listWorkspaces"
+          }
+        }
+      },
+      "description": "listWorkspaces: listWorkloadContainers",
+      "key": "d906f46b",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a running workspace container",
+          "params": {
+            "owner": "qits-workspaces",
+            "ref": "contract-1",
+            "workload": "workspace"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/containers/api/containers/${owner}/${workload}",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/containers/api/containers/qits-workspaces/workspace"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "containers": [
+              {
+                "containerName": "qits-ct-qits-workspaces-workspace-contract-1",
+                "state": {
+                  "observed": "RUNNING"
+                }
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.containers": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "max": 1,
+                  "min": 1
+                }
+              ]
+            },
+            "$.containers[*].containerName": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.containers[*].state.observed": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-containers-service",
+            "operationId": "stopContainer"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "stopWorkspaceContainer"
+          }
+        }
+      },
+      "description": "stopWorkspaceContainer: stopContainer",
+      "key": "a9f1f21",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a running workspace container",
+          "params": {
+            "owner": "qits-workspaces",
+            "ref": "contract-1",
+            "workload": "workspace"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/containers/api/containers/${owner}/${workload}/${ref}/stop",
+            "type": "ProviderState"
+          }
+        },
+        "method": "POST",
+        "path": "/containers/api/containers/qits-workspaces/workspace/contract-1/stop"
       },
       "response": {
         "body": {
