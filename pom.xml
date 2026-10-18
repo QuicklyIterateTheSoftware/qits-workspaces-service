@@ -120,7 +120,7 @@
              (wiring/IdpContract); qits-containers' for the place and volume doors
              (containershost/ContainersContract); qits-workspace-daemon's for the agent-worktree
              doors DaemonAgentClient calls (daemonhost/WorkspaceDaemonContract). -->
-        <qits.idp-golden-masters.version>2026.1018.142635</qits.idp-golden-masters.version>
+        <qits.idp-golden-masters.version>2026.1018.165736</qits.idp-golden-masters.version>
         <qits.containers-golden-masters.version>2026.1010.134141</qits.containers-golden-masters.version>
         <qits.workspace-daemon-golden-masters.version>2026.1018.152111</qits.workspace-daemon-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
