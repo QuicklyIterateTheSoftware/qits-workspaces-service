@@ -97,7 +97,7 @@ public final class WorkspaceDaemonContract {
                   List.of(),
                   (client, row, agentId) ->
                       assertEquals(AgentDaemon.Outcome.OK, client.remove(row, agentId, false))),
-              // --- recorded since qits-workspace-daemon's golden masters 2026.1018.152111 --------
+              // --- the refusals (qits-workspace-daemon-rr-126) -----------------------------------
               row(
                   SIGNED_OUT,
                   "startAgentWorktree",
