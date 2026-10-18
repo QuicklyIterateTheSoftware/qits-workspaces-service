@@ -8,5 +8,10 @@ contracts:
   application: qits-workspaces
   golden-masters: { from: golden-masters/, packages: [maven, npm] }
   pacts:
+    # qits-events-service's pact is the three-part
+    # pacts/qits-workspaces-service_qits-eventstream-javalib_qits-events-service.json (qits-1163):
+    # what the qits-eventstream library asks on this service's behalf, written by
+    # service/src/test/.../wiring/EventstreamPactTest.
+    qits-events-service: { packages: [maven] }
     qits-projects-service: { packages: [maven] }
 userflows: qits-workspaces

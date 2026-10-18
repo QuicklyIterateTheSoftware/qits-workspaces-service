@@ -251,6 +251,17 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <!-- What qits-eventstream asks qits-events for this service (qits-1163): the kit behind
+                 wiring/EventstreamPactTest, which writes
+                 pacts/qits-workspaces-service_qits-eventstream-javalib_qits-events-service.json.
+                 It brings qits-events-golden-masters, and it stays BEFORE every other golden-master
+                 jar: the kit reads the first golden-masters/index.json on the classpath and fails
+                 when that is another provider's. -->
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-eventstream-contracts</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <!-- qits-projects' recorded answers (golden-masters/index.json + one JSON per state and
                  operation), read by testing/contracts/GoldenMasters for HttpRepositoryLookupTest,
                  the stories' StoryPeers and ProjectsConsumerPactTest. Pinned in the root pom. -->

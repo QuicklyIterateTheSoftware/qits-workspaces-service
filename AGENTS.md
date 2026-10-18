@@ -1559,9 +1559,11 @@ pact-jvm upgrade stops writing it. `trigger` is required: a null one throws.
 `contracts: { application: qits-workspaces, pacts: { qits-projects: { from: pacts/, packages: [maven] } } }`.
 qits-ci packages `pacts/` itself as `eu.wohlben.qits:qits-workspaces-pacts-qits-projects` and
 publishes it only when the tree changed since the newest published jar — there is no repository-side
-gate or module anymore; `pacts-jar/` and `published-tree-changed.sh` are gone. `pacts/` holds this
-one pact today — the coordinate rule packages the whole `from:` directory, so split it per provider
-before a second pact lands.
+gate or module anymore; `pacts-jar/` and `published-tree-changed.sh` are gone. Since qits-1163
+`pacts/` also holds `qits-workspaces-service_qits-eventstream-javalib_qits-events-service.json`,
+what the eventstream library asks qits-events for this service, written by
+`wiring/EventstreamPactTest` from the pinned `qits-eventstream-contracts` kit and declared in
+`release.yml` as `qits-events-service`; a library's pact file is three-part, the provider last.
 
 ## Tests
 
