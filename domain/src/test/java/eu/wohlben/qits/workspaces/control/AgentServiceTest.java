@@ -19,6 +19,7 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
+import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
@@ -63,6 +64,7 @@ public class AgentServiceTest {
   @Inject FakeAgentDaemon daemon;
   @Inject FakeWorkspaceDaemonLiveness liveness;
   @Inject FakeCredentialCommissioner commissioner;
+  @Inject RecordingLifecycleAnnouncer announced;
 
   private String repoId;
 
@@ -986,6 +988,239 @@ public class AgentServiceTest {
 
     assertEquals(AgentState.REMOVED, row(agentId).state);
     liveness.markDead(slot);
+  }
+
+  /**
+   * An ACTIVE, started agent whose item is then marked {@code status}, idle for an hour, with
+   * {@code script} run against the daemon first. No release: nothing but the status moves it.
+   */
+  private String closedUnreleased(String workId, String status, Consumer<String> script) {
+    AgentService.Dispatch dispatched = dispatch(workId, true, null);
+    String agentId = dispatched.agent().agentId();
+    liveness.markLive(dispatched.agent().workspaceRowId());
+    service.reconcile(); // deterministically past the agent's start
+    script.accept(agentId);
+    service.markEntity(workId, new EntityFacts(null, status, false), null);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                agents.findById(UUID.fromString(agentId)).lastActivityAt =
+                    Instant.now().minusSeconds(3600));
+    return agentId;
+  }
+
+  private List<AgentObsolete> obsoleteEventsOf(String agentId) {
+    return announced.of(AgentObsolete.class, e -> e.agentId().equals(agentId));
+  }
+
+  @Test
+  void aDroppedItemsIdleCleanAgentIsRemovedWithoutARelease() {
+    // qits-1276: only a release made an agent OBSOLETE, and a dropped item's branch is never
+    // released, so its agent stayed ACTIVE for good, holding its slot.
+    String agentId = closedUnreleased("w-dropped-clean", "DROPPED", id -> {});
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.reconcile();
+
+      AgentWorktree removed = row(agentId);
+      assertEquals(AgentState.REMOVED, removed.state);
+      assertNotNull(removed.obsoleteAt, "made OBSOLETE first, by the drop");
+      assertTrue(
+          daemon.callsFor(agentId).contains("remove " + slot + " " + agentId + " force=false"));
+      AgentRemoved event =
+          announced.of(AgentRemoved.class, e -> e.agentId().equals(agentId)).get(0);
+      assertEquals(AgentRemoved.DROPPED_IDLE_CLEAN, event.reason());
+      assertEquals("dropped, idle and clean", event.detail());
+      List<AgentObsolete> obsolete = obsoleteEventsOf(agentId);
+      assertEquals(1, obsolete.size(), obsolete.toString());
+      assertEquals("ticket/w-dropped-clean", obsolete.get(0).branch(), "its wrapper branch");
+      assertNull(obsolete.get(0).version(), "nothing was released");
+      assertNull(obsolete.get(0).commitSha());
+      assertEquals(slot.toString(), obsolete.get(0).workspaceId());
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aDroppedItemsAgentWithLeftoverWorkIsPromptedWithTheDroppedWording() {
+    String agentId =
+        closedUnreleased(
+            "w-dropped-dirty",
+            "DROPPED",
+            id ->
+                daemon.leftover(
+                    id, new AgentDaemon.CleanupCheck(false, List.of("wrapper"), List.of())));
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.reconcile();
+
+      AgentWorktree prompted = row(agentId);
+      assertEquals(AgentState.OBSOLETE, prompted.state, "nothing is removed");
+      assertNotNull(prompted.cleanupPromptedAt);
+      String said =
+          prompted.pendingText != null
+              ? prompted.pendingText
+              : daemon.callsFor(agentId).stream()
+                  .filter(c -> c.startsWith("turn "))
+                  .reduce((a, b) -> b)
+                  .orElse("");
+      assertTrue(said.contains(AgentService.DROPPED_CLEANUP_PROMPT), said);
+      assertFalse(said.contains(AgentService.CLEANUP_PROMPT), "not the released wording: " + said);
+      assertTrue(said.contains("uncommitted changes in wrapper"), said);
+      assertFalse(
+          daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("remove ")),
+          "leftover work is never deleted");
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aRowAlreadyStuckOnDroppedIsHealedByAPassAlone() {
+    // qits-1276: the rows that were stuck before the fix took their DROPPED long ago; no new mark
+    // will come for them.
+    AgentService.Dispatch dispatched = dispatch("w-dropped-stuck", true, null);
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      QuarkusTransaction.requiringNew()
+          .run(
+              () -> {
+                AgentWorktree row = agents.findById(UUID.fromString(agentId));
+                row.entityStatus = "dropped"; // any case
+                row.lastActivityAt = Instant.now().minusSeconds(3600);
+              });
+
+      service.reconcile();
+
+      assertEquals(AgentState.REMOVED, row(agentId).state);
+      assertEquals(1, obsoleteEventsOf(agentId).size());
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"VERIFIED", "DONE"})
+  void anUnreleasedAgentOfAVerifiedOrDoneItemStaysActive(String status) {
+    // Only a drop obsoletes without a release: a VERIFIED or DONE item's agent still has its own
+    // work to release.
+    String agentId =
+        closedUnreleased("w-unreleased-" + status.toLowerCase(Locale.ROOT), status, id -> {});
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.reconcile();
+
+      AgentWorktree left = row(agentId);
+      assertEquals(AgentState.ACTIVE, left.state);
+      assertNull(left.obsoleteAt);
+      assertEquals(List.of(), obsoleteEventsOf(agentId));
+      assertFalse(daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("remove ")));
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aDroppedItemReopenedAndDispatchedAgainRevivesItsAgentAndKeepsIt() {
+    // qits-1276: a revived agent's row may still read DROPPED (a dispatch whose facts name no
+    // status); the pass must not obsolete it straight back.
+    AgentService.Dispatch first = dispatch("w-reopened", true, "first phase");
+    String agentId = first.agent().agentId();
+    Long slot = first.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      service.markEntity("w-reopened", new EntityFacts(null, "DROPPED", false), null);
+      service.reconcile();
+      assertEquals(
+          AgentState.OBSOLETE, row(agentId).state, "the drop obsoletes it; active lately, so kept");
+
+      AgentService.Dispatch again =
+          service.dispatch(
+              new AgentService.AgentRequest(
+                  repoId,
+                  "ticket/w-reopened",
+                  "w-reopened",
+                  "w-reopened",
+                  "w-reopened",
+                  null,
+                  true,
+                  null,
+                  "reopened: go on",
+                  null));
+
+      assertEquals(agentId, again.agent().agentId(), "the same agent, revived");
+      assertFalse(again.fresh());
+      AgentWorktree revived = row(agentId);
+      assertEquals(AgentState.ACTIVE, revived.state);
+      assertNotEquals("DROPPED", revived.entityStatus, "the stale word is gone");
+      assertEquals(1, liveRowsOf("w-reopened"));
+
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  agents.findById(UUID.fromString(agentId)).lastActivityAt =
+                      Instant.now().minusSeconds(3600));
+      service.reconcile();
+
+      assertEquals(AgentState.ACTIVE, row(agentId).state, "stays ACTIVE across a pass");
+      assertEquals(1, obsoleteEventsOf(agentId).size(), "obsoleted once, by the drop only");
+
+      // The item's next mark says what it is now; still ACTIVE.
+      service.markEntity("w-reopened", new EntityFacts(null, "REPORTED", false), null);
+      service.reconcile();
+      assertEquals(AgentState.ACTIVE, row(agentId).state);
+      assertEquals("REPORTED", row(agentId).entityStatus);
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aDroppedItemsRecentlyActiveAgentIsObsoleteButNotRemovedThatPass() {
+    AgentService.Dispatch dispatched = dispatch("w-dropped-recent", true, null);
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      service.markEntity("w-dropped-recent", new EntityFacts(null, "DROPPED", false), null);
+      QuarkusTransaction.requiringNew()
+          .run(() -> agents.findById(UUID.fromString(agentId)).lastActivityAt = Instant.now());
+
+      service.reconcile();
+
+      assertEquals(AgentState.OBSOLETE, row(agentId).state, "obsolete, but still standing");
+      assertFalse(daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("remove ")));
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aDroppedItemsAgentBusyInTheBackgroundIsObsoleteButNotRemoved() {
+    String agentId =
+        closedUnreleased(
+            "w-dropped-busy",
+            "DROPPED",
+            id ->
+                daemon.leftover(
+                    id, new AgentDaemon.CleanupCheck(false, List.of("wrapper"), List.of(), true)));
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.reconcile();
+
+      AgentWorktree left = row(agentId);
+      assertEquals(AgentState.OBSOLETE, left.state);
+      assertNull(left.cleanupPromptedAt, "no cleanup prompt typed into a working agent");
+      assertFalse(daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("remove ")));
+    } finally {
+      liveness.markDead(slot);
+    }
   }
 
   @Test

@@ -100,6 +100,10 @@ import org.jboss.logging.Logger;
  *       workspace is FAILED with no daemon — it never came up — is queued for another workspace,
  *       the reason stored as its start refusal, unless it started there: then its worktree is in
  *       that volume and it waits for the workspace (qits-1233).
+ *   <li><b>Obsolete the dropped</b> (qits-1276): an ACTIVE agent whose work item is DROPPED is
+ *       made OBSOLETE, as a release makes it. A dropped item's branch is never released, so
+ *       without this its agent would hold its worktree and slot for good. Only DROPPED: a VERIFIED
+ *       or DONE item's agent still has its own work to release.
  *   <li><b>Clean up</b> (D4, D5, D7): an OBSOLETE agent whose work item is closed (VERIFIED,
  *       DONE or DROPPED) and that has been idle for {@code qits.workspace.agent.cleanup-idle} is
  *       removed if its worktrees are clean and pushed; otherwise it is handed the cleanup prompt
@@ -119,6 +123,16 @@ public class AgentService {
           + " they were meant to be part of your work, or discard them. Only in special and rare"
           + " cases, if they are blocked somehow, create a new ticket and push them under that"
           + " workId. Say explicitly what you committed, why, and why it has not been released yet.";
+
+  /** {@link #CLEANUP_PROMPT} for an agent whose work item was dropped (qits-1276). */
+  static final String DROPPED_CLEANUP_PROMPT =
+      "Your work item was dropped, so this worktree is about to be removed, but the cleanup check"
+          + " found work in it that never reached the git host. Release nothing for the dropped"
+          + " item. If the work is still wanted, create a new ticket and push it under that"
+          + " workId; otherwise discard it. Say explicitly which you did, and why.";
+
+  /** A dropped item's status word: its agent is made OBSOLETE without a release (qits-1276). */
+  private static final String DROPPED = "DROPPED";
 
   /** Why the sweep leaves an agent whose harness works in the background (qits-1233). */
   private static final String BUSY_IN_BACKGROUND = "busy: its harness has background work running";
@@ -419,10 +433,11 @@ public class AgentService {
   /**
    * The item's ACTIVE agent; else its newest OBSOLETE one when that stands on the same wrapper
    * branch, made ACTIVE again (qits-1217). A release of an agent's wrapper branch makes it OBSOLETE
-   * while its item goes on, and the agent keeps its worktree, session and slot until the item is
-   * closed (VERIFIED, DONE or DROPPED): a second agent on the same wrapper branch would be refused
-   * by its daemon ("already checked out") for as long as the first stands. An OBSOLETE
-   * agent on another wrapper branch is left alone, and the caller creates a new agent.
+   * while its item goes on — so does a drop of an item that is later reopened (qits-1276) — and
+   * the agent keeps its worktree, session and slot until the item is closed (VERIFIED, DONE or
+   * DROPPED) and the sweep removes it: a second agent on the same wrapper branch would be refused
+   * by its daemon ("already checked out") for as long as the first stands. An OBSOLETE agent on
+   * another wrapper branch is left alone, and the caller creates a new agent.
    *
    * <p>Two dispatches that revive at once are settled by {@code uq_agent_worktree_active_work}: the
    * loser answers the winner.
@@ -463,7 +478,7 @@ public class AgentService {
         id ->
             LOG.infof(
                 "Agent %s of work item %s is ACTIVE again: dispatched again on %s after a release"
-                    + " made it obsolete",
+                    + " or a drop made it obsolete",
                 id, workId, wrapperBranch));
     return revived.map(id -> new Found(id, true));
   }
@@ -482,6 +497,12 @@ public class AgentService {
                 () -> {
                   AgentWorktree agent = agents.findById(id);
                   applyFacts(agent, request.facts(), null);
+                  if (isDropped(agent.entityStatus)) {
+                    // Dispatched again, so no longer dropped (qits-1276). Facts without a status
+                    // left the stale word, and the pass would obsolete the agent straight back;
+                    // the item's next mark says what it is now.
+                    agent.entityStatus = null;
+                  }
                   if (found.revived()) {
                     if (instruction != null) {
                       appendTurn(agent, instruction, false);
@@ -640,7 +661,9 @@ public class AgentService {
    * branch it is is marked OBSOLETE (D4). A branch an agent merely pushed, in a submodule, marks
    * nobody: only the wrapper branch's release ends an agent's work. Nothing is removed here; the
    * cleanup sweep does that once the item is closed (VERIFIED, DONE or DROPPED) and the agent idle.
-   * A workspace of the old model standing on the branch is resolved as before (the drain, D20).
+   * A release is not the only way to OBSOLETE: a DROPPED item's agent is made so by the pass
+   * ({@link #obsoleteDropped}). A workspace of the old model standing on the branch is resolved as
+   * before (the drain, D20).
    */
   public Resolution resolveReleasedBranch(
       String repositoryId, String branch, String target, String commit, String result) {
@@ -1064,6 +1087,7 @@ public class AgentService {
       placeQueued();
       yieldBlocked();
       driveRunning();
+      obsoleteDropped();
       cleanUp();
       removeEmptyWorkspaces();
     }
@@ -1689,11 +1713,54 @@ public class AgentService {
   }
 
   /**
+   * Step 5a (qits-1276): every ACTIVE agent whose item is DROPPED is OBSOLETE, as a release would
+   * make it — a dropped item's branch is never released, and only a release used to obsolete an
+   * agent, so a dropped item's agent held its slot for good. Read from the row's own {@code
+   * entityStatus}, so a row that was already DROPPED before this step existed heals on the next
+   * pass. Only DROPPED: a VERIFIED or DONE item's agent still has its own work to release. A
+   * dispatch that revives the agent clears the stale word ({@link #found}), so this step does not
+   * obsolete it again.
+   */
+  void obsoleteDropped() {
+    synchronized (passLock) {
+      List<AgentObsolete> obsolete =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () -> {
+                    Instant now = Instant.now();
+                    List<AgentObsolete> out = new ArrayList<>();
+                    for (AgentWorktree agent : agents.findActiveByEntityStatus(DROPPED)) {
+                      agent.state = AgentState.OBSOLETE;
+                      agent.obsoleteAt = now;
+                      // Nothing was released: no version, no commit.
+                      out.add(
+                          new AgentObsolete(
+                              agent.id.toString(),
+                              agent.workId,
+                              idOf(agent.workspaceId),
+                              agent.repositoryId,
+                              agent.wrapperBranch,
+                              null,
+                              null,
+                              now));
+                    }
+                    return out;
+                  });
+      for (AgentObsolete event : obsolete) {
+        LOG.infof("Work item %s is dropped: agent %s is obsolete", event.workId(), event.agentId());
+        announce(event);
+      }
+    }
+  }
+
+  /**
    * Step 5: OBSOLETE agents of closed items (VERIFIED, DONE or DROPPED), idle long enough, are
    * removed or prompted (D4–D7). One whose daemon reports background work in its harness ({@code
    * busy}) is neither (qits-1233); one its daemon no longer knows is REMOVED. Judged by the item's CURRENT status — the row {@code
    * findLiveByWorkId} returns, which the relay has always kept current — so a stale OBSOLETE row
-   * whose own {@code entityStatus} never caught up still heals.
+   * whose own {@code entityStatus} never caught up still heals. OBSOLETE by a release, or by a drop
+   * of the item (step 5a); a dropped item's agent hears {@link #DROPPED_CLEANUP_PROMPT} and goes
+   * as {@link AgentRemoved#DROPPED_IDLE_CLEAN}.
    */
   void cleanUp() {
     synchronized (passLock) {
@@ -1732,6 +1799,10 @@ public class AgentService {
 
   private static boolean isClosed(String status) {
     return status != null && CLOSING_STATUSES.contains(status.toUpperCase(Locale.ROOT));
+  }
+
+  private static boolean isDropped(String status) {
+    return DROPPED.equalsIgnoreCase(status);
   }
 
   private void cleanUp(AgentWorktree agent, Instant idleBefore, Map<String, String> currentStatus) {
@@ -1821,11 +1892,12 @@ public class AgentService {
     if (check.clean()) {
       AgentDaemon.Outcome removed = port.remove(workspace.id, agent.id.toString(), false);
       if (removed == AgentDaemon.Outcome.OK || removed == AgentDaemon.Outcome.UNKNOWN_AGENT) {
+        boolean dropped = isDropped(status);
         markRemoved(
             agent.id,
-            AgentRemoved.RELEASED_IDLE_CLEAN,
+            dropped ? AgentRemoved.DROPPED_IDLE_CLEAN : AgentRemoved.RELEASED_IDLE_CLEAN,
             removed == AgentDaemon.Outcome.OK,
-            "released, idle and clean");
+            dropped ? "dropped, idle and clean" : "released, idle and clean");
         return;
       }
       if (removed == AgentDaemon.Outcome.BUSY) {
@@ -1855,7 +1927,11 @@ public class AgentService {
           false);
       return;
     }
-    String prompt = CLEANUP_PROMPT + "\n\nWhat the check found: " + describe(check) + ".";
+    String prompt =
+        (isDropped(status) ? DROPPED_CLEANUP_PROMPT : CLEANUP_PROMPT)
+            + "\n\nWhat the check found: "
+            + describe(check)
+            + ".";
     QuarkusTransaction.requiringNew()
         .run(
             () -> {

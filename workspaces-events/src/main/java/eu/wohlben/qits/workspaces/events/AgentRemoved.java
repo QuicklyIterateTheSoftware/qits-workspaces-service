@@ -8,7 +8,7 @@ import java.util.UUID;
  * An agent is REMOVED: the row stays as history, its credential and prompt draft are gone. The last
  * event about an agent, announced once — only by the write that flipped the row.
  *
- * <p><b>{@code reason} is one of five words</b>, a plain {@code String} on the wire:
+ * <p><b>{@code reason} is one of six words</b>, a plain {@code String} on the wire:
  *
  * <ul>
  *   <li>{@link #OBSOLETE_NEVER_PLACED} — obsolete and closed, and it never had a workspace.
@@ -16,6 +16,8 @@ import java.util.UUID;
  *   <li>{@link #UNKNOWN_TO_DAEMON} — its daemon no longer knows it: a removal whose answer never
  *       arrived, or a daemon that lost it.
  *   <li>{@link #RELEASED_IDLE_CLEAN} — released, closed, idle, and its worktrees clean and pushed.
+ *   <li>{@link #DROPPED_IDLE_CLEAN} — its item was dropped, idle, and its worktrees clean and
+ *       pushed (qits-1276).
  *   <li>{@link #DISCARDED} — a person discarded it.
  * </ul>
  *
@@ -48,6 +50,9 @@ public record AgentRemoved(
 
   /** Released, idle and clean. */
   public static final String RELEASED_IDLE_CLEAN = "RELEASED_IDLE_CLEAN";
+
+  /** Its work item dropped, idle and clean. */
+  public static final String DROPPED_IDLE_CLEAN = "DROPPED_IDLE_CLEAN";
 
   /** Discarded by a person. */
   public static final String DISCARDED = "DISCARDED";

@@ -196,12 +196,14 @@ class LifecycleEventsContractTest {
             "OBSOLETE_WORKSPACE_GONE",
             "UNKNOWN_TO_DAEMON",
             "RELEASED_IDLE_CLEAN",
+            "DROPPED_IDLE_CLEAN",
             "DISCARDED"),
         List.of(
             AgentRemoved.OBSOLETE_NEVER_PLACED,
             AgentRemoved.OBSOLETE_WORKSPACE_GONE,
             AgentRemoved.UNKNOWN_TO_DAEMON,
             AgentRemoved.RELEASED_IDLE_CLEAN,
+            AgentRemoved.DROPPED_IDLE_CLEAN,
             AgentRemoved.DISCARDED));
     assertEquals(
         List.of("DAEMON_REMOVE", "DAEMON_YIELD", "KILLED", "SELF"),

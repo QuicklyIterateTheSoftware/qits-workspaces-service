@@ -6,14 +6,17 @@ import java.util.UUID;
 
 /**
  * A release consumed an agent's wrapper branch, so the agent is OBSOLETE: its work item's work is
- * released. Nothing is removed yet — the cleanup sweep does that once the item is closed and the
- * agent idle ({@link AgentRemoved}, or {@link AgentCleanupDeferred} saying why not).
+ * released. A drop of the work item marks it OBSOLETE too (qits-1276): a dropped item's branch is
+ * never released, and its agent would otherwise hold its slot for good. Nothing is removed yet —
+ * the cleanup sweep does that once the item is closed and the agent idle ({@link AgentRemoved}, or
+ * {@link AgentCleanupDeferred} saying why not).
  *
  * <p>One event per agent, so a subscriber waiting on one agent selects it by {@code agentId}.
  * {@code branch} is the released wrapper branch, {@code version} the release that consumed it and
  * {@code commitSha} the released commit, as the release reported them; either of the last two is
- * absent when it did not say. {@code workspaceId} is absent for an agent that was never placed.
- * Everything else is {@link AgentPlaced}'s.
+ * absent when it did not say. For a drop, {@code branch} is the agent's wrapper branch and both
+ * {@code version} and {@code commitSha} are absent: nothing was released. {@code workspaceId} is
+ * absent for an agent that was never placed. Everything else is {@link AgentPlaced}'s.
  */
 public record AgentObsolete(
     UUID eventId,

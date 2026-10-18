@@ -94,6 +94,17 @@ public class AgentWorktreeRepository implements PanacheRepositoryBase<AgentWorkt
         AgentState.ACTIVE);
   }
 
+  /** ACTIVE agents whose item's status is {@code status}, any case, oldest first (qits-1276). */
+  public List<AgentWorktree> findActiveByEntityStatus(String status) {
+    if (status == null || status.isBlank()) {
+      return List.of();
+    }
+    return list(
+        "state = ?1 and upper(entityStatus) = ?2 order by createdAt",
+        AgentState.ACTIVE,
+        status.trim().toUpperCase(java.util.Locale.ROOT));
+  }
+
   /** Every query of the listing door, each filter optional. */
   public List<AgentWorktree> search(String workId, Long workspaceId, AgentState state) {
     StringBuilder q = new StringBuilder("1 = 1");

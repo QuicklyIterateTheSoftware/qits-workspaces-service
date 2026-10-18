@@ -1102,9 +1102,9 @@ payload's top-level fields:
 | `AgentRequeued` | the four (`workspaceId` is the one it left), `reason`, `detail` | `WORKSPACE_FAILED`, `WORKSPACE_GONE` |
 | `AgentYielded` | the four | |
 | `AgentResumed` | the four, `reason` | `TURN_PENDING`, `WORKS_AGAIN` |
-| `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs) — one per agent | |
+| `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs; both absent for a dropped item) — one per agent | |
 | `AgentCleanupDeferred` | the four, `reason`, `detail` | `ITEM_NOT_CLOSED`, `RECENTLY_ACTIVE`, `TURN_PENDING`, `HARNESS_BUSY`, `DAEMON_NOT_CONNECTED`, `NO_DAEMON_CLIENT`, `CHECK_UNANSWERED`, `BUSY_IN_BACKGROUND`, `REMOVAL_UNANSWERED`, `LEFTOVER_WORK_PROMPTED` |
-| `AgentRemoved` | the four, `reason`, `harnessStopped`, `detail` | `OBSOLETE_NEVER_PLACED`, `OBSOLETE_WORKSPACE_GONE`, `UNKNOWN_TO_DAEMON`, `RELEASED_IDLE_CLEAN`, `DISCARDED` |
+| `AgentRemoved` | the four, `reason`, `harnessStopped`, `detail` | `OBSOLETE_NEVER_PLACED`, `OBSOLETE_WORKSPACE_GONE`, `UNKNOWN_TO_DAEMON`, `RELEASED_IDLE_CLEAN`, `DROPPED_IDLE_CLEAN`, `DISCARDED` |
 | `AgentHarnessExited` | the four, `commandId`, `status`, `exitCode`, `stoppedBy` | `stoppedBy`: `DAEMON_REMOVE`, `DAEMON_YIELD`, `KILLED`, `SELF` |
 | `WorkspaceStarted` | `workspaceId`, `repositoryId` | |
 | `WorkspaceFailed` | `workspaceId`, `repositoryId`, `runtimeError` | |
