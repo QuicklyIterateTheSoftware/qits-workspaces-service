@@ -23,6 +23,7 @@ import io.quarkus.oidc.client.OidcClients;
 import io.quarkus.oidc.client.runtime.OidcClientConfig;
 import io.quarkus.oidc.client.runtime.OidcClientsConfig;
 import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
+import jakarta.ws.rs.WebApplicationException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -67,7 +68,7 @@ import java.util.UUID;
  */
 public final class IdpContract {
 
-  // qits-idp's state names (golden masters 2026.1018.142635).
+  // qits-idp's state names (golden masters 2026.1018.165736).
   static final String SYSTEM_CLIENT = "a service client with the system role";
   static final String A_CLIENT = "a commissioned client";
   static final String A_TOKEN = "a commissioned token";
@@ -76,7 +77,6 @@ public final class IdpContract {
   static final String NO_TOKEN = "no commissioned token with the given id";
   static final String PEER_CALLER = "a service client calling its peers";
 
-  /** Not recorded by qits-idp: a commission whose stated Git refs it refuses with 400. */
   static final String REFUSES_GIT_REFS = "a service client whose stated Git refs are refused";
 
   static final Trigger RECONCILE = Trigger.schedule("AgentService.reconcile");
@@ -328,19 +328,32 @@ public final class IdpContract {
                               commissionerAgainst(url, params)
                                   .updateTokenGitRefs(
                                       params.get("tokenId"), List.of("refs/heads/ws/7")))),
-              // --- pending, and recorded nowhere yet --------------------------------------------
-              // A commission whose stated Git refs qits-idp refuses (400): the commissioner asks
-              // again with gitRefs: [] and fails closed. Both requests are this row's.
+              // A commission whose stated Git refs qits-idp refuses: 400, the answer the commissioner
+              // tells apart from every other refusal (IdpCredentialCommissioner.status) to ask again
+              // with gitRefs: [] and fail closed. The row is that first request and the status it
+              // reads, made through the commissioner's own client; the retry is the system-role
+              // commission above. The refused ref is the state's.
               ContractRow.of(
-                      RECONCILE,
-                      REFUSES_GIT_REFS,
-                      "commissionClient",
-                      basic(workspaceCommission("7")),
-                      List.of(),
-                      (url, params) ->
-                          commissionerAgainst(url, params)
-                              .commission(7L, "a-project", List.of("refs/heads/ws/7"), false))
-                  .waiting()));
+                  RECONCILE,
+                  REFUSES_GIT_REFS,
+                  "commissionClient",
+                  basic(refusedCommission()),
+                  List.of(),
+                  (url, params) -> {
+                    IdpCredentialCommissioner commissioner = commissionerAgainst(url, params);
+                    WebApplicationException refused =
+                        assertThrows(
+                            WebApplicationException.class,
+                            () ->
+                                commissioner.clients.commission(
+                                    IdpCredentialCommissioner.basic(pair(params)[0], pair(params)[1]),
+                                    new IdpClients.CommissionRequest(
+                                        "workspace",
+                                        "7",
+                                        Map.of("project", "a-project"),
+                                        List.of(params.get("refusedGitRef")))));
+                    assertEquals(400, IdpCredentialCommissioner.status(refused));
+                  })));
 
   private IdpContract() {}
 
@@ -380,6 +393,16 @@ public final class IdpContract {
     return new PactDslJsonBody()
         .stringValue("contextKind", IdpRunnerCommissioner.REGISTRATION_KIND)
         .stringValue("contextId", RUNNER.toString());
+  }
+
+  /** A workspace commission stating the one ref the state refuses, as an expression of its param. */
+  private static DslPart refusedCommission() {
+    PactDslJsonBody body =
+        new PactDslJsonBody().stringValue("contextKind", "workspace").stringValue("contextId", "7");
+    body.object("claims").stringType("project", "a-project").closeObject();
+    return body.array("gitRefs")
+        .valueFromProviderState("${refusedGitRef}", "refs/tags/contract")
+        .closeArray();
   }
 
   private static DslPart gitRefsBody() {

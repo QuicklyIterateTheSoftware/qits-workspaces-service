@@ -18,6 +18,172 @@
         }
       },
       "description": "AgentService.reconcile: agentCleanupCheck",
+      "key": "d9135ea7",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace daemon with a signed-in harness",
+          "params": {
+            "agentId": "00000000-0000-4000-8000-0000000000a1",
+            "workspaceRowId": "1"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/workspaces/container/${workspaceRowId}/agent-worktrees/${agentId}/cleanup-check",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/workspaces/container/1/agent-worktrees/00000000-0000-4000-8000-0000000000a1/cleanup-check"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "message": "Agent 00000000-0000-4000-8000-0000000000a1 is not started in this workspace; POST agent-worktrees starts it"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.message": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 404
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspace-daemon",
+            "operationId": "agentCleanupCheck"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: agentCleanupCheck",
+      "key": "29791df2",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace daemon with an agent busy in the background",
+          "params": {
+            "agentId": "00000000-0000-4000-8000-0000000000a1",
+            "commandId": "00000000-0000-4000-8000-000000000100",
+            "workspaceRowId": "1"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/workspaces/container/${workspaceRowId}/agent-worktrees/${agentId}/cleanup-check",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/workspaces/container/1/agent-worktrees/00000000-0000-4000-8000-0000000000a1/cleanup-check"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "busy": true,
+            "clean": true,
+            "dirty": [],
+            "unpushed": []
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.busy": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.clean": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspace-daemon",
+            "operationId": "agentCleanupCheck"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: agentCleanupCheck",
       "key": "fecc7170",
       "pending": false,
       "providerStates": [
@@ -89,6 +255,181 @@
           }
         },
         "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspace-daemon",
+            "operationId": "agentCleanupCheck"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: agentCleanupCheck",
+      "key": "daa61994",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace daemon with an agent whose worktree holds uncommitted work",
+          "params": {
+            "agentId": "00000000-0000-4000-8000-0000000000a1",
+            "commandId": "00000000-0000-4000-8000-000000000100",
+            "workspaceRowId": "1"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/workspaces/container/${workspaceRowId}/agent-worktrees/${agentId}/cleanup-check",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/workspaces/container/1/agent-worktrees/00000000-0000-4000-8000-0000000000a1/cleanup-check"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "busy": false,
+            "clean": false,
+            "dirty": [
+              "wrapper"
+            ],
+            "unpushed": []
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.busy": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.clean": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.dirty": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "max": 1,
+                  "min": 1
+                }
+              ]
+            },
+            "$.dirty[*]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspace-daemon",
+            "operationId": "deliverAgentTurn"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: deliverAgentTurn",
+      "key": "b7d8aa27",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace daemon with a signed-in harness",
+          "params": {
+            "agentId": "00000000-0000-4000-8000-0000000000a1",
+            "workspaceRowId": "1"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "text": "Carry on."
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/workspaces/container/${workspaceRowId}/agent-worktrees/${agentId}/turn",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.text": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/workspaces/container/1/agent-worktrees/00000000-0000-4000-8000-0000000000a1/turn"
+      },
+      "response": {
+        "status": 404
       },
       "type": "Synchronous/HTTP"
     },
@@ -174,6 +515,135 @@
         }
       },
       "description": "AgentService.reconcile: removeAgentWorktree",
+      "key": "e96efab4",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace daemon with a signed-in harness",
+          "params": {
+            "agentId": "00000000-0000-4000-8000-0000000000a1",
+            "workspaceRowId": "1"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/workspaces/container/${workspaceRowId}/agent-worktrees/${agentId}",
+            "type": "ProviderState"
+          }
+        },
+        "method": "DELETE",
+        "path": "/workspaces/container/1/agent-worktrees/00000000-0000-4000-8000-0000000000a1"
+      },
+      "response": {
+        "status": 404
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspace-daemon",
+            "operationId": "removeAgentWorktree"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: removeAgentWorktree",
+      "key": "39d4b9ff",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace daemon with an agent busy in the background",
+          "params": {
+            "agentId": "00000000-0000-4000-8000-0000000000a1",
+            "commandId": "00000000-0000-4000-8000-000000000100",
+            "workspaceRowId": "1"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/workspaces/container/${workspaceRowId}/agent-worktrees/${agentId}",
+            "type": "ProviderState"
+          }
+        },
+        "method": "DELETE",
+        "path": "/workspaces/container/1/agent-worktrees/00000000-0000-4000-8000-0000000000a1"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "busy": true,
+            "clean": true
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.busy": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.clean": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 409
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspace-daemon",
+            "operationId": "removeAgentWorktree"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: removeAgentWorktree",
       "key": "f280d7d",
       "pending": false,
       "providerStates": [
@@ -199,6 +669,177 @@
       },
       "response": {
         "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspace-daemon",
+            "operationId": "removeAgentWorktree"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: removeAgentWorktree",
+      "key": "eb01b5a1",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace daemon with an agent whose worktree holds uncommitted work",
+          "params": {
+            "agentId": "00000000-0000-4000-8000-0000000000a1",
+            "commandId": "00000000-0000-4000-8000-000000000100",
+            "workspaceRowId": "1"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/workspaces/container/${workspaceRowId}/agent-worktrees/${agentId}",
+            "type": "ProviderState"
+          }
+        },
+        "method": "DELETE",
+        "path": "/workspaces/container/1/agent-worktrees/00000000-0000-4000-8000-0000000000a1"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "busy": false,
+            "clean": false
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.busy": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.clean": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 409
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspace-daemon",
+            "operationId": "setAgentEntity"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: setAgentEntity",
+      "key": "a3be670a",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace daemon with a signed-in harness",
+          "params": {
+            "agentId": "00000000-0000-4000-8000-0000000000a1",
+            "workspaceRowId": "1"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "blocked": false,
+            "status": "IMPLEMENTING",
+            "title": "Fix the login"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/workspaces/container/${workspaceRowId}/agent-worktrees/${agentId}/entity",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.blocked": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.title": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/workspaces/container/1/agent-worktrees/00000000-0000-4000-8000-0000000000a1/entity"
+      },
+      "response": {
+        "status": 404
       },
       "type": "Synchronous/HTTP"
     },
@@ -284,6 +925,112 @@
       },
       "response": {
         "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspace-daemon",
+            "operationId": "startAgentWorktree"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: startAgentWorktree",
+      "key": "29e52a8a",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace daemon with a harness nobody signed in",
+          "params": {
+            "agentId": "00000000-0000-4000-8000-0000000000a1",
+            "workspaceRowId": "1"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "agentId": "00000000-0000-4000-8000-0000000000a1",
+            "entityId": "contract-00000001-10",
+            "env": {},
+            "harness": "CLAUDE",
+            "instruction": "Work the ticket.",
+            "mode": "INTERACTIVE",
+            "surface": "ticket.dispatch",
+            "workId": "00000000-0000-4000-8000-000000000001",
+            "wrapperBranch": "ticket/contract-00000001-10"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/workspaces/container/${workspaceRowId}/agent-worktrees",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.agentId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.entityId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.instruction": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.workId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.wrapperBranch": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/workspaces/container/1/agent-worktrees"
+      },
+      "response": {
+        "status": 409
       },
       "type": "Synchronous/HTTP"
     },
@@ -453,6 +1200,54 @@
             }
           }
         },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspace-daemon",
+            "operationId": "removeAgentWorktree"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "discardAgent"
+          }
+        }
+      },
+      "description": "discardAgent: removeAgentWorktree",
+      "key": "b24b8169",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace daemon with an agent whose worktree holds files",
+          "params": {
+            "agentId": "00000000-0000-4000-8000-0000000000a1",
+            "commandId": "00000000-0000-4000-8000-000000000100",
+            "workspaceRowId": "1"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/workspaces/container/${workspaceRowId}/agent-worktrees/${agentId}",
+            "type": "ProviderState"
+          }
+        },
+        "method": "DELETE",
+        "path": "/workspaces/container/1/agent-worktrees/00000000-0000-4000-8000-0000000000a1",
+        "query": {
+          "force": [
+            "true"
+          ]
+        }
+      },
+      "response": {
         "status": 200
       },
       "type": "Synchronous/HTTP"
