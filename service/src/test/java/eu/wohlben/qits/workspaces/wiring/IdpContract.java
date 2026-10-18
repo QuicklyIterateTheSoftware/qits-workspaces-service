@@ -23,12 +23,15 @@ import io.quarkus.oidc.client.OidcClients;
 import io.quarkus.oidc.client.runtime.OidcClientConfig;
 import io.quarkus.oidc.client.runtime.OidcClientsConfig;
 import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -67,7 +70,7 @@ import java.util.UUID;
  */
 public final class IdpContract {
 
-  // qits-idp's state names (golden masters 2026.1018.142635).
+  // qits-idp's state names (golden masters 2026.1018.165736).
   static final String SYSTEM_CLIENT = "a service client with the system role";
   static final String A_CLIENT = "a commissioned client";
   static final String A_TOKEN = "a commissioned token";
@@ -76,7 +79,7 @@ public final class IdpContract {
   static final String NO_TOKEN = "no commissioned token with the given id";
   static final String PEER_CALLER = "a service client calling its peers";
 
-  /** Not recorded by qits-idp: a commission whose stated Git refs it refuses with 400. */
+  /** A commission whose stated Git refs qits-idp refuses with 400. */
   static final String REFUSES_GIT_REFS = "a service client whose stated Git refs are refused";
 
   static final Trigger RECONCILE = Trigger.schedule("AgentService.reconcile");
@@ -328,19 +331,30 @@ public final class IdpContract {
                               commissionerAgainst(url, params)
                                   .updateTokenGitRefs(
                                       params.get("tokenId"), List.of("refs/heads/ws/7")))),
-              // --- pending, and recorded nowhere yet --------------------------------------------
+              // --- recorded since qits-idp's golden masters 2026.1018.165736 ----------------------
               // A commission whose stated Git refs qits-idp refuses (400): the commissioner asks
-              // again with gitRefs: [] and fails closed. Both requests are this row's.
+              // again with gitRefs: [] and fails closed. Both requests are this row's, but only the
+              // refused one is qits-idp's in this state: the pact binds it (the 400 is read by its
+              // status alone), and the ask again is answered here and checked to push nothing.
               ContractRow.of(
-                      RECONCILE,
-                      REFUSES_GIT_REFS,
-                      "commissionClient",
-                      basic(workspaceCommission("7")),
-                      List.of(),
-                      (url, params) ->
-                          commissionerAgainst(url, params)
-                              .commission(7L, "a-project", List.of("refs/heads/ws/7"), false))
-                  .waiting()));
+                  RECONCILE,
+                  REFUSES_GIT_REFS,
+                  "commissionClient",
+                  basic(refusedCommission("7")),
+                  List.of(),
+                  (url, params) -> {
+                    IdpCredentialCommissioner commissioner = commissionerAgainst(url, params);
+                    List<IdpClients.CommissionRequest> askedAgain = new ArrayList<>();
+                    commissioner.clients = refusedOnce(commissioner.clients, askedAgain);
+                    Optional<WorkspaceCredential> issued =
+                        commissioner.commission(
+                            7L, "a-project", List.of(params.get("refusedGitRef")), false);
+                    assertEquals(
+                        List.of(List.of()),
+                        askedAgain.stream().map(IdpClients.CommissionRequest::gitRefs).toList(),
+                        "asked again once, pushing nothing");
+                    assertTrue(issued.isPresent(), "the workspace still launches");
+                  })));
 
   private IdpContract() {}
 
@@ -357,6 +371,48 @@ public final class IdpContract {
         new PactDslJsonBody().stringValue("contextKind", "workspace").stringValue("contextId", rowId);
     body.object("claims").stringType("project", "a-project").closeObject();
     return body.array("gitRefs").stringType("refs/heads/ws/7").closeArray();
+  }
+
+  /**
+   * {@link #workspaceCommission} stating the ref qits-idp's state refuses: its {@code refusedGitRef}
+   * param, so the verifier sends what the state returned.
+   */
+  private static DslPart refusedCommission(String rowId) {
+    PactDslJsonBody body =
+        new PactDslJsonBody().stringValue("contextKind", "workspace").stringValue("contextId", rowId);
+    body.object("claims").stringType("project", "a-project").closeObject();
+    return body.array("gitRefs")
+        .valueFromProviderState(
+            "${refusedGitRef}",
+            GoldenMasters.params(GoldenMasters.IDP, REFUSES_GIT_REFS).get("refusedGitRef"))
+        .closeArray();
+  }
+
+  /**
+   * {@code mock} for the first commission, which qits-idp's state refuses; every commission after it
+   * is collected in {@code askedAgain} and answered with a credential, never reaching the mock.
+   */
+  private static IdpClients refusedOnce(
+      IdpClients mock, List<IdpClients.CommissionRequest> askedAgain) {
+    boolean[] refused = {false};
+    return (IdpClients)
+        Proxy.newProxyInstance(
+            IdpClients.class.getClassLoader(),
+            new Class<?>[] {IdpClients.class},
+            (proxy, method, args) -> {
+              if (method.getName().equals("commission") && refused[0]) {
+                askedAgain.add((IdpClients.CommissionRequest) args[1]);
+                return new IdpClients.CommissionResponse("asked-again", "asked-again-secret");
+              }
+              if (method.getName().equals("commission")) {
+                refused[0] = true;
+              }
+              try {
+                return method.invoke(mock, args);
+              } catch (InvocationTargetException e) {
+                throw e.getCause();
+              }
+            });
   }
 
   /** An agent's token: the workspace kind, {@code agent-<id>}, its project and agent claims. */

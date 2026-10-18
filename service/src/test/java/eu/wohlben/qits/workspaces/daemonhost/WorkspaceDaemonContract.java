@@ -39,8 +39,7 @@ import java.util.Map;
  */
 public final class WorkspaceDaemonContract {
 
-  // qits-workspace-daemon's states (golden masters 2026.1014.182127; the pending ones are
-  // qits-workspace-daemon-rr-126's).
+  // qits-workspace-daemon's states (golden masters 2026.1018.152111).
   static final String SIGNED_IN = "a workspace daemon with a signed-in harness";
   static final String AGENT_RUNNING = "a workspace daemon with an agent running";
   static final String SIGNED_OUT = "a workspace daemon with a harness nobody signed in";
@@ -98,106 +97,96 @@ public final class WorkspaceDaemonContract {
                   List.of(),
                   (client, row, agentId) ->
                       assertEquals(AgentDaemon.Outcome.OK, client.remove(row, agentId, false))),
-              // --- waiting for qits-workspace-daemon-rr-126 -----------------------------------
+              // --- recorded since qits-workspace-daemon's golden masters 2026.1018.152111 --------
               row(
-                      SIGNED_OUT,
-                      "startAgentWorktree",
-                      startBody(),
-                      List.of(),
-                      (client, row, agentId) ->
-                          assertEquals(
-                              AgentDaemon.Outcome.REFUSED, client.start(row, start(agentId)).outcome()))
-                  .waiting(),
+                  SIGNED_OUT,
+                  "startAgentWorktree",
+                  startBody(),
+                  List.of(),
+                  (client, row, agentId) ->
+                      assertEquals(
+                          AgentDaemon.Outcome.REFUSED, client.start(row, start(agentId)).outcome())),
               row(
-                      SIGNED_IN,
-                      "deliverAgentTurn",
-                      turnBody(),
-                      List.of(),
-                      (client, row, agentId) ->
-                          assertEquals(
-                              AgentDaemon.Outcome.UNKNOWN_AGENT, client.turn(row, agentId, "Carry on.")))
-                  .waiting(),
+                  SIGNED_IN,
+                  "deliverAgentTurn",
+                  turnBody(),
+                  List.of(),
+                  (client, row, agentId) ->
+                      assertEquals(
+                          AgentDaemon.Outcome.UNKNOWN_AGENT, client.turn(row, agentId, "Carry on."))),
               row(
-                      SIGNED_IN,
-                      "setAgentEntity",
-                      entityBody(),
-                      List.of(),
-                      (client, row, agentId) ->
-                          assertEquals(
-                              AgentDaemon.Outcome.UNKNOWN_AGENT,
-                              client.entity(row, agentId, facts(), null)))
-                  .waiting(),
+                  SIGNED_IN,
+                  "setAgentEntity",
+                  entityBody(),
+                  List.of(),
+                  (client, row, agentId) ->
+                      assertEquals(
+                          AgentDaemon.Outcome.UNKNOWN_AGENT,
+                          client.entity(row, agentId, facts(), null))),
               // The 404 is the daemon not knowing the agent, told apart from "No such endpoint" by
               // its message: the pact binds the message's presence, the client reads its value.
               row(
-                      SIGNED_IN,
-                      "agentCleanupCheck",
-                      null,
-                      List.of("$.message"),
-                      (client, row, agentId) ->
-                          assertEquals(
-                              AgentDaemon.Outcome.UNKNOWN_AGENT,
-                              client.cleanupCheck(row, agentId).outcome()))
-                  .waiting(),
+                  SIGNED_IN,
+                  "agentCleanupCheck",
+                  null,
+                  List.of("$.message"),
+                  (client, row, agentId) ->
+                      assertEquals(
+                          AgentDaemon.Outcome.UNKNOWN_AGENT,
+                          client.cleanupCheck(row, agentId).outcome())),
               row(
-                      SIGNED_IN,
-                      "removeAgentWorktree",
-                      null,
-                      List.of(),
-                      (client, row, agentId) ->
-                          assertEquals(
-                              AgentDaemon.Outcome.UNKNOWN_AGENT, client.remove(row, agentId, false)))
-                  .waiting(),
+                  SIGNED_IN,
+                  "removeAgentWorktree",
+                  null,
+                  List.of(),
+                  (client, row, agentId) ->
+                      assertEquals(
+                          AgentDaemon.Outcome.UNKNOWN_AGENT, client.remove(row, agentId, false))),
               row(
-                      LEFTOVER_WORK,
-                      "agentCleanupCheck",
-                      null,
-                      List.of("$.clean", "$.dirty", "$.unpushed", "$.busy"),
-                      (client, row, agentId) -> {
-                        AgentDaemon.CleanupAnswer answer = client.cleanupCheck(row, agentId);
-                        assertTrue(answer.isFound(), String.valueOf(answer));
-                        assertFalse(answer.check().clean(), "work would be lost");
-                        assertFalse(answer.check().dirty().isEmpty(), "the dirty worktree is named");
-                      })
-                  .waiting(),
+                  LEFTOVER_WORK,
+                  "agentCleanupCheck",
+                  null,
+                  List.of("$.clean", "$.dirty", "$.unpushed", "$.busy"),
+                  (client, row, agentId) -> {
+                    AgentDaemon.CleanupAnswer answer = client.cleanupCheck(row, agentId);
+                    assertTrue(answer.isFound(), String.valueOf(answer));
+                    assertFalse(answer.check().clean(), "work would be lost");
+                    assertFalse(answer.check().dirty().isEmpty(), "the dirty worktree is named");
+                  }),
               row(
-                      LEFTOVER_WORK,
-                      "removeAgentWorktree",
-                      null,
-                      List.of("$.clean", "$.busy"),
-                      (client, row, agentId) ->
-                          assertEquals(AgentDaemon.Outcome.REFUSED, client.remove(row, agentId, false)))
-                  .waiting(),
+                  LEFTOVER_WORK,
+                  "removeAgentWorktree",
+                  null,
+                  List.of("$.clean", "$.busy"),
+                  (client, row, agentId) ->
+                      assertEquals(AgentDaemon.Outcome.REFUSED, client.remove(row, agentId, false))),
               row(
-                      BUSY,
-                      "agentCleanupCheck",
-                      null,
-                      List.of("$.clean", "$.dirty", "$.unpushed", "$.busy"),
-                      (client, row, agentId) -> {
-                        AgentDaemon.CleanupAnswer answer = client.cleanupCheck(row, agentId);
-                        assertTrue(answer.isFound(), String.valueOf(answer));
-                        assertTrue(answer.check().busy(), "the harness is still working");
-                      })
-                  .waiting(),
+                  BUSY,
+                  "agentCleanupCheck",
+                  null,
+                  List.of("$.clean", "$.dirty", "$.unpushed", "$.busy"),
+                  (client, row, agentId) -> {
+                    AgentDaemon.CleanupAnswer answer = client.cleanupCheck(row, agentId);
+                    assertTrue(answer.isFound(), String.valueOf(answer));
+                    assertTrue(answer.check().busy(), "the harness is still working");
+                  }),
               row(
-                      BUSY,
-                      "removeAgentWorktree",
-                      null,
-                      List.of("$.clean", "$.busy"),
-                      (client, row, agentId) ->
-                          assertEquals(AgentDaemon.Outcome.BUSY, client.remove(row, agentId, false)))
-                  .waiting(),
+                  BUSY,
+                  "removeAgentWorktree",
+                  null,
+                  List.of("$.clean", "$.busy"),
+                  (client, row, agentId) ->
+                      assertEquals(AgentDaemon.Outcome.BUSY, client.remove(row, agentId, false))),
               // A person's forced discard (discardAgent with force) removes whatever is left.
               ContractRow.of(
-                      Trigger.operation("discardAgent"),
-                      WITH_FILES,
-                      "removeAgentWorktree",
-                      Request.NONE,
-                      List.of(),
-                      call(
-                          (client, row, agentId) ->
-                              assertEquals(AgentDaemon.Outcome.OK, client.remove(row, agentId, true))))
-                  .waiting()));
+                  Trigger.operation("discardAgent"),
+                  WITH_FILES,
+                  "removeAgentWorktree",
+                  Request.NONE,
+                  List.of(),
+                  call(
+                      (client, row, agentId) ->
+                          assertEquals(AgentDaemon.Outcome.OK, client.remove(row, agentId, true))))));
 
   private WorkspaceDaemonContract() {}
 

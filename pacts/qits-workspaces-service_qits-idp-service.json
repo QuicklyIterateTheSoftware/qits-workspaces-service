@@ -18,6 +18,101 @@
         }
       },
       "description": "AgentService.reconcile: commissionClient",
+      "key": "c86af197",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a service client whose stated Git refs are refused",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "clientSecret": "test-broad-secret",
+            "refusedGitRef": "refs/tags/contract"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "claims": {
+              "project": "a-project"
+            },
+            "contextId": "7",
+            "contextKind": "workspace",
+            "gitRefs": [
+              "refs/tags/contract"
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "body": {
+            "$.gitRefs[0]": {
+              "dataType": "STRING",
+              "expression": "${refusedGitRef}",
+              "type": "ProviderState"
+            }
+          },
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.claims.project": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.gitRefs[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/idp/api/clients"
+      },
+      "response": {
+        "status": 400
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionClient"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: commissionClient",
       "key": "6aee462a",
       "pending": false,
       "providerStates": [
