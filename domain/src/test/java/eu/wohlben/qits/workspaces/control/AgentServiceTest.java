@@ -1356,10 +1356,124 @@ public class AgentServiceTest {
     service.reconcile();
     service.onActivity(row(agentId).workspaceId, agentId, Boolean.FALSE, "s-1", "UserPromptSubmit", System.currentTimeMillis());
 
-    List<FakeAgentWaitingReporter.Report> reports = reporter.reportsFor("w-blocked");
+    List<FakeAgentWaitingReporter.Report> reports =
+        reporter.reportsFor("w-blocked").stream()
+            .filter(r -> !AgentService.CAUSE_DISPATCHED.equals(r.cause()))
+            .toList();
     assertFalse(reports.isEmpty());
     assertFalse(reports.get(reports.size() - 1).waiting(), "the last word qits-projects heard");
     liveness.markDead(slot);
+  }
+
+  /** A work item id no other test (or earlier run of this one) reported on. */
+  private static String uniqueWorkId(String prefix) {
+    return prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
+  }
+
+  private List<FakeAgentWaitingReporter.Report> reportsWithCause(String workId, String cause) {
+    return reporter.reportsFor(workId).stream().filter(r -> cause.equals(r.cause())).toList();
+  }
+
+  private void setWaiting(String agentId, String sessionId) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agents.findById(UUID.fromString(agentId));
+              row.waitingSince = Instant.now();
+              row.sessionId = sessionId;
+            });
+  }
+
+  @Test
+  void discardingAWaitingAgentTellsQitsProjectsItNoLongerWaitsOnce() {
+    // qits-1274: a REMOVED agent's frames are ignored, so its wait kept the item blocked for good.
+    String workId = uniqueWorkId("w-removed-waiting");
+    String agentId = dispatch(workId, false, null).agent().agentId();
+    service.onActivity(
+        row(agentId).workspaceId, agentId, Boolean.TRUE, "s-rm", "Stop", System.currentTimeMillis());
+    assertNotNull(row(agentId).waitingSince);
+
+    service.discard(UUID.fromString(agentId), true);
+
+    List<FakeAgentWaitingReporter.Report> removed = reportsWithCause(workId, AgentService.CAUSE_REMOVED);
+    assertEquals(1, removed.size(), removed.toString());
+    assertFalse(removed.get(0).waiting());
+    assertEquals("s-rm", removed.get(0).sessionId());
+    assertNull(row(agentId).waitingSince);
+    List<FakeAgentWaitingReporter.Report> all = reporter.reportsFor(workId);
+    assertEquals(AgentService.CAUSE_REMOVED, all.get(all.size() - 1).cause(), "the last word");
+
+    int before = reporter.reportsFor(workId).size();
+    service.discard(UUID.fromString(agentId), true);
+    assertEquals(before, reporter.reportsFor(workId).size(), "a second discard says nothing");
+  }
+
+  @Test
+  void discardingAnAgentThatDoesNotWaitReportsNothing() {
+    String workId = uniqueWorkId("w-removed-idle");
+    String agentId = dispatch(workId, false, null).agent().agentId();
+    int before = reporter.reportsFor(workId).size();
+
+    service.discard(UUID.fromString(agentId), true);
+
+    assertEquals(before, reporter.reportsFor(workId).size());
+    assertTrue(reportsWithCause(workId, AgentService.CAUSE_REMOVED).isEmpty());
+  }
+
+  @Test
+  void removingAWaitingObsoleteAgentLeavesTheCurrentAgentsWaitStanding() {
+    // The cleanup of an OBSOLETE agent must not clear the wait of the agent working the item now.
+    String workId = uniqueWorkId("w-removed-other");
+    String obsoleteId = dispatch(workId, false, null).agent().agentId();
+    releaseWrapperOf(obsoleteId);
+    String activeId =
+        service
+            .dispatch(
+                new AgentService.AgentRequest(
+                    repoId,
+                    "epic/" + workId,
+                    workId,
+                    workId,
+                    null,
+                    workId,
+                    false,
+                    null,
+                    "go",
+                    new EntityFacts("A title", "REFINED", false)))
+            .agent()
+            .agentId();
+    assertNotEquals(obsoleteId, activeId);
+    setWaiting(obsoleteId, "s-old");
+    setWaiting(activeId, "s-new");
+
+    service.discard(UUID.fromString(obsoleteId), true);
+
+    assertEquals(AgentState.REMOVED, row(obsoleteId).state);
+    assertTrue(reportsWithCause(workId, AgentService.CAUSE_REMOVED).isEmpty());
+    assertNotNull(row(activeId).waitingSince, "the current agent still waits");
+
+    service.discard(UUID.fromString(activeId), true);
+    List<FakeAgentWaitingReporter.Report> removed = reportsWithCause(workId, AgentService.CAUSE_REMOVED);
+    assertEquals(1, removed.size(), "the last waiting agent going ends the wait");
+    assertEquals("s-new", removed.get(0).sessionId());
+  }
+
+  @Test
+  void aFreshDispatchTellsQitsProjectsTheItemsAgentDoesNotWaitAndARepressSaysNothing() {
+    // qits-1274: a new agent inherited the wait of the item's previous one.
+    String workId = uniqueWorkId("w-dispatched");
+    AgentService.Dispatch first = dispatch(workId, false, null);
+    assertTrue(first.fresh());
+
+    List<FakeAgentWaitingReporter.Report> reports = reporter.reportsFor(workId);
+    assertEquals(1, reports.size(), reports.toString());
+    assertFalse(reports.get(0).waiting());
+    assertEquals(AgentService.CAUSE_DISPATCHED, reports.get(0).cause());
+    assertNull(reports.get(0).waitingOn());
+
+    AgentService.Dispatch again = dispatch(workId, false, null);
+    assertFalse(again.fresh());
+    assertEquals(1, reporter.reportsFor(workId).size(), "a re-press reports nothing more");
   }
 
   @Test

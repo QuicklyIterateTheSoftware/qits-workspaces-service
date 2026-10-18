@@ -239,6 +239,18 @@ public class AgentService {
   /** The cause relayed to qits-projects when a turn is typed into an agent that was waiting. */
   static final String CAUSE_TURN = "TurnDelivered";
 
+  /**
+   * The cause relayed to qits-projects when a waiting agent is removed and no other live agent of
+   * its item waits (qits-1274): a REMOVED agent's frames are ignored, so its wait would stand.
+   */
+  static final String CAUSE_REMOVED = "AgentRemoved";
+
+  /**
+   * The cause relayed to qits-projects when a fresh agent is dispatched on an item (qits-1274): it
+   * has not waited yet, and must not inherit the previous agent's wait.
+   */
+  static final String CAUSE_DISPATCHED = "AgentDispatched";
+
   /** How long an OBSOLETE agent must be idle before the cleanup sweep looks at it (D4). */
   @ConfigProperty(name = "qits.workspace.agent.cleanup-idle", defaultValue = "PT30S")
   Duration cleanupIdle;
@@ -331,7 +343,8 @@ public class AgentService {
    * idempotently. An ACTIVE agent of the item is the answer ({@code fresh:false}); so is its newest
    * OBSOLETE agent on the same wrapper branch, made ACTIVE again and told the instruction
    * (qits-1217); otherwise one is created and placed. Never a 409 for an existing agent: the caller
-   * presses this to reach a state.
+   * presses this to reach a state. A freshly created agent is relayed to qits-projects as not
+   * waiting ({@link #CAUSE_DISPATCHED}, qits-1274), so the item does not keep a former agent's wait.
    *
    * @throws NotFoundException no such repository; nothing is created
    * @throws BadRequestException no work item, or a wrapper branch git will not take
@@ -388,6 +401,7 @@ public class AgentService {
       return found(winner.get(), request);
     }
     LOG.infof("Agent %s created for work item %s on %s", id, workId, wrapperBranch);
+    waits.relayActivity(workId, id, false, CAUSE_DISPATCHED, null, Instant.now());
     mintToken(id);
     placeQueued();
     kick();
@@ -1977,12 +1991,17 @@ public class AgentService {
     return byWorkspace;
   }
 
-  /** What a removal that flipped the row hands on: the token to delete, and the event. */
-  private record Removal(String tokenId, AgentRemoved event) {}
+  /**
+   * What a removal that flipped the row hands on: the token to delete, the event, and whether its
+   * wait is relayed as over (with the session it was in).
+   */
+  private record Removal(String tokenId, AgentRemoved event, boolean relayNotWaiting, String sessionId) {}
 
   /**
    * REMOVED: the row stays as history; the credential and the prompt draft go. Announced ({@link
-   * AgentRemoved}) only by the call that flipped the row, after its commit.
+   * AgentRemoved}) only by the call that flipped the row, after its commit. A waiting agent's wait
+   * ends with it: relayed to qits-projects as not waiting ({@link #CAUSE_REMOVED}, qits-1274), unless
+   * another live agent of the item waits — removing an OBSOLETE agent never clears the current one's.
    *
    * @param reason one of {@link AgentRemoved}'s reason words
    * @param harnessStopped whether the daemon answered this removal OK
@@ -1998,6 +2017,12 @@ public class AgentService {
                     return null;
                   }
                   String held = row.commissionedTokenId;
+                  boolean wasWaiting = row.waitingSince != null;
+                  row.waitingSince = null;
+                  boolean relay =
+                      wasWaiting
+                          && agents.findLiveAllByWorkId(row.workId).stream()
+                              .noneMatch(other -> !other.id.equals(id) && other.waitingSince != null);
                   row.state = AgentState.REMOVED;
                   row.removedAt = Instant.now();
                   if (row.runState == AgentRunState.RUNNING) {
@@ -2019,7 +2044,9 @@ public class AgentService {
                           reason,
                           harnessStopped,
                           detail,
-                          row.removedAt));
+                          row.removedAt),
+                      relay,
+                      row.sessionId);
                 });
     started.remove(id);
     pendingSince.remove(id);
@@ -2031,6 +2058,10 @@ public class AgentService {
     LOG.infof("Agent %s removed: %s", id, detail);
     announce(removal.event());
     deleteToken(removal.tokenId());
+    if (removal.relayNotWaiting()) {
+      waits.relayActivity(
+          removal.event().workId(), id, false, CAUSE_REMOVED, removal.sessionId(), Instant.now());
+    }
   }
 
   /**

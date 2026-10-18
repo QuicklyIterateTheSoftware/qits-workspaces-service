@@ -28,7 +28,9 @@ public interface AgentWaitingReporter {
    * @param cause the hook event that said so ({@code Stop}, {@code Notification}, {@code
    *     SessionEnd}, {@code OomKilled}, …), or null when the frame carried none; for a declared
    *     wait (qits-1153) {@code Wait} (waiting on {@code waitingOn}), {@code WaitMatched}, {@code
-   *     WaitTimedOut} or {@code WaitCancelled}
+   *     WaitTimedOut} or {@code WaitCancelled}; {@code TurnDelivered} when a turn is typed into a
+   *     waiting agent, and {@code AgentRemoved} or {@code AgentDispatched} when an agent leaves or
+   *     joins the item (qits-1274)
    * @param waitingOn the labels of the agent's OPEN waits while it waits on them; null otherwise
    *     (qits-1153, W5: the item is waiting on that, not blocked)
    * @param sessionId the agent session the frame was about, or null
