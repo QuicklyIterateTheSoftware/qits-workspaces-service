@@ -83,7 +83,7 @@ public class DaemonAgentBindingCheck implements HttpUpgradeCheck {
   }
 
   /** The token's {@code sub}; the principal's name when the identity is not a JWT. */
-  static String subjectOf(SecurityIdentity identity) {
+  public static String subjectOf(SecurityIdentity identity) {
     Principal principal = identity.getPrincipal();
     if (principal instanceof JsonWebToken jwt && jwt.getSubject() != null) {
       return jwt.getSubject();

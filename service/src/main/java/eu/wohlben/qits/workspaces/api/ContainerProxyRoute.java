@@ -3,7 +3,14 @@ package eu.wohlben.qits.workspaces.api;
 import eu.wohlben.qits.db.DbRetry;
 import eu.wohlben.qits.workspaces.control.ContainerProxyPath;
 import eu.wohlben.qits.workspaces.control.DaemonProxyTargets;
+import eu.wohlben.qits.workspaces.daemonhost.DaemonAgentBindingCheck;
 import eu.wohlben.qits.workspaces.daemonhost.WorkspaceTunnels;
+import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import io.quarkus.narayana.jta.QuarkusTransaction;
+import io.quarkus.security.identity.SecurityIdentity;
+import io.quarkus.vertx.http.runtime.security.QuarkusHttpUser;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
@@ -25,7 +32,10 @@ import io.vertx.httpproxy.ProxyResponse;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -70,9 +80,20 @@ import org.jboss.logging.Logger;
  * change under the daemon when the origin does (which is exactly what the dial-back tunnel does).
  * The upgrade path arranges both for itself, one mechanism per path.
  *
- * <p>Security posture, stated plainly because it is easy to overstate: this route scopes a request
- * to an existing ACTIVE workspace and forwards it. It does not authorize the caller, because there
- * is no owner to authorize against — qits is single-user. See {@link DaemonProxyTargets}.
+ * <p><b>Who is let through, because this route opens a shell and writes files.</b> The read doors
+ * take every {@code qits:agent} caller; this one cannot, since what lies behind it is a terminal
+ * and the file browser of somebody's container. An anonymous caller never reaches {@link #handle}
+ * ({@code quarkus.http.auth.permission.container-proxy} demands an authenticated identity, upgrades
+ * included) and is answered 401 here as well. {@code qits:system}, {@code qits:admin} and {@code
+ * qits:admin-agent} may reach any workspace, whatever else they hold. A {@code qits:agent} caller
+ * reaches only a workspace it is bound to: its subject must be the row's {@code
+ * Workspace.boundSubject} — the binding {@code DaemonAgentBindingCheck} holds on the control socket
+ * and {@code DaemonStreamRoute} on the dial-back — or the token subject of a live agent placed in
+ * that workspace, because qits-1152 gave each agent worktree a token of its own. Any other caller
+ * ({@code qits:ci-run}, a runner, no role) is 403. The identity is whatever Quarkus built (forward
+ * auth for a person, a validated bearer for a machine); this class reads no header to decide it.
+ * Which workspace a request is scoped to, and that it is ACTIVE, is still {@link
+ * DaemonProxyTargets}'.
  */
 @ApplicationScoped
 public class ContainerProxyRoute {
@@ -84,6 +105,19 @@ public class ContainerProxyRoute {
   @Inject DaemonProxyTargets targets;
 
   @Inject WorkspaceTunnels tunnels;
+
+  @Inject WorkspaceRepository workspaceRows;
+
+  @Inject AgentWorktreeRepository agents;
+
+  /** Roles that reach any workspace's daemon, even beside {@code qits:agent}. */
+  private static final List<String> ANY_WORKSPACE_ROLES =
+      List.of("qits:system", "qits:admin", "qits:admin-agent");
+
+  /** The role that reaches only a workspace it is bound to. */
+  private static final String AGENT_ROLE = "qits:agent";
+
+  private static final String NOT_YOURS = "Not permitted to reach this workspace.";
 
   /** The bearer the daemon requires; the same value {@code WorkspaceContainerFactory} injects. */
   @ConfigProperty(name = "qits.workspace.daemon-api-token", defaultValue = "qits-workspace-daemon")
@@ -140,14 +174,107 @@ public class ContainerProxyRoute {
       return;
     }
 
-    // The request stays untouched while the lookup runs off the event loop — it reads a row and may
-    // bind a listener, so it needs a worker thread and a transaction; the proxy resumes it when
-    // forwarding.
+    // The request stays untouched while the caller is judged and the lookup runs off the event loop
+    // — both read rows, so they need a worker thread and a transaction; the proxy resumes it when
+    // forwarding. Nothing goes on the wire, and no upgrade is answered, before the decision.
     rc.request().pause();
+    QuarkusHttpUser.getSecurityIdentity(rc, null)
+        .subscribe()
+        .with(
+            identity -> admit(rc, workspaceId, identity),
+            failure -> respond(rc, 401, "Authentication required."));
+  }
+
+  /**
+   * Decide who may reach this workspace's daemon, then look the daemon up. The class javadoc says
+   * who is admitted; only the agent binding needs the database, and it runs inside the same worker
+   * hop as {@link #resolve}, before it.
+   */
+  private void admit(RoutingContext rc, Long workspaceId, SecurityIdentity identity) {
+    if (identity == null || identity.isAnonymous()) {
+      refuse(rc, 401, "Authentication required.", identity, workspaceId);
+      return;
+    }
+    String boundSubject;
+    if (ANY_WORKSPACE_ROLES.stream().anyMatch(identity::hasRole)) {
+      boundSubject = null;
+    } else if (identity.hasRole(AGENT_ROLE)) {
+      boundSubject = DaemonAgentBindingCheck.subjectOf(identity);
+      if (boundSubject == null || boundSubject.isBlank()) {
+        refuse(rc, 403, NOT_YOURS, identity, workspaceId);
+        return;
+      }
+    } else {
+      refuse(rc, 403, NOT_YOURS, identity, workspaceId);
+      return;
+    }
+    String subject = boundSubject;
     rc.vertx()
-        .executeBlocking(() -> resolve(workspaceId))
+        .executeBlocking(
+            () -> {
+              if (subject != null) {
+                Binding binding =
+                    DbRetry.call(
+                        "workspace daemon proxy binding", () -> bindingOf(workspaceId, subject));
+                if (binding == Binding.NO_WORKSPACE) {
+                  return Resolved.absent(DaemonProxyTargets.Reachability.NO_WORKSPACE);
+                }
+                if (binding == Binding.NOT_BOUND) {
+                  return Resolved.REFUSED;
+                }
+              }
+              return resolve(workspaceId);
+            })
         .onFailure(e -> respond(rc, 502, "Workspace lookup failed."))
-        .onSuccess(resolved -> route(rc, resolved));
+        .onSuccess(
+            resolved -> {
+              if (resolved == Resolved.REFUSED) {
+                refuse(rc, 403, NOT_YOURS, identity, workspaceId);
+              } else {
+                route(rc, resolved);
+              }
+            });
+  }
+
+  /** What an agent's subject is to a workspace. */
+  private enum Binding {
+    BOUND,
+    NOT_BOUND,
+    NO_WORKSPACE
+  }
+
+  /**
+   * Whether {@code subject} is bound to the workspace: the ACTIVE row's own bound subject, or the
+   * token of a live agent placed in it. An unknown workspace stays the 404 it always was, so an
+   * agent learns nothing here that an admin would not. Its own transaction, surrounded by the retry
+   * at the caller and never inside it — {@link #resolve} carries the rule.
+   */
+  private Binding bindingOf(Long workspaceId, String subject) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              Optional<Workspace> row = workspaceRows.findActiveById(workspaceId);
+              if (row.isEmpty()) {
+                return Binding.NO_WORKSPACE;
+              }
+              if (subject.equals(row.get().boundSubject())
+                  || agents.existsLiveInWorkspaceWithTokenSubject(workspaceId, subject)) {
+                return Binding.BOUND;
+              }
+              return Binding.NOT_BOUND;
+            });
+  }
+
+  /** Answer a refusal and say who was refused — subject, roles, workspace; never a credential. */
+  private void refuse(
+      RoutingContext rc, int status, String message, SecurityIdentity identity, Long workspaceId) {
+    LOG.infof(
+        "Refused the workspace daemon proxy (%d): %s with roles %s for workspace %d",
+        status,
+        identity == null ? null : DaemonAgentBindingCheck.subjectOf(identity),
+        identity == null ? Set.of() : identity.getRoles(),
+        workspaceId);
+    respond(rc, status, message);
   }
 
   /**
@@ -187,6 +314,9 @@ public class ContainerProxyRoute {
   /** Either a tunnel entrance, or the reason there is none. */
   private record Resolved(
       WorkspaceTunnels.TunnelOrigin tunnel, DaemonProxyTargets.Reachability absence) {
+    /** The agent is not bound to this workspace; compared by identity, never routed. */
+    static final Resolved REFUSED = new Resolved(null, null);
+
     static Resolved tunnelled(WorkspaceTunnels.TunnelOrigin origin) {
       return new Resolved(origin, null);
     }
