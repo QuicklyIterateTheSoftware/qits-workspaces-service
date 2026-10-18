@@ -641,8 +641,11 @@ class WorkspaceContainerFactoryTest {
    */
   @Test
   void composesTheShippedDefaultReference() {
+    // registry.qits.${QITS_DOMAIN}/qits/workspace, QITS_DOMAIN expanded from this module's test
+    // application.properties (qits-1402: the registry moved behind the public edge) — not a bare
+    // literal any more, so this also proves the expansion actually ran.
     assertEquals(
-        "registry.dev.localhost:8080/qits/workspace:" + WorkspaceImage.VERSION,
+        "registry.qits.test.wohlben.eu/qits/workspace:" + WorkspaceImage.VERSION,
         factory().image(),
         "repo and pinned version joined as <repo>:<version>, fully qualified");
   }
