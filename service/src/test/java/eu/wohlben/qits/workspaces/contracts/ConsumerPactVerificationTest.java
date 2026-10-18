@@ -189,6 +189,11 @@ class ConsumerPactVerificationTest {
     return states.params(ProviderStates.AN_UNREGISTERED_RUNNER);
   }
 
+  @State(ProviderStates.A_REGISTERED_RUNNER)
+  Map<String, String> aRegisteredRunner() {
+    return states.params(ProviderStates.A_REGISTERED_RUNNER);
+  }
+
   @State(ProviderStates.A_CONNECTED_RUNNER)
   Map<String, String> aConnectedRunner() {
     return states.params(ProviderStates.A_CONNECTED_RUNNER);

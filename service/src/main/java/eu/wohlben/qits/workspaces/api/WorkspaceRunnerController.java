@@ -544,7 +544,9 @@ public class WorkspaceRunnerController {
   @Path("/{id}/register")
   @Consumes(MediaType.APPLICATION_JSON)
   @RolesAllowed(REGISTRATION_ROLE)
-  @Operation(summary = "Register a workspace runner with its registration token; answers its client")
+  @Operation(
+      operationId = "registerRunner",
+      summary = "Register a workspace runner with its registration token; answers its client")
   @APIResponse(
       responseCode = "200",
       description = "The runner's own client and where to use it",

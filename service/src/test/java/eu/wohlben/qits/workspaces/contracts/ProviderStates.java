@@ -120,6 +120,8 @@ public class ProviderStates {
   public static final String A_CONFIGURED_WORKSPACE_IMAGE = "a configured workspace image";
   public static final String NO_RUNNERS = "no runners";
   public static final String AN_UNREGISTERED_RUNNER = "an unregistered runner";
+  // The runner toolkit's register door (qits-1163), as qits-runner-toolkit-contracts names it.
+  public static final String A_REGISTERED_RUNNER = "a registered runner";
   public static final String A_CONNECTED_RUNNER = "a connected runner";
   public static final String A_QUARANTINED_RUNNER = "a quarantined runner";
 
@@ -171,6 +173,20 @@ public class ProviderStates {
   static final String REGISTRATION_TOKEN_ID = "00000000-0000-4000-8000-000000000021";
   static final String REGISTRATION_SUBJECT = "contract-runner-registration";
 
+  /**
+   * The registration token as a runner presents it, the register door's {@code authorization}
+   * param: {@link ContractBearers} turns it into the edge's JWT for {@link #REGISTRATION_SUBJECT}.
+   */
+  static final String REGISTRATION_BEARER = "Bearer " + REGISTRATION_TOKEN;
+
+  /** The register door's role, as the edge's JWT for a registration token carries it. */
+  static final String REGISTRATION_ROLE = "qits:workspaces-runner-registration";
+
+  /** The client the fake qits-idp commissions for a registering runner. */
+  static final String RUNNER_CLIENT_ID = "contract-runner-client";
+
+  static final String RUNNER_CLIENT_SECRET = "contract-runner-secret";
+
   /** The bug ticket's branch, and the branch every ticket-bound state here stands on. */
   static final String TICKET_BRANCH = "ticket/invoice-totals-are-off-by-one-cent";
 
@@ -215,6 +231,7 @@ public class ProviderStates {
   @Inject WorkspaceRunnerHealth runnerHealth;
   @Inject WorkspaceRunnerMessageCodec runnerCodec;
   @Inject Vertx vertx;
+  @Inject ContractBearers bearers;
 
   @ConfigProperty(name = "qits.workspace.claude-archive-root")
   String archiveRoot;
@@ -245,6 +262,7 @@ public class ProviderStates {
         A_CONFIGURED_WORKSPACE_IMAGE,
         NO_RUNNERS,
         AN_UNREGISTERED_RUNNER,
+        A_REGISTERED_RUNNER,
         A_CONNECTED_RUNNER,
         A_QUARANTINED_RUNNER,
         A_PROJECT_WITH_WORKSPACE_SLOTS,
@@ -282,6 +300,7 @@ public class ProviderStates {
       case A_CONFIGURED_WORKSPACE_IMAGE -> new Setup(new TreeMap<>(), List.of());
       case NO_RUNNERS -> noRunners();
       case AN_UNREGISTERED_RUNNER -> unregisteredRunner();
+      case A_REGISTERED_RUNNER -> registeredRunner();
       case A_CONNECTED_RUNNER -> connectedRunner();
       case A_QUARANTINED_RUNNER -> quarantinedRunner();
       case A_PROJECT_WITH_WORKSPACE_SLOTS -> slotsHostingAgents(false);
@@ -306,6 +325,7 @@ public class ProviderStates {
 
   /** Removes every row a state writes, and tears down every workspace a git-backed state made. */
   public void cleanUp() {
+    bearers.reset();
     endStartingProcess();
     tearDownGitWorkspaces();
     QuarkusTransaction.requiringNew()
@@ -1169,11 +1189,32 @@ public class ProviderStates {
     return new Setup(runnerParams(), List.of());
   }
 
-  /** {@code localhost}, declared and never registered. */
+  /**
+   * {@code localhost}, declared and never registered; its registration token is presented as the
+   * {@code authorization} param, so the register door answers it its client.
+   */
   private Setup unregisteredRunner() {
     commissioningRunners();
     declareRunner();
-    return new Setup(runnerParams(), List.of());
+    return new Setup(presentingItsRegistrationToken(), List.of());
+  }
+
+  /**
+   * {@code localhost}, registered already: its registration token, presented as the {@code
+   * authorization} param, opens nothing now (the register door answers 409).
+   */
+  private Setup registeredRunner() {
+    commissioningRunners();
+    quarantinedRunner();
+    return new Setup(presentingItsRegistrationToken(), List.of());
+  }
+
+  /** The runner params, plus the registration token's bearer granted as the edge would forward it. */
+  private Map<String, String> presentingItsRegistrationToken() {
+    bearers.grant(REGISTRATION_BEARER, REGISTRATION_SUBJECT, REGISTRATION_ROLE);
+    Map<String, String> params = runnerParams();
+    params.put("authorization", REGISTRATION_BEARER);
+    return params;
   }
 
   /** {@code localhost}, registered and quarantined, as registration leaves a runner. */
@@ -1217,6 +1258,14 @@ public class ProviderStates {
           public IssuedToken registrationToken(UUID runnerId) {
             return new IssuedToken(REGISTRATION_TOKEN_ID, REGISTRATION_TOKEN, REGISTRATION_SUBJECT);
           }
+
+          @Override
+          public RunnerClient runnerClient(UUID runnerId) {
+            return new RunnerClient(RUNNER_CLIENT_ID, RUNNER_CLIENT_SECRET);
+          }
+
+          @Override
+          public void decommissionClient(String runnerClientId) {}
 
           @Override
           public boolean deleteToken(String tokenId) {

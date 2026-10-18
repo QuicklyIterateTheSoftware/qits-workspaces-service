@@ -68,6 +68,9 @@ class GoldenMasterRecordingTest {
    * @param callerRole the one role the call is made with, as the edge asserts it in {@code
    *     X-Qits-Roles}; null calls as the {@code %test} dev user (admin and system at once). Recorded
    *     into the index as {@code callerRole}
+   * @param headers request headers a consumer sends because the answer depends on them — the
+   *     register door's {@code Authorization}. A value is expanded from the state's params as a path
+   *     is, and recorded unexpanded, as the index's {@code headers}
    */
   record Interaction(
       String state,
@@ -78,7 +81,23 @@ class GoldenMasterRecordingTest {
       String listFilteredTo,
       String requestBody,
       Map<String, String> fixedStrings,
-      String callerRole) {
+      String callerRole,
+      Map<String, String> headers) {
+
+    Interaction(
+        String state,
+        String operationId,
+        String method,
+        String path,
+        int status,
+        String listFilteredTo,
+        String requestBody,
+        Map<String, String> fixedStrings,
+        String callerRole) {
+      this(
+          state, operationId, method, path, status, listFilteredTo, requestBody, fixedStrings,
+          callerRole, Map.of());
+    }
 
     static Interaction read(String state, String operationId, String path, String listFilteredTo) {
       return new Interaction(state, operationId, "GET", path, 200, listFilteredTo, null, Map.of(), null);
@@ -105,7 +124,7 @@ class GoldenMasterRecordingTest {
     Interaction answering(int answered) {
       return new Interaction(
           state, operationId, method, path, answered, listFilteredTo, requestBody, fixedStrings,
-          callerRole);
+          callerRole, headers);
     }
 
     /** This interaction, with the version at {@code path} recorded as {@link #FIXED_VERSION}. */
@@ -119,13 +138,23 @@ class GoldenMasterRecordingTest {
       fixed.put(path, value);
       return new Interaction(
           state, operationId, method, this.path, status, listFilteredTo, requestBody, fixed,
-          callerRole);
+          callerRole, headers);
     }
 
     /** This interaction, called with {@code role} alone. */
     Interaction as(String role) {
       return new Interaction(
-          state, operationId, method, path, status, listFilteredTo, requestBody, fixedStrings, role);
+          state, operationId, method, path, status, listFilteredTo, requestBody, fixedStrings, role,
+          headers);
+    }
+
+    /** This interaction, sending {@code header} as the state's {@code param} holds it. */
+    Interaction sending(String header, String param) {
+      Map<String, String> sent = new TreeMap<>(headers);
+      sent.put(header, "{" + param + "}");
+      return new Interaction(
+          state, operationId, method, path, status, listFilteredTo, requestBody, fixedStrings,
+          callerRole, sent);
     }
   }
 
@@ -133,6 +162,14 @@ class GoldenMasterRecordingTest {
   static final String FIXED_VERSION = "2026.101.120000";
 
   private static final String WORKSPACES = "/workspaces/api";
+
+  /**
+   * What the runner toolkit's {@code Registration} sends the register door: always the four keys,
+   * however little the runner knows (qits-runner-toolkit-contracts' fixture recording).
+   */
+  private static final String TOOLKIT_REGISTRATION =
+      "{\"capabilities\":{\"docker\":true,\"arch\":\"amd64\",\"os\":\"linux\","
+          + "\"labels\":{\"site\":\"home\"}}}";
 
   static final List<Interaction> INTERACTIONS =
       List.of(
@@ -270,6 +307,21 @@ class GoldenMasterRecordingTest {
               200,
               null)
               .fixing("$.runner.pinnedVersion"),
+          // The runner toolkit's register door (qits-1163): the registration token as its bearer.
+          Interaction.write(
+                  ProviderStates.AN_UNREGISTERED_RUNNER,
+                  "registerRunner",
+                  WORKSPACES + "/runners/{runnerId}/register",
+                  200,
+                  TOOLKIT_REGISTRATION)
+              .sending("Authorization", "authorization"),
+          Interaction.write(
+                  ProviderStates.A_REGISTERED_RUNNER,
+                  "registerRunner",
+                  WORKSPACES + "/runners/{runnerId}/register",
+                  409,
+                  TOOLKIT_REGISTRATION)
+              .sending("Authorization", "authorization"),
           Interaction.read(
                   ProviderStates.A_CONNECTED_RUNNER, "listRunners", WORKSPACES + "/runners", "$")
               .fixing("$[*].pinnedVersion"),
@@ -613,6 +665,10 @@ class GoldenMasterRecordingTest {
               eq < 0 ? "" : URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8));
         }
       }
+      if (!interaction.headers().isEmpty()) {
+        ObjectNode headers = operation.putObject("headers");
+        new TreeMap<>(interaction.headers()).forEach(headers::put);
+      }
       if (interaction.requestBody() != null) {
         operation.set("body", JSON.readTree(interaction.requestBody()));
       }
@@ -699,6 +755,9 @@ class GoldenMasterRecordingTest {
             request
                 .header("X-Qits-User", "contract-caller")
                 .header("X-Qits-Roles", interaction.callerRole());
+      }
+      for (Map.Entry<String, String> header : interaction.headers().entrySet()) {
+        request = request.header(header.getKey(), expand(header.getValue(), params));
       }
       if (interaction.requestBody() != null) {
         request =
