@@ -304,6 +304,12 @@ public class WorkspaceProvisionIT {
     // the row id again — but they are one (kind, from, to, label) and draw once. The id is AUTHORED
     // here, so unlike the release stories' uuid it survives into the label verbatim.
     to(StoryPeers.PROJECTS, StoryPeers.repositoryRead(StoryTarget.WORKSPACE_REPO_ID));
+    // A fresh agent tells qits-projects its item has no agent waiting (qits-1274), so the item does
+    // not keep a former agent's wait. The story's qits-projects does not know the item: a 404, which
+    // the reporter logs and drops.
+    to(
+        StoryPeers.PROJECTS,
+        StoryPeers.posted("/projects/api/work/" + StoryTarget.WORK_ID + "/agent-waiting", 404));
 
     // The git host: the mirror's advertisement and pack read behind the workspace read. Nothing is
     // written: no branch is created up front any more.
@@ -364,12 +370,13 @@ public class WorkspaceProvisionIT {
         StoryPeers.EVENTS,
         StoryPeers.label("PUT", StoryPeers.EVENTS_PATH + java.util.UUID.randomUUID(), 201));
 
-    // SEVENTEEN across four planes: three doors, one registry read, two git reads, one commission,
-    // one token, three container calls, one event publish, one dial and four frames. The count is
+    // EIGHTEEN across four planes: three doors, one registry read, one agent-waiting relay
+    // (qits-1274), two git reads, one commission, one token, three container calls, one event
+    // publish, one dial and four frames. The count is
     // what would notice a peer call creeping into a path that is supposed to be finished — a status
     // poll after the ensure, say, which the design deliberately does not make because the wait is
     // on the socket instead.
-    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, PROVISIONED_SLUG, 17);
+    ReportAssertions.assertEdgeCount(CATEGORY_SLUG, PROVISIONED_SLUG, 18);
     ReportAssertions.assertOnlyEdgesFrom(
         CATEGORY_SLUG,
         PROVISIONED_SLUG,
