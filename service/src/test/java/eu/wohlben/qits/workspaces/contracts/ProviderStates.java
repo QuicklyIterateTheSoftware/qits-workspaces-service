@@ -327,19 +327,19 @@ public class ProviderStates {
   public void cleanUp() {
     bearers.reset();
     endStartingProcess();
+    endLeftoverProcesses();
     tearDownGitWorkspaces();
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
               // Agents first: they name their workspace (and cascade their pushed branches).
               agentRows.delete("workId in ?1", List.copyOf(WORK_IDS));
-              workspaces.delete(
-                  "repositoryId = ?1 and workspaceId = ?2", WRAPPER_REPOSITORY_ID, SLOT_LABEL);
+              agentRows.delete("repositoryId = ?1", WRAPPER_REPOSITORY_ID);
+              // Every slot on the wrapper, not only the labels the states write: a dispatch an
+              // interaction makes (createAgent) opens a slot of its own (ws-2, ...) that the
+              // scheduler then fails to place, and the next state's list would show it.
+              workspaces.delete("repositoryId = ?1", WRAPPER_REPOSITORY_ID);
               workspaces.delete("workId in ?1", List.copyOf(WORK_IDS));
-              workspaces.delete(
-                  "repositoryId = ?1 and workspaceId = ?2",
-                  WRAPPER_REPOSITORY_ID,
-                  HAND_MADE_LABEL);
               workspaces.delete("repositoryId in ?1", GIT_REPOSITORIES);
             });
     // After the rows: a runner that still holds an ACTIVE workspace refuses its delete.
@@ -686,6 +686,20 @@ public class ProviderStates {
     params.put("runnerId", RUNNER_ID);
     params.put("workspaceId", String.valueOf(ids.get(0)));
     return new Setup(params, List.copyOf(ids));
+  }
+
+  /**
+   * Ends whatever process an interaction itself began on a slot this class makes — the start an
+   * {@code ensureWorkspaceContainer} or {@code recreateWorkspaceContainer} kicks off, still live when
+   * the verification moves on. The registry is keyed by repository and label, which every state
+   * reuses, so a leftover would otherwise be the next state's {@code /active-process}.
+   */
+  private void endLeftoverProcesses() {
+    for (String label : List.of(SLOT_LABEL, HAND_MADE_LABEL)) {
+      technicalProcesses
+          .activeFor(WRAPPER_REPOSITORY_ID, label)
+          .ifPresent(id -> technicalProcesses.end(id, "the contract state was cleaned up"));
+    }
   }
 
   /** Ends the start {@link #agentWhoseWorkspaceIsStarting} left open, so no slot shows it. */
