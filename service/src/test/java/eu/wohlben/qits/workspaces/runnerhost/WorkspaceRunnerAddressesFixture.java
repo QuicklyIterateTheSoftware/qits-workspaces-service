@@ -31,13 +31,17 @@ public final class WorkspaceRunnerAddressesFixture {
 
   /**
    * The RUNNER address plane (qits-799) under {@code domain}, for the same {@code installMockForType}
-   * — the plane a take's spec is composed from, recognising the shipped registry spelling.
+   * — the plane a take's spec is composed from, recognising the registry spellings the configured
+   * image repository and the estate's committed files use, as {@link WorkspaceAddressPlanes} does.
    */
   public static WorkspaceAddressPlanes planesWithDomain(String publicDomain) {
+    String imageRepo = Arc.container().instance(WorkspaceContainerFactory.class).get().imageRepo();
+    String configured = imageRepo.substring(0, imageRepo.indexOf('/'));
     return new WorkspaceAddressPlanes() {
       @Override
       public WorkspaceAddressPlane plane() {
-        return WorkspaceAddressPlane.of(publicDomain, List.of("registry.dev.localhost:8080"));
+        return WorkspaceAddressPlane.of(
+            publicDomain, List.of(configured, "registry.dev.localhost:8080"));
       }
     };
   }
