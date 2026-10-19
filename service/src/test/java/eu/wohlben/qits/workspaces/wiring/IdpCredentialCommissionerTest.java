@@ -367,42 +367,6 @@ public class IdpCredentialCommissionerTest {
     assertEquals(1, requests.size());
   }
 
-  @Test
-  public void aNarrowingIsAPutOfTheWholeListAsThisService() throws Exception {
-    String url = serve(List.of(new Answer(204, null)));
-
-    commissionerAgainst(url).updateGitRefs("ws-7-a", List.of("refs/heads/epic/e"));
-
-    assertEquals(List.of("PUT /api/clients/ws-7-a/git-refs"), requests);
-    assertEquals(
-        List.of(IdpCredentialCommissioner.basic("dev-qits-workspaces", "service-secret")),
-        authorizations);
-    assertEquals("{\"gitRefs\":[\"refs/heads/epic/e\"]}", bodies.get(0));
-  }
-
-  @Test
-  public void aRefusedNarrowingThrowsSoTheCallerKeepsItPending() throws Exception {
-    String url = serve(List.of(new Answer(404, "{\"error\":\"not_found\"}")));
-
-    RuntimeException failure =
-        assertThrows(
-            RuntimeException.class,
-            () -> commissionerAgainst(url).updateGitRefs("ws-7-a", List.of()));
-    assertTrue(failure.getMessage().contains("404"), failure.getMessage());
-    assertEquals(1, requests.size(), "one attempt; the reconcile is the retry");
-  }
-
-  @Test
-  public void withTheSwitchOffANarrowingDialsNothing() throws Exception {
-    String url = serve(List.of(new Answer(500, null)));
-    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
-    commissioner.enabled = false;
-
-    commissioner.updateGitRefs("ws-7-a", List.of("refs/heads/epic/e"));
-
-    assertEquals(List.of(), requests);
-  }
-
   // --- the workspace token (qits-625, qits-802) -------------------------------------------------
 
   @Test
@@ -538,7 +502,6 @@ public class IdpCredentialCommissionerTest {
 
     assertEquals(Optional.empty(), commissioner.commissionToken(7L, A_PROJECT, null));
     commissioner.deleteToken("t-1");
-    commissioner.updateTokenGitRefs("t-1", List.of());
     assertEquals(List.of(), commissioner.listTokens());
     assertEquals(List.of(), requests);
   }
@@ -555,20 +518,6 @@ public class IdpCredentialCommissionerTest {
     assertEquals(
         List.of("DELETE /api/tokens/t-1", "DELETE /api/tokens/t-2", "DELETE /api/tokens/t-3"),
         requests);
-  }
-
-  @Test
-  public void aTokensGitRefsGoThroughTheTokenDoorAndAFailureThrows() throws Exception {
-    String url =
-        serve(List.of(new Answer(200, "{\"tokenId\":\"t-1\"}"), new Answer(404, "{}")));
-    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
-
-    commissioner.updateTokenGitRefs("t-1", List.of("refs/heads/epic/e"));
-
-    assertEquals(List.of("PUT /api/tokens/t-1/git-refs"), requests);
-    assertEquals("{\"gitRefs\":[\"refs/heads/epic/e\"]}", bodies.get(0));
-    assertThrows(
-        IllegalStateException.class, () -> commissioner.updateTokenGitRefs("t-2", List.of()));
   }
 
   @Test

@@ -1,7 +1,7 @@
 package eu.wohlben.qits.workspaces.control;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * The Git refs a workspace's credential may push, in the shape of contract C1
+ * The Git refs an agent's credential may push (qits-1152), in the shape of contract C1
  * (principal-bound-git-refs-plan.md): a list of exact refs ({@code refs/heads/ticket/x}) and prefix
  * patterns ending in {@code *}. A trailing {@code *} means "starts with what precedes it", wherever
  * it follows: {@code refs/heads/ticket/qits-1-*} covers {@code ticket/qits-1-fix}, and {@code /*} is
@@ -21,12 +21,12 @@ import java.util.Set;
  * fall back to an unscoped commission, which is the wide answer — so the door refuses a bad list
  * first, with a 400 the caller can read.
  *
- * <p>Stored on {@link Workspace#gitRefs} as a JSON array of strings. {@code String[]} crosses the
- * mapper, so no class needs native-image registration.
+ * <p>Stored on {@link AgentWorktree#gitRefs} as a JSON array of strings. {@code String[]} crosses
+ * the mapper, so no class needs native-image registration.
  *
  * <p><b>A list never lets an agent push the repository's default branch.</b> That branch moves only
- * through a release request. So a workspace on the default branch (a main workspace) gets an empty
- * list, and an entry that covers the default branch is dropped ({@link #withoutDefaultBranch}).
+ * through a release request. So an agent on the default branch gets an empty list, and an entry
+ * that covers the default branch is dropped ({@link #withoutDefaultBranch}).
  */
 public final class GitRefs {
 
@@ -122,21 +122,6 @@ public final class GitRefs {
       }
     }
     return List.copyOf(refs);
-  }
-
-  /**
-   * The list a workspace's commission states: what the row stores, or its own branch when the row
-   * predates the column — in both cases without the default branch. So a main workspace from
-   * before this rule is commissioned with an empty list. Never null.
-   *
-   * @param defaultBranch the repository's default branch; null or blank when not known, which drops
-   *     nothing
-   */
-  public static List<String> effective(Workspace workspace, String defaultBranch) {
-    if (workspace.gitRefs != null) {
-      return withoutDefaultBranch(read(workspace.gitRefs), defaultBranch);
-    }
-    return workspace.branch == null ? List.of() : defaultFor(workspace.branch, defaultBranch);
   }
 
   /** The stored form: a JSON array of strings. */

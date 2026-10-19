@@ -107,7 +107,7 @@ public class DirectWorkspaceTokenTest {
     assertEquals(rowId.longValue(), minted.rowId());
     assertEquals(CredentialCommissioner.ADMIN_CONTEXT_KIND, minted.contextKind());
     assertEquals(FakeRepositoryLookup.PROJECT_ID, minted.projectId(), "scoped to its project");
-    assertEquals(List.of("refs/heads/feat"), minted.gitRefs(), "and to its own branch");
+    assertEquals(List.of(), minted.gitRefs(), "and may push nothing: agents push (qits-1152)");
     assertEquals(List.of(), commissioner.commissionedFor(), "no client pair was asked for");
 
     Workspace row = read(rowId);

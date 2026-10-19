@@ -120,7 +120,7 @@ final class ProjectsContract {
         assertRecordedRepository(view);
       };
 
-  /** {@code find}: the soft read the git-host address, the ref narrowing and the editor make. */
+  /** {@code find}: the soft read the git-host address and the editor make. */
   private static final Call FIND =
       (clients, params) -> {
         RepositoryLookup lookup = clients.lookup();

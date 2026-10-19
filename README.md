@@ -296,8 +296,8 @@ public `<app>.qits.<domain>` names rather than the internal ones; it is otherwis
 container — on qits-net, the admin one with the docker socket, the editor with its port and project
 list. With **no** public domain the pair is commissioned as before and a WARN says so; that is the
 only case the pair is still for. A container keeps whichever credential it was launched with until it
-is recreated or deleted, and teardown, the hourly reconcile and the git-ref narrowing treat the token
-exactly as they treat the pair.
+is recreated or deleted, and teardown and the hourly reconcile treat the token exactly as they treat
+the pair.
 
 The client pair and its control-socket token coordinates are injected together or not at all; a
 partial set cannot authenticate and is never a valid container specification. They sit beside
@@ -335,28 +335,11 @@ claim and the credential is issued as every workspace credential was before scop
 blinking registry must not be able to stop a workspace from starting, and it is never sent as `"*"` —
 qits-idp refuses the wildcard on a commission by design.
 
-**It states which Git refs the container may push** (contracts C4 and C5 in the superproject's
-`principal-bound-git-refs-plan.md`). The commission carries `"gitRefs": [..]` — exact refs and
-trailing `/*` patterns under `refs/heads/`. qits-idp stamps the list into every token as
-`git_refs`, and qits-githost enforces it.
-
-- **Where the list comes from.** `POST /workspaces/api/agent-dispatches` takes an optional
-  `gitRefs`. Without it, and for every other way a workspace is made, the list is the workspace's
-  own branch. A bad list is a 400 and nothing is created. A re-press keeps the list the workspace
-  already has.
-- **Never the default branch.** The repository's default branch moves only through a release
-  request, never by an agent's push. A workspace on the default branch (the main workspace) may push
-  nothing (`[]`). An entry in a stated list that covers the default branch is dropped and logged.
-  Older rows get the same answer when their container is commissioned.
-- **It narrows.** When a workspace is made on a branch that another open workspace in the same
-  project may push, that exact ref leaves the other list, and the other container's commission is
-  updated with `PUT /idp/api/clients/{clientId}/git-refs`. Patterns and a workspace's own branch are
-  never removed. Nothing widens again when the new workspace closes.
-- **It fails closed.** An idp without C2 ignores `gitRefs`, so a 400 to a commission with Git refs
-  means the idp refused the list (for example, more than 500 entries). The workspace is then
-  commissioned with `gitRefs: []`: it starts, and may push nothing. An ERROR names the workspace and
-  the idp's reason. It is never commissioned without `gitRefs`. An update that fails is logged and
-  sent again by the hourly commission reconcile.
+**It states that the container may push nothing**: `"gitRefs": []`, never an absent list, which
+would be unscoped. Since qits-1152 the push scope is the agent's — its token carries the refs of its
+own branch (`agent_worktree.git_refs`), and the daemon pushes with it — so a workspace slot has no
+refs of its own. The per-workspace list and its narrowing (contracts C4 and C5 in the superproject's
+`principal-bound-git-refs-plan.md`) are gone, and `V27` dropped their columns (qits-1385).
 
 **It mirrors the container's lifetime, not the row's.** A provision commissions, a recreate
 commissions afresh and hands the old one back, `deleteContainer` hands it back while the workspace

@@ -154,30 +154,6 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
   }
 
   /**
-   * Every ACTIVE workspace that stores a Git ref list — the candidates a new workspace may narrow.
-   * Rows that predate the column store none; their list is only their own branch, which is never
-   * narrowed away, so they are never candidates.
-   */
-  public List<Workspace> findActiveWithGitRefs() {
-    return list("status = ?1 and gitRefs is not null", WorkspaceStatus.ACTIVE);
-  }
-
-  /**
-   * The ACTIVE workspaces whose narrowed Git ref list has not reached qits-idp yet, and whose
-   * container still holds the commission it has to reach — a client pair, or a RUNNER row's token
-   * (qits-625). What the reconcile sends again.
-   */
-  public List<Long> pendingGitRefIds() {
-    return list(
-            "status = ?1 and gitRefsPending = true"
-                + " and (commissionedClientId is not null or commissionedTokenId is not null)",
-            WorkspaceStatus.ACTIVE)
-        .stream()
-        .map(w -> w.id)
-        .toList();
-  }
-
-  /**
    * The ACTIVE slot workspaces (qits-1152): the rows that name no branch of their own, whose agents
    * carry the work. Old-model rows on a branch are not slots and drain as before (D20).
    */

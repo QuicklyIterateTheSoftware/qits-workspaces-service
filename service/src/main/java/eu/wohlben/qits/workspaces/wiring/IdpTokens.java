@@ -7,7 +7,6 @@ import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.POST;
-import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -55,20 +54,6 @@ public interface IdpTokens {
   void delete(
       @HeaderParam(HttpHeaders.AUTHORIZATION) String authorization,
       @PathParam("tokenId") String tokenId);
-
-  /**
-   * Replace the Git refs a token states (qits-625): the twin of {@link IdpClients#updateGitRefs},
-   * owner-only, and the body must carry a list — {@code []} is "may push nothing". 200 with the
-   * token's view, which nothing here reads; 404 for a foreign or unknown token. The edge picks the
-   * new list up within its introspection cache.
-   */
-  @PUT
-  @Path("/{tokenId}/git-refs")
-  @Consumes(MediaType.APPLICATION_JSON)
-  void updateGitRefs(
-      @HeaderParam(HttpHeaders.AUTHORIZATION) String authorization,
-      @PathParam("tokenId") String tokenId,
-      IdpClients.GitRefsRequest request);
 
   /**
    * What a caller asks for: the context the token is for, and optionally what that context is about

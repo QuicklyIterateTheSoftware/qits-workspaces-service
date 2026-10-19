@@ -100,8 +100,6 @@ erDiagram
     string entity_status
     text entity_title
     text epic_id
-    text git_refs
-    boolean git_refs_pending "not null"
     string parent_id
     enum placement "not null"
     text preamble

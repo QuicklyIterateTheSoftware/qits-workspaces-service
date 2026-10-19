@@ -2,7 +2,6 @@ package eu.wohlben.qits.workspaces.wiring;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import eu.wohlben.qits.workspaces.control.GitRefScopes;
 import eu.wohlben.qits.workspaces.control.StubInstance;
 import eu.wohlben.qits.workspaces.control.WorkspaceRunners;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
@@ -39,7 +38,6 @@ public class CommissionReconcilerRunnerArmsTest {
   @Inject WorkspaceRunnerRepository runnerRepository;
   @Inject WorkspaceRepository workspaceRepository;
   @Inject eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository agentRows;
-  @Inject GitRefScopes gitRefScopes;
 
   private IdpStub idp;
   private final List<UUID> created = new ArrayList<>();
@@ -61,7 +59,6 @@ public class CommissionReconcilerRunnerArmsTest {
     reconciler.commissioner = StubInstance.of(idp.credentialCommissioner());
     reconciler.workspaces = workspaceRepository;
     reconciler.agentRows = agentRows;
-    reconciler.gitRefScopes = gitRefScopes;
     reconciler.runners = runnerRepository;
     reconciler.runnerCommissioner = idp.runnerCommissioner();
     return reconciler;
