@@ -8,13 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import eu.wohlben.qits.workspaces.control.AgentDaemon;
 import io.vertx.core.json.JsonObject;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
  * The daemon's cleanup-check answer (qits-1152, D5) as {@link DaemonAgentClient} reads it: {@code
  * {clean, dirty: [repository], unpushed: [{repository, branch|null, commits}], busy?}}, what its
  * status says (qits-1233): 200 a check, 404 an agent the daemon does not know, anything else none;
- * and an accepted start's {@code launched} flag (qits-1225).
+ * an accepted start's {@code launched} flag (qits-1225); and a start's own body, with and without
+ * the agent-config checkout (qits-1382).
  */
 class DaemonAgentClientAnswersTest {
 
@@ -122,5 +124,28 @@ class DaemonAgentClientAnswersTest {
   void aStartWithoutTheFlagReadsAsLaunched() {
     assertTrue(DaemonAgentClient.startedOf(new JsonObject("{\"commandId\":\"c\"}")).launched());
     assertTrue(DaemonAgentClient.startedOf(null).launched(), "no body, or none that parses");
+  }
+
+  @Test
+  void aStartWithNoAgentConfigOmitsTheKey() {
+    JsonObject body = DaemonAgentClient.startBody(start(null));
+    assertFalse(body.containsKey("agentConfig"), body.encode());
+  }
+
+  @Test
+  void aStartWithAgentConfigCarriesItsTwoFields() {
+    JsonObject body =
+        DaemonAgentClient.startBody(
+            start(new AgentDaemon.AgentConfig("repo-1", "proj-1/qits-agent-config")));
+    JsonObject agentConfig = body.getJsonObject("agentConfig");
+    assertEquals("repo-1", agentConfig.getString("repositoryId"));
+    assertEquals("proj-1/qits-agent-config", agentConfig.getString("repositoryPath"));
+  }
+
+  /** A start otherwise shaped like a fresh agent's, carrying {@code agentConfig} or null. */
+  private static AgentDaemon.Start start(AgentDaemon.AgentConfig agentConfig) {
+    return new AgentDaemon.Start(
+        "a1", "w1", "e1", "ticket/w1", "CLAUDE", null, Map.of(), "Work the ticket.", null, null,
+        agentConfig);
   }
 }

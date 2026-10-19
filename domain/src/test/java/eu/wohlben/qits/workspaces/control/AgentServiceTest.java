@@ -214,6 +214,23 @@ public class AgentServiceTest {
   }
 
   @Test
+  void aStartCarriesNoAgentConfigWhenEitherPropertyIsBlank() {
+    // qits-1382: this class's profile ships both qits.workspace.agent-config.* blank, the shipped
+    // default; AgentConfigStartTest is the pair-set half, on the shared profile that pins them.
+    AgentService.Dispatch dispatched = dispatch("w-no-agent-config", true, "go");
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+
+    service.reconcile();
+
+    AgentDaemon.Start start =
+        daemon.starts().stream().filter(s -> s.agentId().equals(agentId)).findFirst().orElseThrow();
+    assertNull(start.agentConfig());
+    liveness.markDead(slot);
+  }
+
+  @Test
   void aDeliveryReachesARunningAgentAtItsNextTurn() {
     AgentService.Dispatch dispatched = dispatch("w-turn", true, null);
     String agentId = dispatched.agent().agentId();

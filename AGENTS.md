@@ -1163,6 +1163,16 @@ integrate and cleanup ask only when a DIRECT container exists, as before; recrea
 /projects/api/work` for an IMPROVEMENT ticket in the captured repository's project (`WorkFiler`,
 `wiring/HttpWorkFiler`) and answers `{work: {id, qualifiedId}}`. No workspace, branch or agent.
 
+**A start may carry its own `qits-agent-config` checkout** (qits-1382):
+`qits.workspace.agent-config.repository-id` and `qits.workspace.agent-config.repository-path`
+(`<projectId>/<repoName>`), read in `AgentService` beside its other config. Blanking either
+switches the feature off — `AgentDaemon.Start.agentConfig()` is null, exactly as it is where
+neither is set. With both set, the daemon checks the agent's own branch of that repository out
+under `/workspace/agent-config/<agentId>/tree` and launches Claude with it in place. The branch the
+daemon pushes back is named for the agent's wrapper branch, and `releaseAgentBranches` is what
+releases it, at VERIFIED, behind manual-review approval — the same gate every other agent branch
+gets.
+
 **Known limits.** The person door derives the wrapper branch from what it is told; it does
 not read the work item. `MountedClaudeTranscripts` reads a slot's sessions per agent directory, keyed
 on the wrapper's name.

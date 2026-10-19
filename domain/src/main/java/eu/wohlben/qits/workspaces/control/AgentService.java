@@ -277,6 +277,20 @@ public class AgentService {
   @ConfigProperty(name = "qits.workspace.agent-dispatch.compact-before-turn", defaultValue = "false")
   boolean compactBeforeTurn;
 
+  /**
+   * The {@code qits-agent-config} repository a start's {@link AgentDaemon.AgentConfig} names
+   * (qits-1382), so the daemon checks out the agent's own branch of it before launching the
+   * harness. Blank reads as absent (MicroProfile config's own rule for an empty value), which is
+   * why these are {@code Optional<String>} rather than {@code String}: a deployment that renders
+   * {@code KEY=} must turn the feature off, not hand the daemon an empty id.
+   */
+  @ConfigProperty(name = "qits.workspace.agent-config.repository-id")
+  Optional<String> agentConfigRepositoryId;
+
+  /** The other half of the pair above; see it for why both are {@code Optional<String>}. */
+  @ConfigProperty(name = "qits.workspace.agent-config.repository-path")
+  Optional<String> agentConfigRepositoryPath;
+
   /** A workspace with no agent ever assigned is removed after this long (a crash between create and assign). */
   private static final Duration ORPHAN_SLOT_GRACE = Duration.ofMinutes(2);
 
@@ -1629,7 +1643,8 @@ public class AgentService {
                 instruction,
                 new EntityFacts(
                     fresh.entityTitle, fresh.entityStatus, Boolean.TRUE.equals(fresh.entityBlocked)),
-                fresh.blockSource));
+                fresh.blockSource,
+                agentConfig()));
     if (answer.outcome() != AgentDaemon.Outcome.OK) {
       if (answer.outcome() == AgentDaemon.Outcome.REFUSED) {
         recordRefusal(workspace.id, agent, answer.detail());
@@ -1675,6 +1690,19 @@ public class AgentService {
             answer.resumed(),
             Instant.now()));
     changePublisher.fire(agent.repositoryId, workspace.id, WorkspaceChangeHint.Topic.AGENTS);
+  }
+
+  /**
+   * The {@code qits-agent-config} checkout a start asks the daemon to make (qits-1382): null unless
+   * BOTH properties are set, so a half-configured pair is the same as the feature being off rather
+   * than a daemon call with one blank field.
+   */
+  private AgentDaemon.AgentConfig agentConfig() {
+    String repositoryId = agentConfigRepositoryId.filter(v -> !v.isBlank()).orElse(null);
+    String repositoryPath = agentConfigRepositoryPath.filter(v -> !v.isBlank()).orElse(null);
+    return repositoryId == null || repositoryPath == null
+        ? null
+        : new AgentDaemon.AgentConfig(repositoryId, repositoryPath);
   }
 
   /**

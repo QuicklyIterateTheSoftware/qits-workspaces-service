@@ -6,8 +6,8 @@ import java.util.Map;
 /**
  * One test application for every class that needs a shipped value moved but contradicts nobody.
  *
- * <p>It is deliberately not a theme. The three overrides below have nothing to do with each other —
- * a chain-await bound and a git identity — and that is precisely the point: a {@code
+ * <p>It is deliberately not a theme. The overrides below have nothing to do with each other —
+ * a chain-await bound, a git identity and an agent-config pair — and that is precisely the point: a {@code
  * @TestProfile} is a QUARKUS RESTART, Quarkus keys applications by profile IDENTITY rather than by
  * the map they produce, and two classes each carrying a map of its own were two restarts whose
  * classloaders are reclaimable only by a full GC. Measured 2026-09-14 while fixing bug e6f0bdfa:
@@ -48,6 +48,11 @@ public class SharedTestOverridesProfile implements QuarkusTestProfile {
         // Pinned rather than defaulted, because the claim is that the CONFIGURED name reaches the
         // commit — a value read out of the ambient environment would assert nothing.
         "qits.git.author-name", "qits-bot",
-        "qits.git.author-email", "qits-bot@example.com");
+        "qits.git.author-email", "qits-bot@example.com",
+        // AgentConfigStartTest (qits-1382): both halves of the pair, set so a start's agentConfig
+        // is present. The default profile ships both blank (the feature off), which is the shape
+        // every other class on it still gets.
+        "qits.workspace.agent-config.repository-id", "00000000-0000-4000-8000-0000000000c1",
+        "qits.workspace.agent-config.repository-path", "test-project/qits-agent-config");
   }
 }
