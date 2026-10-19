@@ -64,6 +64,18 @@ public final class TestWorkspaceContainerFactory {
   }
 
   /**
+   * A factory whose containers run as {@code uid} rather than as whoever owns this machine's {@code
+   * user.home} — for a row whose request body is committed (qits-1163, {@code ContainersContract}):
+   * the host uid is 0 in one container and 1001 on the CI builder, so a pact written from {@link
+   * #persistent()} depends on the machine that builds it.
+   */
+  public static WorkspaceContainerFactory withHostUid(long uid) {
+    WorkspaceContainerFactory f = build(true);
+    f.hostUid = () -> uid;
+    return f;
+  }
+
+  /**
    * A factory whose workspaces hold a commissioned platform credential — the shape a deployment with
    * an issuer wired has. The shipped posture is the other one, which is why the two builders above
    * leave the lookup empty.

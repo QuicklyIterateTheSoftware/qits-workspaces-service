@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.time.ZoneId;
 import java.util.Optional;
 import java.util.function.BiConsumer;
+import java.util.function.LongSupplier;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -632,7 +633,7 @@ public class WorkspaceContainerFactory {
     WorkspaceContainer container =
         new WorkspaceContainer()
             .name(containerName(workspaceId, repoId))
-            .user(Long.toString(hostUid()))
+            .user(Long.toString(hostUid.getAsLong()))
             .label("qits.repository", repoId)
             .label("qits.workspace", workspaceId)
             .label("qits.branch", branch == null ? "" : branch)
@@ -970,9 +971,20 @@ public class WorkspaceContainerFactory {
   }
 
   /**
+   * Where the container's uid comes from: {@link #readHostUid()} in every deployment.
+   *
+   * <p><b>A test seam, and only that</b> (qits-1163). Package-private, not a config key: production
+   * never assigns it. It exists because the uid is whoever owns {@code user.home} on the machine
+   * running the code, so a consumer pact written from a hand-built factory carried the build
+   * machine's uid ({@code 0} in one container, {@code 1001} on the CI builder) and the committed
+   * pact stopped matching the rows that write it. {@code TestWorkspaceContainerFactory} pins it.
+   */
+  LongSupplier hostUid = WorkspaceContainerFactory::readHostUid;
+
+  /**
    * The host uid the container runs as, so cloned {@code /workspace} files are owned by the user.
    */
-  private long hostUid() {
+  private static long readHostUid() {
     try {
       Object uid = Files.getAttribute(Path.of(System.getProperty("user.home")), "unix:uid");
       return ((Number) uid).longValue();

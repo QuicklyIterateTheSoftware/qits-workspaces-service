@@ -176,6 +176,15 @@ public final class ContainersContract {
                   (url, params) -> adapter(url, params).rm(params.get("ref")))))
           .via(ContainersClientPact.VIA);
 
+  /**
+   * The uid the ensure body carries, pinned (qits-1163): the factory otherwise reads the uid owning
+   * this machine's {@code user.home}, so the committed pact said {@code "0"} where the CI builder
+   * wrote {@code "1001"}. qits-containers' {@code no workspace container at the place} recording
+   * sends no {@code user} at all, so there is no provider value to copy; {@code 0} is the value the
+   * committed file already held, which keeps it byte-identical.
+   */
+  static final long PACT_UID = 0L;
+
   private ContainersContract() {}
 
   private static ContainersClient client(String url) {
@@ -186,7 +195,7 @@ public final class ContainersContract {
   private static WorkspaceContainers adapter(String url, Map<String, String> params) {
     assertEquals(WorkspaceContainers.WORKLOAD, params.get("workload"));
     WorkspaceContainers containers = new WorkspaceContainers();
-    containers.containerFactory = TestWorkspaceContainerFactory.persistent();
+    containers.containerFactory = TestWorkspaceContainerFactory.withHostUid(PACT_UID);
     containers.owner = params.get("owner");
     containers.launchPatience = Duration.ofSeconds(1);
     containers.containers = client(url);
@@ -196,7 +205,7 @@ public final class ContainersContract {
   /** The spec a workspace's start sends, as the adapter composes it. */
   private static EnsureRequest ensureRequest() {
     WorkspaceContainers adapter = new WorkspaceContainers();
-    adapter.containerFactory = TestWorkspaceContainerFactory.persistent();
+    adapter.containerFactory = TestWorkspaceContainerFactory.withHostUid(PACT_UID);
     return adapter.ensureRequest(REPO, "work", 1L, "main", "0parent");
   }
 
