@@ -433,6 +433,14 @@
                                 <quarkus.http.test-port>0</quarkus.http.test-port>
                                 <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                             </systemPropertyVariables>
+                            <!-- QITS_DOMAIN carries no default in the shipped properties (qits-1402:
+                                 qits.workspace.image-repo is registry.qits.${QITS_DOMAIN}), and the
+                                 launched packaged artifact reads src/main/resources only, never the
+                                 test properties. The deployer states it on every container; here
+                                 the forked JVM states it, and the launch inherits it. -->
+                            <environmentVariables>
+                                <QITS_DOMAIN>test.wohlben.eu</QITS_DOMAIN>
+                            </environmentVariables>
                         </configuration>
                     </execution>
                 </executions>
