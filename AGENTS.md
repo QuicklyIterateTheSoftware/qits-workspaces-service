@@ -152,10 +152,10 @@ because both name rows in another context's database exactly as `repository_id` 
 columns rather than a `(kind, id)` pair: a workspace names at most one in practice and the schema does
 not need to enforce that. See "Dispatching an agent onto a branch" for why it is a field at all.
 
-**`V6__workspace_git_refs.sql` adds `git_refs` and `git_refs_pending`** — what the container may
-push, and whether a narrowing has still to reach qits-idp. Columns on a `CausedRow` again, so no
-`ArchRulesTest` decision; no backfill, because null reads as the workspace's own branch (none for a
-main workspace). See "The Git refs a workspace may push".
+**`V6__workspace_git_refs.sql` added `git_refs` and `git_refs_pending`** — what the container may
+push, and whether a narrowing had still to reach qits-idp. **`V27__drop_workspace_git_refs.sql`
+drops both** (qits-1385): the push scope is the agent's since qits-1152, and a workspace states
+`gitRefs: []`. See "The Git refs a workspace may push".
 
 **`V12__workspace_runners.sql` adds the `workspace_runner` table and the placement columns**
 (epic qits-624). `WorkspaceRunner` is a new entity and takes the `ArchRulesTest` decision: **in**, a
@@ -1285,46 +1285,22 @@ There is no key of ours, and there must not be.
 
 ## The Git refs a workspace may push
 
-Contracts C4 and C5 of the superproject's `principal-bound-git-refs-plan.md`. The commission states
-`gitRefs` beside the `project` claim; qits-idp stamps it into every token as `git_refs`, and
-qits-githost enforces it. Roles stay the owner's until phase 4.
+None. Contracts C4 and C5 of the superproject's `principal-bound-git-refs-plan.md` gave each
+workspace a list of its own, stated in its commission and narrowed when another workspace took a
+branch. Since qits-1152 the push scope is the **agent's**: `AgentService.gitRefsFor` works it out,
+`agent_worktree.git_refs` stores it, and the agent's token carries it (see "Agents and the
+workspaces they run in"). A workspace is a slot with no branch, and its credential — pair or token —
+states `gitRefs: []`: it may push nothing, and the daemon pushes with each agent's token.
 
-- **Stored on the row** (`workspace.git_refs`, a JSON array, `V6`), for the credential's reason: the
-  commission must be reproducible at every ensure. `GitRefs` is the one reader, writer and validator.
-  A null column (a row older than `V6`) means the workspace's own branch, the same default a new row
-  stores.
-- **Written once, then only narrowed.** `recordWorkspace` stores the dispatch's list or
-  `["refs/heads/<branch>"]`, and in the same transaction `GitRefScopes.narrowFor` removes the new
-  branch's exact ref from every other ACTIVE workspace of the same project. A re-dispatch ignores
-  `gitRefs`: a wider list on a re-press would undo a narrowing.
-- **Never the default branch.** Agents push only their own domain branches; the repository's
-  default branch (`RepositoryView.mainBranch`, read as `defaultMainBranch` reads it) moves only
-  through a release request. So a workspace on the default branch — the main workspace — stores
-  `[]`, and a stated entry that covers the default branch (its exact ref, or a `/*` pattern over it)
-  is dropped with a WARN. Rows stored before this rule get the same answer at commission:
-  `GitRefs.effective` leaves the default branch out, so a null main row is commissioned with `[]`,
-  and a stored list that names it is rewritten without it, so a later narrowing `PUT` cannot send
-  it back. A registry that cannot answer at commission drops nothing, the same way it costs the
-  project scope and not the launch.
-- **Three limits on the narrowing.** Only exact refs go; `/*` patterns stay. A workspace never loses
-  its own branch. The project is the same repository, or the registry's answer for another one —
-  a registry that cannot answer leaves the list as it is.
-- **No widening on close.** When the narrowing workspace resolves, nothing is given back. Its branch
-  is normally merged and deleted by then, and a list that grew again unasked would undo the
-  separation for the next workspace on that branch.
-- **The update is after the commit and off the thread.** A narrowed row with a live commission gets
-  `git_refs_pending = true`; an `AFTER_SUCCESS` observer sends the `PUT` on its own thread, and a
-  landed `PUT` clears the flag only if the row still holds the same client and list. A failed `PUT`
-  stays pending, and `CommissionReconciler` sends it again (`GitRefScopes.pushPending`). A new
-  commission states the current list, so it clears the flag — and sets it again if a narrowing
-  landed while the commission was in flight.
-- **The 400 fallback is in `IdpCredentialCommissioner`, and it fails closed.** An idp without C2
-  ignores the `gitRefs` member and answers 201, so a 400 to a commission that states a list means a
-  C2 idp refused that list (an epic list over 500 entries, say). The commission is asked again with
-  `gitRefs: []` — the workspace launches and may push nothing — and an ERROR names the workspace and
-  the idp's reason, every time. It is never asked again without `gitRefs`: that would let the
-  credential push every ref. A 400 to a commission that states no list, or `[]`, is still a failed
-  launch. A narrowing `PUT` that fails stays pending and is sent again, as before.
+- **The list is stated, never omitted.** An absent `gitRefs` would let the credential push every
+  ref, so `commissionFor` and the RUNNER mint always pass `List.of()`.
+- **The narrowing is gone** (qits-1385): the narrowing bean, the `PUT …/git-refs` updates on both
+  doors and the reconcile's resend were removed with nothing to narrow. `V27` drops
+  `workspace.git_refs` and `git_refs_pending`; `agent_worktree.git_refs` (`V21`) stays.
+- **The 400 fallback is in `IdpCredentialCommissioner`, and it fails closed.** A 400 to a commission
+  that states a non-empty list means qits-idp refused that list; the commission is asked again with
+  `gitRefs: []` and an ERROR names the row and the idp's reason. It is never asked again without
+  `gitRefs`. A 400 to `[]` is a failed launch.
 
 ## Admin workspaces: the one privilege a workspace can be granted
 
