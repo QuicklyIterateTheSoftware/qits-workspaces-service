@@ -90,9 +90,6 @@ public class WorkspaceService {
    */
   @Inject Instance<CredentialCommissioner> commissioner;
 
-  /** The Git refs a workspace may push, and their narrowing when another workspace takes a branch. */
-  @Inject GitRefScopes gitRefScopes;
-
   @Inject WorkspaceContainerEventPublisher containerEvents;
 
   /**
@@ -696,21 +693,10 @@ public class WorkspaceService {
         QuarkusTransaction.requiringNew()
             .call(() -> workspaceRepository.findActiveById(rowId).map(wt -> wt.admin).orElse(false));
     RepositoryLookup.RepositoryView repository = repositoryOf(repoId);
-    // The default branch, read the way a create reads it. An agent never pushes it, so it leaves
-    // every list below. A registry that did not answer drops nothing: like the project scope, it
-    // costs the scope and not the launch.
-    String defaultBranch = repository == null ? null : defaultMainBranch(repository);
-    // The Git refs this container may push (contract C5): the row's list, or its own branch for a
-    // row that predates the column. Read as the stored form so the check below compares like with
-    // like.
-    String statedRefs =
-        QuarkusTransaction.requiringNew()
-            .call(
-                () ->
-                    workspaceRepository
-                        .findActiveById(rowId)
-                        .map(wt -> GitRefs.write(GitRefs.effective(wt, defaultBranch)))
-                        .orElse(null));
+    // The Git refs this container may push: none. The workspace credential never pushes — the
+    // daemon pushes with each agent's own token, whose refs are the agent's (qits-1152) — so the
+    // commission states an empty list rather than none, which would be unscoped.
+    List<String> statedRefs = List.of();
     // THE WORKSPACE TOKEN, WHENEVER THERE IS AN EDGE (qits-1084). An admin or editor row stays
     // DIRECT for good, but its container no longer needs an hourly-minting client pair: given an
     // edge plane it holds the same non-expiring qits_tok_ a RUNNER row does — `workspace-admin` for
@@ -727,7 +713,7 @@ public class WorkspaceService {
         return;
       }
       WorkspaceToken token = minted.get();
-      if (!storeToken(rowId, token, defaultBranch, statedRefs)) {
+      if (!storeToken(rowId, token)) {
         // A second provision stored its token first, or the row resolved meanwhile: this one is
         // nobody's.
         deleteToken(token.tokenId());
@@ -741,48 +727,22 @@ public class WorkspaceService {
     Optional<WorkspaceCredential> issued =
         commissioner
             .get()
-            .commission(
-                rowId,
-                projectOf(repository),
-                statedRefs == null ? null : GitRefs.read(statedRefs),
-                admin);
+            .commission(rowId, projectOf(repository), statedRefs, admin);
     if (issued.isEmpty()) {
       // No issuer wired. Supported, and the same as no implementation at all.
       return;
     }
     WorkspaceCredential credential = issued.get();
-    boolean narrowedMeanwhile =
-        QuarkusTransaction.requiringNew()
-            .call(
-                () ->
-                    workspaceRepository
-                        .findActiveById(rowId)
-                        .map(
-                            wt -> {
-                              wt.commissionedClientId = credential.clientId();
-                              wt.commissionedClientSecret = credential.secret();
-                              // A list stored before the default-branch rule may still name the
-                              // default branch. Store it without, so a later narrowing sends what
-                              // the commission stated and does not put the branch back.
-                              List<String> allowed = GitRefs.effective(wt, defaultBranch);
-                              if (wt.gitRefs != null
-                                  && !GitRefs.read(wt.gitRefs).equals(allowed)) {
-                                LOG.infof(
-                                    "Workspace %s may not push the default branch %s; its stored"
-                                        + " Git refs no longer name it",
-                                    rowId, defaultBranch);
-                                wt.gitRefs = GitRefs.write(allowed);
-                              }
-                              // The commission stated `statedRefs`. A narrowing that landed while it
-                              // was being made found no client to update, so the list it left is
-                              // still to be sent.
-                              wt.gitRefsPending = !GitRefs.write(allowed).equals(statedRefs);
-                              return wt.gitRefsPending;
-                            })
-                        .orElse(false));
-    if (narrowedMeanwhile) {
-      gitRefScopes.push(rowId);
-    }
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                workspaceRepository
+                    .findActiveById(rowId)
+                    .ifPresent(
+                        wt -> {
+                          wt.commissionedClientId = credential.clientId();
+                          wt.commissionedClientSecret = credential.secret();
+                        }));
     LOG.debugf(
         "Commissioned %s for workspace %s/%s", credential.clientId(), repoId, workspaceId);
   }
@@ -808,61 +768,38 @@ public class WorkspaceService {
   /**
    * The mint both token paths make — a RUNNER start ({@link #ensureRunnerToken}) and a DIRECT
    * provision on an edge plane ({@link #commissionFor}): the row's project claim, the Git refs the
-   * caller read as {@code statedRefs}, and the kind {@code admin} picks.
+   * caller states as {@code statedRefs}, and the kind {@code admin} picks.
    */
   private Optional<WorkspaceToken> mintToken(
       Long rowId,
       RepositoryLookup.RepositoryView repository,
-      String statedRefs,
+      List<String> statedRefs,
       boolean admin) {
-    return commissioner
-        .get()
-        .commissionToken(
-            rowId,
-            projectOf(repository),
-            statedRefs == null ? null : GitRefs.read(statedRefs),
-            admin);
+    return commissioner.get().commissionToken(rowId, projectOf(repository), statedRefs, admin);
   }
 
   /**
    * Store a freshly minted {@code token} on the row's three token columns ({@code V13}), unless the
    * row already holds one or is no longer ACTIVE — answering whether it stored it, so the caller
    * deletes a token nobody holds. Shared by both token paths.
-   *
-   * <p>{@link #commissionFor}'s two Git ref rules, for the same reasons: a stored list never names
-   * the default branch, and a narrowing that landed while the mint was in flight ({@code
-   * statedRefs} is what the mint stated) is still to be sent — and is sent from here.
    */
-  private boolean storeToken(
-      Long rowId, WorkspaceToken token, String defaultBranch, String statedRefs) {
-    // [stored, narrowedMeanwhile]
-    boolean[] outcome =
-        QuarkusTransaction.requiringNew()
-            .call(
-                () ->
-                    workspaceRepository
-                        .findActiveById(rowId)
-                        .map(
-                            wt -> {
-                              if (wt.holdsToken()) {
-                                return new boolean[] {false, false};
-                              }
-                              wt.commissionedTokenId = token.tokenId();
-                              wt.commissionedTokenSubject = token.subject();
-                              wt.commissionedToken = token.token();
-                              List<String> allowed = GitRefs.effective(wt, defaultBranch);
-                              if (wt.gitRefs != null
-                                  && !GitRefs.read(wt.gitRefs).equals(allowed)) {
-                                wt.gitRefs = GitRefs.write(allowed);
-                              }
-                              wt.gitRefsPending = !GitRefs.write(allowed).equals(statedRefs);
-                              return new boolean[] {true, wt.gitRefsPending};
-                            })
-                        .orElse(new boolean[] {false, false}));
-    if (outcome[1]) {
-      gitRefScopes.push(rowId);
-    }
-    return outcome[0];
+  private boolean storeToken(Long rowId, WorkspaceToken token) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                workspaceRepository
+                    .findActiveById(rowId)
+                    .map(
+                        wt -> {
+                          if (wt.holdsToken()) {
+                            return false;
+                          }
+                          wt.commissionedTokenId = token.tokenId();
+                          wt.commissionedTokenSubject = token.subject();
+                          wt.commissionedToken = token.token();
+                          return true;
+                        })
+                    .orElse(false));
   }
 
   /**
@@ -1558,7 +1495,6 @@ public class WorkspaceService {
         adoptExisting,
         false,
         WorkspaceSubject.none(),
-        null,
         null);
   }
 
@@ -1573,12 +1509,6 @@ public class WorkspaceService {
    * <p>It is also the only writer of the {@link WorkspaceSubject}, for the milder version of the
    * same reason: the two ids are same-typed and adjacent, so they travel as a record rather than as
    * a pair of positional strings.
-   *
-   * <p>And the only writer of the Git ref list a new workspace starts with: {@code gitRefs} as
-   * stated (already validated), or the workspace's own branch when null. Never the repository's
-   * default branch: a stated entry that covers it is dropped and logged, and a workspace on the
-   * default branch gets an empty list. Writing the row is also what narrows every other open
-   * workspace that could push this branch ({@link GitRefScopes}).
    */
   private Workspace recordWorkspace(
       String repoId,
@@ -1589,7 +1519,6 @@ public class WorkspaceService {
       boolean adoptExisting,
       boolean admin,
       WorkspaceSubject subject,
-      List<String> gitRefs,
       WorkspacePlacement placement) {
     var repo = repositories.require(repoId);
 
@@ -1683,27 +1612,8 @@ public class WorkspaceService {
     workspace.epicId = named.epicId();
     workspace.entityId = named.entityId();
     workspace.workId = named.workId();
-    // What the container may push (contract C4): the stated list, or its own branch. Never the
-    // default branch: it moves only through a release request, never by an agent's push.
-    String defaultBranch = defaultMainBranch(repo);
-    List<String> allowed;
-    if (gitRefs == null) {
-      allowed = GitRefs.defaultFor(newBranch, defaultBranch);
-    } else {
-      allowed = GitRefs.withoutDefaultBranch(gitRefs, defaultBranch);
-      if (allowed.size() < gitRefs.size()) {
-        List<String> dropped = new ArrayList<>(gitRefs);
-        dropped.removeAll(allowed);
-        LOG.warnf(
-            "Workspace %s/%s may not push the default branch %s; dropped %s from the stated Git refs",
-            repoId, workspaceId, defaultBranch, dropped);
-      }
-    }
-    workspace.gitRefs = GitRefs.write(allowed);
     workspaceRepository.persist(workspace);
     recordEvent(workspace, WorkspaceEventType.CREATED, newBranch, parentBranch, null);
-    // The branch is this workspace's now, so no other open workspace in the project may push it.
-    gitRefScopes.narrowFor(workspace, repo);
 
     WorkspaceMetadata metadata = new WorkspaceMetadata();
     metadata.workspaceId = workspaceId;
@@ -1820,7 +1730,7 @@ public class WorkspaceService {
         WorkspaceSubject.none());
   }
 
-  /** The posture and the subject together, with the default Git refs (the workspace's branch). */
+  /** The posture and the subject together, placed by the rule. */
   public Workspace createWorkspace(
       String repoId,
       String workspaceId,
@@ -1841,38 +1751,6 @@ public class WorkspaceService {
         branchTree,
         admin,
         subject,
-        null);
-  }
-
-  /**
-   * The posture, the subject and the Git refs together, placed DIRECT.
-   *
-   * <p>{@code gitRefs} is what the workspace's container may push (contract C4) — exact refs and
-   * trailing {@code /*} patterns. Null means the workspace's own branch. It is checked before any
-   * ref is pushed, so a bad list costs nothing.
-   */
-  public Workspace createWorkspace(
-      String repoId,
-      String workspaceId,
-      String parent,
-      String branch,
-      String preamble,
-      boolean adoptExisting,
-      boolean branchTree,
-      boolean admin,
-      WorkspaceSubject subject,
-      List<String> gitRefs) {
-    return createWorkspace(
-        repoId,
-        workspaceId,
-        parent,
-        branch,
-        preamble,
-        adoptExisting,
-        branchTree,
-        admin,
-        subject,
-        gitRefs,
         null);
   }
 
@@ -1900,7 +1778,6 @@ public class WorkspaceService {
       boolean branchTree,
       boolean admin,
       WorkspaceSubject subject,
-      List<String> gitRefs,
       WorkspacePlacement placement) {
     return queuedOnRunner(
         recordPlaced(
@@ -1913,7 +1790,6 @@ public class WorkspaceService {
             branchTree,
             admin,
             subject,
-            gitRefs,
             placement));
   }
 
@@ -1954,9 +1830,7 @@ public class WorkspaceService {
       boolean branchTree,
       boolean admin,
       WorkspaceSubject subject,
-      List<String> gitRefs,
       WorkspacePlacement placement) {
-    List<String> stated = gitRefs == null ? null : GitRefs.validated(gitRefs);
     // A call on `this` never reaches the interceptor, so each delegation below opens its own
     // transaction explicitly rather than relying on the annotation of the method it calls.
     if (!branchTree) {
@@ -1972,7 +1846,6 @@ public class WorkspaceService {
                       adoptExisting,
                       admin,
                       subject,
-                      stated,
                       placement));
     }
     // The branch tree (a branch in every submodule, plus a WORKSPACE.md commit) went with
@@ -2005,7 +1878,6 @@ public class WorkspaceService {
                   workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
                   workspace.admin = admin;
                   workspace.placement = placed;
-                  workspace.gitRefs = GitRefs.write(List.of());
                   workspaceRepository.persist(workspace);
                   workspaceRepository.flush();
                   workspace.workspaceId = "ws-" + workspace.id;
@@ -3501,19 +3373,11 @@ public class WorkspaceService {
       return TOKEN_UNAVAILABLE + ": no issuer is wired to mint the workspace token";
     }
     RepositoryLookup.RepositoryView repository = repositoryOf(row.repositoryId);
-    String defaultBranch = repository == null ? null : defaultMainBranch(repository);
-    String statedRefs =
-        QuarkusTransaction.requiringNew()
-            .call(
-                () ->
-                    workspaceRepository
-                        .findActiveById(rowId)
-                        .map(wt -> GitRefs.write(GitRefs.effective(wt, defaultBranch)))
-                        .orElse(null));
     Optional<WorkspaceToken> issued;
     try {
       // A RUNNER row is never admin (ck_workspace_runner_posture), so its token is `workspace`.
-      issued = mintToken(rowId, repository, statedRefs, false);
+      // It pushes nothing (`gitRefs: []`): every push is an agent's, on the agent's token.
+      issued = mintToken(rowId, repository, List.of(), false);
     } catch (RuntimeException failed) {
       return TOKEN_UNAVAILABLE + ": " + failed.getMessage();
     }
@@ -3521,7 +3385,7 @@ public class WorkspaceService {
       return TOKEN_UNAVAILABLE + ": no issuer is configured to mint the workspace token";
     }
     WorkspaceToken token = issued.get();
-    if (!storeToken(rowId, token, defaultBranch, statedRefs)) {
+    if (!storeToken(rowId, token)) {
       // Another start stored a token first, or the row resolved meanwhile: this one is nobody's.
       deleteToken(token.tokenId());
       boolean nowHeld =

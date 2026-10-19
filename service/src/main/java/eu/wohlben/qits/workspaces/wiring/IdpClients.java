@@ -7,7 +7,6 @@ import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.POST;
-import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -55,21 +54,6 @@ public interface IdpClients {
   void decommission(
       @HeaderParam(HttpHeaders.AUTHORIZATION) String authorization,
       @PathParam("clientId") String clientId);
-
-  /**
-   * Replace the Git refs one of this caller's commissions states (contract C2). Only the owner may
-   * ask; 404 for a foreign or unknown client. The next token of that client carries the new list.
-   */
-  @PUT
-  @Path("/{clientId}/git-refs")
-  @Consumes(MediaType.APPLICATION_JSON)
-  void updateGitRefs(
-      @HeaderParam(HttpHeaders.AUTHORIZATION) String authorization,
-      @PathParam("clientId") String clientId,
-      GitRefsRequest request);
-
-  /** The body of {@link #updateGitRefs}: the whole new list. */
-  record GitRefsRequest(List<String> gitRefs) {}
 
   /**
    * What a caller asks for: which context this credential is being commissioned for, and what that

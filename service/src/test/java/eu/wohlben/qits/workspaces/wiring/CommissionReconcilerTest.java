@@ -1,7 +1,6 @@
 package eu.wohlben.qits.workspaces.wiring;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.CredentialCommissioner;
@@ -11,7 +10,6 @@ import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceCredentials;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
-import eu.wohlben.qits.workspaces.control.WorkspaceSubject;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
@@ -158,45 +156,6 @@ public class CommissionReconcilerTest {
     assertEquals(List.of(), commissioner.decommissioned());
   }
 
-  @Test
-  public void aNarrowingTheIdpDidNotTakeIsSentAgainByTheReconcile() throws Exception {
-    String repoId = TestOrigin.create(dataDir);
-    repositories.register(repoId);
-    workspaceService.createWorkspace(
-        repoId,
-        "epic-e",
-        "master",
-        "epic/e",
-        null,
-        false,
-        false,
-        true,
-        WorkspaceSubject.none(),
-        List.of("refs/heads/epic/e", "refs/heads/task/e/a"));
-    Long epic = workspaceIds.of(repoId, "epic-e");
-    workspaceService.ensureContainer(epic);
-    String client = credentials.forWorkspace(epic).orElseThrow().clientId();
-    commissioner.failGitRefUpdates(true);
-
-    workspaceService.createWorkspace(repoId, "task-e-a", "epic/e", "task/e/a");
-
-    long deadline = System.currentTimeMillis() + 10_000;
-    while (commissioner.gitRefUpdates().isEmpty() && System.currentTimeMillis() < deadline) {
-      Thread.sleep(20);
-    }
-    assertEquals(1, commissioner.gitRefUpdates().size(), "the first update was attempted");
-    assertTrue(pending(epic), "and did not land");
-
-    commissioner.failGitRefUpdates(false);
-    assertEquals(0, reconciler.reconcile(), "nothing to reap");
-
-    assertEquals(
-        new FakeCredentialCommissioner.GitRefUpdate(client, List.of("refs/heads/epic/e")),
-        commissioner.gitRefUpdates().get(1),
-        "the reconcile sent the narrowed list again");
-    assertFalse(pending(epic));
-  }
-
   /**
    * The workspace token arm (qits-625, qits-802): an orphaned token (no ACTIVE row names it) and a
    * superseded one (its row holds a newer token) are deleted; the token a live row holds, a token of
@@ -306,10 +265,5 @@ public class CommissionReconcilerTest {
               workspaceRepository.flush();
               return w.id;
             });
-  }
-
-  private boolean pending(Long rowId) {
-    return QuarkusTransaction.requiringNew()
-        .call(() -> workspaceRepository.findActiveById(rowId).orElseThrow().gitRefsPending);
   }
 }

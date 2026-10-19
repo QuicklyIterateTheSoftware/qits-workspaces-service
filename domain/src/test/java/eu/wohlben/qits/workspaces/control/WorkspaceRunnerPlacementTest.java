@@ -194,7 +194,6 @@ public class WorkspaceRunnerPlacementTest {
                     false,
                     false,
                     WorkspaceSubject.none(),
-                    null,
                     WorkspacePlacement.DIRECT));
     assertEquals(400, refused.statusCode());
     assertEquals(RunnerRefusals.DIRECT_PLACEMENT_REFUSED, refused.code());
@@ -539,8 +538,8 @@ public class WorkspaceRunnerPlacementTest {
 
   /**
    * The token's lifetime is the container's: the create's start mints it (the row holds id, subject
-   * and value, the mint states the row's own context and Git refs) and no client is commissioned; a
-   * stop deletes nothing and the next start reuses it; delete-container deletes it and clears the
+   * and value, the mint states the row's own context and no Git refs) and no client is commissioned;
+   * a stop deletes nothing and the next start reuses it; delete-container deletes it and clears the
    * row; the start after that mints a fresh one.
    */
   @Test
@@ -555,7 +554,7 @@ public class WorkspaceRunnerPlacementTest {
     assertEquals(1, commissioner.tokensMinted().size());
     FakeCredentialCommissioner.MintedToken minted = commissioner.tokensMinted().get(0);
     assertEquals(created.id.longValue(), minted.rowId());
-    assertEquals(List.of("refs/heads/tok"), minted.gitRefs());
+    assertEquals(List.of(), minted.gitRefs(), "a workspace token pushes nothing (qits-1152)");
     Workspace row = read(created.id);
     assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
     assertEquals(minted.token().tokenId(), row.commissionedTokenId);
@@ -997,7 +996,6 @@ public class WorkspaceRunnerPlacementTest {
             false,
             admin,
             WorkspaceSubject.none(),
-            null,
             WorkspacePlacement.RUNNER);
     rows.add(created.id);
     return created;

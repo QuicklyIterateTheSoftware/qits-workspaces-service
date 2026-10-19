@@ -1,7 +1,6 @@
 package eu.wohlben.qits.workspaces.wiring;
 
 import eu.wohlben.qits.workspaces.control.CredentialCommissioner;
-import eu.wohlben.qits.workspaces.control.GitRefScopes;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
@@ -83,9 +82,6 @@ public class CommissionReconciler {
   /** The agents, whose own tokens are claimed while they are not REMOVED (qits-1152). */
   @Inject AgentWorktreeRepository agentRows;
 
-  /** Sends the Git ref narrowings whose first update did not reach qits-idp. */
-  @Inject GitRefScopes gitRefScopes;
-
   /** The runner rows the two runner arms judge against. */
   @Inject WorkspaceRunnerRepository runners;
 
@@ -112,15 +108,11 @@ public class CommissionReconciler {
 
   /**
    * One pass. Returns how many credentials it gave back — the number the tests read.
-   *
-   * <p>It first sends again every narrowed Git ref list that did not reach qits-idp when the
-   * narrowing happened ({@link GitRefScopes#pushPending}). That half never throws either.
    */
   int reconcile() {
     if (!commissioner.isResolvable()) {
       return 0;
     }
-    gitRefScopes.pushPending();
     Instant now = Instant.now();
     return reapClients() + reapRegistrationTokens(now) + reapWorkspaceTokens(now);
   }

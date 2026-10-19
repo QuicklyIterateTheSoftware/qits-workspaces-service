@@ -149,17 +149,6 @@ public interface CredentialCommissioner {
       Long rowId, String projectId, List<String> gitRefs, boolean admin);
 
   /**
-   * Replace the Git refs a live commission states — the narrowing (contract C5), sent as {@code PUT
-   * /idp/api/clients/{clientId}/git-refs}. The next token of that client carries the new list.
-   *
-   * <p>Does nothing when this deployment has no issuer. Unlike {@link #decommission}, a failure
-   * <b>throws</b>: the caller keeps the narrowing pending and the reconcile sends it again.
-   *
-   * @throws RuntimeException when an issuer is configured and the update did not land
-   */
-  void updateGitRefs(String clientId, List<String> gitRefs);
-
-  /**
    * Give a credential back — the container it belonged to is gone.
    *
    * <p>Best-effort by contract: every caller runs after something irreversible has already happened,
@@ -219,14 +208,6 @@ public interface CredentialCommissioner {
   String AGENT_CONTEXT_PREFIX = "agent-";
 
   void deleteToken(String tokenId);
-
-  /**
-   * Replace the Git refs a live token states ({@code PUT /idp/api/tokens/{tokenId}/git-refs}), the
-   * token twin of {@link #updateGitRefs}. Throws on failure, as that does.
-   *
-   * @throws RuntimeException when an issuer is configured and the update did not land
-   */
-  void updateTokenGitRefs(String tokenId, List<String> gitRefs);
 
   /**
    * Every token this service currently owns, of every kind, for the reconcile. Empty when nothing

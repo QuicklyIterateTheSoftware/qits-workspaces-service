@@ -205,7 +205,6 @@ public class WorkspaceServicePlacementTest {
             false,
             true,
             WorkspaceSubject.none(),
-            null,
             WorkspacePlacement.DIRECT);
     rows.add(created.id);
 
@@ -228,7 +227,6 @@ public class WorkspaceServicePlacementTest {
             false,
             false,
             WorkspaceSubject.none(),
-            null,
             WorkspacePlacement.RUNNER);
     rows.add(created.id);
 
@@ -255,7 +253,6 @@ public class WorkspaceServicePlacementTest {
                     false,
                     false,
                     WorkspaceSubject.none(),
-                    null,
                     WorkspacePlacement.DIRECT));
     assertEquals(400, refused.statusCode());
     assertEquals(RunnerRefusals.DIRECT_PLACEMENT_REFUSED, refused.code());

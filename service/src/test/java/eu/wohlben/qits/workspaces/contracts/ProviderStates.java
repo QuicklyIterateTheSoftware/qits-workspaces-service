@@ -1109,7 +1109,6 @@ public class ProviderStates {
     row.status = WorkspaceStatus.ACTIVE;
     row.runtimeStatus = runtime;
     row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
-    row.gitRefs = "[]";
     workspaces.persist(row);
     workspaces.flush();
     return row.id;

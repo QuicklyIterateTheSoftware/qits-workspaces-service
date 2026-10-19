@@ -47,7 +47,7 @@ import java.util.UUID;
  *   <li>{@link IdpCredentialCommissioner} — the commission doors for a workspace's credential: a
  *       client pair ({@code /idp/api/clients}) or a token ({@code /idp/api/tokens}, a workspace's
  *       or an agent's), commissioned when the scheduler starts a slot or places an agent ({@code
- *       AgentService.reconcile}), listed, narrowed and handed back by {@code
+ *       AgentService.reconcile}), listed and handed back by {@code
  *       CommissionReconciler.reconcile}.
  *   <li>{@link IdpRunnerCommissioner} — a runner's registration token ({@code createRunner}, {@code
  *       rotateRunnerRegistrationToken}) and its own client, with the spent token deleted ({@code
@@ -165,15 +165,6 @@ public final class IdpContract {
                       commissionerAgainst(url, params).decommission(params.get("clientId"))),
               ContractRow.of(
                   COMMISSIONS,
-                  A_CLIENT,
-                  "replaceClientGitRefs",
-                  basic(gitRefsBody()),
-                  List.of(),
-                  (url, params) ->
-                      commissionerAgainst(url, params)
-                          .updateGitRefs(params.get("clientId"), List.of("refs/heads/ws/7"))),
-              ContractRow.of(
-                  COMMISSIONS,
                   A_TOKEN,
                   "listTokens",
                   basic(null),
@@ -191,15 +182,6 @@ public final class IdpContract {
                   basic(null),
                   List.of(),
                   (url, params) -> commissionerAgainst(url, params).deleteToken(params.get("tokenId"))),
-              ContractRow.of(
-                  COMMISSIONS,
-                  A_TOKEN,
-                  "replaceTokenGitRefs",
-                  basic(gitRefsBody()),
-                  List.of(),
-                  (url, params) ->
-                      commissionerAgainst(url, params)
-                          .updateTokenGitRefs(params.get("tokenId"), List.of("refs/heads/ws/7"))),
               // --- a runner's credentials ------------------------------------------------------
               ContractRow.of(
                   CREATE_RUNNER,
@@ -275,7 +257,7 @@ public final class IdpContract {
               // The peer bearer: client_secret_basic, the client grant and the platform audience,
               // exactly as the shipped `qits` client sends it. A handback (decommission, delete) of
               // a credential qits-idp no longer holds answers 404, which the commissioners read as
-              // done; a narrowing's 404 throws, and the caller keeps the narrowing pending.
+              // done.
               ContractRow.of(
                   RECONCILE,
                   PEER_CALLER,
@@ -297,37 +279,12 @@ public final class IdpContract {
                       commissionerAgainst(url, params).decommission(params.get("clientId"))),
               ContractRow.of(
                   COMMISSIONS,
-                  NO_CLIENT,
-                  "replaceClientGitRefs",
-                  basic(gitRefsBody()),
-                  List.of(),
-                  (url, params) ->
-                      assertThrows(
-                          IllegalStateException.class,
-                          () ->
-                              commissionerAgainst(url, params)
-                                  .updateGitRefs(params.get("clientId"), List.of("refs/heads/ws/7")))),
-              ContractRow.of(
-                  COMMISSIONS,
                   NO_TOKEN,
                   "deleteToken",
                   basic(null),
                   List.of(),
                   (url, params) ->
                       commissionerAgainst(url, params).deleteToken(params.get("tokenId"))),
-              ContractRow.of(
-                  COMMISSIONS,
-                  NO_TOKEN,
-                  "replaceTokenGitRefs",
-                  basic(gitRefsBody()),
-                  List.of(),
-                  (url, params) ->
-                      assertThrows(
-                          IllegalStateException.class,
-                          () ->
-                              commissionerAgainst(url, params)
-                                  .updateTokenGitRefs(
-                                      params.get("tokenId"), List.of("refs/heads/ws/7")))),
               // A commission whose stated Git refs qits-idp refuses: 400, the answer the commissioner
               // tells apart from every other refusal (IdpCredentialCommissioner.status) to ask again
               // with gitRefs: [] and fail closed. The row is that first request and the status it
@@ -403,10 +360,6 @@ public final class IdpContract {
     return body.array("gitRefs")
         .valueFromProviderState("${refusedGitRef}", "refs/tags/contract")
         .closeArray();
-  }
-
-  private static DslPart gitRefsBody() {
-    return new PactDslJsonBody().array("gitRefs").stringType("refs/heads/ws/7").closeArray();
   }
 
   // --- the clients -------------------------------------------------------------------------------

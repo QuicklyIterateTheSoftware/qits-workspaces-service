@@ -36,20 +36,11 @@ public class FakeRepositoryLookup implements RepositoryLookup {
 
   private final Map<String, String> mainBranches = new ConcurrentHashMap<>();
 
-  /**
-   * Projects other than {@link #PROJECT_ID}, by repository. Only a test about two projects — the
-   * Git ref narrowing, which must stop at a project's edge — sets one.
-   */
+  /** Projects other than {@link #PROJECT_ID}, by repository: a declared wrapper's. */
   private final Map<String, String> projects = new ConcurrentHashMap<>();
 
   private String projectOf(String repoId) {
     return projects.getOrDefault(repoId, PROJECT_ID);
-  }
-
-  /** Register {@code repoId} with {@code master} as its main branch, in another project. */
-  public void registerInProject(String repoId, String projectId) {
-    register(repoId);
-    projects.put(repoId, projectId);
   }
 
   /**

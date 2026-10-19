@@ -52,14 +52,11 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     decommissioned.clear();
     gitRefs.clear();
     kinds.clear();
-    gitRefUpdates.clear();
-    failGitRefUpdates = false;
     tokensWired = true;
     tokenFailure = null;
     tokensMinted.clear();
     agentTokensMinted.clear();
     tokensDeleted.clear();
-    tokenGitRefUpdates.clear();
     synchronized (liveTokens) {
       liveTokens.clear();
     }
@@ -88,7 +85,6 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
 
   private final List<MintedToken> tokensMinted = new CopyOnWriteArrayList<>();
   private final List<String> tokensDeleted = new CopyOnWriteArrayList<>();
-  private final List<GitRefUpdate> tokenGitRefUpdates = new CopyOnWriteArrayList<>();
 
   /** Live tokens by id: kind, context and creation instant, as a listing would read them. */
   private final Map<String, TokenCommission> liveTokens = new LinkedHashMap<>();
@@ -111,11 +107,6 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
   /** Every token id deleted, in order. */
   public List<String> tokensDeleted() {
     return List.copyOf(tokensDeleted);
-  }
-
-  /** Every token Git ref update, in order — the failed ones included. */
-  public List<GitRefUpdate> tokenGitRefUpdates() {
-    return List.copyOf(tokenGitRefUpdates);
   }
 
   /** Put a token in place this service never stored on a row — an orphan, for the reconcile. */
@@ -217,15 +208,6 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
   }
 
   @Override
-  public void updateTokenGitRefs(String tokenId, List<String> refs) {
-    boolean fail = failGitRefUpdates;
-    tokenGitRefUpdates.add(new GitRefUpdate(tokenId, List.copyOf(refs)));
-    if (fail) {
-      throw new IllegalStateException("qits-idp is unreachable (fake)");
-    }
-  }
-
-  @Override
   public List<TokenCommission> listTokens() {
     if (!tokensWired) {
       return List.of();
@@ -276,13 +258,6 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
   /** The Git refs each commission stated, by row id. Absent is "stated nothing". */
   private final Map<Long, List<String>> gitRefs = new java.util.concurrent.ConcurrentHashMap<>();
 
-  /** One Git ref update as the service sent it. */
-  public record GitRefUpdate(String clientId, List<String> gitRefs) {}
-
-  private final List<GitRefUpdate> gitRefUpdates = new CopyOnWriteArrayList<>();
-
-  private volatile boolean failGitRefUpdates;
-
   /** The Git refs the last commission for {@code rowId} stated, or null when it stated none. */
   public List<String> gitRefsFor(Long rowId) {
     return gitRefs.get(rowId);
@@ -296,29 +271,6 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
    */
   public String contextKindFor(Long rowId) {
     return kinds.get(rowId);
-  }
-
-  /** Every Git ref update that reached this issuer, in order — the failed ones included. */
-  public List<GitRefUpdate> gitRefUpdates() {
-    return List.copyOf(gitRefUpdates);
-  }
-
-  /** Make every following Git ref update fail the way an unreachable issuer does, or stop that. */
-  public void failGitRefUpdates(boolean fail) {
-    failGitRefUpdates = fail;
-  }
-
-  @Override
-  public void updateGitRefs(String clientId, List<String> refs) {
-    if (!wired) {
-      return;
-    }
-    // Decided before the update is recorded, so a test that sees the record knows its outcome.
-    boolean fail = failGitRefUpdates;
-    gitRefUpdates.add(new GitRefUpdate(clientId, List.copyOf(refs)));
-    if (fail) {
-      throw new IllegalStateException("qits-idp is unreachable (fake)");
-    }
   }
 
   @Override

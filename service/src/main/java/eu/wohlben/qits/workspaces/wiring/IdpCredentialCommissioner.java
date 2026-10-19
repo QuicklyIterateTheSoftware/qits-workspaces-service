@@ -221,29 +221,6 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
     }
   }
 
-  /**
-   * One attempt, and a failure throws: the caller keeps the narrowing pending and the reconcile
-   * sends it again, so there is no window to hold through here.
-   */
-  @Override
-  public void updateGitRefs(String clientId, List<String> gitRefs) {
-    String authorization = authorization();
-    if (authorization == null || blank(clientId)) {
-      return;
-    }
-    try {
-      clients.updateGitRefs(
-          authorization, clientId, new IdpClients.GitRefsRequest(List.copyOf(gitRefs)));
-    } catch (WebApplicationException http) {
-      throw new IllegalStateException(
-          "qits-idp answered "
-              + http.getResponse().getStatus()
-              + " to the Git ref update of "
-              + clientId,
-          http);
-    }
-  }
-
   /** The HTTP status of a failed call, or -1 when nothing answered. */
   static int status(RuntimeException failure) {
     return failure instanceof WebApplicationException http ? http.getResponse().getStatus() : -1;
@@ -401,26 +378,6 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
       LOG.warnf(
           "Could not reach qits-idp to delete workspace token %s; the reconcile will reap it: %s",
           tokenId, transportFailure.toString());
-    }
-  }
-
-  /** {@link #updateGitRefs}' twin on the token door: one attempt, and a failure throws. */
-  @Override
-  public void updateTokenGitRefs(String tokenId, List<String> gitRefs) {
-    String authorization = authorization();
-    if (authorization == null || blank(tokenId)) {
-      return;
-    }
-    try {
-      tokens.updateGitRefs(
-          authorization, tokenId, new IdpClients.GitRefsRequest(List.copyOf(gitRefs)));
-    } catch (WebApplicationException http) {
-      throw new IllegalStateException(
-          "qits-idp answered "
-              + http.getResponse().getStatus()
-              + " to the Git ref update of token "
-              + tokenId,
-          http);
     }
   }
 
