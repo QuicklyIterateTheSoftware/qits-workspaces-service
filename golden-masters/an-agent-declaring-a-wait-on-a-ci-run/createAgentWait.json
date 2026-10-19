@@ -1,0 +1,75 @@
+{
+  "id": "00000000-0000-4000-8000-000000000100",
+  "agentId": "00000000-0000-4000-8000-0000000000a1",
+  "label": "CI run 00000000 to end",
+  "selection": {
+    "event": "BuildStatusChanged",
+    "when": [
+      [
+        {
+          "path": "runId",
+          "op": "exact",
+          "value": "00000000-0000-4000-8000-0000000000c2"
+        },
+        {
+          "path": "status",
+          "op": "exact",
+          "value": "SUCCESS"
+        }
+      ],
+      [
+        {
+          "path": "runId",
+          "op": "exact",
+          "value": "00000000-0000-4000-8000-0000000000c2"
+        },
+        {
+          "path": "status",
+          "op": "exact",
+          "value": "FAILED"
+        }
+      ],
+      [
+        {
+          "path": "runId",
+          "op": "exact",
+          "value": "00000000-0000-4000-8000-0000000000c2"
+        },
+        {
+          "path": "status",
+          "op": "exact",
+          "value": "CANCELLED"
+        }
+      ],
+      [
+        {
+          "path": "runId",
+          "op": "exact",
+          "value": "00000000-0000-4000-8000-0000000000c2"
+        },
+        {
+          "path": "status",
+          "op": "exact",
+          "value": "CONFIG_ERROR"
+        }
+      ],
+      [
+        {
+          "path": "runId",
+          "op": "exact",
+          "value": "00000000-0000-4000-8000-0000000000c2"
+        },
+        {
+          "path": "status",
+          "op": "exact",
+          "value": "TIMED_OUT"
+        }
+      ]
+    ]
+  },
+  "state": "OPEN",
+  "createdAt": "2026-01-01T00:00:00Z",
+  "expiresAt": null,
+  "matchedEventId": null,
+  "closedAt": null
+}

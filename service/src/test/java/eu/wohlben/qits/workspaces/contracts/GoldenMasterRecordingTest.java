@@ -256,6 +256,36 @@ class GoldenMasterRecordingTest {
                       + "{\"path\":\"entities[].status\",\"op\":\"exact\",\"value\":\"VERIFIED\"}]]},"
                       + "\"timeout\":\"PT2H\"}")
               .as("qits:agent"),
+          // The presets' bodies (qits-1149), byte for byte as `qits wait release-request <uuid>`
+          // and `qits wait ci-run <uuid>` send them: one group per final state, no timeout.
+          Interaction.write(
+                  ProviderStates.AN_AGENT_WAITING_ON_A_RELEASE_REQUEST,
+                  "createAgentWait",
+                  WORKSPACES + "/agents/{agentId}/waits",
+                  201,
+                  "{\"label\":\"release request 00000000 to end\","
+                      + "\"selection\":{\"event\":\"ReleaseRequestStateChanged\",\"when\":["
+                      + "[{\"path\":\"releaseRequestId\",\"op\":\"exact\",\"value\":\"{releaseRequestId}\"},{\"path\":\"state\",\"op\":\"exact\",\"value\":\"FINALIZED\"}],"
+                      + "[{\"path\":\"releaseRequestId\",\"op\":\"exact\",\"value\":\"{releaseRequestId}\"},{\"path\":\"state\",\"op\":\"exact\",\"value\":\"REJECTED\"}],"
+                      + "[{\"path\":\"releaseRequestId\",\"op\":\"exact\",\"value\":\"{releaseRequestId}\"},{\"path\":\"state\",\"op\":\"exact\",\"value\":\"FAILED\"}],"
+                      + "[{\"path\":\"releaseRequestId\",\"op\":\"exact\",\"value\":\"{releaseRequestId}\"},{\"path\":\"state\",\"op\":\"exact\",\"value\":\"WITHDRAWN\"}],"
+                      + "[{\"path\":\"releaseRequestId\",\"op\":\"exact\",\"value\":\"{releaseRequestId}\"},{\"path\":\"state\",\"op\":\"exact\",\"value\":\"OBSOLETE\"}]"
+                      + "]}}")
+              .as("qits:agent"),
+          Interaction.write(
+                  ProviderStates.AN_AGENT_WAITING_ON_A_CI_RUN,
+                  "createAgentWait",
+                  WORKSPACES + "/agents/{agentId}/waits",
+                  201,
+                  "{\"label\":\"CI run 00000000 to end\","
+                      + "\"selection\":{\"event\":\"BuildStatusChanged\",\"when\":["
+                      + "[{\"path\":\"runId\",\"op\":\"exact\",\"value\":\"{runId}\"},{\"path\":\"status\",\"op\":\"exact\",\"value\":\"SUCCESS\"}],"
+                      + "[{\"path\":\"runId\",\"op\":\"exact\",\"value\":\"{runId}\"},{\"path\":\"status\",\"op\":\"exact\",\"value\":\"FAILED\"}],"
+                      + "[{\"path\":\"runId\",\"op\":\"exact\",\"value\":\"{runId}\"},{\"path\":\"status\",\"op\":\"exact\",\"value\":\"CANCELLED\"}],"
+                      + "[{\"path\":\"runId\",\"op\":\"exact\",\"value\":\"{runId}\"},{\"path\":\"status\",\"op\":\"exact\",\"value\":\"CONFIG_ERROR\"}],"
+                      + "[{\"path\":\"runId\",\"op\":\"exact\",\"value\":\"{runId}\"},{\"path\":\"status\",\"op\":\"exact\",\"value\":\"TIMED_OUT\"}]"
+                      + "]}}")
+              .as("qits:agent"),
           Interaction.read(
                   ProviderStates.AN_AGENT_WITH_AN_OPEN_WAIT,
                   "listAgentWaits",

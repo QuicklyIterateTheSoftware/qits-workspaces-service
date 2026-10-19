@@ -949,6 +949,206 @@
       ]
     },
     {
+      "name": "an agent declaring a wait on a CI run",
+      "slug": "an-agent-declaring-a-wait-on-a-ci-run",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "runId": "00000000-0000-4000-8000-0000000000c2"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "createAgentWait",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/waits",
+          "body": {
+            "label": "CI run 00000000 to end",
+            "selection": {
+              "event": "BuildStatusChanged",
+              "when": [
+                [
+                  {
+                    "path": "runId",
+                    "op": "exact",
+                    "value": "{runId}"
+                  },
+                  {
+                    "path": "status",
+                    "op": "exact",
+                    "value": "SUCCESS"
+                  }
+                ],
+                [
+                  {
+                    "path": "runId",
+                    "op": "exact",
+                    "value": "{runId}"
+                  },
+                  {
+                    "path": "status",
+                    "op": "exact",
+                    "value": "FAILED"
+                  }
+                ],
+                [
+                  {
+                    "path": "runId",
+                    "op": "exact",
+                    "value": "{runId}"
+                  },
+                  {
+                    "path": "status",
+                    "op": "exact",
+                    "value": "CANCELLED"
+                  }
+                ],
+                [
+                  {
+                    "path": "runId",
+                    "op": "exact",
+                    "value": "{runId}"
+                  },
+                  {
+                    "path": "status",
+                    "op": "exact",
+                    "value": "CONFIG_ERROR"
+                  }
+                ],
+                [
+                  {
+                    "path": "runId",
+                    "op": "exact",
+                    "value": "{runId}"
+                  },
+                  {
+                    "path": "status",
+                    "op": "exact",
+                    "value": "TIMED_OUT"
+                  }
+                ]
+              ]
+            }
+          },
+          "callerRole": "qits:agent",
+          "status": 201,
+          "file": "an-agent-declaring-a-wait-on-a-ci-run/createAgentWait.json",
+          "frozen": {
+            "ids": [
+              "$.id",
+              "$.agentId",
+              "$.selection.when[*][*].value"
+            ],
+            "instants": [
+              "$.createdAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "an agent declaring a wait on a release request",
+      "slug": "an-agent-declaring-a-wait-on-a-release-request",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "releaseRequestId": "00000000-0000-4000-8000-0000000000c1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "createAgentWait",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/waits",
+          "body": {
+            "label": "release request 00000000 to end",
+            "selection": {
+              "event": "ReleaseRequestStateChanged",
+              "when": [
+                [
+                  {
+                    "path": "releaseRequestId",
+                    "op": "exact",
+                    "value": "{releaseRequestId}"
+                  },
+                  {
+                    "path": "state",
+                    "op": "exact",
+                    "value": "FINALIZED"
+                  }
+                ],
+                [
+                  {
+                    "path": "releaseRequestId",
+                    "op": "exact",
+                    "value": "{releaseRequestId}"
+                  },
+                  {
+                    "path": "state",
+                    "op": "exact",
+                    "value": "REJECTED"
+                  }
+                ],
+                [
+                  {
+                    "path": "releaseRequestId",
+                    "op": "exact",
+                    "value": "{releaseRequestId}"
+                  },
+                  {
+                    "path": "state",
+                    "op": "exact",
+                    "value": "FAILED"
+                  }
+                ],
+                [
+                  {
+                    "path": "releaseRequestId",
+                    "op": "exact",
+                    "value": "{releaseRequestId}"
+                  },
+                  {
+                    "path": "state",
+                    "op": "exact",
+                    "value": "WITHDRAWN"
+                  }
+                ],
+                [
+                  {
+                    "path": "releaseRequestId",
+                    "op": "exact",
+                    "value": "{releaseRequestId}"
+                  },
+                  {
+                    "path": "state",
+                    "op": "exact",
+                    "value": "OBSOLETE"
+                  }
+                ]
+              ]
+            }
+          },
+          "callerRole": "qits:agent",
+          "status": 201,
+          "file": "an-agent-declaring-a-wait-on-a-release-request/createAgentWait.json",
+          "frozen": {
+            "ids": [
+              "$.id",
+              "$.agentId",
+              "$.selection.when[*][*].value"
+            ],
+            "instants": [
+              "$.createdAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "an agent owning a released branch",
       "slug": "an-agent-owning-a-released-branch",
       "params": {

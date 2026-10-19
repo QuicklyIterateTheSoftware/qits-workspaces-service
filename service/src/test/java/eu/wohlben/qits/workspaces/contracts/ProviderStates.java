@@ -115,6 +115,10 @@ public class ProviderStates {
 
   // The declared-wait state (qits-1153), for the CLI's `qits wait`.
   public static final String AN_AGENT_WITH_AN_OPEN_WAIT = "an agent with an open wait";
+  // The presets' own bodies (qits-1149): `qits wait release-request` and `qits wait ci-run`.
+  public static final String AN_AGENT_WAITING_ON_A_RELEASE_REQUEST =
+      "an agent declaring a wait on a release request";
+  public static final String AN_AGENT_WAITING_ON_A_CI_RUN = "an agent declaring a wait on a CI run";
   public static final String REPOSITORIES_WITH_MERGED_BRANCHES =
       "repositories with merged branches";
   public static final String A_CONFIGURED_WORKSPACE_IMAGE = "a configured workspace image";
@@ -258,6 +262,8 @@ public class ProviderStates {
         AN_AGENT_ON_A_TICKET,
         AN_AGENT_ON_A_RELEASED_BRANCH,
         AN_AGENT_WITH_AN_OPEN_WAIT,
+        AN_AGENT_WAITING_ON_A_RELEASE_REQUEST,
+        AN_AGENT_WAITING_ON_A_CI_RUN,
         REPOSITORIES_WITH_MERGED_BRANCHES,
         A_CONFIGURED_WORKSPACE_IMAGE,
         NO_RUNNERS,
@@ -296,6 +302,8 @@ public class ProviderStates {
       case AN_AGENT_ON_A_TICKET -> agentOnATicket();
       case AN_AGENT_ON_A_RELEASED_BRANCH -> agentOwningAReleasedBranch();
       case AN_AGENT_WITH_AN_OPEN_WAIT -> agentWithAnOpenWait();
+      case AN_AGENT_WAITING_ON_A_RELEASE_REQUEST -> agentDeclaringAWait("releaseRequestId", RELEASE_REQUEST_ID);
+      case AN_AGENT_WAITING_ON_A_CI_RUN -> agentDeclaringAWait("runId", CI_RUN_ID);
       case REPOSITORIES_WITH_MERGED_BRANCHES -> mergedBranches();
       case A_CONFIGURED_WORKSPACE_IMAGE -> new Setup(new TreeMap<>(), List.of());
       case NO_RUNNERS -> noRunners();
@@ -511,6 +519,9 @@ public class ProviderStates {
 
   static final String RELEASE_REQUEST_ID = "00000000-0000-4000-8000-0000000000c1";
 
+  /** The CI run {@code qits wait ci-run} waits on. */
+  static final String CI_RUN_ID = "00000000-0000-4000-8000-0000000000c2";
+
   /** The caller the recording sends ({@code X-Qits-User}), and so the agents' token subject. */
   static final String CONTRACT_CALLER = "contract-caller";
   static final String AGENT_OBSOLETE_ID = "00000000-0000-4000-8000-0000000000a2";
@@ -589,6 +600,26 @@ public class ProviderStates {
     params.put("agentId", AGENT_ACTIVE_ID);
     params.put("releaseRequestId", RELEASE_REQUEST_ID);
     params.put("waitId", OPEN_WAIT_ID);
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /**
+   * An ACTIVE agent with no wait yet, about to declare one on what {@code param} names — a release
+   * request ({@code releaseRequestId}) or a CI run ({@code runId}): the presets' create, recorded as
+   * the agent itself.
+   */
+  private Setup agentDeclaringAWait(String param, String value) {
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Long slot = slot(WorkspaceRuntimeStatus.QUEUED);
+              ids.add(slot);
+              agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
+            });
+    Map<String, String> params = new TreeMap<>();
+    params.put("agentId", AGENT_ACTIVE_ID);
+    params.put(param, value);
     return new Setup(params, List.copyOf(ids));
   }
 

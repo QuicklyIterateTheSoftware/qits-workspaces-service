@@ -175,6 +175,16 @@ class ConsumerPactVerificationTest {
     return states.params(ProviderStates.AN_AGENT_WITH_AN_OPEN_WAIT);
   }
 
+  @State(ProviderStates.AN_AGENT_WAITING_ON_A_RELEASE_REQUEST)
+  Map<String, String> anAgentWaitingOnAReleaseRequest() {
+    return states.params(ProviderStates.AN_AGENT_WAITING_ON_A_RELEASE_REQUEST);
+  }
+
+  @State(ProviderStates.AN_AGENT_WAITING_ON_A_CI_RUN)
+  Map<String, String> anAgentWaitingOnACiRun() {
+    return states.params(ProviderStates.AN_AGENT_WAITING_ON_A_CI_RUN);
+  }
+
   @State(ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES)
   Map<String, String> repositoriesWithMergedBranches() {
     return states.params(ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES);
