@@ -34,8 +34,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
  *
  * <p>The pacts come off the test classpath ({@link ClasspathPactLoader}): a consumer publishes
  * {@code pacts/<consumer>_qits-workspaces-service.json} in a jar, and this repository pins that jar
- * as a test dependency (today: qits-landing-app's). Each interaction runs against this {@code
- * @QuarkusTest} over real HTTP as the {@code %test} dev user.
+ * as a test dependency (today: qits-landing-app's, qits-projects', qits-artifacts',
+ * qits-bootstrap's, qits-orchestrator's and the qits CLI's). Each interaction runs against this
+ * {@code @QuarkusTest} over real HTTP as the {@code %test} dev user.
  *
  * <p>Every {@code @State} method delegates to {@link ProviderStates}. {@link #target} fails a state
  * this provider does not answer for, and an interaction without {@code comments.references.qits-call}
@@ -167,6 +168,11 @@ class ConsumerPactVerificationTest {
   @State(ProviderStates.AN_AGENT_ON_A_RELEASED_BRANCH)
   Map<String, String> anAgentOnAReleasedBranch() {
     return states.params(ProviderStates.AN_AGENT_ON_A_RELEASED_BRANCH);
+  }
+
+  @State(ProviderStates.AN_AGENT_WITH_AN_OPEN_WAIT)
+  Map<String, String> anAgentWithAnOpenWait() {
+    return states.params(ProviderStates.AN_AGENT_WITH_AN_OPEN_WAIT);
   }
 
   @State(ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES)
