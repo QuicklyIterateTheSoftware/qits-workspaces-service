@@ -142,6 +142,9 @@
         <qits.bootstrap-cli-pacts-qits-workspaces-service.version>2026.1019.73740</qits.bootstrap-cli-pacts-qits-workspaces-service.version>
         <qits.orchestrator-service-pacts-qits-workspaces-service.version>2026.1018.172917</qits.orchestrator-service-pacts-qits-workspaces-service.version>
         <qits.platform-access-cli-pacts-qits-workspaces-service.version>2026.1019.65035</qits.platform-access-cli-pacts-qits-workspaces-service.version>
+        <!-- qits-workspaces-runner-daemon's consumer pact against this service (qits-1163):
+             registerRunner, under "an unregistered runner" and "a registered runner". -->
+        <qits.workspaces-runner-daemon-pacts-qits-workspaces-service.version>2026.1019.75736</qits.workspaces-runner-daemon-pacts-qits-workspaces-service.version>
         <qits.maven.repository.url>https://registry.qits.wohlben.eu/artifacts/maven/maven</qits.maven.repository.url>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -466,6 +469,11 @@
                 <groupId>eu.wohlben.qits</groupId>
                 <artifactId>qits-platform-access-cli-pacts-qits-workspaces-service</artifactId>
                 <version>${qits.platform-access-cli-pacts-qits-workspaces-service.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>eu.wohlben.qits</groupId>
+                <artifactId>qits-workspaces-runner-daemon-pacts-qits-workspaces-service</artifactId>
+                <version>${qits.workspaces-runner-daemon-pacts-qits-workspaces-service.version}</version>
             </dependency>
             <dependency>
                 <groupId>${project.groupId}</groupId>

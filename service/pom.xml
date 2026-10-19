@@ -344,6 +344,11 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>eu.wohlben.qits</groupId>
+            <artifactId>qits-workspaces-runner-daemon-pacts-qits-workspaces-service</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <!-- The store every @QuarkusTest here boots against — BOTH of this module's datasources,
                  `workspaces` and the qits-eventstream jar's `eventstream`. Zonky spawns real
                  postgres binaries as a child process, a maven dependency rather than a container,
