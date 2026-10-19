@@ -18,16 +18,17 @@
         }
       },
       "description": "AgentService.reconcile: commissionClient",
-      "key": "c86af197",
+      "key": "7d4bea47",
       "pending": false,
       "providerStates": [
         {
-          "name": "a service client whose stated Git refs are refused",
+          "name": "a workspace's client being commissioned",
           "params": {
             "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
             "callerClientId": "test-broad",
-            "clientSecret": "test-broad-secret",
-            "refusedGitRef": "refs/tags/contract"
+            "gitRef": "refs/heads/ticket/contract",
+            "projectId": "00000000-0000-4000-8000-000000000001",
+            "workspaceId": "7"
           }
         }
       ],
@@ -35,12 +36,12 @@
         "body": {
           "content": {
             "claims": {
-              "project": "a-project"
+              "project": "00000000-0000-4000-8000-000000000001"
             },
             "contextId": "7",
             "contextKind": "workspace",
             "gitRefs": [
-              "refs/tags/contract"
+              "refs/heads/ticket/contract"
             ]
           },
           "contentType": "application/json",
@@ -48,9 +49,19 @@
         },
         "generators": {
           "body": {
+            "$.claims.project": {
+              "dataType": "STRING",
+              "expression": "${projectId}",
+              "type": "ProviderState"
+            },
+            "$.contextId": {
+              "dataType": "STRING",
+              "expression": "${workspaceId}",
+              "type": "ProviderState"
+            },
             "$.gitRefs[0]": {
               "dataType": "STRING",
-              "expression": "${refusedGitRef}",
+              "expression": "${gitRef}",
               "type": "ProviderState"
             }
           },
@@ -80,86 +91,7 @@
                 }
               ]
             },
-            "$.gitRefs[0]": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            }
-          }
-        },
-        "method": "POST",
-        "path": "/idp/api/clients"
-      },
-      "response": {
-        "status": 400
-      },
-      "type": "Synchronous/HTTP"
-    },
-    {
-      "comments": {
-        "references": {
-          "qits-call": {
-            "app": "qits-idp-service",
-            "operationId": "commissionClient"
-          },
-          "qits-trigger": {
-            "app": "qits-workspaces-service",
-            "kind": "schedule",
-            "schedule": "AgentService.reconcile"
-          }
-        }
-      },
-      "description": "AgentService.reconcile: commissionClient",
-      "key": "6aee462a",
-      "pending": false,
-      "providerStates": [
-        {
-          "name": "a service client with the system role",
-          "params": {
-            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
-            "callerClientId": "test-broad",
-            "clientSecret": "test-broad-secret"
-          }
-        }
-      ],
-      "request": {
-        "body": {
-          "content": {
-            "claims": {
-              "project": "a-project"
-            },
-            "contextId": "7",
-            "contextKind": "workspace",
-            "gitRefs": [
-              "refs/heads/ws/7"
-            ]
-          },
-          "contentType": "application/json",
-          "encoded": false
-        },
-        "generators": {
-          "header": {
-            "Authorization": {
-              "dataType": "RAW",
-              "expression": "${authorization}",
-              "type": "ProviderState"
-            }
-          }
-        },
-        "headers": {
-          "Authorization": [
-            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
-          ],
-          "content-type": [
-            "application/json"
-          ]
-        },
-        "matchingRules": {
-          "body": {
-            "$.claims.project": {
+            "$.contextId": {
               "combine": "AND",
               "matchers": [
                 {
@@ -234,7 +166,7 @@
         "references": {
           "qits-call": {
             "app": "qits-idp-service",
-            "operationId": "commissionToken"
+            "operationId": "commissionClient"
           },
           "qits-trigger": {
             "app": "qits-workspaces-service",
@@ -243,16 +175,18 @@
           }
         }
       },
-      "description": "AgentService.reconcile: commissionToken",
-      "key": "1bfd916e",
+      "description": "AgentService.reconcile: commissionClient",
+      "key": "36291d9b",
       "pending": false,
       "providerStates": [
         {
-          "name": "a service client with the system role",
+          "name": "a workspace's client being commissioned to push nothing",
           "params": {
             "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
             "callerClientId": "test-broad",
-            "clientSecret": "test-broad-secret"
+            "gitRef": "refs/heads/ticket/contract",
+            "projectId": "00000000-0000-4000-8000-000000000001",
+            "workspaceId": "7"
           }
         }
       ],
@@ -260,18 +194,28 @@
         "body": {
           "content": {
             "claims": {
-              "project": "a-project"
+              "project": "00000000-0000-4000-8000-000000000001"
             },
             "contextId": "7",
             "contextKind": "workspace",
-            "gitRefs": [
-              "refs/heads/ws/7"
-            ]
+            "gitRefs": []
           },
           "contentType": "application/json",
           "encoded": false
         },
         "generators": {
+          "body": {
+            "$.claims.project": {
+              "dataType": "STRING",
+              "expression": "${projectId}",
+              "type": "ProviderState"
+            },
+            "$.contextId": {
+              "dataType": "STRING",
+              "expression": "${workspaceId}",
+              "type": "ProviderState"
+            }
+          },
           "header": {
             "Authorization": {
               "dataType": "RAW",
@@ -298,6 +242,278 @@
                 }
               ]
             },
+            "$.contextId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/idp/api/clients"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "clientId": "opaque",
+            "secret": "opaque"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.clientId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.secret": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionClient"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: commissionClient",
+      "key": "9dfb156e",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace's client whose stated Git refs are refused",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "projectId": "00000000-0000-4000-8000-000000000001",
+            "refusedGitRef": "refs/tags/contract",
+            "workspaceId": "7"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "claims": {
+              "project": "00000000-0000-4000-8000-000000000001"
+            },
+            "contextId": "7",
+            "contextKind": "workspace",
+            "gitRefs": [
+              "refs/tags/contract"
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "body": {
+            "$.claims.project": {
+              "dataType": "STRING",
+              "expression": "${projectId}",
+              "type": "ProviderState"
+            },
+            "$.contextId": {
+              "dataType": "STRING",
+              "expression": "${workspaceId}",
+              "type": "ProviderState"
+            },
+            "$.gitRefs[0]": {
+              "dataType": "STRING",
+              "expression": "${refusedGitRef}",
+              "type": "ProviderState"
+            }
+          },
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.claims.project": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.contextId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.gitRefs[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/idp/api/clients"
+      },
+      "response": {
+        "status": 400
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionToken"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: commissionToken",
+      "key": "efed75bd",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace's token being commissioned",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "gitRef": "refs/heads/ticket/contract",
+            "projectId": "00000000-0000-4000-8000-000000000001",
+            "workspaceId": "7"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "claims": {
+              "project": "00000000-0000-4000-8000-000000000001"
+            },
+            "contextId": "7",
+            "contextKind": "workspace",
+            "gitRefs": [
+              "refs/heads/ticket/contract"
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "body": {
+            "$.claims.project": {
+              "dataType": "STRING",
+              "expression": "${projectId}",
+              "type": "ProviderState"
+            },
+            "$.contextId": {
+              "dataType": "STRING",
+              "expression": "${workspaceId}",
+              "type": "ProviderState"
+            },
+            "$.gitRefs[0]": {
+              "dataType": "STRING",
+              "expression": "${gitRef}",
+              "type": "ProviderState"
+            }
+          },
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.claims.project": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.contextId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
             "$.gitRefs[0]": {
               "combine": "AND",
               "matchers": [
@@ -316,7 +532,7 @@
           "content": {
             "subject": "opaque",
             "token": "opaque",
-            "tokenId": "00000000-0000-4000-8000-000000000001"
+            "tokenId": "00000000-0000-4000-8000-000000000002"
           },
           "contentType": "application/json",
           "encoded": false
@@ -367,6 +583,273 @@
           }
         },
         "status": 201
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionToken"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: commissionToken",
+      "key": "7d780511",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace's token being commissioned to push nothing",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "gitRef": "refs/heads/ticket/contract",
+            "projectId": "00000000-0000-4000-8000-000000000001",
+            "workspaceId": "7"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "claims": {
+              "project": "00000000-0000-4000-8000-000000000001"
+            },
+            "contextId": "7",
+            "contextKind": "workspace",
+            "gitRefs": []
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "body": {
+            "$.claims.project": {
+              "dataType": "STRING",
+              "expression": "${projectId}",
+              "type": "ProviderState"
+            },
+            "$.contextId": {
+              "dataType": "STRING",
+              "expression": "${workspaceId}",
+              "type": "ProviderState"
+            }
+          },
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.claims.project": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.contextId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/idp/api/tokens"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "subject": "opaque",
+            "token": "opaque",
+            "tokenId": "00000000-0000-4000-8000-000000000002"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.subject": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.tokenId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionToken"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "AgentService.reconcile"
+          }
+        }
+      },
+      "description": "AgentService.reconcile: commissionToken",
+      "key": "7d2d7640",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace's token whose stated Git refs are refused",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "projectId": "00000000-0000-4000-8000-000000000001",
+            "refusedGitRef": "refs/tags/contract",
+            "workspaceId": "7"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "claims": {
+              "project": "00000000-0000-4000-8000-000000000001"
+            },
+            "contextId": "7",
+            "contextKind": "workspace",
+            "gitRefs": [
+              "refs/tags/contract"
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "body": {
+            "$.claims.project": {
+              "dataType": "STRING",
+              "expression": "${projectId}",
+              "type": "ProviderState"
+            },
+            "$.contextId": {
+              "dataType": "STRING",
+              "expression": "${workspaceId}",
+              "type": "ProviderState"
+            },
+            "$.gitRefs[0]": {
+              "dataType": "STRING",
+              "expression": "${refusedGitRef}",
+              "type": "ProviderState"
+            }
+          },
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.claims.project": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.contextId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.gitRefs[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/idp/api/tokens"
+      },
+      "response": {
+        "status": 400
       },
       "type": "Synchronous/HTTP"
     },
@@ -1404,28 +1887,35 @@
         }
       },
       "description": "createRunner: commissionToken",
-      "key": "7488e7fa",
+      "key": "3cf45625",
       "pending": false,
       "providerStates": [
         {
-          "name": "a service client with the system role",
+          "name": "a workspace runner's registration token being commissioned",
           "params": {
             "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
             "callerClientId": "test-broad",
-            "clientSecret": "test-broad-secret"
+            "runnerId": "00000000-0000-4000-8000-000000000001"
           }
         }
       ],
       "request": {
         "body": {
           "content": {
-            "contextId": "00000000-0000-4000-8000-000000000020",
+            "contextId": "00000000-0000-4000-8000-000000000001",
             "contextKind": "workspaces-runner-registration"
           },
           "contentType": "application/json",
           "encoded": false
         },
         "generators": {
+          "body": {
+            "$.contextId": {
+              "dataType": "STRING",
+              "expression": "${runnerId}",
+              "type": "ProviderState"
+            }
+          },
           "header": {
             "Authorization": {
               "dataType": "RAW",
@@ -1442,6 +1932,18 @@
             "application/json"
           ]
         },
+        "matchingRules": {
+          "body": {
+            "$.contextId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
         "method": "POST",
         "path": "/idp/api/tokens"
       },
@@ -1450,7 +1952,7 @@
           "content": {
             "subject": "opaque",
             "token": "opaque",
-            "tokenId": "00000000-0000-4000-8000-000000000001"
+            "tokenId": "00000000-0000-4000-8000-000000000002"
           },
           "contentType": "application/json",
           "encoded": false
@@ -1519,15 +2021,17 @@
         }
       },
       "description": "dispatchAgent: commissionToken",
-      "key": "69289785",
+      "key": "239e5caf",
       "pending": false,
       "providerStates": [
         {
-          "name": "a service client with the system role",
+          "name": "an agent's token being commissioned",
           "params": {
+            "agentId": "00000000-0000-4000-8000-000000000001",
             "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
             "callerClientId": "test-broad",
-            "clientSecret": "test-broad-secret"
+            "gitRef": "refs/heads/ticket/contract",
+            "projectId": "00000000-0000-4000-8000-000000000002"
           }
         }
       ],
@@ -1535,20 +2039,47 @@
         "body": {
           "content": {
             "claims": {
-              "agent": "00000000-0000-4000-8000-0000000000a1",
-              "project": "a-project"
+              "agent": "00000000-0000-4000-8000-000000000001",
+              "project": "00000000-0000-4000-8000-000000000002"
             },
-            "contextId": "agent-00000000-0000-4000-8000-0000000000a1",
+            "contextId": "agent-00000000-0000-4000-8000-000000000001",
             "contextKind": "workspace",
             "gitRefs": [
-              "refs/heads/ticket/a",
-              "refs/heads/ticket/a-*"
+              "refs/heads/ticket/contract",
+              "refs/heads/ticket/contract-*"
             ]
           },
           "contentType": "application/json",
           "encoded": false
         },
         "generators": {
+          "body": {
+            "$.claims.agent": {
+              "dataType": "STRING",
+              "expression": "${agentId}",
+              "type": "ProviderState"
+            },
+            "$.claims.project": {
+              "dataType": "STRING",
+              "expression": "${projectId}",
+              "type": "ProviderState"
+            },
+            "$.contextId": {
+              "dataType": "STRING",
+              "expression": "agent-${agentId}",
+              "type": "ProviderState"
+            },
+            "$.gitRefs[0]": {
+              "dataType": "STRING",
+              "expression": "${gitRef}",
+              "type": "ProviderState"
+            },
+            "$.gitRefs[1]": {
+              "dataType": "STRING",
+              "expression": "${gitRef}-*",
+              "type": "ProviderState"
+            }
+          },
           "header": {
             "Authorization": {
               "dataType": "RAW",
@@ -1567,7 +2098,23 @@
         },
         "matchingRules": {
           "body": {
+            "$.claims.agent": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
             "$.claims.project": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.contextId": {
               "combine": "AND",
               "matchers": [
                 {
@@ -1601,7 +2148,7 @@
           "content": {
             "subject": "opaque",
             "token": "opaque",
-            "tokenId": "00000000-0000-4000-8000-000000000001"
+            "tokenId": "00000000-0000-4000-8000-000000000003"
           },
           "contentType": "application/json",
           "encoded": false
@@ -1660,39 +2207,62 @@
         "references": {
           "qits-call": {
             "app": "qits-idp-service",
-            "operationId": "commissionClient"
+            "operationId": "commissionToken"
           },
           "qits-trigger": {
             "app": "qits-workspaces-service",
             "kind": "operation",
-            "operationId": "registerRunner"
+            "operationId": "dispatchAgent"
           }
         }
       },
-      "description": "registerRunner: commissionClient",
-      "key": "7101604b",
+      "description": "dispatchAgent: commissionToken",
+      "key": "d169f403",
       "pending": false,
       "providerStates": [
         {
-          "name": "a service client with the system role",
+          "name": "an agent's token being commissioned to push nothing",
           "params": {
+            "agentId": "00000000-0000-4000-8000-000000000001",
             "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
             "callerClientId": "test-broad",
-            "clientSecret": "test-broad-secret"
+            "gitRef": "refs/heads/ticket/contract",
+            "projectId": "00000000-0000-4000-8000-000000000002"
           }
         }
       ],
       "request": {
         "body": {
           "content": {
-            "claims": null,
-            "contextId": "00000000-0000-4000-8000-000000000020",
-            "contextKind": "workspaces-runner"
+            "claims": {
+              "agent": "00000000-0000-4000-8000-000000000001",
+              "project": "00000000-0000-4000-8000-000000000002"
+            },
+            "contextId": "agent-00000000-0000-4000-8000-000000000001",
+            "contextKind": "workspace",
+            "gitRefs": []
           },
           "contentType": "application/json",
           "encoded": false
         },
         "generators": {
+          "body": {
+            "$.claims.agent": {
+              "dataType": "STRING",
+              "expression": "${agentId}",
+              "type": "ProviderState"
+            },
+            "$.claims.project": {
+              "dataType": "STRING",
+              "expression": "${projectId}",
+              "type": "ProviderState"
+            },
+            "$.contextId": {
+              "dataType": "STRING",
+              "expression": "agent-${agentId}",
+              "type": "ProviderState"
+            }
+          },
           "header": {
             "Authorization": {
               "dataType": "RAW",
@@ -1708,6 +2278,297 @@
           "content-type": [
             "application/json"
           ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.claims.agent": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.claims.project": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.contextId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/idp/api/tokens"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "subject": "opaque",
+            "token": "opaque",
+            "tokenId": "00000000-0000-4000-8000-000000000003"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.subject": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.tokenId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionToken"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "dispatchAgent"
+          }
+        }
+      },
+      "description": "dispatchAgent: commissionToken",
+      "key": "76ecce3a",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "an agent's token whose stated Git refs are refused",
+          "params": {
+            "agentId": "00000000-0000-4000-8000-000000000001",
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "projectId": "00000000-0000-4000-8000-000000000002",
+            "refusedGitRef": "refs/tags/contract"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "claims": {
+              "agent": "00000000-0000-4000-8000-000000000001",
+              "project": "00000000-0000-4000-8000-000000000002"
+            },
+            "contextId": "agent-00000000-0000-4000-8000-000000000001",
+            "contextKind": "workspace",
+            "gitRefs": [
+              "refs/tags/contract"
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "body": {
+            "$.claims.agent": {
+              "dataType": "STRING",
+              "expression": "${agentId}",
+              "type": "ProviderState"
+            },
+            "$.claims.project": {
+              "dataType": "STRING",
+              "expression": "${projectId}",
+              "type": "ProviderState"
+            },
+            "$.contextId": {
+              "dataType": "STRING",
+              "expression": "agent-${agentId}",
+              "type": "ProviderState"
+            },
+            "$.gitRefs[0]": {
+              "dataType": "STRING",
+              "expression": "${refusedGitRef}",
+              "type": "ProviderState"
+            }
+          },
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.claims.agent": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.claims.project": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.contextId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.gitRefs[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/idp/api/tokens"
+      },
+      "response": {
+        "status": 400
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
+            "operationId": "commissionClient"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "registerRunner"
+          }
+        }
+      },
+      "description": "registerRunner: commissionClient",
+      "key": "fc84a5e4",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace runner being commissioned",
+          "params": {
+            "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
+            "callerClientId": "test-broad",
+            "runnerId": "00000000-0000-4000-8000-000000000001"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "claims": null,
+            "contextId": "00000000-0000-4000-8000-000000000001",
+            "contextKind": "workspaces-runner"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "body": {
+            "$.contextId": {
+              "dataType": "STRING",
+              "expression": "${runnerId}",
+              "type": "ProviderState"
+            }
+          },
+          "header": {
+            "Authorization": {
+              "dataType": "RAW",
+              "expression": "${authorization}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "headers": {
+          "Authorization": [
+            "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA=="
+          ],
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.contextId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
         },
         "method": "POST",
         "path": "/idp/api/clients"
@@ -1832,28 +2693,35 @@
         }
       },
       "description": "rotateRunnerRegistrationToken: commissionToken",
-      "key": "554b0737",
+      "key": "1db67562",
       "pending": false,
       "providerStates": [
         {
-          "name": "a service client with the system role",
+          "name": "a workspace runner's registration token being commissioned",
           "params": {
             "authorization": "Basic dGVzdC1icm9hZDp0ZXN0LWJyb2FkLXNlY3JldA==",
             "callerClientId": "test-broad",
-            "clientSecret": "test-broad-secret"
+            "runnerId": "00000000-0000-4000-8000-000000000001"
           }
         }
       ],
       "request": {
         "body": {
           "content": {
-            "contextId": "00000000-0000-4000-8000-000000000020",
+            "contextId": "00000000-0000-4000-8000-000000000001",
             "contextKind": "workspaces-runner-registration"
           },
           "contentType": "application/json",
           "encoded": false
         },
         "generators": {
+          "body": {
+            "$.contextId": {
+              "dataType": "STRING",
+              "expression": "${runnerId}",
+              "type": "ProviderState"
+            }
+          },
           "header": {
             "Authorization": {
               "dataType": "RAW",
@@ -1870,6 +2738,18 @@
             "application/json"
           ]
         },
+        "matchingRules": {
+          "body": {
+            "$.contextId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
         "method": "POST",
         "path": "/idp/api/tokens"
       },
@@ -1878,7 +2758,7 @@
           "content": {
             "subject": "opaque",
             "token": "opaque",
-            "tokenId": "00000000-0000-4000-8000-000000000001"
+            "tokenId": "00000000-0000-4000-8000-000000000002"
           },
           "contentType": "application/json",
           "encoded": false

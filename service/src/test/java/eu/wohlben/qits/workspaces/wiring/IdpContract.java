@@ -68,8 +68,7 @@ import java.util.UUID;
  */
 public final class IdpContract {
 
-  // qits-idp's state names (golden masters 2026.1018.165736).
-  static final String SYSTEM_CLIENT = "a service client with the system role";
+  // qits-idp's state names (golden masters 2026.1018.175524).
   static final String A_CLIENT = "a commissioned client";
   static final String A_TOKEN = "a commissioned token";
   static final String SIGNING_KEY = "a published signing key";
@@ -77,7 +76,24 @@ public final class IdpContract {
   static final String NO_TOKEN = "no commissioned token with the given id";
   static final String PEER_CALLER = "a service client calling its peers";
 
-  static final String REFUSES_GIT_REFS = "a service client whose stated Git refs are refused";
+  // One state per commission body this service sends (qits-idp qits-1149 round 3): the state's
+  // params are the row's values, and the body binds each with a provider-state expression.
+  static final String WORKSPACE_CLIENT = "a workspace's client being commissioned";
+  static final String WORKSPACE_CLIENT_REFUSED =
+      "a workspace's client whose stated Git refs are refused";
+  static final String WORKSPACE_CLIENT_PUSHING_NOTHING =
+      "a workspace's client being commissioned to push nothing";
+  static final String WORKSPACE_TOKEN = "a workspace's token being commissioned";
+  static final String WORKSPACE_TOKEN_REFUSED =
+      "a workspace's token whose stated Git refs are refused";
+  static final String WORKSPACE_TOKEN_PUSHING_NOTHING =
+      "a workspace's token being commissioned to push nothing";
+  static final String AGENT_TOKEN = "an agent's token being commissioned";
+  static final String AGENT_TOKEN_REFUSED = "an agent's token whose stated Git refs are refused";
+  static final String AGENT_TOKEN_PUSHING_NOTHING =
+      "an agent's token being commissioned to push nothing";
+  static final String RUNNER_CLIENT = "a workspace runner being commissioned";
+  static final String RUNNER_REGISTRATION = "a workspace runner's registration token being commissioned";
 
   static final Trigger RECONCILE = Trigger.schedule("AgentService.reconcile");
   static final Trigger COMMISSIONS = Trigger.schedule("CommissionReconciler.reconcile");
@@ -86,8 +102,6 @@ public final class IdpContract {
   static final Trigger REGISTER = Trigger.operation("registerRunner");
 
   private static final String BASIC = "{authorization}";
-  private static final UUID RUNNER = UUID.fromString("00000000-0000-4000-8000-000000000020");
-  private static final String AGENT = "00000000-0000-4000-8000-0000000000a1";
 
   public static final ContractTable TABLE =
       new ContractTable(
@@ -96,15 +110,20 @@ public final class IdpContract {
               // --- a workspace's credential ---------------------------------------------------
               ContractRow.of(
                   RECONCILE,
-                  SYSTEM_CLIENT,
+                  WORKSPACE_CLIENT,
                   "commissionClient",
-                  basic(workspaceCommission("7")),
+                  basic(workspaceCommission(WORKSPACE_CLIENT, "${gitRef}")),
                   List.of("$.clientId", "$.secret"),
                   (url, params) -> {
                     Optional<WorkspaceCredential> issued =
                         commissionerAgainst(url, params)
-                            .commission(7L, "a-project", List.of("refs/heads/ws/7"), false);
-                    JsonNode recorded = GoldenMasters.json(GoldenMasters.IDP, SYSTEM_CLIENT, "commissionClient");
+                            .commission(
+                                workspaceId(params),
+                                params.get("projectId"),
+                                List.of(params.get("gitRef")),
+                                false);
+                    JsonNode recorded =
+                        GoldenMasters.json(GoldenMasters.IDP, WORKSPACE_CLIENT, "commissionClient");
                     assertEquals(
                         Optional.of(
                             new WorkspaceCredential(
@@ -113,35 +132,39 @@ public final class IdpContract {
                   }),
               ContractRow.of(
                   RECONCILE,
-                  SYSTEM_CLIENT,
+                  WORKSPACE_TOKEN,
                   "commissionToken",
-                  basic(workspaceCommission("7")),
+                  basic(workspaceCommission(WORKSPACE_TOKEN, "${gitRef}")),
                   List.of("$.tokenId", "$.token", "$.subject"),
                   (url, params) -> {
                     WorkspaceToken issued =
                         commissionerAgainst(url, params)
-                            .commissionToken(7L, "a-project", List.of("refs/heads/ws/7"), false)
+                            .commissionToken(
+                                workspaceId(params),
+                                params.get("projectId"),
+                                List.of(params.get("gitRef")),
+                                false)
                             .orElseThrow();
-                    assertRecordedToken(issued.tokenId(), issued.subject());
+                    assertRecordedToken(WORKSPACE_TOKEN, issued.tokenId(), issued.subject());
                   }),
               // An agent's own token (qits-1152, qits-1213): the workspace kind, context agent-<id>,
               // minted when the dispatch door records the agent (AgentService.mintToken).
               ContractRow.of(
                   Trigger.operation("dispatchAgent"),
-                  SYSTEM_CLIENT,
+                  AGENT_TOKEN,
                   "commissionToken",
-                  basic(agentCommission()),
+                  basic(agentCommission(AGENT_TOKEN, "${gitRef}", "${gitRef}-*")),
                   List.of("$.tokenId", "$.token", "$.subject"),
                   (url, params) -> {
                     WorkspaceToken issued =
                         commissionerAgainst(url, params)
                             .commissionAgentToken(
-                                AGENT,
-                                "a-project",
-                                List.of("refs/heads/ticket/a", "refs/heads/ticket/a-*"),
+                                params.get("agentId"),
+                                params.get("projectId"),
+                                List.of(params.get("gitRef"), params.get("gitRef") + "-*"),
                                 false)
                             .orElseThrow();
-                    assertRecordedToken(issued.tokenId(), issued.subject());
+                    assertRecordedToken(AGENT_TOKEN, issued.tokenId(), issued.subject());
                   }),
               ContractRow.of(
                   COMMISSIONS,
@@ -203,41 +226,42 @@ public final class IdpContract {
               // --- a runner's credentials ------------------------------------------------------
               ContractRow.of(
                   CREATE_RUNNER,
-                  SYSTEM_CLIENT,
+                  RUNNER_REGISTRATION,
                   "commissionToken",
                   basic(registrationCommission()),
                   List.of("$.tokenId", "$.token", "$.subject"),
                   (url, params) -> {
                     IdpRunnerCommissioner.IssuedToken issued =
-                        runnerCommissionerAgainst(url, params).registrationToken(RUNNER);
-                    assertRecordedToken(issued.tokenId(), issued.subject());
+                        runnerCommissionerAgainst(url, params).registrationToken(runnerId(params));
+                    assertRecordedToken(RUNNER_REGISTRATION, issued.tokenId(), issued.subject());
                   }),
               ContractRow.of(
                   ROTATE,
-                  SYSTEM_CLIENT,
+                  RUNNER_REGISTRATION,
                   "commissionToken",
                   basic(registrationCommission()),
                   List.of("$.tokenId", "$.token", "$.subject"),
                   (url, params) -> {
                     IdpRunnerCommissioner.IssuedToken issued =
-                        runnerCommissionerAgainst(url, params).registrationToken(RUNNER);
-                    assertRecordedToken(issued.tokenId(), issued.subject());
+                        runnerCommissionerAgainst(url, params).registrationToken(runnerId(params));
+                    assertRecordedToken(RUNNER_REGISTRATION, issued.tokenId(), issued.subject());
                   }),
               ContractRow.of(
                   REGISTER,
-                  SYSTEM_CLIENT,
+                  RUNNER_CLIENT,
                   "commissionClient",
                   basic(
                       new PactDslJsonBody()
                           .stringValue("contextKind", IdpRunnerCommissioner.RUNNER_KIND)
-                          .stringValue("contextId", RUNNER.toString())
+                          .valueFromProviderState(
+                              "contextId", "${runnerId}", param(RUNNER_CLIENT, "runnerId"))
                           .nullValue("claims")),
                   List.of("$.clientId", "$.secret"),
                   (url, params) -> {
                     IdpRunnerCommissioner.RunnerClient client =
-                        runnerCommissionerAgainst(url, params).runnerClient(RUNNER);
+                        runnerCommissionerAgainst(url, params).runnerClient(runnerId(params));
                     JsonNode recorded =
-                        GoldenMasters.json(GoldenMasters.IDP, SYSTEM_CLIENT, "commissionClient");
+                        GoldenMasters.json(GoldenMasters.IDP, RUNNER_CLIENT, "commissionClient");
                     assertEquals(recorded.path("clientId").asText(), client.clientId());
                   }),
               ContractRow.of(
@@ -330,29 +354,105 @@ public final class IdpContract {
                                       params.get("tokenId"), List.of("refs/heads/ws/7")))),
               // A commission whose stated Git refs qits-idp refuses: 400, the answer the commissioner
               // tells apart from every other refusal (IdpCredentialCommissioner.status) to ask again
-              // with gitRefs: [] and fail closed. The row is that first request and the status it
-              // reads, made through the commissioner's own client; the retry is the system-role
-              // commission above. The refused ref is the state's.
+              // with gitRefs: [] and fail closed. Each refused row is that first request and the
+              // status it reads, made through the commissioner's own client; each "push nothing"
+              // row is the retry, the same request's pushingNothing(). The refused ref is the
+              // state's.
               ContractRow.of(
                   RECONCILE,
-                  REFUSES_GIT_REFS,
+                  WORKSPACE_CLIENT_REFUSED,
                   "commissionClient",
-                  basic(refusedCommission()),
+                  basic(workspaceCommission(WORKSPACE_CLIENT_REFUSED, "${refusedGitRef}")),
                   List.of(),
                   (url, params) -> {
                     IdpCredentialCommissioner commissioner = commissionerAgainst(url, params);
-                    WebApplicationException refused =
-                        assertThrows(
-                            WebApplicationException.class,
-                            () ->
-                                commissioner.clients.commission(
-                                    IdpCredentialCommissioner.basic(pair(params)[0], pair(params)[1]),
-                                    new IdpClients.CommissionRequest(
-                                        "workspace",
-                                        "7",
-                                        Map.of("project", "a-project"),
-                                        List.of(params.get("refusedGitRef")))));
-                    assertEquals(400, IdpCredentialCommissioner.status(refused));
+                    assertRefused(
+                        () ->
+                            commissioner.clients.commission(
+                                basicOf(params),
+                                workspaceClientRequest(params, List.of(params.get("refusedGitRef")))));
+                  }),
+              ContractRow.of(
+                  RECONCILE,
+                  WORKSPACE_CLIENT_PUSHING_NOTHING,
+                  "commissionClient",
+                  basic(workspaceCommission(WORKSPACE_CLIENT_PUSHING_NOTHING)),
+                  List.of("$.clientId", "$.secret"),
+                  (url, params) -> {
+                    IdpClients.CommissionResponse issued =
+                        commissionerAgainst(url, params)
+                            .clients
+                            .commission(
+                                basicOf(params),
+                                workspaceClientRequest(params, List.of(params.get("gitRef")))
+                                    .pushingNothing());
+                    JsonNode recorded =
+                        GoldenMasters.json(
+                            GoldenMasters.IDP, WORKSPACE_CLIENT_PUSHING_NOTHING, "commissionClient");
+                    assertEquals(recorded.path("clientId").asText(), issued.clientId());
+                  }),
+              ContractRow.of(
+                  RECONCILE,
+                  WORKSPACE_TOKEN_REFUSED,
+                  "commissionToken",
+                  basic(workspaceCommission(WORKSPACE_TOKEN_REFUSED, "${refusedGitRef}")),
+                  List.of(),
+                  (url, params) -> {
+                    IdpCredentialCommissioner commissioner = commissionerAgainst(url, params);
+                    assertRefused(
+                        () ->
+                            commissioner.tokens.commission(
+                                basicOf(params),
+                                workspaceTokenRequest(params, List.of(params.get("refusedGitRef")))));
+                  }),
+              ContractRow.of(
+                  RECONCILE,
+                  WORKSPACE_TOKEN_PUSHING_NOTHING,
+                  "commissionToken",
+                  basic(workspaceCommission(WORKSPACE_TOKEN_PUSHING_NOTHING)),
+                  List.of("$.tokenId", "$.token", "$.subject"),
+                  (url, params) -> {
+                    IdpTokens.TokenResponse issued =
+                        commissionerAgainst(url, params)
+                            .tokens
+                            .commission(
+                                basicOf(params),
+                                workspaceTokenRequest(params, List.of(params.get("gitRef")))
+                                    .pushingNothing());
+                    assertRecordedToken(
+                        WORKSPACE_TOKEN_PUSHING_NOTHING, issued.tokenId(), issued.subject());
+                  }),
+              ContractRow.of(
+                  Trigger.operation("dispatchAgent"),
+                  AGENT_TOKEN_REFUSED,
+                  "commissionToken",
+                  basic(agentCommission(AGENT_TOKEN_REFUSED, "${refusedGitRef}")),
+                  List.of(),
+                  (url, params) -> {
+                    IdpCredentialCommissioner commissioner = commissionerAgainst(url, params);
+                    assertRefused(
+                        () ->
+                            commissioner.tokens.commission(
+                                basicOf(params),
+                                agentTokenRequest(params, List.of(params.get("refusedGitRef")))));
+                  }),
+              ContractRow.of(
+                  Trigger.operation("dispatchAgent"),
+                  AGENT_TOKEN_PUSHING_NOTHING,
+                  "commissionToken",
+                  basic(agentCommission(AGENT_TOKEN_PUSHING_NOTHING)),
+                  List.of("$.tokenId", "$.token", "$.subject"),
+                  (url, params) -> {
+                    String gitRef = params.get("gitRef");
+                    IdpTokens.TokenResponse issued =
+                        commissionerAgainst(url, params)
+                            .tokens
+                            .commission(
+                                basicOf(params),
+                                agentTokenRequest(params, List.of(gitRef, gitRef + "-*"))
+                                    .pushingNothing());
+                    assertRecordedToken(
+                        AGENT_TOKEN_PUSHING_NOTHING, issued.tokenId(), issued.subject());
                   })));
 
   private IdpContract() {}
@@ -364,45 +464,123 @@ public final class IdpContract {
     return Request.json(body).header("Authorization", BASIC);
   }
 
-  /** A workspace row's commission: its kind, its row id, its project claim, the refs it may push. */
-  private static DslPart workspaceCommission(String rowId) {
-    PactDslJsonBody body =
-        new PactDslJsonBody().stringValue("contextKind", "workspace").stringValue("contextId", rowId);
-    body.object("claims").stringType("project", "a-project").closeObject();
-    return body.array("gitRefs").stringType("refs/heads/ws/7").closeArray();
+  /** {@code state}'s pinned value of {@code name}: the example a provider-state expression carries. */
+  private static String param(String state, String name) {
+    String value = GoldenMasters.params(GoldenMasters.IDP, state).get(name);
+    if (value == null) {
+      throw new IllegalStateException("qits-idp's '" + state + "' records no param " + name);
+    }
+    return value;
   }
 
-  /** An agent's token: the workspace kind, {@code agent-<id>}, its project and agent claims. */
-  private static DslPart agentCommission() {
+  /**
+   * A workspace row's commission: its kind, its row id, its project claim, the refs it may push —
+   * each a provider-state expression of {@code state}'s params ({@code ${gitRef}}, {@code
+   * ${refusedGitRef}}); no ref at all is the {@code gitRefs: []} retry.
+   */
+  private static DslPart workspaceCommission(String state, String... gitRefs) {
     PactDslJsonBody body =
         new PactDslJsonBody()
             .stringValue("contextKind", "workspace")
-            .stringValue("contextId", CredentialCommissioner.AGENT_CONTEXT_PREFIX + AGENT);
+            .valueFromProviderState("contextId", "${workspaceId}", param(state, "workspaceId"));
     body.object("claims")
-        .stringType("project", "a-project")
-        .stringValue("agent", AGENT)
+        .valueFromProviderState("project", "${projectId}", param(state, "projectId"))
         .closeObject();
-    return body.array("gitRefs")
-        .stringType("refs/heads/ticket/a")
-        .stringType("refs/heads/ticket/a-*")
-        .closeArray();
+    return refs(body, state, gitRefs);
+  }
+
+  /** An agent's token: the workspace kind, {@code agent-<id>}, its project and agent claims. */
+  private static DslPart agentCommission(String state, String... gitRefs) {
+    String agent = param(state, "agentId");
+    PactDslJsonBody body =
+        new PactDslJsonBody()
+            .stringValue("contextKind", "workspace")
+            .valueFromProviderState(
+                "contextId",
+                CredentialCommissioner.AGENT_CONTEXT_PREFIX + "${agentId}",
+                CredentialCommissioner.AGENT_CONTEXT_PREFIX + agent);
+    body.object("claims")
+        .valueFromProviderState("project", "${projectId}", param(state, "projectId"))
+        .valueFromProviderState("agent", "${agentId}", agent)
+        .closeObject();
+    return refs(body, state, gitRefs);
+  }
+
+  /** {@code gitRefs}, each an expression whose example is that expression over the state's params. */
+  private static DslPart refs(PactDslJsonBody body, String state, String... expressions) {
+    var array = body.array("gitRefs");
+    Map<String, String> params = GoldenMasters.params(GoldenMasters.IDP, state);
+    for (String expression : expressions) {
+      String example = expression;
+      for (var param : params.entrySet()) {
+        example = example.replace("${" + param.getKey() + "}", param.getValue());
+      }
+      array.valueFromProviderState(expression, example);
+    }
+    return array.closeArray();
   }
 
   /** A runner's registration token: its kind and the runner id, nothing else. */
   private static DslPart registrationCommission() {
     return new PactDslJsonBody()
         .stringValue("contextKind", IdpRunnerCommissioner.REGISTRATION_KIND)
-        .stringValue("contextId", RUNNER.toString());
+        .valueFromProviderState(
+            "contextId", "${runnerId}", param(RUNNER_REGISTRATION, "runnerId"));
   }
 
-  /** A workspace commission stating the one ref the state refuses, as an expression of its param. */
-  private static DslPart refusedCommission() {
-    PactDslJsonBody body =
-        new PactDslJsonBody().stringValue("contextKind", "workspace").stringValue("contextId", "7");
-    body.object("claims").stringType("project", "a-project").closeObject();
-    return body.array("gitRefs")
-        .valueFromProviderState("${refusedGitRef}", "refs/tags/contract")
-        .closeArray();
+  /** The workspace row a state names: its {@code workspaceId} param. */
+  private static Long workspaceId(Map<String, String> params) {
+    return Long.valueOf(params.get("workspaceId"));
+  }
+
+  private static UUID runnerId(Map<String, String> params) {
+    return UUID.fromString(params.get("runnerId"));
+  }
+
+  /** The request {@code commission} builds for a workspace row, stating {@code gitRefs}. */
+  private static IdpClients.CommissionRequest workspaceClientRequest(
+      Map<String, String> params, List<String> gitRefs) {
+    return new IdpClients.CommissionRequest(
+        "workspace",
+        params.get("workspaceId"),
+        Map.of(CredentialCommissioner.PROJECT_CLAIM, params.get("projectId")),
+        gitRefs);
+  }
+
+  /** The request {@code commissionToken} builds for a workspace row, stating {@code gitRefs}. */
+  private static IdpTokens.TokenRequest workspaceTokenRequest(
+      Map<String, String> params, List<String> gitRefs) {
+    return new IdpTokens.TokenRequest(
+        "workspace",
+        params.get("workspaceId"),
+        Map.of(CredentialCommissioner.PROJECT_CLAIM, params.get("projectId")),
+        gitRefs);
+  }
+
+  /** The request {@code commissionAgentToken} builds, stating {@code gitRefs}. */
+  private static IdpTokens.TokenRequest agentTokenRequest(
+      Map<String, String> params, List<String> gitRefs) {
+    String agent = params.get("agentId");
+    return new IdpTokens.TokenRequest(
+        "workspace",
+        CredentialCommissioner.AGENT_CONTEXT_PREFIX + agent,
+        Map.of(
+            CredentialCommissioner.PROJECT_CLAIM,
+            params.get("projectId"),
+            CredentialCommissioner.AGENT_CLAIM,
+            agent),
+        gitRefs);
+  }
+
+  /** A 400, read the way the commissioner reads it to retry with {@code gitRefs: []}. */
+  private static void assertRefused(org.junit.jupiter.api.function.Executable call) {
+    WebApplicationException refused = assertThrows(WebApplicationException.class, call);
+    assertEquals(400, IdpCredentialCommissioner.status(refused));
+  }
+
+  private static String basicOf(Map<String, String> params) {
+    String[] pair = pair(params);
+    return IdpCredentialCommissioner.basic(pair[0], pair[1]);
   }
 
   private static DslPart gitRefsBody() {
@@ -478,8 +656,8 @@ public final class IdpContract {
     }
   }
 
-  private static void assertRecordedToken(String tokenId, String subject) {
-    JsonNode recorded = GoldenMasters.json(GoldenMasters.IDP, SYSTEM_CLIENT, "commissionToken");
+  private static void assertRecordedToken(String state, String tokenId, String subject) {
+    JsonNode recorded = GoldenMasters.json(GoldenMasters.IDP, state, "commissionToken");
     assertEquals(recorded.path("tokenId").asText(), tokenId);
     assertEquals(recorded.path("subject").asText(), subject);
   }
