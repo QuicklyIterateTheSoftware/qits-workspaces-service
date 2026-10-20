@@ -145,6 +145,14 @@ public class AgentService {
   /** The statuses that end an item (D4): the cleanup sweep removes a closed item's OBSOLETE agents. */
   private static final Set<String> CLOSING_STATUSES = Set.of("VERIFIED", "DONE", "DROPPED");
 
+  /**
+   * The statuses between two phases (qits-1460): the agent's phase is finished, and its next turn
+   * comes from the platform's own dispatch — a person approves REFINED to READY_FOR_DEV, the
+   * platform starts implement and verify. An idle agent there is not stalled and is never nudged:
+   * "carry on with the phase" would push it into work nobody started.
+   */
+  private static final Set<String> BETWEEN_PHASES = Set.of("REFINED", "READY_FOR_DEV", "IMPLEMENTED");
+
   /** A branch name git and the daemon both take: no leading dash, no spaces or control characters. */
   private static final Pattern BRANCH = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]{0,199}");
 
@@ -1378,7 +1386,9 @@ public class AgentService {
    * dispatch phase and a delivery are the only turns it gets, so one that stops without declaring a
    * wait or a block sat idle until a person noticed.
    *
-   * <p>An agent is nudged when every one of {@link #nudgeable} holds and it has no OPEN wait. The
+   * <p>An agent is nudged when every one of {@link #nudgeable} holds and it has no OPEN wait. An
+   * item between phases (REFINED, READY_FOR_DEV, IMPLEMENTED) is not nudged: its agent's phase is
+   * done, and the next turn is the platform's dispatch of the next phase, not a nudge. The
    * quiet clock is {@code max(waitingSince, lastActivityAt)}: {@code waitingSince} is the only
    * signal that its turn ended (hooks fire only at turn boundaries, so a long turn sends no frame
    * and {@code lastActivityAt} alone would nudge busy agents), and any later frame restarts it. The
@@ -1465,7 +1475,8 @@ public class AgentService {
 
   /**
    * Every condition of a nudge but the open waits, read off the row (qits-1460): ACTIVE, placed
-   * (RUNNING or YIELDED) with no start refused, dispatched on a work item that is not closed, with
+   * (RUNNING or YIELDED) with no start refused, dispatched on a work item that is neither closed nor
+   * between phases ({@link #BETWEEN_PHASES}), with
    * nothing pending, not explicitly blocked, waiting for input, quiet for {@code after}, and under
    * {@code limit}.
    */
@@ -1475,6 +1486,7 @@ public class AgentService {
         || agent.startRefusal != null
         || agent.workId == null
         || isClosed(agent.entityStatus)
+        || isBetweenPhases(agent.entityStatus)
         || agent.pendingText != null
         || explicitlyBlocked(agent)
         || agent.waitingSince == null
@@ -1955,6 +1967,10 @@ public class AgentService {
               }
             });
     return out;
+  }
+
+  private static boolean isBetweenPhases(String status) {
+    return status != null && BETWEEN_PHASES.contains(status.toUpperCase(Locale.ROOT));
   }
 
   private static boolean isClosed(String status) {

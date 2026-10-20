@@ -988,7 +988,10 @@ makes every daemon call, one pass at a time, kicked after each door and every
    without declaring a wait or a block: it used to sit idle, its item showing "waiting for you",
    until a person noticed (qits-1149, qits-1163 and qits-1383 sat ~8 h on 2026-10-19). An agent is
    nudged when it is ACTIVE, RUNNING or YIELDED with no start refused, on a work item that is not
-   VERIFIED, DONE or DROPPED, with no pending text, no OPEN wait and no explicit block
+   VERIFIED, DONE or DROPPED and not between phases — REFINED, READY_FOR_DEV or IMPLEMENTED
+   (`BETWEEN_PHASES`, case-insensitive): there the phase is finished and the next turn is the
+   platform's own dispatch (a person approves REFINED→READY_FOR_DEV, the platform starts implement
+   and verify), so "carry on with the phase" would push it into work nobody started — with no pending text, no OPEN wait and no explicit block
    (`entity_blocked` with `block_source` `EXPLICIT` or `BOTH`, or no source at all; the derived
    `AGENT_WAITING` block alone is the stall itself and does not exempt it), and has been quiet for
    `qits.workspace.agent.nudge-after` (20 min; zero or negative switches it off) counted from the

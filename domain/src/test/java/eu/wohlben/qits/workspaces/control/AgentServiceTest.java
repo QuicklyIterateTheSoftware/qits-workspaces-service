@@ -1918,6 +1918,8 @@ public class AgentServiceTest {
     service.reconcile();
     assertTrue(service.isStarted(UUID.fromString(agentId)));
     assertNull(row(agentId).pendingText, "the instruction was handed over");
+    // dispatch() says REFINED, which is between phases; a quiet agent mid-phase is the subject.
+    service.markEntity(workId, new EntityFacts(null, "IMPLEMENTING", false), null);
     endedItsTurn(agentId, quiet);
     return agentId;
   }
@@ -2117,6 +2119,21 @@ public class AgentServiceTest {
     service.markEntity("w-nudge-closed", new EntityFacts(null, "VERIFIED", false), null);
     endedItsTurn(agentId, NUDGE_AFTER.plusMinutes(1));
     assertNotNudged(agentId);
+  }
+
+  @Test
+  void anAgentBetweenPhasesIsNotNudgedAndOneMidPhaseIs() {
+    String between = quietAgent("w-nudge-refined", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(between).workspaceId);
+    service.markEntity("w-nudge-refined", new EntityFacts(null, "refined", false), null);
+    endedItsTurn(between, NUDGE_AFTER.plusMinutes(1));
+    assertNotNudged(between);
+
+    String working = quietAgent("w-nudge-implementing", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(working).workspaceId);
+    assertEquals("IMPLEMENTING", row(working).entityStatus);
+    service.nudgeIdle(NUDGE_AFTER, 1);
+    assertEquals(1, row(working).nudgeCount, "an agent mid-phase is nudged");
   }
 
   @Test
