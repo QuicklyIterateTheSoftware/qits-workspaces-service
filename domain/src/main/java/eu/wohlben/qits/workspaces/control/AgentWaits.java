@@ -44,7 +44,8 @@ import org.jboss.logging.Logger;
  *       scheduler is kicked after the commit. Only OPEN waits match, so a repeated delivery of an
  *       event changes nothing.
  *   <li><b>The wake</b> (W6) is the qits-1152 turn path: the scheduler says {@code pending_text} to a
- *       running agent at its next turn boundary, and resumes a yielded one first (D17).
+ *       running agent once it is not BUSY, or after the launch window regardless, and resumes a
+ *       yielded one first (D17).
  *   <li><b>The sweep</b> ({@link #sweep}, every scheduler pass): an OPEN wait past {@code expires_at}
  *       is TIMED_OUT and wakes its agent; an OPEN wait of an agent that is no longer ACTIVE is
  *       CANCELLED with no wake (W6).

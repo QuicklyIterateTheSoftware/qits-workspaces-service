@@ -245,6 +245,10 @@ public class AgentServiceTest {
     AgentService.Delivery delivery = service.deliver("w-turn", "next phase", false);
     assertEquals(agentId, delivery.agentId());
     assertTrue(delivery.delivered());
+    assertEquals(
+        "Queued: said at once if the agent is idle, else when its current turn ends, and after"
+            + " 15 minutes regardless.",
+        delivery.detail());
     service.reconcile();
 
     assertTrue(daemon.callsFor(agentId).contains("turn " + slot + " " + agentId + " next phase"));
@@ -453,9 +457,13 @@ public class AgentServiceTest {
     assertEquals(before, daemon.callsFor(firstId), "a yield makes no daemon call");
     assertTrue(service.isStarted(UUID.fromString(firstId)), "the harness keeps running");
 
-    // Spoken to, the yielded agent runs again and hears it at its next turn boundary.
+    // Spoken to, the yielded agent runs again at once and hears it now.
     AgentService.Delivery delivery = service.deliver("w-first", "your answer", false);
     assertTrue(delivery.resumed());
+    assertEquals(
+        "The agent had yielded its workspace slot while it waited for input; it runs again and"
+            + " hears this now.",
+        delivery.detail());
     service.reconcile();
     assertEquals(AgentRunState.RUNNING, row(firstId).runState);
     assertTrue(daemon.callsFor(firstId).contains("turn " + slot + " " + firstId + " your answer"));

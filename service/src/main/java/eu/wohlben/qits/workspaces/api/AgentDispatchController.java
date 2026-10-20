@@ -127,9 +127,10 @@ public class AgentDispatchController {
       responseCode = "200",
       description =
           "Answered. `agentId: null` means no agent works on the item: nothing was said and"
-              + " nothing created — a normal outcome. Otherwise one of `delivered` (said at the"
-              + " running agent's next turn boundary), `launched` (its first turn, once it starts)"
-              + " or `resumed` (a yielded agent resumes to hear it).")
+              + " nothing created — a normal outcome. Otherwise one of `delivered` (queued for the"
+              + " running agent: said once it is not busy, or after the launch window),"
+              + " `launched` (its first turn, once it starts) or `resumed` (a yielded agent"
+              + " resumes to hear it).")
   @APIResponse(
       responseCode = "400",
       description = "A blank work item or text.",
