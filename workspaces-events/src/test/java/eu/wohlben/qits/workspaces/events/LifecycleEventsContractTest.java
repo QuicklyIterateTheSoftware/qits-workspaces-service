@@ -18,7 +18,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * The <b>wire contract</b> of the thirteen lifecycle events (qits-1236), pinned at the source and
+ * The <b>wire contract</b> of the fourteen lifecycle events (qits-1236), pinned at the source and
  * serialised through {@link EventEnvelope#of} — the path {@code QitsEventBus.publish} takes, so the
  * payload asserted is the one that would be PUT, the {@code QitsEvent} mix-in applied.
  *
@@ -53,6 +53,7 @@ class LifecycleEventsContractTest {
             AGENT, WORK, "385", REPO, AgentRequeued.WORKSPACE_FAILED, "Workspace 385 did not come up.", AT),
         with(agent, "detail", "reason"));
     out.put(new AgentYielded(AGENT, WORK, "385", REPO, AT), agent);
+    out.put(new AgentNudged(AGENT, WORK, "385", REPO, 1, AT), with(agent, "nudgeCount"));
     out.put(
         new AgentResumed(AGENT, WORK, "385", REPO, AgentResumed.TURN_PENDING, AT),
         with(agent, "reason"));
@@ -96,6 +97,7 @@ class LifecycleEventsContractTest {
             "AgentStartRefused",
             "AgentRequeued",
             "AgentYielded",
+            "AgentNudged",
             "AgentResumed",
             "AgentObsolete",
             "AgentCleanupDeferred",

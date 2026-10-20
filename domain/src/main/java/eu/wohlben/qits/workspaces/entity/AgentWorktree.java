@@ -157,6 +157,21 @@ public class AgentWorktree extends PanacheEntityBase implements CausedRow {
   @Column(name = "started_workspace_id")
   public Long startedWorkspaceId;
 
+  /**
+   * When the scheduler last nudged this agent for ending its turn with nothing open (qits-1460,
+   * {@code V28}); null while it never was.
+   */
+  @Column(name = "nudged_at")
+  public Instant nudgedAt;
+
+  /**
+   * Nudges in a row with no other turn between them (qits-1460, {@code V28}). Set back to 0 where a
+   * turn that is not a nudge is written (dispatch instruction, delivery, a wait's wake) and when a
+   * wait is declared; at {@code qits.workspace.agent.nudge-limit} the agent is nudged no more.
+   */
+  @Column(name = "nudge_count", nullable = false)
+  public int nudgeCount;
+
   @Column(name = "created_at", nullable = false, updatable = false)
   public Instant createdAt;
 

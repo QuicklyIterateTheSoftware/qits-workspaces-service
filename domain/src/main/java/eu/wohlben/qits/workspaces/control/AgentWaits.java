@@ -176,6 +176,8 @@ public class AgentWaits {
                   wait.createdAt = Instant.now();
                   wait.expiresAt = timeout == null ? null : wait.createdAt.plus(timeout);
                   waits.persist(wait);
+                  // It said what it waits on: a later quiet period earns a fresh nudge (qits-1460).
+                  row.nudgeCount = 0;
                   return row;
                 });
     addName(selection.event());
@@ -481,6 +483,8 @@ public class AgentWaits {
     agent.pendingText = agent.pendingText == null ? turn : agent.pendingText + "\n\n" + turn;
     // It is about to work, not waiting: the next Stop is a fresh flip.
     agent.waitingSince = null;
+    // A turn that is not a nudge: a later quiet period earns a fresh nudge (qits-1460).
+    agent.nudgeCount = 0;
     return agent;
   }
 

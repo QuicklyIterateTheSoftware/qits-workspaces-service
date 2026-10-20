@@ -208,6 +208,10 @@ longer stops the harness, so a workspace may hold several RUNNING agents.
 **`V25__agent_start_refusal.sql`** (qits-1217) adds `start_refusal` and `start_refused_at` to
 `agent_worktree`: why the daemon last refused to start the agent, and since when. Nullable columns on
 a `CausedRow`, so no `ArchRulesTest` decision; see "Agents and the workspaces they run in", Drive.
+**`V28__agent_nudge.sql`** (qits-1460) adds `nudged_at` (nullable) and `nudge_count` (`not null
+default 0`) to `agent_worktree`: when the scheduler last nudged an idle agent, and how many nudges
+in a row it has had. Columns on a `CausedRow`, so no `ArchRulesTest` decision; see "Agents and the
+workspaces they run in", Nudge.
 
 **`V18__dispatch_command_id.sql` adds `dispatch_command_id` to `workspace`** (qits-895): the daemon
 command the last launch this service made started, replaced by every accepted launch
@@ -980,7 +984,30 @@ makes every daemon call, one pass at a time, kicked after each door and every
    (qits-1212). The write is the yield: a candidate that is no longer RUNNING when its row is read
    again yields nothing, so nothing is logged and nobody is placed on its account. A yielded agent
    that works again (`awaitingInput: false`, say a person typed in its terminal) is RUNNING again.
-4. **Drive** — a RUNNING agent whose daemon answers is started with `POST agent-worktrees` (its
+4. **Nudge** (qits-1460, `nudgeIdle`) — nothing else wakes a dispatched agent that ends its turn
+   without declaring a wait or a block: it used to sit idle, its item showing "waiting for you",
+   until a person noticed (qits-1149, qits-1163 and qits-1383 sat ~8 h on 2026-10-19). An agent is
+   nudged when it is ACTIVE, RUNNING or YIELDED with no start refused, on a work item that is not
+   VERIFIED, DONE or DROPPED, with no pending text, no OPEN wait and no explicit block
+   (`entity_blocked` with `block_source` `EXPLICIT` or `BOTH`, or no source at all; the derived
+   `AGENT_WAITING` block alone is the stall itself and does not exempt it), and has been quiet for
+   `qits.workspace.agent.nudge-after` (20 min; zero or negative switches it off) counted from the
+   later of `waiting_since` and `last_activity_at`. `waiting_since` is the clock because hooks fire
+   only at turn boundaries — a 40-minute build sends no frame, so `last_activity_at` alone would
+   nudge busy agents — and qits-workspace-daemon's background-work grace is what keeps it honest
+   for a Stop that still lists a subagent, a monitor or a session cron. The nudge is the wake path:
+   re-checked on the locked row, written to `pending_text` ("You ended your turn with no open wait
+   and no block on <workId>. Carry on…; or … `qits wait …` …; or … `work_block` …"), `nudged_at`
+   and `nudge_count` stamped (`V28`), `AgentNudged` announced, the pass kicked; a YIELDED agent is
+   resumed for it. **At most `qits.workspace.agent.nudge-limit` (1) nudges in a row**: every frame,
+   the nudge's own delivery included, moves `last_activity_at`, so the guard is the counter, not
+   activity since the nudge. `nudge_count` goes back to 0 where a turn that is not a nudge is
+   written — the dispatch instruction, a delivery (`appendTurn`), a wait's wake — and when a wait is
+   declared, never in `drive`. An agent that answers its nudge with nothing stays idle for a person.
+   Every agent has a work item (D24), so a person-created agent is nudged like a dispatched one; a
+   turn a person types in its terminal does not reset the count. The domain suite pins `nudge-after`
+   at a year, because its fixtures backdate `waiting_since`, and drives `nudgeIdle(after, limit)`.
+5. **Drive** — a RUNNING agent whose daemon answers is started with `POST agent-worktrees` (its
    instruction, session, entity facts and credential; `mode: INTERACTIVE`, the harness's TUI in a
    terminal), and its pending turn is said at a turn boundary (`/turn`; BUSY waits up to the launch
    window). The daemon holds a turn until the harness has started and types it on one line. The daemon keeps the agent credential in
@@ -1001,7 +1028,7 @@ makes every daemon call, one pass at a time, kicked after each door and every
    that workspace, the reason stored once. A row from before `V26` (null) with a command id counts
    as started where it is placed. A second failure in a row holds the agent
    back from placement 1 min, doubling to 30 min, until an accepted start (qits-1233).
-5. **Clean up** (D4, D5, D7) — an OBSOLETE agent whose item is VERIFIED (the status the entity door
+6. **Clean up** (D4, D5, D7) — an OBSOLETE agent whose item is VERIFIED (the status the entity door
    stores) and that has been idle for `qits.workspace.agent.cleanup-idle` (30 s) is checked
    (`cleanup-check`): clean → `DELETE agent-worktrees/{id}`, token deleted, REMOVED; leftover work →
    the D7 prompt is its next turn, never a deletion. It is prompted again only after it has worked.
@@ -1009,7 +1036,7 @@ makes every daemon call, one pass at a time, kicked after each door and every
    removed nor prompted, nor is a removal the daemon refuses as busy; a check answered 404 is an
    agent the daemon no longer knows, and the row is REMOVED. Every pass that leaves an agent alone
    logs why, once per agent and reason (qits-1233).
-6. **Remove empty workspaces** (D2) — a slot whose agents are all REMOVED is discarded: container,
+7. **Remove empty workspaces** (D2) — a slot whose agents are all REMOVED is discarded: container,
    volume and daemon credential.
 
 Every pending thing is a row, so a restart loses nothing. What is in memory — which agents this
@@ -1117,6 +1144,7 @@ payload's top-level fields:
 | `AgentStartRefused` | the four, `detail` (the daemon's refusal, or the never-came-up sentence) | |
 | `AgentRequeued` | the four (`workspaceId` is the one it left), `reason`, `detail` | `WORKSPACE_FAILED`, `WORKSPACE_GONE` |
 | `AgentYielded` | the four | |
+| `AgentNudged` | the four, `nudgeCount` (this nudge included) | |
 | `AgentResumed` | the four, `reason` | `TURN_PENDING`, `WORKS_AGAIN` |
 | `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs; both absent for a dropped item) — one per agent | |
 | `AgentCleanupDeferred` | the four, `reason`, `detail` | `ITEM_NOT_CLOSED`, `RECENTLY_ACTIVE`, `TURN_PENDING`, `HARNESS_BUSY`, `DAEMON_NOT_CONNECTED`, `NO_DAEMON_CLIENT`, `CHECK_UNANSWERED`, `BUSY_IN_BACKGROUND`, `REMOVAL_UNANSWERED`, `LEFTOVER_WORK_PROMPTED` |
