@@ -65,6 +65,8 @@ erDiagram
     text git_refs
     enum harness "not null"
     instant last_activity_at
+    int nudge_count "not null"
+    instant nudged_at
     instant obsolete_at
     boolean pending_compact "not null"
     text pending_text
