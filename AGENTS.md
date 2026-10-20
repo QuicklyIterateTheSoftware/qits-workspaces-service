@@ -1104,9 +1104,10 @@ event name, optional expiry) and gets a turn when it happens:
   `pending_text` in one transaction on this service's datasource, before the claim commits. A throw
   leaves the event owed; a repeat finds the wait closed. With the bus dark (`%dev`, `%test`), tests
   call the listener directly.
-- **The wake** is the qits-1152 turn path: a running agent hears it at its next turn boundary, a
-  yielded one resumes for it (resume goes first, D17). The platform writes every sentence: label,
-  event name, `occurredAt`, event id, and a `qits events query` line that reads the whole event.
+- **The wake** is the qits-1152 turn path: a running agent hears it once it is not BUSY, or after
+  the launch window regardless; a yielded one resumes for it (resume goes first, D17). The platform
+  writes every sentence: label, event name, `occurredAt`, event id, and a `qits events query` line
+  that reads the whole event.
   **The payload is never inlined**: it carries text other people wrote, and a turn reads as
   instructions. Only the values at the selection's own paths are shown (JSON-quoted, at most 80
   characters and 3 per path) inside a block marked as event-log data, not instructions.

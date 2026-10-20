@@ -1331,9 +1331,9 @@ paths:
         "200":
           description: "Answered. `agentId: null` means no agent works on the item:\
             \ nothing was said and nothing created — a normal outcome. Otherwise one\
-            \ of `delivered` (said at the running agent's next turn boundary), `launched`\
-            \ (its first turn, once it starts) or `resumed` (a yielded agent resumes\
-            \ to hear it)."
+            \ of `delivered` (queued for the running agent: said once it is not busy,\
+            \ or after the launch window), `launched` (its first turn, once it starts)\
+            \ or `resumed` (a yielded agent resumes to hear it)."
           content:
             application/json:
               schema:
@@ -3107,4 +3107,4 @@ paths:
         - qits:admin-agent
 info:
   title: qits-workspaces API
-  version: 2026.1018.113154
+  version: 2026.1020.150158

@@ -599,7 +599,14 @@ public class AgentService {
       case RUNNING ->
           started.containsKey(id)
               ? new Delivery(
-                  agentId, true, false, false, "Delivered at the agent's next turn boundary.")
+                  agentId,
+                  true,
+                  false,
+                  false,
+                  "Queued: said at once if the agent is idle, else when its current turn ends,"
+                      + " and after "
+                      + turnWindowPhrase()
+                      + " regardless.")
               : new Delivery(
                   agentId,
                   false,
@@ -612,8 +619,8 @@ public class AgentService {
               false,
               false,
               true,
-              "The agent had yielded its workspace slot; it hears this at its next turn"
-                  + " boundary.");
+              "The agent had yielded its workspace slot while it waited for input; it runs"
+                  + " again and hears this now.");
       case QUEUED ->
           new Delivery(
               agentId,
@@ -625,10 +632,23 @@ public class AgentService {
   }
 
   /**
+   * {@code turnWindowMs} as a phrase for {@link #deliver}'s detail: whole minutes, rounded up, or
+   * whole seconds (rounded up) under one minute.
+   */
+  private String turnWindowPhrase() {
+    if (turnWindowMs < 60_000) {
+      long seconds = (turnWindowMs + 999) / 1000;
+      return seconds + (seconds == 1 ? " second" : " seconds");
+    }
+    long minutes = (turnWindowMs + 59_999) / 60_000;
+    return minutes + (minutes == 1 ? " minute" : " minutes");
+  }
+
+  /**
    * {@code said} becomes part of what the agent has still to hear, after anything already pending.
-   * The scheduler says it whatever the agent's run state: at the next turn boundary of a running
-   * agent, as the resume of a yielded one (D16), as part of a queued one's first turn. Called inside
-   * a transaction, on a managed row.
+   * The scheduler says it whatever the agent's run state: once a running agent is not BUSY (at
+   * once if it already is not), as the resume of a yielded one (D16), as part of a queued one's
+   * first turn. Called inside a transaction, on a managed row.
    */
   private void appendTurn(AgentWorktree row, String said, boolean compactFirst) {
     row.pendingText = row.pendingText == null ? said : row.pendingText + "\n\n" + said;
@@ -1138,7 +1158,8 @@ public class AgentService {
   /**
    * Step 1: every yielded agent with something to hear is RUNNING again at once, before anyone new
    * is placed. Another RUNNING agent in its workspace does not hold it back: its harness never
-   * stopped, so it hears the turn at its next turn boundary ({@link #drive}).
+   * stopped, so it hears the turn once it is not BUSY, or after the launch window regardless
+   * ({@link #drive}).
    */
   void resumeYielded() {
     synchronized (placeLock) {
