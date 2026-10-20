@@ -141,7 +141,7 @@
         <qits.artifacts-service-pacts-qits-workspaces-service.version>2026.1018.153037</qits.artifacts-service-pacts-qits-workspaces-service.version>
         <qits.bootstrap-cli-pacts-qits-workspaces-service.version>2026.1019.84610</qits.bootstrap-cli-pacts-qits-workspaces-service.version>
         <qits.orchestrator-service-pacts-qits-workspaces-service.version>2026.1018.172917</qits.orchestrator-service-pacts-qits-workspaces-service.version>
-        <qits.platform-access-cli-pacts-qits-workspaces-service.version>2026.1019.65035</qits.platform-access-cli-pacts-qits-workspaces-service.version>
+        <qits.platform-access-cli-pacts-qits-workspaces-service.version>2026.1019.195617</qits.platform-access-cli-pacts-qits-workspaces-service.version>
         <!-- qits-workspaces-runner-daemon's consumer pact against this service (qits-1163):
              registerRunner, under "an unregistered runner" and "a registered runner". -->
         <qits.workspaces-runner-daemon-pacts-qits-workspaces-service.version>2026.1019.75736</qits.workspaces-runner-daemon-pacts-qits-workspaces-service.version>
