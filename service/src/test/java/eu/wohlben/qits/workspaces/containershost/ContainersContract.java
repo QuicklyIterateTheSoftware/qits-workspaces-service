@@ -110,26 +110,25 @@ public final class ContainersContract {
                     assertTrue(answer.succeeded(), String.valueOf(answer));
                     assertTrue(answer.value().state().observed() != null, "the place says what it found");
                   }),
-              // Still waiting. A pin the registry does not hold: 409 IMAGE_MISSING, which the launch
-              // does not hold through and fails naming (WorkspaceContainers.holdThrough).
+              // A pin the registry does not hold: 409 IMAGE_MISSING, which the launch does not hold
+              // through and fails naming (WorkspaceContainers.holdThrough).
               ContractRow.of(
-                      RECONCILE,
-                      IMAGE_MISSING,
-                      "ensureContainer",
-                      Request.json(GoldenMasters.exactBody(wire(ensureRequest()))),
-                      List.of("$.code"),
-                      (url, params) -> {
-                        ContainersAnswer<Envelope> answer =
-                            adapter(url, params)
-                                .containers
-                                .ensure(
-                                    params.get("owner"),
-                                    WorkspaceContainers.WORKLOAD,
-                                    params.get("ref"),
-                                    ensureRequest());
-                        assertTrue(answer.imageMissing(), String.valueOf(answer));
-                      })
-                  .waiting(),
+                  RECONCILE,
+                  IMAGE_MISSING,
+                  "ensureContainer",
+                  Request.json(GoldenMasters.exactBody(wire(ensureRequest()))),
+                  List.of("$.code"),
+                  (url, params) -> {
+                    ContainersAnswer<Envelope> answer =
+                        adapter(url, params)
+                            .containers
+                            .ensure(
+                                params.get("owner"),
+                                WorkspaceContainers.WORKLOAD,
+                                params.get("ref"),
+                                ensureRequest());
+                    assertTrue(answer.imageMissing(), String.valueOf(answer));
+                  }),
               ContractRow.of(
                   Trigger.operation("ensureWorkspaceContainer"),
                   RUNNING,
@@ -137,15 +136,14 @@ public final class ContainersContract {
                   Request.NONE,
                   List.of("$.state.observed"),
                   (url, params) -> assertTrue(adapter(url, params).isRunning(params.get("ref")))),
-              // Still waiting: no recording of getContainer against an absent container.
+              // An absent container: 404, which the start reads as "not there" and launches.
               ContractRow.of(
-                      Trigger.operation("ensureWorkspaceContainer"),
-                      NO_CONTAINER,
-                      "getContainer",
-                      Request.NONE,
-                      List.of(),
-                      (url, params) -> assertFalse(adapter(url, params).exists(params.get("ref"))))
-                  .waiting(),
+                  Trigger.operation("ensureWorkspaceContainer"),
+                  NO_CONTAINER,
+                  "getContainer",
+                  Request.NONE,
+                  List.of(),
+                  (url, params) -> assertFalse(adapter(url, params).exists(params.get("ref")))),
               ContractRow.of(
                   Trigger.operation("listWorkspaces"),
                   RUNNING,
