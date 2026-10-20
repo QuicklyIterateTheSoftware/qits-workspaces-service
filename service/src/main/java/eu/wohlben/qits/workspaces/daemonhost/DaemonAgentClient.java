@@ -83,6 +83,31 @@ public class DaemonAgentClient implements AgentDaemon {
     if (route == null) {
       return Started.of(Outcome.UNREACHABLE, "the daemon is not connected");
     }
+    Answer answer = send(route, HttpMethod.POST, BASE, startBody(start));
+    if (answer == null) {
+      return Started.of(Outcome.UNREACHABLE, "the daemon did not answer");
+    }
+    if (answer.status() == 409) {
+      return Started.of(Outcome.REFUSED, answer.body());
+    }
+    if (answer.status() < 200 || answer.status() >= 300) {
+      LOG.warnf(
+          "workspace %s's daemon answered %s to starting agent %s: %s",
+          workspaceRowId, Integer.valueOf(answer.status()), start.agentId(), answer.body());
+      return Started.of(
+          answer.status() >= 500 ? Outcome.UNREACHABLE : Outcome.REFUSED, answer.body());
+    }
+    return startedOf(json(answer.body()));
+  }
+
+  /**
+   * A start's body. {@code agentConfig} rides beside {@code env} only when the agent's {@link
+   * AgentDaemon.Start#agentConfig()} is set (qits-1382, switched off by blanking either half of
+   * {@code qits.workspace.agent-config.*}): the daemon checks the agent's own branch of {@code
+   * qits-agent-config} out and launches Claude with it, and a daemon that predates the field simply
+   * ignores an object it does not read. Package-private for its test.
+   */
+  static JsonObject startBody(Start start) {
     JsonObject env = new JsonObject();
     if (start.env() != null) {
       for (Map.Entry<String, String> entry : start.env().entrySet()) {
@@ -116,21 +141,15 @@ public class DaemonAgentClient implements AgentDaemon {
     if (start.blockSource() != null) {
       body.put("blockSource", start.blockSource());
     }
-    Answer answer = send(route, HttpMethod.POST, BASE, body);
-    if (answer == null) {
-      return Started.of(Outcome.UNREACHABLE, "the daemon did not answer");
+    AgentDaemon.AgentConfig agentConfig = start.agentConfig();
+    if (agentConfig != null) {
+      body.put(
+          "agentConfig",
+          new JsonObject()
+              .put("repositoryId", agentConfig.repositoryId())
+              .put("repositoryPath", agentConfig.repositoryPath()));
     }
-    if (answer.status() == 409) {
-      return Started.of(Outcome.REFUSED, answer.body());
-    }
-    if (answer.status() < 200 || answer.status() >= 300) {
-      LOG.warnf(
-          "workspace %s's daemon answered %s to starting agent %s: %s",
-          workspaceRowId, Integer.valueOf(answer.status()), start.agentId(), answer.body());
-      return Started.of(
-          answer.status() >= 500 ? Outcome.UNREACHABLE : Outcome.REFUSED, answer.body());
-    }
-    return startedOf(json(answer.body()));
+    return body;
   }
 
   /**

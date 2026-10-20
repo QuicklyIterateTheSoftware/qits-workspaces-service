@@ -390,10 +390,68 @@ public class AgentWaitsTest {
 
     service.onActivity(row(id).workspaceId, id.toString(), Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
 
-    FakeAgentWaitingReporter.Report report = reporter.reportsFor(workId).get(0);
+    List<FakeAgentWaitingReporter.Report> reports = reporter.reportsFor(workId);
+    FakeAgentWaitingReporter.Report report = reports.get(reports.size() - 1);
     assertTrue(report.waiting());
     assertEquals(AgentWaits.CAUSE_WAIT, report.cause());
     assertEquals("release-request 42", report.waitingOn());
+  }
+
+  private FakeAgentWaitingReporter.Report lastReport(String workId) {
+    List<FakeAgentWaitingReporter.Report> reports = reporter.reportsFor(workId);
+    assertFalse(reports.isEmpty(), "something was relayed for " + workId);
+    return reports.get(reports.size() - 1);
+  }
+
+  @Test
+  void aMatchRelaysTheWaitsThatStayOpen() {
+    UUID id = agent("w-two");
+    String workId = row(id).workId;
+    waits.create(id, "ticket e-1 verified", verified(), null);
+    waits.create(id, "ci run 7", EventSelection.of("BuildStatusChanged"), null);
+
+    assertEquals(
+        1,
+        waits.onEvent(
+            "ev-two",
+            "EntityTransitioned",
+            Instant.now(),
+            "{\"entities\":[{\"entityId\":\"e-1\",\"status\":\"VERIFIED\"}]}"));
+
+    // qits-1460: the busy agent's item keeps showing the wait that is still open.
+    FakeAgentWaitingReporter.Report report = lastReport(workId);
+    assertFalse(report.waiting());
+    assertEquals(AgentWaits.CAUSE_MATCHED, report.cause());
+    assertEquals("ci run 7", report.waitingOn());
+  }
+
+  @Test
+  void aWaitDeclaredWhileTheAgentIsBusyIsRelayedNotWaiting() {
+    UUID id = agent("w-busy");
+    String workId = row(id).workId;
+    assertNull(row(id).waitingSince, "the agent is mid-turn");
+
+    waits.create(id, "release-request 42", EventSelection.of("ReleaseRequestStateChanged"), null);
+
+    FakeAgentWaitingReporter.Report report = lastReport(workId);
+    assertFalse(report.waiting(), "a busy agent is not waiting for input");
+    assertEquals(AgentWaits.CAUSE_WAIT, report.cause());
+    assertEquals("release-request 42", report.waitingOn());
+  }
+
+  @Test
+  void cancellingTheLastWaitWhileBusyRelaysNoLabel() {
+    UUID id = agent("w-cancel");
+    String workId = row(id).workId;
+    AgentWaitDto wait =
+        waits.create(id, "release-request 42", EventSelection.of("ReleaseRequestStateChanged"), null);
+
+    waits.cancel(id, UUID.fromString(wait.id()));
+
+    FakeAgentWaitingReporter.Report report = lastReport(workId);
+    assertFalse(report.waiting());
+    assertEquals(AgentWaits.CAUSE_CANCELLED, report.cause());
+    assertNull(report.waitingOn());
   }
 
   @Test

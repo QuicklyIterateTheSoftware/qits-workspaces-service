@@ -4,6 +4,7 @@ import eu.wohlben.qits.eventstream.control.EventEnvelope;
 import eu.wohlben.qits.eventstream.control.EventFrame;
 import eu.wohlben.qits.workspaces.events.AgentCleanupDeferred;
 import eu.wohlben.qits.workspaces.events.AgentHarnessExited;
+import eu.wohlben.qits.workspaces.events.AgentNudged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentPlaced;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
@@ -30,7 +31,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
  * anything else. This suite cannot see it either; {@code EventWireReflectionTest} guards the
  * registration's completeness, and only the running binary proves it.
  *
- * <p><b>Why these types.</b> The thirteen records are what {@link EventstreamLifecycleAnnouncer}
+ * <p><b>Why these types.</b> The fourteen records are what {@link EventstreamLifecycleAnnouncer}
  * publishes. {@link EventEnvelope} is the PUT body. {@link EventFrame} is what arrives on {@code
  * /events/stream} for {@link AgentWaitListener}, which reads the frame's fields and hands the
  * payload on as a string — so it binds nothing else, but the frame itself is bound.
@@ -47,6 +48,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
       AgentStartRefused.class,
       AgentRequeued.class,
       AgentYielded.class,
+      AgentNudged.class,
       AgentResumed.class,
       AgentObsolete.class,
       AgentCleanupDeferred.class,

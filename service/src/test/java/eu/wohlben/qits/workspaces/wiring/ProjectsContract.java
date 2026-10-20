@@ -44,8 +44,11 @@ import java.util.Map;
  *       createWork} files the ticket (D25).
  *   <li>{@code workspace-daemon:agent-waiting} — the daemon reports that the agent waits, and
  *       {@link HttpAgentWaitingReporter} relays it with {@code reportWorkAgentWaiting}. The answer
- *       is read by its status alone. {@code waitingOn} is sent only with cause {@code Wait}
- *       (qits-1153, W5).
+ *       is read by its status alone. {@code waitingOn} names the agent's open waits (qits-1153,
+ *       W5).
+ *   <li>{@code createAgentWait} — an agent declares a wait, usually mid-turn: the same call with
+ *       {@code waiting: false} and the label in {@code waitingOn}, which every relay now carries
+ *       whether or not the agent waits for input (qits-1460).
  * </ul>
  */
 final class ProjectsContract {
@@ -167,6 +170,16 @@ final class ProjectsContract {
               .reporter()
               .report(params.get("ticketId"), true, "Wait", "release-request 42", "s-1", 1234L);
 
+  /**
+   * The relay of a wait declared mid-turn (qits-1460): the agent is not waiting for input, and the
+   * label rides along all the same.
+   */
+  private static final Call REPORT_BUSY =
+      (clients, params) ->
+          clients
+              .reporter()
+              .report(params.get("ticketId"), false, "Wait", "ci-run 7", "s-1", 1234L);
+
   static final List<Case> CASES =
       List.of(
           new Case(
@@ -230,7 +243,19 @@ final class ProjectsContract {
                   .integerType("at", 1234L)
                   .stringType("waitingOn", "release-request 42"),
               READS_NOTHING,
-              REPORT));
+              REPORT),
+          new Case(
+              Trigger.operation("createAgentWait"),
+              DISPATCHED_TICKET,
+              REPORT_AGENT_WAITING,
+              new PactDslJsonBody()
+                  .booleanType("waiting", false)
+                  .stringType("cause", "Wait")
+                  .stringType("sessionId", "s-1")
+                  .integerType("at", 1234L)
+                  .stringType("waitingOn", "ci-run 7"),
+              READS_NOTHING,
+              REPORT_BUSY));
 
   private ProjectsContract() {}
 

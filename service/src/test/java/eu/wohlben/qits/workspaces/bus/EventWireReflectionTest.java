@@ -12,6 +12,7 @@ import eu.wohlben.qits.eventstream.control.EventEnvelope;
 import eu.wohlben.qits.eventstream.control.EventFrame;
 import eu.wohlben.qits.workspaces.events.AgentCleanupDeferred;
 import eu.wohlben.qits.workspaces.events.AgentHarnessExited;
+import eu.wohlben.qits.workspaces.events.AgentNudged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentPlaced;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
@@ -62,6 +63,7 @@ class EventWireReflectionTest {
             AgentStartRefused.class,
             AgentRequeued.class,
             AgentYielded.class,
+            AgentNudged.class,
             AgentResumed.class,
             AgentObsolete.class,
             AgentCleanupDeferred.class,
@@ -73,7 +75,7 @@ class EventWireReflectionTest {
             EventEnvelope.class,
             EventFrame.class),
         Set.of(registration.targets()),
-        "the thirteen lifecycle events out, the PUT body, the frame — a new wire type is added"
+        "the fourteen lifecycle events out, the PUT body, the frame — a new wire type is added"
             + " here");
   }
 
