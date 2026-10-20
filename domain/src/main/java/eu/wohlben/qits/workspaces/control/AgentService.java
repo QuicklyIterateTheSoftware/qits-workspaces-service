@@ -2135,8 +2135,9 @@ public class AgentService {
     announce(removal.event());
     deleteToken(removal.tokenId());
     if (removal.relayNotWaiting()) {
-      waits.relayActivity(
-          removal.event().workId(), id, false, CAUSE_REMOVED, removal.sessionId(), Instant.now());
+      // No label: its OPEN waits are cancelled by the next sweep, and must not outlive it on the
+      // item (qits-1460).
+      waits.relayEnded(removal.event().workId(), CAUSE_REMOVED, removal.sessionId(), Instant.now());
     }
   }
 

@@ -527,7 +527,8 @@ sentence is the host's own and names no memory cap.
 **An agent's waiting state is relayed to qits-projects** (qits-895; per agent since qits-1152),
 which derives a work item's BLOCKED from it. A daemon sets `AgentActivity.awaitingInput` (null =
 unknown, never relayed) and, at capability 10, `agentId`. `AgentService.onActivity` stores the flip on
-the agent row (`waiting_since`) and relays only a flip, through the `AgentWaitingReporter` port
+the agent row (`waiting_since`) and relays only a flip (and, since qits-1460, every frame names the
+agent's open waits in `waitingOn` — see "Declared waits"), through the `AgentWaitingReporter` port
 (`wiring/HttpAgentWaitingReporter` → `POST /projects/api/work/{workId}/agent-waiting`). A frame naming
 no agent is a person's own session and relays nothing. The registry also keeps the last state per
 agent (`AgentActivityView`), which the scheduler reads to say a turn at a turn boundary.
@@ -1085,8 +1086,17 @@ event name, optional expiry) and gets a turn when it happens:
   waiting relay says `cause: "Wait"` and `waitingOn: <labels>` (`AgentWaitingReporter`), and an agent
   waiting for input on a wait gives up its slot at once when another agent wants it (no
   `yield-after`); its harness keeps running.
-  A match or timeout relays `waiting: false` (`WaitMatched`, `WaitTimedOut`); a cancel while it
-  waits relays it again without the wait (`WaitCancelled`). `AgentDto.waitingOn` shows the labels,
+  A match or timeout relays `waiting: false` (`WaitMatched`, `WaitTimedOut`).
+  **Every relay names the OPEN waits, busy or idle** (qits-1460): `waitingOn` is the labels of the
+  waits still open whatever `waiting` says — after a match or timeout, the waits that stayed open,
+  read after the close committed — so an item whose agent is working still shows what it waits on.
+  A declare and a cancel always relay, with `waiting` = whether the agent waits for input and cause
+  `Wait` while a label remains, else `WaitCancelled`; a wait is normally declared mid-turn, which
+  used to relay nothing at all. A busy relay keeps its own cause (`TurnDelivered`,
+  `AgentDispatched`, the hook); qits-projects stores the label regardless and the cause only while
+  waiting. The one relay that names no label is a removal's (`AgentRemoved`): its OPEN waits are
+  cancelled by the next sweep, which relays nothing, so the label would outlive the agent.
+  `AgentDto.waitingOn` shows the labels,
   `AgentDto.waitingOnSince` when the oldest of them was declared (qits-1229; not `waitingSince`,
   the hook's clock). A wait opening or closing fires `AGENTS` on the agent's workspace channel after
   it commits; an agent with no workspace fires nothing.
