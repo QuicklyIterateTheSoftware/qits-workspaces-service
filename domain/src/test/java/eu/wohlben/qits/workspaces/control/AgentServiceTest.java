@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import eu.wohlben.qits.eventstream.selection.EventSelection;
 import eu.wohlben.qits.workspaces.dto.AgentDto;
 import eu.wohlben.qits.workspaces.entity.AgentRunState;
 import eu.wohlben.qits.workspaces.entity.AgentState;
@@ -19,6 +20,7 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
+import eu.wohlben.qits.workspaces.events.AgentNudged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
@@ -29,6 +31,7 @@ import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -65,6 +68,7 @@ public class AgentServiceTest {
   @Inject FakeWorkspaceDaemonLiveness liveness;
   @Inject FakeCredentialCommissioner commissioner;
   @Inject RecordingLifecycleAnnouncer announced;
+  @Inject AgentWaits waits;
 
   private String repoId;
 
@@ -210,6 +214,23 @@ public class AgentServiceTest {
     service.onDaemonConnection(slot);
     service.reconcile();
     assertEquals("session-" + agentId, daemon.starts().get(daemon.starts().size() - 1).sessionId());
+    liveness.markDead(slot);
+  }
+
+  @Test
+  void aStartCarriesNoAgentConfigWhenEitherPropertyIsBlank() {
+    // qits-1382: this class's profile ships both qits.workspace.agent-config.* blank, the shipped
+    // default; AgentConfigStartTest is the pair-set half, on the shared profile that pins them.
+    AgentService.Dispatch dispatched = dispatch("w-no-agent-config", true, "go");
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+
+    service.reconcile();
+
+    AgentDaemon.Start start =
+        daemon.starts().stream().filter(s -> s.agentId().equals(agentId)).findFirst().orElseThrow();
+    assertNull(start.agentConfig());
     liveness.markDead(slot);
   }
 
@@ -1898,5 +1919,284 @@ public class AgentServiceTest {
     assertEquals(WorkspaceRuntimeStatus.QUEUED, created.get(0).runtimeStatus);
     assertEquals(created.get(0).id, row(first.toString()).workspaceId);
     assertEquals(AgentRunState.QUEUED, row(second.toString()).runState);
+  }
+
+  // --- the idle nudge (qits-1460) -----------------------------------------------------------------
+
+  private static final Duration NUDGE_AFTER = Duration.ofMinutes(20);
+
+  private static final String NUDGE_OPENING = "You ended your turn with no open wait and no block on";
+
+  /** A dispatched admin agent, started on a live daemon with its instruction, quiet for {@code quiet}. */
+  private String quietAgent(String workId, Duration quiet) {
+    AgentService.Dispatch dispatched = dispatch(workId, true, "the phase");
+    String agentId = dispatched.agent().agentId();
+    liveness.markLive(dispatched.agent().workspaceRowId());
+    service.reconcile();
+    assertTrue(service.isStarted(UUID.fromString(agentId)));
+    assertNull(row(agentId).pendingText, "the instruction was handed over");
+    // dispatch() says REFINED, which is between phases; a quiet agent mid-phase is the subject.
+    service.markEntity(workId, new EntityFacts(null, "IMPLEMENTING", false), null);
+    endedItsTurn(agentId, quiet);
+    return agentId;
+  }
+
+  /** The agent's turn ended {@code ago}, and no frame came since. */
+  private void endedItsTurn(String agentId, Duration ago) {
+    Instant at = Instant.now().minus(ago);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agents.findById(UUID.fromString(agentId));
+              row.waitingSince = at;
+              row.lastActivityAt = at;
+            });
+  }
+
+  private long nudgeTurns(String agentId) {
+    return daemon.callsFor(agentId).stream()
+        .filter(c -> c.startsWith("turn ") && c.contains(NUDGE_OPENING))
+        .count();
+  }
+
+  private List<AgentNudged> nudgesOf(String agentId) {
+    return announced.of(AgentNudged.class, e -> e.agentId().equals(agentId));
+  }
+
+  private void assertNotNudged(String agentId) {
+    service.nudgeIdle(NUDGE_AFTER, 1);
+    assertEquals(0, row(agentId).nudgeCount);
+    assertNull(row(agentId).nudgedAt);
+    assertEquals(List.of(), nudgesOf(agentId));
+  }
+
+  @Test
+  void aQuietDispatchedAgentIsNudgedExactlyOnce() {
+    String agentId = quietAgent("w-nudge-once", NUDGE_AFTER.plusMinutes(1));
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.nudgeIdle(NUDGE_AFTER, 1);
+
+      AgentWorktree nudged = row(agentId);
+      assertEquals(AgentService.nudgeText("w-nudge-once"), nudged.pendingText);
+      assertTrue(nudged.pendingText.contains("w-nudge-once"));
+      assertEquals(1, nudged.nudgeCount);
+      assertNotNull(nudged.nudgedAt);
+      AgentNudged event = nudgesOf(agentId).get(0);
+      assertEquals("w-nudge-once", event.workId());
+      assertEquals(slot.toString(), event.workspaceId());
+      assertEquals(1, event.nudgeCount());
+
+      service.reconcile();
+      assertEquals(1, nudgeTurns(agentId), daemon.callsFor(agentId).toString());
+      assertNull(row(agentId).pendingText, "said");
+      assertEquals(1, row(agentId).nudgeCount, "its own delivery does not reset the count");
+
+      // A second sweep finds nothing: the delivery cleared waitingSince.
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      // It answers the nudge with nothing: a new Stop, and another quiet period.
+      service.onActivity(
+          slot, agentId, Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
+      endedItsTurn(agentId, NUDGE_AFTER.plusMinutes(5));
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      service.reconcile();
+
+      assertEquals(1, nudgeTurns(agentId), "no second nudge");
+      assertEquals(1, nudgesOf(agentId).size());
+      assertNull(row(agentId).pendingText);
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aDeliveryResetsTheCountSoALaterQuietPeriodIsNudgedAgain() {
+    String agentId = quietAgent("w-nudge-delivery", NUDGE_AFTER.plusMinutes(1));
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      service.reconcile();
+      assertEquals(1, nudgeTurns(agentId));
+
+      service.deliver("w-nudge-delivery", "next phase", false);
+      assertEquals(0, row(agentId).nudgeCount, "a delivery is a turn that is not a nudge");
+      service.reconcile();
+      endedItsTurn(agentId, NUDGE_AFTER.plusMinutes(1));
+
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      service.reconcile();
+      assertEquals(2, nudgeTurns(agentId), daemon.callsFor(agentId).toString());
+      assertEquals(1, row(agentId).nudgeCount);
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aWaitsWakeResetsTheCountSoALaterQuietPeriodIsNudgedAgain() {
+    String agentId = quietAgent("w-nudge-wake", NUDGE_AFTER.plusMinutes(1));
+    UUID id = UUID.fromString(agentId);
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      service.reconcile();
+      assertEquals(1, nudgeTurns(agentId));
+
+      waits.create(id, "ci run 7", EventSelection.of("BuildStatusChanged"), null);
+      assertEquals(0, row(agentId).nudgeCount, "declaring a wait starts the count again");
+      // Isolate the wake: as if the nudges ran out after the wait was declared.
+      QuarkusTransaction.requiringNew().run(() -> agents.findById(id).nudgeCount = 1);
+      endedItsTurn(agentId, NUDGE_AFTER.plusMinutes(1));
+      assertNotNudgedWithAnOpenWait(agentId);
+
+      assertEquals(1, waits.onEvent("ev-nudge", "BuildStatusChanged", Instant.now(), "{}"));
+      assertEquals(0, row(agentId).nudgeCount, "a wake is a turn that is not a nudge");
+      service.reconcile();
+      endedItsTurn(agentId, NUDGE_AFTER.plusMinutes(1));
+
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      service.reconcile();
+      assertEquals(2, nudgeTurns(agentId), daemon.callsFor(agentId).toString());
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  private void assertNotNudgedWithAnOpenWait(String agentId) {
+    int before = nudgesOf(agentId).size();
+    service.nudgeIdle(NUDGE_AFTER, 5);
+    assertEquals(before, nudgesOf(agentId).size(), "an open wait is never nudged");
+  }
+
+  @Test
+  void anAgentWithAnOpenWaitIsNotNudged() {
+    String agentId = quietAgent("w-nudge-wait", Duration.ZERO);
+    liveness.markDead(row(agentId).workspaceId);
+    waits.create(UUID.fromString(agentId), "ci run 8", EventSelection.of("BuildStatusChanged"), null);
+    endedItsTurn(agentId, NUDGE_AFTER.plusHours(1));
+    assertNotNudged(agentId);
+  }
+
+  @Test
+  void anExplicitBlockExemptsTheAgentAndTheDerivedWaitingBlockDoesNot() {
+    String explicit = quietAgent("w-nudge-explicit", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(explicit).workspaceId);
+    service.markBlocked("w-nudge-explicit", true, "EXPLICIT");
+    endedItsTurn(explicit, NUDGE_AFTER.plusMinutes(1));
+    assertNotNudged(explicit);
+
+    service.markBlocked("w-nudge-explicit", true, "BOTH");
+    assertNotNudged(explicit);
+
+    String derived = quietAgent("w-nudge-derived", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(derived).workspaceId);
+    service.markBlocked("w-nudge-derived", true, "AGENT_WAITING");
+    endedItsTurn(derived, NUDGE_AFTER.plusMinutes(1));
+    service.nudgeIdle(NUDGE_AFTER, 1);
+    assertEquals(1, row(derived).nudgeCount, "the stalled agent's own derived block is no reason");
+  }
+
+  @Test
+  void pendingTextIsNotNudged() {
+    String agentId = quietAgent("w-nudge-pending", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(agentId).workspaceId);
+    QuarkusTransaction.requiringNew()
+        .run(() -> agents.findById(UUID.fromString(agentId)).pendingText = "about to be said");
+    assertNotNudged(agentId);
+    assertEquals("about to be said", row(agentId).pendingText);
+  }
+
+  @Test
+  void anAgentWhoseTurnHasNotEndedOrEndedLatelyIsNotNudged() {
+    String working = quietAgent("w-nudge-working", NUDGE_AFTER.plusHours(1));
+    liveness.markDead(row(working).workspaceId);
+    QuarkusTransaction.requiringNew()
+        .run(() -> agents.findById(UUID.fromString(working)).waitingSince = null);
+    assertNotNudged(working);
+
+    String lately = quietAgent("w-nudge-lately", NUDGE_AFTER.minusMinutes(5));
+    liveness.markDead(row(lately).workspaceId);
+    assertNotNudged(lately);
+
+    // A frame since the turn ended restarts the quiet clock.
+    String framed = quietAgent("w-nudge-framed", NUDGE_AFTER.plusHours(1));
+    liveness.markDead(row(framed).workspaceId);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                agents.findById(UUID.fromString(framed)).lastActivityAt =
+                    Instant.now().minus(Duration.ofMinutes(1)));
+    assertNotNudged(framed);
+  }
+
+  @Test
+  void aClosedItemsAgentIsNotNudged() {
+    String agentId = quietAgent("w-nudge-closed", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(agentId).workspaceId);
+    service.markEntity("w-nudge-closed", new EntityFacts(null, "VERIFIED", false), null);
+    endedItsTurn(agentId, NUDGE_AFTER.plusMinutes(1));
+    assertNotNudged(agentId);
+  }
+
+  @Test
+  void anAgentBetweenPhasesIsNotNudgedAndOneMidPhaseIs() {
+    String between = quietAgent("w-nudge-refined", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(between).workspaceId);
+    service.markEntity("w-nudge-refined", new EntityFacts(null, "refined", false), null);
+    endedItsTurn(between, NUDGE_AFTER.plusMinutes(1));
+    assertNotNudged(between);
+
+    String working = quietAgent("w-nudge-implementing", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(working).workspaceId);
+    assertEquals("IMPLEMENTING", row(working).entityStatus);
+    service.nudgeIdle(NUDGE_AFTER, 1);
+    assertEquals(1, row(working).nudgeCount, "an agent mid-phase is nudged");
+  }
+
+  @Test
+  void anObsoleteAgentIsNotNudged() {
+    String agentId = quietAgent("w-nudge-obsolete", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(agentId).workspaceId);
+    releaseWrapperOf(agentId);
+    endedItsTurn(agentId, NUDGE_AFTER.plusMinutes(1));
+    assertNotNudged(agentId);
+  }
+
+  @Test
+  void aQueuedAgentIsNotNudged() {
+    AgentService.Dispatch queued = dispatch("w-nudge-queued", false, null);
+    String agentId = queued.agent().agentId();
+    assertEquals(AgentRunState.QUEUED, row(agentId).runState);
+    endedItsTurn(agentId, NUDGE_AFTER.plusHours(1));
+    assertNotNudged(agentId);
+  }
+
+  @Test
+  void aYieldedAgentIsNudgedAndResumedToHearIt() {
+    String agentId = quietAgent("w-nudge-yielded", NUDGE_AFTER.plusMinutes(1));
+    Long slot = row(agentId).workspaceId;
+    try {
+      setRunState(agentId, AgentRunState.YIELDED);
+
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      assertEquals(AgentService.nudgeText("w-nudge-yielded"), row(agentId).pendingText);
+      service.reconcile();
+
+      assertEquals(AgentRunState.RUNNING, row(agentId).runState, "resumed for the nudge");
+      assertEquals(1, nudgeTurns(agentId), daemon.callsFor(agentId).toString());
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aZeroQuietTimeSwitchesNudgingOff() {
+    String agentId = quietAgent("w-nudge-off", NUDGE_AFTER.plusHours(1));
+    liveness.markDead(row(agentId).workspaceId);
+    service.nudgeIdle(Duration.ZERO, 1);
+    service.nudgeIdle(Duration.ofMinutes(-1), 1);
+    service.nudgeIdle(NUDGE_AFTER, 0);
+    assertEquals(0, row(agentId).nudgeCount);
+    assertNull(row(agentId).pendingText);
   }
 }

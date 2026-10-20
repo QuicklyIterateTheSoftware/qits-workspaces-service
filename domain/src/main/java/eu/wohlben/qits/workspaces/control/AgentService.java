@@ -16,6 +16,7 @@ import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.events.AgentCleanupDeferred;
 import eu.wohlben.qits.workspaces.events.AgentHarnessExited;
+import eu.wohlben.qits.workspaces.events.AgentNudged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentPlaced;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
@@ -92,6 +93,10 @@ import org.jboss.logging.Logger;
  *   <li><b>Yield</b>: a RUNNING agent that has waited for input longer than {@code
  *       qits.workspace.agent.yield-after} gives up its slot when another agent wants it. Only the
  *       row changes: no daemon call, and its harness keeps running.
+ *   <li><b>Nudge</b> (qits-1460): a dispatched agent that ended its turn with no open wait and no
+ *       explicit block on its item, and has been quiet for {@code qits.workspace.agent.nudge-after},
+ *       is handed {@link #nudgeText} as its next turn — at most {@code
+ *       qits.workspace.agent.nudge-limit} times in a row ({@link #nudgeIdle}).
  *   <li><b>Drive</b>: a RUNNING agent whose daemon answers is started (again after a daemon restart:
  *       its credential lives only in daemon memory) and is told what it has still to hear. A placed
  *       YIELDED agent is started too when this process has not started it on its daemon's current
@@ -139,6 +144,14 @@ public class AgentService {
 
   /** The statuses that end an item (D4): the cleanup sweep removes a closed item's OBSOLETE agents. */
   private static final Set<String> CLOSING_STATUSES = Set.of("VERIFIED", "DONE", "DROPPED");
+
+  /**
+   * The statuses between two phases (qits-1460): the agent's phase is finished, and its next turn
+   * comes from the platform's own dispatch — a person approves REFINED to READY_FOR_DEV, the
+   * platform starts implement and verify. An idle agent there is not stalled and is never nudged:
+   * "carry on with the phase" would push it into work nobody started.
+   */
+  private static final Set<String> BETWEEN_PHASES = Set.of("REFINED", "READY_FOR_DEV", "IMPLEMENTED");
 
   /** A branch name git and the daemon both take: no leading dash, no spaces or control characters. */
   private static final Pattern BRANCH = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]{0,199}");
@@ -241,6 +254,17 @@ public class AgentService {
   @ConfigProperty(name = "qits.workspace.agent.yield-after", defaultValue = "PT30S")
   Duration yieldAfter;
 
+  /**
+   * How long a dispatched agent may sit quiet after ending its turn with nothing open before it is
+   * nudged (qits-1460, {@link #nudgeIdle}); zero or negative: never.
+   */
+  @ConfigProperty(name = "qits.workspace.agent.nudge-after", defaultValue = "PT20M")
+  Duration nudgeAfter;
+
+  /** At most this many nudges in a row, with no other turn between them (qits-1460). */
+  @ConfigProperty(name = "qits.workspace.agent.nudge-limit", defaultValue = "1")
+  int nudgeLimit;
+
   /** A push the daemon reported, kept until its repository name maps to an id. */
   private record PendingPush(UUID agentId, String repositoryName, String branch, String sha, Instant pushedAt) {}
 
@@ -276,6 +300,20 @@ public class AgentService {
   /** Whether a delivery's {@code compactFirst} is honoured; off until somebody reads a transcript. */
   @ConfigProperty(name = "qits.workspace.agent-dispatch.compact-before-turn", defaultValue = "false")
   boolean compactBeforeTurn;
+
+  /**
+   * The {@code qits-agent-config} repository a start's {@link AgentDaemon.AgentConfig} names
+   * (qits-1382), so the daemon checks out the agent's own branch of it before launching the
+   * harness. Blank reads as absent (MicroProfile config's own rule for an empty value), which is
+   * why these are {@code Optional<String>} rather than {@code String}: a deployment that renders
+   * {@code KEY=} must turn the feature off, not hand the daemon an empty id.
+   */
+  @ConfigProperty(name = "qits.workspace.agent-config.repository-id")
+  Optional<String> agentConfigRepositoryId;
+
+  /** The other half of the pair above; see it for why both are {@code Optional<String>}. */
+  @ConfigProperty(name = "qits.workspace.agent-config.repository-path")
+  Optional<String> agentConfigRepositoryPath;
 
   /** A workspace with no agent ever assigned is removed after this long (a crash between create and assign). */
   private static final Duration ORPHAN_SLOT_GRACE = Duration.ofMinutes(2);
@@ -511,6 +549,7 @@ public class AgentService {
                     return AgentLaunch.SKIPPED_RUNNING;
                   } else if (instruction != null && agent.pendingText == null) {
                     agent.pendingText = instruction;
+                    agent.nudgeCount = 0;
                   }
                   return agent.runState == AgentRunState.QUEUED
                       ? AgentLaunch.QUEUED
@@ -594,6 +633,8 @@ public class AgentService {
   private void appendTurn(AgentWorktree row, String said, boolean compactFirst) {
     row.pendingText = row.pendingText == null ? said : row.pendingText + "\n\n" + said;
     row.pendingCompact = row.pendingCompact || (compactFirst && compactBeforeTurn);
+    // A turn that is not a nudge: a later quiet period earns a fresh nudge (qits-1460).
+    row.nudgeCount = 0;
   }
 
   /**
@@ -1086,6 +1127,7 @@ public class AgentService {
       resumeYielded();
       placeQueued();
       yieldBlocked();
+      nudgeIdle();
       driveRunning();
       obsoleteDropped();
       cleanUp();
@@ -1341,6 +1383,150 @@ public class AgentService {
         placeQueued();
       }
     }
+  }
+
+  /** The nudge (qits-1460): short, and naming the three ways out of a turn. */
+  static String nudgeText(String workId) {
+    return "You ended your turn with no open wait and no block on "
+        + workId
+        + ". Carry on with the phase; or, if you are waiting on something, declare it with"
+        + " `qits wait …` and end your turn; or, if you cannot go on, call `work_block` with what"
+        + " is in the way.";
+  }
+
+  /**
+   * Step 3b, after the yield and before the drive (qits-1460): nudge a dispatched agent that ended
+   * its turn with nothing open. Nothing else wakes such an agent: a wait match or timeout, a
+   * dispatch phase and a delivery are the only turns it gets, so one that stops without declaring a
+   * wait or a block sat idle until a person noticed.
+   *
+   * <p>An agent is nudged when every one of {@link #nudgeable} holds and it has no OPEN wait. An
+   * item between phases (REFINED, READY_FOR_DEV, IMPLEMENTED) is not nudged: its agent's phase is
+   * done, and the next turn is the platform's dispatch of the next phase, not a nudge. The
+   * quiet clock is {@code max(waitingSince, lastActivityAt)}: {@code waitingSince} is the only
+   * signal that its turn ended (hooks fire only at turn boundaries, so a long turn sends no frame
+   * and {@code lastActivityAt} alone would nudge busy agents), and any later frame restarts it. The
+   * nudge is the wake path: it is written to {@code pending_text} on the locked row, re-checked
+   * there, with {@code nudged_at} and {@code nudge_count} stamped, announced as {@link AgentNudged},
+   * and said by {@link #drive} — a YIELDED agent is resumed for it first.
+   *
+   * <p>Not again: every frame moves {@code lastActivityAt}, the nudge's own delivery included, so a
+   * counter is the guard. At most {@link #nudgeLimit} nudges go out in a row; {@code nudge_count}
+   * goes back to 0 only where another turn is written (dispatch instruction, delivery, a wait's
+   * wake) or a wait is declared — never in {@link #drive}, so the nudge's own delivery does not
+   * count. An agent that answers a nudge with nothing stays idle, its item showing it waits for
+   * a person.
+   */
+  void nudgeIdle() {
+    nudgeIdle(nudgeAfter, nudgeLimit);
+  }
+
+  /** {@link #nudgeIdle()} with the quiet time and the limit given, for a test to stand anywhere. */
+  void nudgeIdle(Duration after, int limit) {
+    if (after == null || after.isZero() || after.isNegative() || limit <= 0) {
+      return;
+    }
+    synchronized (passLock) {
+      Instant now = Instant.now();
+      List<UUID> candidates =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () -> {
+                    List<AgentWorktree> quiet =
+                        agents.findPlacedLive().stream()
+                            .filter(a -> nudgeable(a, now, after, limit))
+                            .toList();
+                    if (quiet.isEmpty()) {
+                      return List.<UUID>of();
+                    }
+                    Set<UUID> onAWait = new java.util.HashSet<>();
+                    waitRows
+                        .findOpenByAgents(quiet.stream().map(a -> a.id).toList())
+                        .forEach(w -> onAWait.add(w.agentId));
+                    return quiet.stream().map(a -> a.id).filter(id -> !onAWait.contains(id)).toList();
+                  });
+      boolean nudged = false;
+      for (UUID id : candidates) {
+        AgentNudged event =
+            QuarkusTransaction.requiringNew()
+                .call(
+                    () -> {
+                      AgentWorktree row =
+                          agents
+                              .findByIdOptional(id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                              .orElse(null);
+                      if (row == null
+                          || !nudgeable(row, now, after, limit)
+                          || !waitRows.findOpenByAgents(List.of(id)).isEmpty()) {
+                        return null;
+                      }
+                      row.pendingText = nudgeText(row.workId);
+                      row.nudgedAt = now;
+                      row.nudgeCount = row.nudgeCount + 1;
+                      return new AgentNudged(
+                          row.id.toString(),
+                          row.workId,
+                          idOf(row.workspaceId),
+                          row.repositoryId,
+                          row.nudgeCount,
+                          now);
+                    });
+        if (event == null) {
+          continue;
+        }
+        LOG.infof(
+            "Agent %s of work item %s ended its turn with nothing open and was quiet for %s:"
+                + " nudged (%d of %d)",
+            id, event.workId(), after, event.nudgeCount(), limit);
+        announce(event);
+        nudged = true;
+      }
+      if (nudged) {
+        kick();
+      }
+    }
+  }
+
+  /**
+   * Every condition of a nudge but the open waits, read off the row (qits-1460): ACTIVE, placed
+   * (RUNNING or YIELDED) with no start refused, dispatched on a work item that is neither closed nor
+   * between phases ({@link #BETWEEN_PHASES}), with
+   * nothing pending, not explicitly blocked, waiting for input, quiet for {@code after}, and under
+   * {@code limit}.
+   */
+  private static boolean nudgeable(AgentWorktree agent, Instant now, Duration after, int limit) {
+    if (agent.state != AgentState.ACTIVE
+        || (agent.runState != AgentRunState.RUNNING && agent.runState != AgentRunState.YIELDED)
+        || agent.startRefusal != null
+        || agent.workId == null
+        || isClosed(agent.entityStatus)
+        || isBetweenPhases(agent.entityStatus)
+        || agent.pendingText != null
+        || explicitlyBlocked(agent)
+        || agent.waitingSince == null
+        || agent.nudgeCount >= limit) {
+      return false;
+    }
+    Instant quietSince =
+        agent.lastActivityAt != null && agent.lastActivityAt.isAfter(agent.waitingSince)
+            ? agent.lastActivityAt
+            : agent.waitingSince;
+    return !quietSince.plus(after).isAfter(now);
+  }
+
+  /**
+   * Whether the agent's item carries a block somebody set (qits-1460): {@code EXPLICIT} or {@code
+   * BOTH}. The derived {@code AGENT_WAITING} block alone is the "waiting for you" of a stalled agent
+   * — exactly what a nudge is for — so it does not count. A block with no source (a dispatch's facts
+   * name none) is read as explicit: not nudging is the safe side.
+   */
+  private static boolean explicitlyBlocked(AgentWorktree agent) {
+    if (!Boolean.TRUE.equals(agent.entityBlocked)) {
+      return false;
+    }
+    return agent.blockSource == null
+        || "EXPLICIT".equals(agent.blockSource)
+        || "BOTH".equals(agent.blockSource);
   }
 
   /**
@@ -1629,7 +1815,8 @@ public class AgentService {
                 instruction,
                 new EntityFacts(
                     fresh.entityTitle, fresh.entityStatus, Boolean.TRUE.equals(fresh.entityBlocked)),
-                fresh.blockSource));
+                fresh.blockSource,
+                agentConfig()));
     if (answer.outcome() != AgentDaemon.Outcome.OK) {
       if (answer.outcome() == AgentDaemon.Outcome.REFUSED) {
         recordRefusal(workspace.id, agent, answer.detail());
@@ -1675,6 +1862,19 @@ public class AgentService {
             answer.resumed(),
             Instant.now()));
     changePublisher.fire(agent.repositoryId, workspace.id, WorkspaceChangeHint.Topic.AGENTS);
+  }
+
+  /**
+   * The {@code qits-agent-config} checkout a start asks the daemon to make (qits-1382): null unless
+   * BOTH properties are set, so a half-configured pair is the same as the feature being off rather
+   * than a daemon call with one blank field.
+   */
+  private AgentDaemon.AgentConfig agentConfig() {
+    String repositoryId = agentConfigRepositoryId.filter(v -> !v.isBlank()).orElse(null);
+    String repositoryPath = agentConfigRepositoryPath.filter(v -> !v.isBlank()).orElse(null);
+    return repositoryId == null || repositoryPath == null
+        ? null
+        : new AgentDaemon.AgentConfig(repositoryId, repositoryPath);
   }
 
   /**
@@ -1795,6 +1995,10 @@ public class AgentService {
               }
             });
     return out;
+  }
+
+  private static boolean isBetweenPhases(String status) {
+    return status != null && BETWEEN_PHASES.contains(status.toUpperCase(Locale.ROOT));
   }
 
   private static boolean isClosed(String status) {
@@ -2135,8 +2339,9 @@ public class AgentService {
     announce(removal.event());
     deleteToken(removal.tokenId());
     if (removal.relayNotWaiting()) {
-      waits.relayActivity(
-          removal.event().workId(), id, false, CAUSE_REMOVED, removal.sessionId(), Instant.now());
+      // No label: its OPEN waits are cancelled by the next sweep, and must not outlive it on the
+      // item (qits-1460).
+      waits.relayEnded(removal.event().workId(), CAUSE_REMOVED, removal.sessionId(), Instant.now());
     }
   }
 

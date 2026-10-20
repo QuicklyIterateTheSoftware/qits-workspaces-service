@@ -36,6 +36,13 @@ import java.util.Map;
  * work and a busy harness refusing a removal ({@code REFUSED}, {@code BUSY}), and a forced removal.
  * Every state carries {@code workspaceRowId} (the daemon serves under {@code
  * /workspaces/container/<row id>/}) and {@code agentId}.
+ *
+ * <p><b>{@code agentConfig} (qits-1382).</b> The accepted start (state {@link #SIGNED_IN}) is
+ * extended rather than given a sibling interaction: the golden masters record only one 200 for
+ * {@code startAgentWorktree} ({@link #SIGNED_IN}), so a second interaction naming the same state
+ * and operation would collide on ({@code description}, state) — see {@code ContractTable}'s
+ * constructor. The refused start ({@link #SIGNED_OUT}) keeps the plain body, so the committed file
+ * still shows a start with no {@code agentConfig}.
  */
 public final class WorkspaceDaemonContract {
 
@@ -54,17 +61,25 @@ public final class WorkspaceDaemonContract {
   private static final String ENTITY_ID = "contract-00000001-10";
   private static final String WRAPPER_BRANCH = "ticket/contract-00000001-10";
 
+  // qits-1382: the qits-agent-config repository a start may name, switched by configuration.
+  private static final String AGENT_CONFIG_REPOSITORY_ID = "00000000-0000-4000-8000-0000000000c1";
+  private static final String AGENT_CONFIG_REPOSITORY_PATH = "qits/qits-agent-config";
+
   public static final ContractTable TABLE =
       new ContractTable(
           GoldenMasters.WORKSPACE_DAEMON,
           List.of(
+              // The ACCEPTED start is the one interaction extended to carry agentConfig (qits-1382):
+              // the refusal below keeps the plain shape, so the pact still shows a start without it.
               row(
                   SIGNED_IN,
                   "startAgentWorktree",
-                  startBody(),
+                  startBodyWithAgentConfig(),
                   List.of("$.commandId", "$.sessionId", "$.resumed", "$.launched"),
                   (client, row, agentId) ->
-                      assertEquals(AgentDaemon.Outcome.OK, client.start(row, start(agentId)).outcome())),
+                      assertEquals(
+                          AgentDaemon.Outcome.OK,
+                          client.start(row, startWithAgentConfig(agentId)).outcome())),
               row(
                   AGENT_RUNNING,
                   "deliverAgentTurn",
@@ -218,7 +233,33 @@ public final class WorkspaceDaemonContract {
 
   private static AgentDaemon.Start start(String agentId) {
     return new AgentDaemon.Start(
-        agentId, WORK_ID, ENTITY_ID, WRAPPER_BRANCH, "CLAUDE", null, Map.of(), "Work the ticket.", null, null);
+        agentId,
+        WORK_ID,
+        ENTITY_ID,
+        WRAPPER_BRANCH,
+        "CLAUDE",
+        null,
+        Map.of(),
+        "Work the ticket.",
+        null,
+        null,
+        null);
+  }
+
+  /** The same start, with the agent-config checkout a configured daemon acts on (qits-1382). */
+  private static AgentDaemon.Start startWithAgentConfig(String agentId) {
+    return new AgentDaemon.Start(
+        agentId,
+        WORK_ID,
+        ENTITY_ID,
+        WRAPPER_BRANCH,
+        "CLAUDE",
+        null,
+        Map.of(),
+        "Work the ticket.",
+        null,
+        null,
+        new AgentDaemon.AgentConfig(AGENT_CONFIG_REPOSITORY_ID, AGENT_CONFIG_REPOSITORY_PATH));
   }
 
   private static EntityFacts facts() {
@@ -238,6 +279,16 @@ public final class WorkspaceDaemonContract {
             .stringValue("mode", DaemonAgentClient.MODE)
             .stringType("instruction", "Work the ticket.");
     body.object("env").closeObject();
+    return body;
+  }
+
+  /** {@link #startBody()}, plus the agent-config checkout (qits-1382). */
+  private static DslPart startBodyWithAgentConfig() {
+    PactDslJsonBody body = (PactDslJsonBody) startBody();
+    body.object("agentConfig")
+        .stringType("repositoryId", AGENT_CONFIG_REPOSITORY_ID)
+        .stringType("repositoryPath", AGENT_CONFIG_REPOSITORY_PATH)
+        .closeObject();
     return body;
   }
 

@@ -50,7 +50,9 @@ import org.jboss.logging.Logger;
  *       CANCELLED with no wake (W6).
  *   <li><b>Waiting on</b> (W5): while an agent has an OPEN wait, its waiting relay to qits-projects
  *       says {@code cause: "Wait"} and names the wait's label in {@code waitingOn}, so the item is
- *       read as waiting on that, not blocked.
+ *       read as waiting on that, not blocked. Since qits-1460 every relay names the OPEN waits,
+ *       busy or idle, and a declare or cancel always relays: the label is no longer lost while the
+ *       agent works.
  *   <li><b>The hint</b> (qits-1229): a wait opening or closing changes what {@code AgentDto} says
  *       ({@code waitingOn}, {@code waitingOnSince}), so it fires {@code AGENTS} on the agent's
  *       workspace channel once the change has committed. An agent with no workspace (QUEUED) is in
@@ -174,12 +176,14 @@ public class AgentWaits {
                   wait.createdAt = Instant.now();
                   wait.expiresAt = timeout == null ? null : wait.createdAt.plus(timeout);
                   waits.persist(wait);
+                  // It said what it waits on: a later quiet period earns a fresh nudge (qits-1460).
+                  row.nudgeCount = 0;
                   return row;
                 });
     addName(selection.event());
     LOG.infof("Agent %s waits on %s (%s)", agentId, finalLabel, id);
     hint(List.of(Placed.of(agent)));
-    relayIfWaiting(agent, CAUSE_WAIT);
+    relayWaits(agent, CAUSE_WAIT);
     return get(agentId, id);
   }
 
@@ -230,7 +234,7 @@ public class AgentWaits {
       if (agent != null) {
         hint(List.of(Placed.of(agent)));
       }
-      relayIfWaiting(agent, CAUSE_CANCELLED);
+      relayWaits(agent, CAUSE_CANCELLED);
     }
     return get(agentId, waitId);
   }
@@ -285,7 +289,7 @@ public class AgentWaits {
                     String turn = matchedTurn(wait.label, selection, eventId, occurredAt, tree);
                     AgentWorktree agent = wake(wait.agentId, turn);
                     if (agent != null) {
-                      out.add(new Woken(agent.workId, agent.sessionId));
+                      out.add(new Woken(agent.id, agent.workId, agent.sessionId));
                     }
                     LOG.infof(
                         "Agent %s's wait %s matched %s %s", wait.agentId, wait.label, name, eventId);
@@ -297,8 +301,10 @@ public class AgentWaits {
       return 0;
     }
     refreshNames();
+    // After the commit, so the label read is what stays open once the matched waits closed
+    // (qits-1460): an agent with a second wait still shows it.
     for (Woken w : woken) {
-      relay(w.workId(), false, CAUSE_MATCHED, null, w.sessionId(), Instant.now());
+      relay(w.workId(), false, CAUSE_MATCHED, waitingOn(w.agentId()), w.sessionId(), Instant.now());
     }
     agentService.kick();
     return woken.size();
@@ -338,7 +344,7 @@ public class AgentWaits {
                                 + " event matched it. It is closed; declare a new one if you still"
                                 + " need to wait.");
                     if (agent != null) {
-                      out.add(new Woken(agent.workId, agent.sessionId));
+                      out.add(new Woken(agent.id, agent.workId, agent.sessionId));
                     }
                     LOG.infof("Agent %s's wait %s timed out", wait.agentId, wait.label);
                   }
@@ -347,7 +353,7 @@ public class AgentWaits {
     hint(closedFor);
     refreshNames();
     for (Woken w : woken) {
-      relay(w.workId(), false, CAUSE_TIMED_OUT, null, w.sessionId(), now);
+      relay(w.workId(), false, CAUSE_TIMED_OUT, waitingOn(w.agentId()), w.sessionId(), now);
     }
     if (!woken.isEmpty()) {
       agentService.kick();
@@ -389,21 +395,42 @@ public class AgentWaits {
   }
 
   /**
-   * Relay an agent's waiting state to qits-projects (qits-895). A waiting agent with an OPEN wait is
-   * reported as {@code cause: "Wait"} with {@code waitingOn}, whatever the hook said (W5).
+   * Relay an agent's waiting state to qits-projects (qits-895). Every relay names the agent's OPEN
+   * waits in {@code waitingOn}, whether or not it waits for input (qits-1460): a wait is normally
+   * declared mid-turn, and an item should show what its agent waits on while the agent works. A
+   * waiting agent with an OPEN wait is reported as {@code cause: "Wait"}, whatever the hook said
+   * (W5); a busy one keeps the hook's cause.
    */
   void relayActivity(String workId, UUID agentId, boolean waiting, String hookEvent, String sessionId, Instant at) {
-    String on = waiting ? waitingOn(agentId) : null;
-    relay(workId, waiting, on != null ? CAUSE_WAIT : hookEvent, on, sessionId, at);
+    String on = waitingOn(agentId);
+    relay(workId, waiting, waiting && on != null ? CAUSE_WAIT : hookEvent, on, sessionId, at);
   }
 
-  /** A wait opened or closed while the agent waits for input: say what it waits on now. */
-  private void relayIfWaiting(AgentWorktree agent, String cause) {
-    if (agent == null || agent.waitingSince == null) {
+  /**
+   * A relay that names no wait whatever is still OPEN: the agent is gone (qits-1274), and its waits
+   * are cancelled by the next sweep, which relays nothing.
+   */
+  void relayEnded(String workId, String cause, String sessionId, Instant at) {
+    relay(workId, false, cause, null, sessionId, at);
+  }
+
+  /**
+   * A wait opened or closed: say what the agent waits on now, busy or not (qits-1460). {@code
+   * waiting} is whether it waits for input; the cause is {@code "Wait"} while a wait is open,
+   * otherwise {@code cause}.
+   */
+  private void relayWaits(AgentWorktree agent, String cause) {
+    if (agent == null) {
       return;
     }
     String on = waitingOn(agent.id);
-    relay(agent.workId, true, on != null ? CAUSE_WAIT : cause, on, agent.sessionId, Instant.now());
+    relay(
+        agent.workId,
+        agent.waitingSince != null,
+        on != null ? CAUSE_WAIT : cause,
+        on,
+        agent.sessionId,
+        Instant.now());
   }
 
   private void relay(String workId, boolean waiting, String cause, String waitingOn, String sessionId, Instant at) {
@@ -419,7 +446,7 @@ public class AgentWaits {
 
   // --- helpers ------------------------------------------------------------------------------------
 
-  private record Woken(String workId, String sessionId) {}
+  private record Woken(UUID agentId, String workId, String sessionId) {}
 
   /** Where an agent is listed: its wrapper and its workspace (null while it has none). */
   private record Placed(String repositoryId, Long workspaceId) {
@@ -456,6 +483,8 @@ public class AgentWaits {
     agent.pendingText = agent.pendingText == null ? turn : agent.pendingText + "\n\n" + turn;
     // It is about to work, not waiting: the next Stop is a fresh flip.
     agent.waitingSince = null;
+    // A turn that is not a nudge: a later quiet period earns a fresh nudge (qits-1460).
+    agent.nudgeCount = 0;
     return agent;
   }
 

@@ -66,7 +66,7 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1018.215740</qits.workspace-daemon-protocol.version>
+        <qits.workspace-daemon-protocol.version>2026.1020.81108</qits.workspace-daemon-protocol.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -79,18 +79,18 @@
              the qits/qits-workspaces-runner image every runner is told to upgrade to, so the frames
              this service speaks and the binary it hands out are one release. Moved by
              qits-maintenance on maintenance/dependencies, gated here; never by hand. -->
-        <qits.workspaces-runner-protocol.version>2026.1019.75736</qits.workspaces-runner-protocol.version>
+        <qits.workspaces-runner-protocol.version>2026.1019.193809</qits.workspaces-runner-protocol.version>
         <!-- qits-runner-javalib (qits-771): the lifecycle frames and their codec
              (qits-runner-protocol), and the install script template plus RunnerIdentity
              (qits-runner-toolkit). One release carries both, so one property pins both. -->
-        <qits.runner.version>2026.1019.73256</qits.runner.version>
-        <qits.coding-agents.version>2026.1018.71830</qits.coding-agents.version>
-        <qits.eventstream.version>2026.1018.170159</qits.eventstream.version>
+        <qits.runner.version>2026.1020.83028</qits.runner.version>
+        <qits.coding-agents.version>2026.1019.194627</qits.coding-agents.version>
+        <qits.eventstream.version>2026.1019.123026</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
         <qits.arch-rules.version>2026.1011.185745</qits.arch-rules.version>
         <qits.auth-core.version>2026.1012.173247</qits.auth-core.version>
-        <qits.containers-client.version>2026.1018.185227</qits.containers-client.version>
+        <qits.containers-client.version>2026.1019.132444</qits.containers-client.version>
         <!-- CallerServerFilter/CallerClientFilter: jandex-indexed filters that record inbound
              X-Qits-Caller as the qits.caller span attribute and stamp it on outgoing REST-client
              calls. Also published by qits-integrations-quarkus. -->
@@ -114,14 +114,14 @@
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1018.195756</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1019.190811</qits.projects-golden-masters.version>
         <!-- The other providers' golden masters (qits-1149), the same rule: qits-idp's for the
              commission doors, the peer token mint and the tenant's discovery and keys
              (wiring/IdpContract); qits-containers' for the place and volume doors
              (containershost/ContainersContract); qits-workspace-daemon's for the agent-worktree
              doors DaemonAgentClient calls (daemonhost/WorkspaceDaemonContract). -->
-        <qits.idp-golden-masters.version>2026.1018.175524</qits.idp-golden-masters.version>
-        <qits.containers-golden-masters.version>2026.1018.185227</qits.containers-golden-masters.version>
+        <qits.idp-golden-masters.version>2026.1019.100619</qits.idp-golden-masters.version>
+        <qits.containers-golden-masters.version>2026.1019.103940</qits.containers-golden-masters.version>
         <qits.workspace-daemon-golden-masters.version>2026.1018.152111</qits.workspace-daemon-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
@@ -133,9 +133,9 @@
              ConsumerPactVerificationTest loads every such resource off the test classpath. Test
              scope at the declaration site; a pin in <properties> like every other qits jar, so
              qits-maintenance bumps it when the consumer releases a changed pact. -->
-        <qits.landing-app-pacts-qits-workspaces-service.version>2026.1016.105752</qits.landing-app-pacts-qits-workspaces-service.version>
+        <qits.landing-app-pacts-qits-workspaces-service.version>2026.1019.192834</qits.landing-app-pacts-qits-workspaces-service.version>
         <!-- qits-projects' consumer pact against this service (qits-1152). -->
-        <qits.projects-service-pacts-qits-workspaces-service.version>2026.1018.195756</qits.projects-service-pacts-qits-workspaces-service.version>
+        <qits.projects-service-pacts-qits-workspaces-service.version>2026.1019.190811</qits.projects-service-pacts-qits-workspaces-service.version>
         <!-- qits-artifacts', qits-bootstrap's, qits-orchestrator's and the qits CLI's consumer
              pacts against this service (qits-1149). -->
         <qits.artifacts-service-pacts-qits-workspaces-service.version>2026.1018.153037</qits.artifacts-service-pacts-qits-workspaces-service.version>

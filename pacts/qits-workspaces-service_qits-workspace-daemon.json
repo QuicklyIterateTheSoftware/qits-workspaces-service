@@ -1063,6 +1063,10 @@
       "request": {
         "body": {
           "content": {
+            "agentConfig": {
+              "repositoryId": "00000000-0000-4000-8000-0000000000c1",
+              "repositoryPath": "qits/qits-agent-config"
+            },
             "agentId": "00000000-0000-4000-8000-0000000000a1",
             "entityId": "contract-00000001-10",
             "env": {},
@@ -1090,6 +1094,22 @@
         },
         "matchingRules": {
           "body": {
+            "$.agentConfig.repositoryId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.agentConfig.repositoryPath": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
             "$.agentId": {
               "combine": "AND",
               "matchers": [

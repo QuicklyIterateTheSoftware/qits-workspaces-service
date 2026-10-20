@@ -25,7 +25,16 @@ public interface AgentDaemon {
       Map<String, String> env,
       String instruction,
       EntityFacts facts,
-      String blockSource) {}
+      String blockSource,
+      AgentConfig agentConfig) {}
+
+  /**
+   * The {@code qits-agent-config} repository to check the agent's own branch of out, so the daemon
+   * can launch Claude with it (qits-1382). Null: the feature is off, and the daemon starts the
+   * harness as before. {@code repositoryId} is this platform's id for that repository;
+   * {@code repositoryPath} is {@code <projectId>/<repoName>}, what the daemon clones it under.
+   */
+  record AgentConfig(String repositoryId, String repositoryPath) {}
 
   /** How a call went. */
   enum Outcome {
