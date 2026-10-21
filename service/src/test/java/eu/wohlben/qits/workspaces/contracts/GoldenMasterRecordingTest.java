@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenFiles;
+import eu.wohlben.qits.workspacesrunner.protocol.WorkspacesRunnerProtocol;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
 import jakarta.inject.Inject;
@@ -37,6 +38,12 @@ import org.junit.jupiter.api.Test;
  * golden-masters/<state-slug>/<operationId>.json} per (state, operation), and {@code index.json}
  * describing them. One addition: {@code frozen.numbers} lists the paths of frozen row ids. An answer
  * with no body (a 204, a bare 202) records {@code file: null} and no file, as qits-githost's does.
+ *
+ * <p><b>The frames it sends a workspace runner are recorded beside the calls</b> (qits-950): one
+ * operation {@code frame:<type>} per ({@link RunnerFrames#FRAMES state, frame}), whose file is the
+ * frame's JSON as it went on the wire, frozen like an answer ({@link Freezer#frames}). Such an
+ * operation has no method, query or status; it says {@code kind: frame}, the wire type as {@code
+ * frame}, the socket's {@code path} and the {@code trigger} that sent it.
  *
  * <p>It compares by default and fails with a diff per differing file, including a committed file
  * no interaction records any more. {@code -Dgolden.update=true} (or {@code QITS_GOLDEN_UPDATE=true})
@@ -691,6 +698,8 @@ class GoldenMasterRecordingTest {
 
   @Inject ProviderStates states;
 
+  @Inject RunnerFrames frames;
+
   /** The state's name as a directory: lower case, runs of anything else as one dash. */
   static String slug(String state) {
     return state.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "-")
@@ -719,17 +728,7 @@ class GoldenMasterRecordingTest {
       String slug = slug(interaction.state());
       String file = slug + "/" + interaction.operationId() + ".json";
 
-      ObjectNode state = indexStates.get(slug);
-      if (state == null) {
-        state = JsonNodeFactory.instance.objectNode();
-        state.put("name", interaction.state());
-        state.put("slug", slug);
-        state.set("params", recorded.params());
-        state.set("dependsOn", JsonNodeFactory.instance.arrayNode());
-        indexStates.put(slug, state);
-      } else if (!state.get("params").equals(recorded.params())) {
-        failures.add("State '" + interaction.state() + "' froze to different params per operation");
-      }
+      indexState(indexStates, interaction.state(), recorded.params(), failures);
 
       ObjectNode operation = JsonNodeFactory.instance.objectNode();
       operation.put("operationId", interaction.operationId());
@@ -784,6 +783,36 @@ class GoldenMasterRecordingTest {
       }
     }
 
+    for (RunnerFrames.Frame frame : RunnerFrames.FRAMES) {
+      Recorded recorded = record(frame);
+      String slug = slug(frame.state());
+      String file = slug + "/" + frame.fileName();
+      indexState(indexStates, frame.state(), recorded.params(), failures);
+
+      ObjectNode operation = JsonNodeFactory.instance.objectNode();
+      operation.put("operationId", frame.operationId());
+      operation.put("kind", "frame");
+      operation.put("frame", frame.type());
+      operation.put("path", WorkspacesRunnerProtocol.SOCKET_PATH);
+      ObjectNode trigger = operation.putObject("trigger");
+      frame.cause().trigger().reference().forEach(trigger::put);
+      operation.put("file", file);
+      ObjectNode frozen = operation.putObject("frozen");
+      frozen.set("ids", strings(recorded.freezer().idPaths()));
+      frozen.set("instants", strings(recorded.freezer().instantPaths()));
+      frozen.set("strings", strings(recorded.freezer().stringPaths()));
+      frozen.set("numbers", strings(recorded.freezer().numberPaths()));
+      frozen.putNull("listFilteredTo");
+      if (indexOperations
+              .computeIfAbsent(slug, k -> new TreeMap<>())
+              .put(frame.operationId(), operation)
+          != null) {
+        failures.add("Duplicate frame " + file);
+      }
+      written.add(file);
+      check(dir.resolve(file), GoldenJson.render(recorded.body()), update, failures);
+    }
+
     ObjectNode index = JsonNodeFactory.instance.objectNode();
     index.put("formatVersion", FORMAT_VERSION);
     index.put("provider", PROVIDER);
@@ -813,6 +842,23 @@ class GoldenMasterRecordingTest {
 
     if (!failures.isEmpty()) {
       throw new AssertionError(String.join("\n\n", failures));
+    }
+  }
+
+  /** The index's entry for {@code name}, made at its first operation and checked at the rest. */
+  private static void indexState(
+      Map<String, ObjectNode> indexStates, String name, ObjectNode params, List<String> failures) {
+    String slug = slug(name);
+    ObjectNode state = indexStates.get(slug);
+    if (state == null) {
+      state = JsonNodeFactory.instance.objectNode();
+      state.put("name", name);
+      state.put("slug", slug);
+      state.set("params", params);
+      state.set("dependsOn", JsonNodeFactory.instance.arrayNode());
+      indexStates.put(slug, state);
+    } else if (!state.get("params").equals(params)) {
+      failures.add("State '" + name + "' froze to different params per operation");
     }
   }
 
@@ -889,13 +935,53 @@ class GoldenMasterRecordingTest {
     return new Recorded(body == null ? null : freezer.freeze(body), frozenParams, freezer);
   }
 
+  /**
+   * The frame {@code frame} names, sent in its state by the real code path ({@link
+   * RunnerFrames#send}) and frozen as an answer is, with the runner's own row id fields.
+   */
+  private Recorded record(RunnerFrames.Frame frame) throws IOException {
+    ProviderStates.Setup setup = states.setUp(frame.state());
+    String text;
+    try {
+      text = frames.send(frame, setup.params());
+    } finally {
+      states.cleanUp();
+    }
+    JsonNode body = JSON.readTree(text);
+    Freezer freezer = new Freezer().rowIds(setup.rowIds()).frames();
+    for (Map.Entry<String, String> fixed : frame.fixedStrings().entrySet()) {
+      fix(body, fixed.getKey().substring(1), fixed.getValue());
+      freezer.markString(fixed.getKey());
+    }
+    for (String path : frame.rowIdsIn()) {
+      edit(body, path.substring(1), freezer::freezeRowIdSegments);
+      freezer.markString(path);
+    }
+    ObjectNode frozenParams = JsonNodeFactory.instance.objectNode();
+    setup
+        .params()
+        .forEach(
+            (k, v) ->
+                frozenParams.put(
+                    k,
+                    ROW_ID_PARAMS.contains(k)
+                        ? freezer.freezeRowIdParam(v)
+                        : freezer.freezeParam(v)));
+    return new Recorded(freezer.freeze(body), frozenParams, freezer);
+  }
+
   /** Sets every string at {@code rest} (a {@code .a[*].b} path below {@code node}) to {@code value}. */
   private static void fix(JsonNode node, String rest, String value) {
+    edit(node, rest, ignored -> value);
+  }
+
+  /** Rewrites every string at {@code rest} (a {@code .a[*].b} path below {@code node}). */
+  private static void edit(JsonNode node, String rest, UnaryOperator<String> value) {
     if (rest.isEmpty() || node == null) {
       return;
     }
     if (rest.startsWith("[*]")) {
-      node.forEach(element -> fix(element, rest.substring(3), value));
+      node.forEach(element -> edit(element, rest.substring(3), value));
       return;
     }
     String tail = rest.substring(1);
@@ -913,10 +999,10 @@ class GoldenMasterRecordingTest {
     }
     if (after.isEmpty()) {
       if (object.get(field).isTextual()) {
-        object.put(field, value);
+        object.put(field, value.apply(object.get(field).asText()));
       }
     } else {
-      fix(object.get(field), after, value);
+      edit(object.get(field), after, value);
     }
   }
 

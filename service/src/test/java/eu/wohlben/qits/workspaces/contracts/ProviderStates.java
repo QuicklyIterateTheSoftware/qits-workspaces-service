@@ -158,6 +158,24 @@ public class ProviderStates {
   public static final String A_SLOT_ON_A_DISCONNECTED_RUNNER =
       "a workspace slot on a disconnected runner";
 
+  // The states the frames this service sends a workspace runner are recorded in (qits-950, A1):
+  // each leaves localhost on a recording socket (runnerFramesSent), and RunnerFrames sends the
+  // frame from it by the real code path. A runner "dialling in" holds a socket and has not said
+  // hello yet.
+  public static final String A_RUNNER_DIALLING_IN_HOLDING_ITS_WORKSPACE =
+      "a greenlit runner dialling in holding a workspace it owns";
+  public static final String A_RUNNER_DIALLING_IN_WITH_A_QUEUED_WORKSPACE =
+      "a greenlit runner dialling in with a workspace queued for it";
+  public static final String A_RUNNER_DIALLING_IN_AT_AN_OLDER_VERSION =
+      "a greenlit runner dialling in at an older version";
+  public static final String A_QUARANTINED_RUNNER_DIALLING_IN = "a quarantined runner dialling in";
+  public static final String A_QUARANTINED_RUNNER_HOLDING_A_SOCKET =
+      "a quarantined runner holding a socket";
+  public static final String A_RUNNER_IN_SERVICE_WITH_A_QUEUED_WORKSPACE =
+      "a runner in service with a free slot and a queued workspace";
+  public static final String A_RUNNER_IN_SERVICE_WITH_EVERY_SLOT_TAKEN =
+      "a runner in service with every slot taken";
+
   static final String PROJECT_ID = "00000000-0000-4000-8000-00000000000f";
   static final String BUG_TICKET_ID = "00000000-0000-4000-8000-000000000001";
   static final String EPIC_ID = "00000000-0000-4000-8000-000000000006";
@@ -249,6 +267,9 @@ public class ProviderStates {
   /** The connection {@link #A_CONNECTED_RUNNER} admitted, closed again by {@link #cleanUp}. */
   private volatile WorkspaceRunnerRegistry.Session runnerSession;
 
+  /** The scripted socket of the state's runner, when it holds one: what it was sent. */
+  private volatile ScriptedRunner scriptedRunner;
+
   /** The start {@link #AN_AGENT_WHOSE_WORKSPACE_IS_STARTING} left open, ended by {@link #cleanUp}. */
   private volatile TechnicalProcess startingProcess;
 
@@ -284,7 +305,14 @@ public class ProviderStates {
         A_RUNNER_IN_SERVICE,
         A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE,
         A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE,
-        A_SLOT_ON_A_DISCONNECTED_RUNNER);
+        A_SLOT_ON_A_DISCONNECTED_RUNNER,
+        A_RUNNER_DIALLING_IN_HOLDING_ITS_WORKSPACE,
+        A_RUNNER_DIALLING_IN_WITH_A_QUEUED_WORKSPACE,
+        A_RUNNER_DIALLING_IN_AT_AN_OLDER_VERSION,
+        A_QUARANTINED_RUNNER_DIALLING_IN,
+        A_QUARANTINED_RUNNER_HOLDING_A_SOCKET,
+        A_RUNNER_IN_SERVICE_WITH_A_QUEUED_WORKSPACE,
+        A_RUNNER_IN_SERVICE_WITH_EVERY_SLOT_TAKEN);
   }
 
   public Map<String, String> params(String state) {
@@ -327,6 +355,13 @@ public class ProviderStates {
       case A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE ->
           slotOnARunnerInService(WorkspaceRuntimeStatus.STOPPED);
       case A_SLOT_ON_A_DISCONNECTED_RUNNER -> slotOnADisconnectedRunner();
+      case A_RUNNER_DIALLING_IN_HOLDING_ITS_WORKSPACE -> runnerDiallingInHoldingItsWorkspace();
+      case A_RUNNER_DIALLING_IN_WITH_A_QUEUED_WORKSPACE -> runnerDiallingInWithAQueuedWorkspace();
+      case A_RUNNER_DIALLING_IN_AT_AN_OLDER_VERSION -> runnerDiallingIn(true);
+      case A_QUARANTINED_RUNNER_DIALLING_IN -> runnerDiallingIn(false);
+      case A_QUARANTINED_RUNNER_HOLDING_A_SOCKET -> quarantinedRunnerHoldingASocket();
+      case A_RUNNER_IN_SERVICE_WITH_A_QUEUED_WORKSPACE -> runnerInServiceWithAQueuedWorkspace();
+      case A_RUNNER_IN_SERVICE_WITH_EVERY_SLOT_TAKEN -> runnerInServiceWithEverySlotTaken();
       default -> throw new IllegalArgumentException("No provider state named '" + state + "'");
     };
   }
@@ -391,6 +426,7 @@ public class ProviderStates {
   private void removeRunners() {
     WorkspaceRunnerRegistry.Session session = runnerSession;
     runnerSession = null;
+    scriptedRunner = null;
     if (session != null) {
       runnerRegistry.onClose(session);
     }
@@ -954,23 +990,204 @@ public class ProviderStates {
         WorkspaceRunnerAddresses.class);
     quarantinedRunner();
     WorkspaceRunner runner = runners.greenlight(UUID.fromString(RUNNER_ID));
-    ScriptedRunner scripted = new ScriptedRunner();
-    WorkspaceRunnerRegistry.Session session = runnerRegistry.admit(runner, scripted.connection());
-    scripted.session = session;
-    runnerSession = session;
-    runnerRegistry.onHello(
-        session,
-        new Hello(
-            WorkspacesRunnerBinary.VERSION,
-            WorkspacesRunnerProtocol.CAPABILITY_VERSION,
-            1,
-            new RunnerCapabilities(true, "amd64", "linux", Map.of()),
-            List.of(),
-            Map.of()));
+    WorkspaceRunnerRegistry.Session session = dialIn(runner);
+    runnerRegistry.onHello(session, hello(WorkspacesRunnerBinary.VERSION, List.of()));
     runnerHealth.request(runner.id);
     runnerRegistry.onInventory(session, new Inventory(List.of(), List.of(), DOT_CLAUDE_VOLUME));
-    runnerRegistry.onLoginState(session, scripted.loginState());
+    runnerRegistry.onLoginState(session, scriptedRunner.loginState());
     return new Setup(runnerParams(), List.of());
+  }
+
+  // --- the frames this service sends a runner (qits-950) ------------------------------------------
+
+  /** The version an older runner dials in at: below any pin a release train writes. */
+  static final String OLDER_RUNNER_VERSION = "2026.101.100000";
+
+  /**
+   * Every frame the state's runner was sent on its socket, oldest first, as the JSON text that
+   * went on the wire ({@link WorkspaceRunnerRegistry#send} hands the codec's text to the socket,
+   * and the socket here keeps it). Empty when the state's runner holds no recording socket.
+   */
+  public List<String> runnerFramesSent() {
+    ScriptedRunner scripted = scriptedRunner;
+    return scripted == null ? List.of() : List.copyOf(scripted.sent);
+  }
+
+  /** Forgets what the state's runner was sent so far: the frames its setting up cost. */
+  public void forgetRunnerFrames() {
+    ScriptedRunner scripted = scriptedRunner;
+    if (scripted != null) {
+      scripted.sent.clear();
+    }
+  }
+
+  /** The state's runner connection, admitted and perhaps not greeted yet; null when it has none. */
+  public WorkspaceRunnerRegistry.Session runnerSession() {
+    return runnerSession;
+  }
+
+  /** What a runner at {@code version} says first, holding {@code held} (row ids as strings). */
+  static Hello hello(String version, List<String> held) {
+    return new Hello(
+        version,
+        WorkspacesRunnerProtocol.CAPABILITY_VERSION,
+        1,
+        new RunnerCapabilities(true, "amd64", "linux", Map.of()),
+        held,
+        Map.of());
+  }
+
+  /** {@code runner} admitted on a {@link ScriptedRunner}'s socket, which records what it is sent. */
+  private WorkspaceRunnerRegistry.Session dialIn(WorkspaceRunner runner) {
+    return dialIn(runner, true);
+  }
+
+  /**
+   * {@link #dialIn(WorkspaceRunner)}, its health checks left unanswered unless {@code
+   * answersChecks}: a quarantined runner that passed its check would be reinstated by it.
+   */
+  private WorkspaceRunnerRegistry.Session dialIn(WorkspaceRunner runner, boolean answersChecks) {
+    ScriptedRunner scripted = new ScriptedRunner(answersChecks);
+    WorkspaceRunnerRegistry.Session session = runnerRegistry.admit(runner, scripted.connection());
+    scripted.session = session;
+    scriptedRunner = scripted;
+    runnerSession = session;
+    return session;
+  }
+
+  /** Public addresses for a runner: the image names an estate, a take and an upgrade carry. */
+  private static void addressingRunners() {
+    QuarkusMock.installMockForType(
+        WorkspaceRunnerAddressesFixture.withDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
+        WorkspaceRunnerAddresses.class);
+    QuarkusMock.installMockForType(
+        WorkspaceRunnerAddressesFixture.planesWithDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
+        WorkspaceAddressPlanes.class);
+  }
+
+  /**
+   * {@code localhost}, greenlit, on a socket and not greeted yet, owning the wrapper's slot, which
+   * its container still runs: its hello names the slot as held.
+   */
+  private Setup runnerDiallingInHoldingItsWorkspace() {
+    addressingRunners();
+    quarantinedRunner();
+    WorkspaceRunner runner = runners.greenlight(UUID.fromString(RUNNER_ID));
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(() -> ids.add(slot(WorkspaceRuntimeStatus.RUNNING, runner.id)));
+    dialIn(runner);
+    Map<String, String> params = runnerParams();
+    params.put("workspaceId", String.valueOf(ids.get(0)));
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /**
+   * {@code localhost}, greenlit, on a socket and not greeted yet, with the wrapper's slot QUEUED
+   * for it (sticky to it) and nothing else queued anywhere: its backlog is that one row. Other
+   * tests share the store, so every unplaced QUEUED row they left is abandoned first.
+   */
+  private Setup runnerDiallingInWithAQueuedWorkspace() {
+    addressingRunners();
+    quarantinedRunner();
+    WorkspaceRunner runner = runners.greenlight(UUID.fromString(RUNNER_ID));
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              abandonUnplacedQueuedRows();
+              ids.add(queuedSlot(runner.id));
+            });
+    dialIn(runner);
+    Map<String, String> params = runnerParams();
+    params.put("workspaceId", String.valueOf(ids.get(0)));
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /**
+   * {@code localhost} on a socket and not greeted yet: greenlit and holding nothing when {@code
+   * greenlit}, else quarantined as registration leaves it. Whatever version it says hello at is
+   * the trigger's — an older one is the one a greenlit runner is told to upgrade from.
+   */
+  private Setup runnerDiallingIn(boolean greenlit) {
+    addressingRunners();
+    quarantinedRunner();
+    WorkspaceRunner runner =
+        greenlit
+            ? runners.greenlight(UUID.fromString(RUNNER_ID))
+            : runners.get(UUID.fromString(RUNNER_ID));
+    dialIn(runner, greenlit);
+    Map<String, String> params = runnerParams();
+    if (greenlit) {
+      params.put("runnerVersion", OLDER_RUNNER_VERSION);
+    }
+    return new Setup(params, List.of());
+  }
+
+  /**
+   * {@code localhost}, quarantined as registration leaves it, greeted on a recording socket; the
+   * health check its greeting was sent is still unanswered, so only a person lifts the quarantine.
+   */
+  private Setup quarantinedRunnerHoldingASocket() {
+    addressingRunners();
+    quarantinedRunner();
+    WorkspaceRunnerRegistry.Session session =
+        dialIn(runners.get(UUID.fromString(RUNNER_ID)), false);
+    runnerRegistry.onHello(session, hello(WorkspacesRunnerBinary.VERSION, List.of()));
+    return new Setup(runnerParams(), List.of());
+  }
+
+  /**
+   * {@link #runnerInService}, its one slot free, and the wrapper's slot QUEUED for it — sticky to
+   * it, so its reserve takes this row and no other a test left in the queue.
+   */
+  private Setup runnerInServiceWithAQueuedWorkspace() {
+    addressingRunners();
+    runnerInService();
+    repositories.register(WRAPPER_REPOSITORY_ID);
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew().run(() -> ids.add(queuedSlot(UUID.fromString(RUNNER_ID))));
+    Map<String, String> params = runnerParams();
+    params.put("workspaceId", String.valueOf(ids.get(0)));
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /** {@link #runnerInService}, its one slot held by the wrapper's RUNNING slot: it takes nothing. */
+  private Setup runnerInServiceWithEverySlotTaken() {
+    addressingRunners();
+    runnerInService();
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(() -> ids.add(slot(WorkspaceRuntimeStatus.RUNNING, UUID.fromString(RUNNER_ID))));
+    Map<String, String> params = runnerParams();
+    params.put("workspaceId", String.valueOf(ids.get(0)));
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /**
+   * The wrapper's slot QUEUED for {@code runnerId} with the workspace token a RUNNER start mints
+   * before it queues (no row is claimable without one).
+   */
+  private Long queuedSlot(UUID runnerId) {
+    Long slot = slot(WorkspaceRuntimeStatus.QUEUED, runnerId);
+    Workspace row = workspaces.findById(slot);
+    row.queuedAt = Instant.now();
+    row.commissionedTokenId = SLOT_TOKEN_ID;
+    row.commissionedTokenSubject = "contract-workspace-token";
+    row.commissionedToken = "qits_tok_contract-workspace";
+    workspaces.flush();
+    return slot;
+  }
+
+  /** Every ACTIVE RUNNER row QUEUED on no runner, abandoned: what any runner's backlog counts. */
+  private void abandonUnplacedQueuedRows() {
+    workspaces.update(
+        "status = ?1 where placement = ?2 and runtimeStatus = ?3 and status = ?4 and runnerId is"
+            + " null",
+        WorkspaceStatus.ABANDONED,
+        eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER,
+        WorkspaceRuntimeStatus.QUEUED,
+        WorkspaceStatus.ACTIVE);
   }
 
   /**
@@ -1037,11 +1254,22 @@ public class ProviderStates {
    * the asking thread: a {@code stop} with {@code stopped}, a {@code delete} with {@code deleted},
    * a {@code healthCheck} with a passing {@code healthChecked}, a {@code probeLogin} with its
    * {@code loginState}. Everything else it takes and says nothing. Answering on the asking thread
-   * is what keeps a recording deterministic: the answer is in before the door returns.
+   * is what keeps a recording deterministic: the answer is in before the door returns. It keeps
+   * every frame it is sent, as the text that went on the wire (qits-950).
    */
   private final class ScriptedRunner {
 
     volatile WorkspaceRunnerRegistry.Session session;
+
+    /** Every frame this socket was sent, as its text. */
+    final List<String> sent = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** Whether a {@code healthCheck} is answered; a quarantined state's runner leaves it open. */
+    private final boolean answersChecks;
+
+    ScriptedRunner(boolean answersChecks) {
+      this.answersChecks = answersChecks;
+    }
 
     /** Checked now: a login checked before the connection began proves nothing of its image. */
     LoginState loginState() {
@@ -1062,6 +1290,7 @@ public class ProviderStates {
                     case "equals" -> proxy == args[0];
                     case "toString" -> "contract-runner-in-service";
                     case "sendText" -> {
+                      sent.add(String.valueOf(args[0]));
                       answer(String.valueOf(args[0]));
                       yield Uni.createFrom().voidItem();
                     }
@@ -1080,7 +1309,7 @@ public class ProviderStates {
       switch (runnerCodec.decode(frame)) {
         case Stop stop -> runnerRegistry.onStopped(to, new Stopped(stop.rowId()));
         case Delete delete -> runnerRegistry.onDeleted(to, new Deleted(delete.rowId()));
-        case HealthCheck check ->
+        case HealthCheck check when answersChecks ->
             runnerRegistry.onHealthChecked(
                 to,
                 new HealthChecked(

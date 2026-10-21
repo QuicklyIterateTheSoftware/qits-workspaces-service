@@ -1,0 +1,6 @@
+{
+  "type": "upgrade",
+  "version": "2026.101.120000",
+  "image": "registry.qits.runners.example.test/qits/qits-workspaces-runner:2026.101.120000",
+  "sha256": null
+}

@@ -1633,6 +1633,59 @@ masked, so a client bump alone is no contract change. The file keeps the two-par
 client ships from the provider's own repository. The kit's own fixed rows (the `editor` workload, a
 minimal ensure body) are not used: they pact requests this service never sends.
 
+**The frames this service sends a workspace runner are golden masters too (qits-950, A1).** The
+runner socket is the one boundary of the RUNNER flow no HTTP pact covers, so the provider half of
+its message pact is recorded beside the calls, in the same `golden-masters/` tree and the same
+`GoldenMasterRecordingTest` run (compare by default, `-Dgolden.update=true` rewrites):
+
+- **`contracts/RunnerFrames.FRAMES` is the table**: one row per (provider state, frame type, cause).
+  Thirteen frames, every one this service builds: `ack`, `estate`, `backlog`, `quarantined`,
+  `upgrade` (a runner's `hello`), `take`, `nothing` (its `reserve`), `stop`, `delete` (the
+  `stopWorkspaceContainer` / `deleteWorkspaceContainer` doors), `probeLogin`, `healthCheck`,
+  `retire` (`requestRunnerLoginCheck`, `requestRunnerHealthcheck`, `deleteRunner`) and
+  `reinstated` (`greenlightRunner`). The frames it only receives are never built here.
+- **A frame comes off the socket, never off a constructor.** Each state leaves `localhost` on a
+  `ProviderStates.ScriptedRunner` socket that keeps every text `WorkspaceRunnerRegistry.send` hands
+  it — the codec's JSON, byte for byte what goes on the wire. `RunnerFrames.send` forgets what the
+  setting up cost, makes the frame happen the way it does live (the runner's frame handed to the
+  registry or to `RunnerReservations` as `WorkspaceRunnerSocket` dispatches it, or the door pressed
+  over HTTP) and takes the first text of that type. The states are `ProviderStates`' own, seven of
+  them new (`a greenlit runner dialling in …`, `a quarantined runner …`, `a runner in service with
+  …`); the stop, delete, login, health and retire frames reuse `a workspace slot running on a runner
+  in service` and `a runner in service`.
+- **The index entry of a frame** is an operation with no method, query or status:
+
+      {"operationId": "frame:take", "kind": "frame", "frame": "take",
+       "path": "/workspaces/runners/socket",
+       "trigger": {"kind": "event", "app": "qits-workspaces-service",
+                   "event": "workspaces-runner:reserve"},
+       "file": "<state-slug>/frame-take.json",
+       "frozen": {"ids": [], "instants": [], "strings": [...], "numbers": [...],
+                  "listFilteredTo": null}}
+
+  `path` is the socket the frame travels on; `trigger` is the `qits-trigger` group a message pact
+  names (an operation of this service, or the runner's own frame as `workspaces-runner:<type>`).
+  The file is named `frame-<type>.json`, never with the key's colon, so every checkout can hold it.
+  The HTTP entries are untouched; a reader that only looks operations up by id (qits-pact-consumer's
+  `GoldenMasters`) never sees a frame, and qits-docs renders one with an empty method and status.
+- **Frozen like an answer, plus the frame's own row fields** (`Freezer.frames()`): `rowId`, the
+  `owned` list and the base's `adoptedWorkspaces`/`heldWorkspaces` strings freeze to the state's
+  write order. It is a mode because the HTTP answers use `owned` for a count. The image tags a bump
+  moves are fixed at `FIXED_VERSION`; a row id inside an address (`take`'s daemon url and api base
+  path) has only that segment frozen (`Frame.rowIdIn`), so a change to the rest of the address is
+  still drift.
+- **`contracts/RunnerFramesGuardTest` is A3's sending side.** It reads the frames off the code —
+  every class of the sealed `WorkspacesRunnerMessage` and `LifecycleMessage` sets that this
+  module's main bytecode constructs (`new`, or a static factory of the frame's class such as
+  `Retire.deleted`) — and fails naming each one with no `frame:<type>` in the committed index, and
+  each recorded one nothing builds any more. The protocol marks no direction on a class, so "built
+  here" is "can be sent from here". A type is the record's simple name with a lower-case first
+  letter, held to the protocol jars' type constants.
+
+`ConsumerPactVerificationTest` verifies HTTP interactions only (`@PactFilter` on
+`Synchronous/HTTP`), so the runner's message pact arriving in its pinned jar costs the HTTP gate
+nothing; the message verifier is wave 3's.
+
 ## Tests
 
 - **App-level config lives in `service/src/main/resources/application.properties`, and the tests

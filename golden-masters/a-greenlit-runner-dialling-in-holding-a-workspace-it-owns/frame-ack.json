@@ -1,0 +1,8 @@
+{
+  "type": "ack",
+  "capabilityVersion": 1,
+  "slots": 1,
+  "adoptedWorkspaces": [
+    "1"
+  ]
+}

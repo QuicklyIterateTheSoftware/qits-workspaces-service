@@ -77,6 +77,127 @@
       ]
     },
     {
+      "name": "a greenlit runner dialling in at an older version",
+      "slug": "a-greenlit-runner-dialling-in-at-an-older-version",
+      "params": {
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost",
+        "runnerVersion": "2026.101.100000"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "frame:upgrade",
+          "kind": "frame",
+          "frame": "upgrade",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "event",
+            "app": "qits-workspaces-service",
+            "event": "workspaces-runner:hello"
+          },
+          "file": "a-greenlit-runner-dialling-in-at-an-older-version/frame-upgrade.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [
+              "$.image",
+              "$.version"
+            ],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a greenlit runner dialling in holding a workspace it owns",
+      "slug": "a-greenlit-runner-dialling-in-holding-a-workspace-it-owns",
+      "params": {
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "frame:ack",
+          "kind": "frame",
+          "frame": "ack",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "event",
+            "app": "qits-workspaces-service",
+            "event": "workspaces-runner:hello"
+          },
+          "file": "a-greenlit-runner-dialling-in-holding-a-workspace-it-owns/frame-ack.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [
+              "$.adoptedWorkspaces[*]"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "frame:estate",
+          "kind": "frame",
+          "frame": "estate",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "event",
+            "app": "qits-workspaces-service",
+            "event": "workspaces-runner:hello"
+          },
+          "file": "a-greenlit-runner-dialling-in-holding-a-workspace-it-owns/frame-estate.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [
+              "$.workspaceImage"
+            ],
+            "numbers": [
+              "$.owned[*]"
+            ],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a greenlit runner dialling in with a workspace queued for it",
+      "slug": "a-greenlit-runner-dialling-in-with-a-workspace-queued-for-it",
+      "params": {
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "frame:backlog",
+          "kind": "frame",
+          "frame": "backlog",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "event",
+            "app": "qits-workspaces-service",
+            "event": "workspaces-runner:hello"
+          },
+          "file": "a-greenlit-runner-dialling-in-with-a-workspace-queued-for-it/frame-backlog.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "a project with agents bound to work items",
       "slug": "a-project-with-agents-bound-to-work-items",
       "params": {
@@ -311,6 +432,68 @@
       ]
     },
     {
+      "name": "a quarantined runner dialling in",
+      "slug": "a-quarantined-runner-dialling-in",
+      "params": {
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "frame:quarantined",
+          "kind": "frame",
+          "frame": "quarantined",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "event",
+            "app": "qits-workspaces-service",
+            "event": "workspaces-runner:hello"
+          },
+          "file": "a-quarantined-runner-dialling-in/frame-quarantined.json",
+          "frozen": {
+            "ids": [],
+            "instants": [
+              "$.since"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a quarantined runner holding a socket",
+      "slug": "a-quarantined-runner-holding-a-socket",
+      "params": {
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "frame:reinstated",
+          "kind": "frame",
+          "frame": "reinstated",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "operation",
+            "app": "qits-workspaces-service",
+            "operationId": "greenlightRunner"
+          },
+          "file": "a-quarantined-runner-holding-a-socket/frame-reinstated.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "a registered runner",
       "slug": "a-registered-runner",
       "params": {
@@ -422,6 +605,65 @@
       },
       "dependsOn": [],
       "operations": [
+        {
+          "operationId": "frame:healthCheck",
+          "kind": "frame",
+          "frame": "healthCheck",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "operation",
+            "app": "qits-workspaces-service",
+            "operationId": "requestRunnerHealthcheck"
+          },
+          "file": "a-runner-in-service/frame-healthCheck.json",
+          "frozen": {
+            "ids": [
+              "$.requestId"
+            ],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "frame:probeLogin",
+          "kind": "frame",
+          "frame": "probeLogin",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "operation",
+            "app": "qits-workspaces-service",
+            "operationId": "requestRunnerLoginCheck"
+          },
+          "file": "a-runner-in-service/frame-probeLogin.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "frame:retire",
+          "kind": "frame",
+          "frame": "retire",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "operation",
+            "app": "qits-workspaces-service",
+            "operationId": "deleteRunner"
+          },
+          "file": "a-runner-in-service/frame-retire.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
         {
           "operationId": "getRunnerHealth",
           "method": "GET",
@@ -555,6 +797,77 @@
           "path": "/workspaces/api/runners/{runnerId}/login-check",
           "status": 202,
           "file": null,
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a runner in service with a free slot and a queued workspace",
+      "slug": "a-runner-in-service-with-a-free-slot-and-a-queued-workspace",
+      "params": {
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "frame:take",
+          "kind": "frame",
+          "frame": "take",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "event",
+            "app": "qits-workspaces-service",
+            "event": "workspaces-runner:reserve"
+          },
+          "file": "a-runner-in-service-with-a-free-slot-and-a-queued-workspace/frame-take.json",
+          "frozen": {
+            "ids": [
+              "$.spec.env.QITS_WORKSPACE_DAEMON_REPOSITORY_ID",
+              "$.spec.labels.qits.repository"
+            ],
+            "instants": [],
+            "strings": [
+              "$.spec.image",
+              "$.spec.env.QITS_WORKSPACE_DAEMON_URL",
+              "$.spec.env.QITS_WORKSPACE_DAEMON_API_BASE_PATH"
+            ],
+            "numbers": [
+              "$.rowId"
+            ],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a runner in service with every slot taken",
+      "slug": "a-runner-in-service-with-every-slot-taken",
+      "params": {
+        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "runnerName": "localhost",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "frame:nothing",
+          "kind": "frame",
+          "frame": "nothing",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "event",
+            "app": "qits-workspaces-service",
+            "event": "workspaces-runner:reserve"
+          },
+          "file": "a-runner-in-service-with-every-slot-taken/frame-nothing.json",
           "frozen": {
             "ids": [],
             "instants": [],
@@ -847,6 +1160,48 @@
       },
       "dependsOn": [],
       "operations": [
+        {
+          "operationId": "frame:delete",
+          "kind": "frame",
+          "frame": "delete",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "operation",
+            "app": "qits-workspaces-service",
+            "operationId": "deleteWorkspaceContainer"
+          },
+          "file": "a-workspace-slot-running-on-a-runner-in-service/frame-delete.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [
+              "$.rowId"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "frame:stop",
+          "kind": "frame",
+          "frame": "stop",
+          "path": "/workspaces/runners/socket",
+          "trigger": {
+            "kind": "operation",
+            "app": "qits-workspaces-service",
+            "operationId": "stopWorkspaceContainer"
+          },
+          "file": "a-workspace-slot-running-on-a-runner-in-service/frame-stop.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [
+              "$.rowId"
+            ],
+            "listFilteredTo": null
+          }
+        },
         {
           "operationId": "stopWorkspaceContainer",
           "method": "POST",
