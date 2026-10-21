@@ -1601,7 +1601,7 @@ pact-jvm upgrade stops writing it. `trigger` is required: a null one throws.
 
 **Published only on change.** `release.yml` declares one `contracts.pacts` entry per provider
 (`qits-events-service`, `qits-projects-service`, `qits-idp-service`, `qits-containers-service`,
-`qits-workspace-daemon`), and
+`qits-workspace-daemon`, and since qits-950 `qits-workspaces-runner-daemon`), and
 qits-ci packages each `pacts/qits-workspaces-service_<provider>.json` as
 `eu.wohlben.qits:qits-workspaces-service-pacts-<provider>`, published only when it changed since the
 newest published jar — there is no repository-side gate or module anymore; `pacts-jar/` and
@@ -1685,6 +1685,44 @@ its message pact is recorded beside the calls, in the same `golden-masters/` tre
 `ConsumerPactVerificationTest` verifies HTTP interactions only (`@PactFilter` on
 `Synchronous/HTTP`), so the runner's message pact arriving in its pinned jar costs the HTTP gate
 nothing; the message verifier is wave 3's.
+
+**The frames a workspace runner sends are a consumer message pact (qits-950, A2).** The other
+direction: `pacts/qits-workspaces-service_qits-workspaces-runner-daemon.json`, Pact V4
+`Asynchronous/Messages`, built from the runner's golden masters
+(`eu.wohlben.qits:qits-workspaces-runner-golden-masters`, pinned at
+`qits.workspaces-runner-golden-masters.version`; index provider `qits-workspaces-runner`) and
+declared under `contracts.pacts.qits-workspaces-runner-daemon` in `release.yml`.
+
+- **`runnerhost/RunnerFramesContract` is the table**: one `ContractRow.message(trigger, state,
+  frame, receive)` per recorded (state, frame) — seventeen rows over the eleven frames. It is an
+  ordinary `ContractTable`, so `ConsumerPactFilesTest` compares and rewrites its file and asserts
+  the references like the HTTP tables'. A message row's `qits-call` is `{app, frame}` and its
+  `qits-trigger` is the cause **on the runner's side**, as the index records it (`{kind: frame,
+  frame: take}`, `{kind: event, event: reconnect}`, `{kind: schedule, schedule: exit-watch}`), with
+  `app` the runner's repository; `GoldenMasters.messageInteraction` refuses a row naming another.
+- **Matchers as the HTTP helper's** (`frozen` lists: ids → uuid, instants → the ISO regex, every
+  other leaf → type, arrays `minMaxArrayLike(n, n)` against one merged template), with two message
+  rules: `$.type` is exact (it is the frame), and an array whose objects are not one structure —
+  `healthChecked`'s `checks[]` — is matched element by element at its recorded length.
+- **`runnerhost/RunnerFramesConsumerPactTest` runs every row against the real thing**, one
+  parameterized invocation per row on `GateOn`: a `FakeWorkspacesRunner` writes the pact message's
+  text verbatim onto the real socket (`sendText`), `WorkspaceRunnerSocket` decodes it with the real
+  codec and dispatches it, and the row asserts the effect on the rows, the runner row, the frames
+  sent back and the verb or check it answers (`RunnerFrameHarness` holds the beans and cleans up).
+  **The runner's frozen values are swapped for the row's** — the message counterpart of an HTTP
+  state param: `PactMessage.text(Map.of("rowId", seeded))` replaces every leaf holding the state's
+  frozen `params.rowId` (or `requestId`), a `hello`'s `runnerVersion` is set to the pin, and every
+  text is matched against the interaction's own rules (pact-jvm's `JsonContentMatcher`) before it is
+  fed, so the test only ever feeds a message the pact admits.
+- **The receiving guard** is in `contracts/RunnerFramesGuardTest`: the frame types
+  `WorkspaceRunnerSocket.onMessage` dispatches are read off its bytecode (the pattern switch's
+  `SwitchBootstraps.typeSwitch` labels), and each needs a `RunnerFramesContract` row, by name; so
+  does every frame type the pinned runner golden masters record. A row for a frame the socket no
+  longer dispatches fails too.
+- **Effects worth knowing**: `exited` only stops the row (from RUNNING/PROVISIONING) — its
+  `exitCode` is decoded and kept nowhere, and no runtime error is written; an empty `inventory`
+  changes nothing only for rows with no live container — an owned RUNNING row would be STOPPED and a
+  PROVISIONING one queued again; `launched` leaves the row PROVISIONING until the daemon reports.
 
 ## Tests
 

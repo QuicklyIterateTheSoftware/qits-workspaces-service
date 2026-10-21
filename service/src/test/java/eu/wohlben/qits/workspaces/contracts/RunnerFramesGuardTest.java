@@ -11,7 +11,14 @@ import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerRegistry;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenFiles;
 import eu.wohlben.qits.workspacesrunner.protocol.WorkspacesRunnerMessage;
 import eu.wohlben.qits.workspacesrunner.protocol.WorkspacesRunnerProtocol;
+import eu.wohlben.qits.workspaces.runnerhost.RunnerFramesContract;
+import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerSocket;
+import eu.wohlben.qits.workspaces.testing.contracts.GoldenMasters;
 import java.io.IOException;
+import java.io.InputStream;
+import java.lang.classfile.instruction.InvokeDynamicInstruction;
+import java.lang.constant.ClassDesc;
+import java.lang.constant.ConstantDesc;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeModel;
@@ -52,6 +59,13 @@ import org.junit.jupiter.api.Test;
  * the guard holds that to the protocol's own type constants ({@link WorkspacesRunnerProtocol.Type},
  * {@link RunnerWire.Type}), so a frame that broke the convention fails here rather than slipping
  * past under a name nobody records.
+ *
+ * <p><b>The receiving side (qits-950, A3, for A2).</b> Every frame type {@link WorkspaceRunnerSocket}
+ * dispatches — the case labels of {@code onMessage}'s pattern switch, read off its bytecode (the
+ * {@code SwitchBootstraps.typeSwitch} call's labels), never a hand list — needs a row in {@link
+ * RunnerFramesContract}, the message pact of the frames the runner sends; a frame the socket handles
+ * with no row fails here by name. So does a row for a frame the socket no longer handles, and a frame
+ * the runner records (its pinned golden masters) that no row receives.
  */
 class RunnerFramesGuardTest {
 
@@ -93,6 +107,95 @@ class RunnerFramesGuardTest {
     Set<String> table = new TreeSet<>();
     RunnerFrames.FRAMES.forEach(frame -> table.add(frame.type()));
     assertEquals(recordedFrames(), table, "RunnerFrames.FRAMES and golden-masters/index.json");
+  }
+
+  @Test
+  void everyFrameTheServiceHandlesHasAContractRow() throws Exception {
+    Set<String> handled = framesHandled();
+    Set<String> rows = contractFrames();
+    List<String> missing = new ArrayList<>();
+    for (String type : handled) {
+      if (!rows.contains(type)) {
+        missing.add(
+            type
+                + " is dispatched by WorkspaceRunnerSocket.onMessage and has no row in"
+                + " RunnerFramesContract — add one asserting what the service does with it");
+      }
+    }
+    for (String type : rows) {
+      if (!handled.contains(type)) {
+        missing.add(
+            "RunnerFramesContract has a row for " + type + ", which WorkspaceRunnerSocket no longer"
+                + " dispatches");
+      }
+    }
+    assertTrue(missing.isEmpty(), String.join("\n", missing));
+  }
+
+  @Test
+  void everyFrameTheRunnerRecordsHasAContractRow() {
+    Set<String> rows = contractFrames();
+    Set<String> recorded = new TreeSet<>();
+    GoldenMasters.recordedFrames(GoldenMasters.WORKSPACES_RUNNER)
+        .forEach(
+            entry ->
+                recorded.add(entry.getValue().substring(GoldenMasters.FRAME_PREFIX.length())));
+    assertTrue(!recorded.isEmpty(), "the runner's pinned golden masters record no frame");
+    Set<String> unreceived = new TreeSet<>(recorded);
+    unreceived.removeAll(rows);
+    assertTrue(
+        unreceived.isEmpty(),
+        "qits-workspaces-runner-daemon records frames no RunnerFramesContract row receives: "
+            + unreceived);
+  }
+
+  /** The frame types {@link RunnerFramesContract}'s rows receive. */
+  private static Set<String> contractFrames() {
+    Set<String> rows = new TreeSet<>();
+    RunnerFramesContract.TABLE.rows()
+        .forEach(row -> rows.add(row.operationId().substring(GoldenMasters.FRAME_PREFIX.length())));
+    return rows;
+  }
+
+  /**
+   * The frame types {@link WorkspaceRunnerSocket#onMessage} dispatches: the class labels of its
+   * pattern switch, which javac hands {@code SwitchBootstraps.typeSwitch} as bootstrap arguments.
+   */
+  static Set<String> framesHandled() throws IOException, IllegalAccessException {
+    Map<String, Class<?>> frames = new TreeMap<>();
+    for (Class<?> sealed : List.of(WorkspacesRunnerMessage.class, LifecycleMessage.class)) {
+      for (Class<?> frame : sealed.getPermittedSubclasses()) {
+        frames.put(frame.descriptorString(), frame);
+      }
+    }
+    Set<String> declaredTypes = declaredTypes();
+    ClassModel socket;
+    try (InputStream in =
+        WorkspaceRunnerSocket.class.getResourceAsStream("WorkspaceRunnerSocket.class")) {
+      socket = ClassFile.of().parse(in.readAllBytes());
+    }
+    Set<String> handled = new TreeSet<>();
+    int switches = 0;
+    for (MethodModel method : socket.methods()) {
+      if (!method.methodName().equalsString("onMessage")) {
+        continue;
+      }
+      CodeModel code = method.code().orElseThrow();
+      for (java.lang.classfile.CodeElement element : code) {
+        if (element instanceof InvokeDynamicInstruction indy
+            && indy.bootstrapMethod().methodName().equals("typeSwitch")) {
+          switches++;
+          for (ConstantDesc label : indy.bootstrapArgs()) {
+            if (label instanceof ClassDesc type && frames.containsKey(type.descriptorString())) {
+              handled.add(typeOf(frames.get(type.descriptorString()), declaredTypes));
+            }
+          }
+        }
+      }
+    }
+    assertTrue(switches > 0, "no pattern switch in WorkspaceRunnerSocket.onMessage: is it still the dispatch?");
+    assertTrue(!handled.isEmpty(), "WorkspaceRunnerSocket.onMessage dispatches no frame: is the scan reading it?");
+    return handled;
   }
 
   /** Each frame type this module's main classes build, with the classes that build it. */
