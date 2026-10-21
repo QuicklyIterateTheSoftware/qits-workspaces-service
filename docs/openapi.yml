@@ -1344,10 +1344,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            item's ACTIVE agent's project. Nothing was said.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Deliver
       tags:
       - Agent Dispatch Controller
@@ -1356,6 +1361,7 @@ paths:
         - qits:admin
         - qits:admin-agent
         - qits:system
+        - qits:desk
   /workspaces/api/agent-dispatches/entity:
     post:
       operationId: markAgentDispatchEntity
@@ -3107,4 +3113,4 @@ paths:
         - qits:admin-agent
 info:
   title: qits-workspaces API
-  version: 2026.1020.150158
+  version: 2026.1021.140952

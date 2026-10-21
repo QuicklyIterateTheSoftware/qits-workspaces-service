@@ -872,6 +872,16 @@ agent whose token subject it is; anything else is 403. `ContainerProxyAuthorizat
 create, list and cancel waits on `/workspaces/api/agents/{agentId}/waits`, but only for the agent
 their token belongs to: the principal must equal the agent row's `commissioned_token_subject`.
 `qits:admin` and `qits:system` act on any agent. `AgentWaitAccessTest` pins it.
+**`qits:desk` is admitted on one door, bound to its project** (qits-1493). `POST
+/workspaces/api/agent-dispatches/delivery` alone admits it, beside the usual machine set. A
+`qits:desk` caller holding none of `qits:admin`/`qits:admin-agent`/`qits:system` may deliver only to
+the item's ACTIVE agent's own project: the door resolves that agent through
+`AgentService.projectOfActiveAgent` and compares it against the token's `project` claim
+(`MachineIdentity.claimMatches`, `QitsClaims.PROJECT` — the structured claim's enforcement-side
+vocabulary, next to `CredentialCommissioner.PROJECT_CLAIM` on the minting side); a mismatch is 403
+"The delivery desk may prompt only the agents of its own project" and nothing is said. An item with
+no ACTIVE agent is not a binding violation — the door still answers `agentId: null`, as it does for
+every other role. `qits:admin`, `qits:admin-agent` and `qits:system` stay unbound.
 **`qits:admin-agent` is admitted wherever `qits:admin` is** (qits-628 follow-up, owner's request
 2026-10-07). It is the role qits-idp issues, beside `qits:agent`, to an ADMIN workspace's container
 credential (context kind `workspace-admin`), whose agent holds the host's docker socket. It is named
