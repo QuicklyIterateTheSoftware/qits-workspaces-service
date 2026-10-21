@@ -837,12 +837,18 @@ public class AgentService {
    * The project of the work item's ACTIVE agent (qits-1493): what {@code
    * AgentDispatchController.deliver} binds a {@code qits:desk} caller to, so that the delivery desk
    * may prompt only the agents of its own project. Empty when the item has no ACTIVE agent — not a
-   * refusal, since the door answers such a call with {@code agentId: null} rather than a 403.
+   * refusal, since the door answers such a call with {@code agentId: null} rather than a 403. An
+   * ACTIVE agent whose project cannot be resolved answers the empty string, which no token's
+   * {@code project} claim matches: the binding fails closed rather than reading it as no agent.
    */
   public Optional<String> projectOfActiveAgent(String workId) {
     Optional<AgentWorktree> active =
         QuarkusTransaction.requiringNew().call(() -> agents.findActiveByWorkId(workId));
-    return active.map(agent -> projectOf(agent.repositoryId));
+    return active.map(
+        agent -> {
+          String project = projectOf(agent.repositoryId);
+          return project == null ? "" : project;
+        });
   }
 
   /** Every agent that is not REMOVED, for the work views. */
