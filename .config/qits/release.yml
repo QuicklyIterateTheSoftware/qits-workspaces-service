@@ -19,4 +19,7 @@ contracts:
     qits-idp-service: { packages: [maven] }
     qits-containers-service: { packages: [maven] }
     qits-workspace-daemon: { packages: [maven] }
+    # qits-950: the message pact of the frames a workspace runner sends this service
+    # (runnerhost/RunnerFramesContract), published as qits-workspaces-service-pacts-qits-workspaces-runner-daemon.
+    qits-workspaces-runner-daemon: { packages: [maven] }
 userflows: qits-workspaces

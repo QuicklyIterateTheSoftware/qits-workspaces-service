@@ -1,0 +1,2114 @@
+{
+  "consumer": {
+    "name": "qits-workspaces-service"
+  },
+  "interactions": [
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "inventory"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "ack",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "containers": [
+            {
+              "rowId": 5,
+              "running": true,
+              "specHash": "h5"
+            }
+          ],
+          "dotClaudeVolume": "qits-workspaces-runner-dot-claude-r1",
+          "type": "inventory",
+          "volumes": [
+            5
+          ]
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "ack: frame:inventory",
+      "key": "3cc1f75e",
+      "matchingRules": {
+        "body": {
+          "$.containers": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type",
+                "max": 1,
+                "min": 1
+              }
+            ]
+          },
+          "$.containers[*].rowId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.containers[*].running": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.containers[*].specHash": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.dotClaudeVolume": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.volumes": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type",
+                "max": 1,
+                "min": 1
+              }
+            ]
+          },
+          "$.volumes[*]": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner whose node holds a running workspace",
+          "params": {
+            "rowId": "5",
+            "runnerId": "r1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "inventory"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "ack",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "containers": [
+            {
+              "rowId": 5,
+              "running": false,
+              "specHash": "h5"
+            }
+          ],
+          "dotClaudeVolume": "qits-workspaces-runner-dot-claude-r1",
+          "type": "inventory",
+          "volumes": [
+            5
+          ]
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "ack: frame:inventory",
+      "key": "ed64e0bc",
+      "matchingRules": {
+        "body": {
+          "$.containers": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type",
+                "max": 1,
+                "min": 1
+              }
+            ]
+          },
+          "$.containers[*].rowId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.containers[*].running": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.containers[*].specHash": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.dotClaudeVolume": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.volumes": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type",
+                "max": 1,
+                "min": 1
+              }
+            ]
+          },
+          "$.volumes[*]": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner whose node holds a stopped workspace",
+          "params": {
+            "rowId": "5",
+            "runnerId": "r1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "inventory"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "ack",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "containers": [],
+          "dotClaudeVolume": "qits-workspaces-runner-dot-claude-r1",
+          "type": "inventory",
+          "volumes": []
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "ack: frame:inventory",
+      "key": "5ba693c9",
+      "matchingRules": {
+        "body": {
+          "$.dotClaudeVolume": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner whose node holds no workspaces",
+          "params": {
+            "runnerId": "r1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "reserve"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "backlog",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "type": "reserve"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "backlog: frame:reserve",
+      "key": "82c1e8f4",
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner with a free slot and queued work",
+          "params": {
+            "runnerId": "r1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "hello"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "event": "connect",
+            "kind": "event"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "capabilities": {
+            "arch": "amd64",
+            "docker": true,
+            "labels": {},
+            "os": "linux"
+          },
+          "capabilityVersion": 1,
+          "runnerVersion": "2026.101.0",
+          "slots": 2,
+          "type": "hello"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "connect: frame:hello",
+      "key": "99ead2bc",
+      "matchingRules": {
+        "body": {
+          "$.capabilities.arch": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.capabilities.docker": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.capabilities.os": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.capabilityVersion": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.runnerVersion": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.slots": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner whose node holds no workspaces",
+          "params": {
+            "runnerId": "r1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "deleted"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "delete",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "rowId": 5,
+          "type": "deleted"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "delete: frame:deleted",
+      "key": "6eb67fdb",
+      "matchingRules": {
+        "body": {
+          "$.rowId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner whose node holds a running workspace",
+          "params": {
+            "rowId": "5",
+            "runnerId": "r1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "loginState"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "estate",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "checkedAt": "2026-01-01T00:00:00Z",
+          "claude": "PRESENT",
+          "kimi": "PRESENT",
+          "type": "loginState"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "estate: frame:loginState",
+      "key": "3adcf300",
+      "matchingRules": {
+        "body": {
+          "$.checkedAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+              }
+            ]
+          },
+          "$.claude": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.kimi": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner whose node is healthy and logged in",
+          "params": {
+            "requestId": "00000000-0000-4000-8000-000000000001",
+            "runnerId": "r1",
+            "workspaceImage": "registry.example:5000/qits/workspace:2026.1004.1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "loginState"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "estate",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "checkedAt": "2026-01-01T00:00:00Z",
+          "claude": "ABSENT",
+          "kimi": "ABSENT",
+          "type": "loginState"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "estate: frame:loginState",
+      "key": "339b8a21",
+      "matchingRules": {
+        "body": {
+          "$.checkedAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+              }
+            ]
+          },
+          "$.claude": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.kimi": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner whose node is not logged in",
+          "params": {
+            "runnerId": "r1",
+            "workspaceImage": "registry.example:5000/qits/workspace:2026.1004.1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "exited"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "kind": "schedule",
+            "schedule": "exit-watch"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "exitCode": 137,
+          "rowId": 5,
+          "type": "exited"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "exit-watch: frame:exited",
+      "key": "a574a5ca",
+      "matchingRules": {
+        "body": {
+          "$.exitCode": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.rowId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner whose running workspace exits by itself",
+          "params": {
+            "rowId": "5",
+            "runnerId": "r1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "healthChecked"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "healthCheck",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "checks": [
+            {
+              "data": {
+                "serverVersion": "27.3.1"
+              },
+              "detail": "docker 27.3.1",
+              "name": "docker",
+              "ok": true
+            },
+            {
+              "data": {
+                "image": null
+              },
+              "detail": "the runner has had no estate yet, so it does not know the workspace image",
+              "name": "workspaceImage",
+              "ok": false
+            },
+            {
+              "data": {
+                "image": null,
+                "pin": null
+              },
+              "detail": "the runner has had no estate yet, so it does not know the workspace image",
+              "name": "selfTest",
+              "ok": false
+            },
+            {
+              "data": {
+                "containers": [],
+                "runnerContainer": null,
+                "volumes": [
+                  {
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "name": "qits-workspaces-runner-dot-claude-r1",
+                    "rowId": null
+                  }
+                ]
+              },
+              "detail": "0 container(s), 1 volume(s), no runner container",
+              "name": "nodeInventory",
+              "ok": true
+            },
+            {
+              "data": {
+                "checkedAt": null,
+                "claude": null,
+                "kimi": null
+              },
+              "detail": "the login has not been probed yet",
+              "name": "login",
+              "ok": true
+            },
+            {
+              "data": {
+                "connected": true,
+                "connectedSince": "2026-01-01T00:00:00Z",
+                "held": [],
+                "slots": 1
+              },
+              "detail": "connected since 2026-10-05T04:38:19Z, 0 of 1 slot(s) held",
+              "name": "session",
+              "ok": true
+            },
+            {
+              "data": {
+                "node": {
+                  "memTotal": 0,
+                  "overcommitted": null,
+                  "slots": 1,
+                  "swapTotal": 0
+                },
+                "workspaces": []
+              },
+              "detail": "0 workspace(s), no oom kills",
+              "name": "workspaceMemory",
+              "ok": true
+            }
+          ],
+          "detail": "workspaceImage: the runner has had no estate yet, so it does not know the workspace image; selfTest: the runner has had no estate yet, so it does not know the workspace image",
+          "ok": false,
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "type": "healthChecked"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "healthCheck: frame:healthChecked",
+      "key": "72ac54b2",
+      "matchingRules": {
+        "body": {
+          "$.checks[0].data.serverVersion": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[0].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[0].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[0].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[1].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[1].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[1].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[2].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[2].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[2].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].data.volumes": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type",
+                "max": 1,
+                "min": 1
+              }
+            ]
+          },
+          "$.checks[3].data.volumes[*].createdAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+              }
+            ]
+          },
+          "$.checks[3].data.volumes[*].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[4].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[4].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[4].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[5].data.connected": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[5].data.connectedSince": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+              }
+            ]
+          },
+          "$.checks[5].data.slots": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.checks[5].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[5].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[5].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[6].data.node.memTotal": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.checks[6].data.node.slots": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.checks[6].data.node.swapTotal": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.checks[6].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[6].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[6].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.requestId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner that has heard no estate yet",
+          "params": {
+            "requestId": "00000000-0000-4000-8000-000000000001",
+            "runnerId": "r1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "healthChecked"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "healthCheck",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "checks": [
+            {
+              "data": {
+                "serverVersion": "27.3.1"
+              },
+              "detail": "docker 27.3.1",
+              "name": "docker",
+              "ok": true
+            },
+            {
+              "data": {
+                "created": "2026-01-01T00:00:00Z",
+                "id": "sha256:ws",
+                "image": "registry.example:5000/qits/workspace:2026.1004.1",
+                "pulled": false,
+                "pulling": false
+              },
+              "detail": "registry.example:5000/qits/workspace:2026.1004.1 is here",
+              "name": "workspaceImage",
+              "ok": true
+            },
+            {
+              "data": {
+                "image": "registry.example:5000/qits/workspace:2026.1004.1",
+                "pin": "registry.example:5000/qits/workspace:2026.1004.1"
+              },
+              "detail": "registry.example:5000/qits/workspace:2026.1004.1 ran on this node",
+              "name": "selfTest",
+              "ok": true
+            },
+            {
+              "data": {
+                "containers": [
+                  {
+                    "exitCode": 137,
+                    "finishedAt": "2026-01-01T00:00:00Z",
+                    "id": "c1full",
+                    "image": "registry.example:5000/qits/workspace:2026.1004.1",
+                    "name": "qits-workspaces-runner-ws-1-r1",
+                    "rowId": 1,
+                    "startedAt": "2026-01-01T00:00:00Z",
+                    "state": "exited"
+                  }
+                ],
+                "runnerContainer": {
+                  "id": "selffull",
+                  "name": "qits-workspaces-runner-r1-2026.101.0",
+                  "startedAt": "2026-01-01T00:00:00Z",
+                  "version": "2026.101.0"
+                },
+                "volumes": [
+                  {
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "name": "qits-workspaces-runner-dot-claude-r1",
+                    "rowId": 1
+                  },
+                  {
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "name": "qits-workspaces-runner-dot-claude-r1",
+                    "rowId": 1
+                  },
+                  {
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "name": "qits-workspaces-runner-dot-claude-r1",
+                    "rowId": 1
+                  }
+                ]
+              },
+              "detail": "1 container(s), 3 volume(s), runner container qits-workspaces-runner-r1-2026.101.0",
+              "name": "nodeInventory",
+              "ok": true
+            },
+            {
+              "data": {
+                "checkedAt": "2026-01-01T00:00:00Z",
+                "claude": "PRESENT",
+                "kimi": "PRESENT"
+              },
+              "detail": "claude PRESENT, kimi PRESENT at 2026-10-05T04:38:19Z",
+              "name": "login",
+              "ok": true
+            },
+            {
+              "data": {
+                "connected": true,
+                "connectedSince": "2026-01-01T00:00:00Z",
+                "held": [],
+                "slots": 1
+              },
+              "detail": "connected since 2026-10-05T04:38:19Z, 0 of 1 slot(s) held",
+              "name": "session",
+              "ok": true
+            },
+            {
+              "data": {
+                "node": {
+                  "memTotal": 0,
+                  "overcommitted": null,
+                  "slots": 1,
+                  "swapTotal": 0
+                },
+                "workspaces": []
+              },
+              "detail": "0 workspace(s), no oom kills",
+              "name": "workspaceMemory",
+              "ok": true
+            }
+          ],
+          "detail": "all 7 checks passed",
+          "ok": true,
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "type": "healthChecked"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "healthCheck: frame:healthChecked",
+      "key": "93256983",
+      "matchingRules": {
+        "body": {
+          "$.checks[0].data.serverVersion": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[0].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[0].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[0].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[1].data.created": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+              }
+            ]
+          },
+          "$.checks[1].data.id": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[1].data.image": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[1].data.pulled": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[1].data.pulling": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[1].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[1].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[1].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[2].data.image": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[2].data.pin": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[2].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[2].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[2].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].data.containers": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type",
+                "max": 1,
+                "min": 1
+              }
+            ]
+          },
+          "$.checks[3].data.containers[*].exitCode": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.checks[3].data.containers[*].finishedAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+              }
+            ]
+          },
+          "$.checks[3].data.containers[*].id": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].data.containers[*].image": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].data.containers[*].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].data.containers[*].rowId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.checks[3].data.containers[*].startedAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+              }
+            ]
+          },
+          "$.checks[3].data.containers[*].state": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].data.runnerContainer.id": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].data.runnerContainer.name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].data.runnerContainer.startedAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+              }
+            ]
+          },
+          "$.checks[3].data.runnerContainer.version": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].data.volumes": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type",
+                "max": 3,
+                "min": 3
+              }
+            ]
+          },
+          "$.checks[3].data.volumes[*].createdAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+              }
+            ]
+          },
+          "$.checks[3].data.volumes[*].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].data.volumes[*].rowId": {
+            "combine": "OR",
+            "matchers": [
+              {
+                "match": "type"
+              },
+              {
+                "match": "null"
+              }
+            ]
+          },
+          "$.checks[3].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[3].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[4].data.checkedAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+              }
+            ]
+          },
+          "$.checks[4].data.claude": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[4].data.kimi": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[4].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[4].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[4].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[5].data.connected": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[5].data.connectedSince": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+              }
+            ]
+          },
+          "$.checks[5].data.slots": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.checks[5].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[5].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[5].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[6].data.node.memTotal": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.checks[6].data.node.slots": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.checks[6].data.node.swapTotal": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.checks[6].detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[6].name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.checks[6].ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.ok": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.requestId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner whose node is healthy and logged in",
+          "params": {
+            "requestId": "00000000-0000-4000-8000-000000000001",
+            "runnerId": "r1",
+            "workspaceImage": "registry.example:5000/qits/workspace:2026.1004.1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "heartbeat"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "kind": "schedule",
+            "schedule": "heartbeat"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "type": "heartbeat"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "heartbeat: frame:heartbeat",
+      "key": "e5053ca4",
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner whose node holds no workspaces",
+          "params": {
+            "runnerId": "r1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "loginState"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "probeLogin",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "checkedAt": "2026-01-01T00:00:00Z",
+          "claude": "UNKNOWN",
+          "kimi": "UNKNOWN",
+          "type": "loginState"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "probeLogin: frame:loginState",
+      "key": "9a74358a",
+      "matchingRules": {
+        "body": {
+          "$.checkedAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+              }
+            ]
+          },
+          "$.claude": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.kimi": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner that has heard no estate yet",
+          "params": {
+            "requestId": "00000000-0000-4000-8000-000000000001",
+            "runnerId": "r1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "hello"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "event": "reconnect",
+            "kind": "event"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "capabilities": {
+            "arch": "amd64",
+            "docker": true,
+            "labels": {},
+            "os": "linux"
+          },
+          "capabilityVersion": 1,
+          "heldWorkspaces": [
+            "5"
+          ],
+          "runnerVersion": "2026.101.0",
+          "slots": 2,
+          "type": "hello"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "reconnect: frame:hello",
+      "key": "bf9cef0",
+      "matchingRules": {
+        "body": {
+          "$.capabilities.arch": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.capabilities.docker": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.capabilities.os": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.capabilityVersion": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          },
+          "$.heldWorkspaces": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type",
+                "max": 1,
+                "min": 1
+              }
+            ]
+          },
+          "$.heldWorkspaces[*]": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.runnerVersion": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.slots": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner reconnecting while its node holds a running workspace",
+          "params": {
+            "rowId": "5",
+            "runnerId": "r1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "stopped"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "stop",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "rowId": 5,
+          "type": "stopped"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "stop: frame:stopped",
+      "key": "7e82ad46",
+      "matchingRules": {
+        "body": {
+          "$.rowId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner whose node holds a running workspace",
+          "params": {
+            "rowId": "5",
+            "runnerId": "r1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "launchFailed"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "take",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "detail": "docker could not run qits-workspaces-runner-ws-5-r1: docker: Error response from daemon: no space left on device.",
+          "rowId": 5,
+          "type": "launchFailed"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "take: frame:launchFailed",
+      "key": "a2bf9e75",
+      "matchingRules": {
+        "body": {
+          "$.detail": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.rowId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner asked to take a workspace whose launch fails",
+          "params": {
+            "rowId": "5",
+            "runnerId": "r1",
+            "workspaceImage": "registry.example:5000/qits/workspace:2026.1004.1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "launched"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-runner-daemon",
+            "frame": "take",
+            "kind": "frame"
+          }
+        }
+      },
+      "contents": {
+        "content": {
+          "containerId": "qits-workspaces-runner-ws-5-r1",
+          "rowId": 5,
+          "type": "launched"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "take: frame:launched",
+      "key": "3f084575",
+      "matchingRules": {
+        "body": {
+          "$.containerId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.rowId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "number"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a runner asked to take a new workspace",
+          "params": {
+            "rowId": "5",
+            "runnerId": "r1",
+            "workspaceImage": "registry.example:5000/qits/workspace:2026.1004.1"
+          }
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "4.0"
+    },
+    "plugins": []
+  },
+  "provider": {
+    "name": "qits-workspaces-runner-daemon"
+  }
+}

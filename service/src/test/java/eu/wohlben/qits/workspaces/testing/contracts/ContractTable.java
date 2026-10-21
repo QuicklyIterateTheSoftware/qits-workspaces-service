@@ -9,6 +9,7 @@ import au.com.dius.pact.consumer.PactVerificationResult;
 import au.com.dius.pact.consumer.dsl.PactBuilder;
 import au.com.dius.pact.consumer.model.MockProviderConfig;
 import au.com.dius.pact.core.model.PactSpecVersion;
+import au.com.dius.pact.core.model.V4Interaction;
 import au.com.dius.pact.core.model.V4Pact;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,6 +40,13 @@ import java.util.Set;
  * {@code ConsumerPact.via} writes it). The committed file is compared with the via version masked,
  * so a client bump alone is not a contract change; the rewrite under {@code -Dgolden.update=true}
  * still writes the version.
+ *
+ * <p><b>Message rows</b> (qits-950, {@link ContractRow#message}): a table may hold frames its
+ * provider SENDS this service — qits-workspaces-runner-daemon's — as {@code Asynchronous/Messages}
+ * interactions ({@link GoldenMasters#messageInteraction}). {@link #verifyLive} hands each one's
+ * {@link PactMessage} to the row's {@code receive} instead of running a mock server, and the
+ * references they carry are {@code qits-call {app, frame}} and a {@code qits-trigger} on the
+ * provider's side ({@link GoldenMasters.Trigger#sent}).
  */
 public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> rows, Via via) {
 
@@ -97,6 +105,11 @@ public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> r
     PactBuilder builder =
         new PactBuilder(GoldenMasters.CONSUMER, provider.repository(), PactSpecVersion.V4);
     for (ContractRow row : selected) {
+      if (row.isMessage()) {
+        GoldenMasters.messageInteraction(
+            builder, provider, row.state(), row.operationId(), row.trigger());
+        continue;
+      }
       GoldenMasters.interaction(
           builder,
           provider,
@@ -115,6 +128,14 @@ public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> r
     assertTrue(!live().isEmpty(), provider.repository() + ": no live row");
     List<String> failures = new ArrayList<>();
     for (ContractRow row : live()) {
+      if (row.isMessage()) {
+        try {
+          receive(row);
+        } catch (Exception | AssertionError e) {
+          failures.add(row.description() + " [" + row.state() + "]: " + e);
+        }
+        continue;
+      }
       Map<String, String> params = GoldenMasters.params(provider, row.state());
       PactVerificationResult result =
           ConsumerPactRunnerKt.runConsumerTest(
@@ -136,6 +157,31 @@ public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> r
               + " contract row(s) failed:\n  "
               + String.join("\n  ", failures));
     }
+  }
+
+  /** The live row {@code description} names in {@code state}; fails naming both when none does. */
+  public ContractRow row(String description, String state) {
+    return live().stream()
+        .filter(r -> r.description().equals(description) && r.state().equals(state))
+        .findFirst()
+        .orElseThrow(
+            () ->
+                new IllegalArgumentException(
+                    provider.repository() + ": no live row " + description + " [" + state + "]"));
+  }
+
+  /**
+   * A message row's {@code receive}, handed the pact's message for it — the interaction exactly as
+   * {@link #pact(List)} writes it, with the state's params.
+   */
+  public void receive(ContractRow row) throws Exception {
+    if (!row.isMessage()) {
+      throw new IllegalArgumentException(row.description() + " is no message row");
+    }
+    V4Pact single = pact(List.of(row));
+    V4Interaction.AsynchronousMessage message =
+        (V4Interaction.AsynchronousMessage) single.getInteractions().get(0);
+    row.receive().run(new PactMessage(message, GoldenMasters.params(provider, row.state())));
   }
 
   /** The pending rows whose (state, operation) the pinned golden masters now record. */
@@ -169,20 +215,27 @@ public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> r
     assertEquals(live().size(), interactions.size(), "one interaction per live row");
     Map<String, String> keyOfKind =
         Map.of(
-            "operation", "operationId", "event", "event", "schedule", "schedule", "ui", "interaction");
+            "operation", "operationId", "event", "event", "schedule", "schedule", "ui", "interaction",
+            "frame", "frame");
     for (JsonNode interaction : interactions) {
       String description = interaction.path("description").asText();
+      // A message is the provider's frame: what it is called and what caused it are both its own.
+      boolean message = "Asynchronous/Messages".equals(interaction.path("type").asText());
       JsonNode references = interaction.path("comments").path("references");
       JsonNode call = references.path("qits-call");
       assertEquals(provider.repository(), call.path("app").asText(), description);
-      assertTrue(!call.path("operationId").asText().isBlank(), description + ": qits-call.operationId");
+      String callKey = message ? "frame" : "operationId";
+      assertTrue(!call.path(callKey).asText().isBlank(), description + ": qits-call." + callKey);
       JsonNode trigger = references.path("qits-trigger");
       String kind = trigger.path("kind").asText();
       assertTrue(keyOfKind.containsKey(kind), description + ": unknown trigger kind '" + kind + "'");
       assertTrue(
           !trigger.path(keyOfKind.get(kind)).asText().isBlank(),
           description + ": qits-trigger." + keyOfKind.get(kind));
-      assertEquals(GoldenMasters.CONSUMER, trigger.path("app").asText(), description);
+      assertEquals(
+          message ? provider.repository() : GoldenMasters.CONSUMER,
+          trigger.path("app").asText(),
+          description);
       if (via != null) {
         assertEquals(MAPPER.valueToTree(via.reference()), references.path("qits-via"), description + ": qits-via");
       }

@@ -123,6 +123,11 @@
         <qits.idp-golden-masters.version>2026.1019.100619</qits.idp-golden-masters.version>
         <qits.containers-golden-masters.version>2026.1019.103940</qits.containers-golden-masters.version>
         <qits.workspace-daemon-golden-masters.version>2026.1018.152111</qits.workspace-daemon-golden-masters.version>
+        <!-- qits-workspaces-runner-daemon's golden masters (qits-950, A2): the frames a workspace
+             runner sends this service, per runner-side state, which runnerhost/RunnerFramesContract
+             builds the message pact pacts/qits-workspaces-service_qits-workspaces-runner-daemon.json
+             from. The same rule: a qits-maintenance bump moves it. -->
+        <qits.workspaces-runner-golden-masters.version>2026.1021.200248</qits.workspaces-runner-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
              and ConsumerPactVerificationTest verifies consumers' pacts against this service.
@@ -425,6 +430,11 @@
                 <groupId>${project.groupId}</groupId>
                 <artifactId>qits-workspace-daemon-golden-masters</artifactId>
                 <version>${qits.workspace-daemon-golden-masters.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${project.groupId}</groupId>
+                <artifactId>qits-workspaces-runner-golden-masters</artifactId>
+                <version>${qits.workspaces-runner-golden-masters.version}</version>
             </dependency>
             <dependency>
                 <groupId>au.com.dius.pact.consumer</groupId>

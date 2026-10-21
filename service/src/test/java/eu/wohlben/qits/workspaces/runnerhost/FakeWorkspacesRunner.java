@@ -96,6 +96,11 @@ final class FakeWorkspacesRunner implements AutoCloseable {
         .get(5, TimeUnit.SECONDS);
   }
 
+  /** {@code text} on the socket verbatim: a pact message, never re-encoded (qits-950). */
+  void sendText(String text) throws Exception {
+    socket.writeTextMessage(text).toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+  }
+
   /** The next frame, which must be a {@code type}. */
   <T extends RunnerMessage> T expect(Class<T> type) throws InterruptedException {
     RunnerMessage next = received.poll(SOON.toMillis(), TimeUnit.MILLISECONDS);

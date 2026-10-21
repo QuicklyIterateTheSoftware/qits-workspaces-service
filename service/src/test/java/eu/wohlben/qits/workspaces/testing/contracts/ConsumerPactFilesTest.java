@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.containershost.ContainersContract;
 import eu.wohlben.qits.workspaces.daemonhost.WorkspaceDaemonContract;
+import eu.wohlben.qits.workspaces.runnerhost.RunnerFramesContract;
 import eu.wohlben.qits.workspaces.wiring.IdpContract;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -15,7 +16,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * <b>The committed consumer pacts against qits-idp, qits-containers and qits-workspace-daemon</b>
- * (qits-1149), one {@link ContractTable} each. Plain JUnit: building and writing a pact needs no
+ * (qits-1149), and the message pact of the frames qits-workspaces-runner-daemon sends (qits-950),
+ * one {@link ContractTable} each. Plain JUnit: building and writing a pact needs no
  * application. qits-projects' file is {@code ProjectsPactFileTest}'s.
  *
  * <p>Per table: the committed {@code pacts/qits-workspaces-service_<provider>.json} is what the live
@@ -27,7 +29,11 @@ import org.junit.jupiter.params.provider.MethodSource;
 class ConsumerPactFilesTest {
 
   static Stream<ContractTable> tables() {
-    return Stream.of(IdpContract.TABLE, ContainersContract.TABLE, WorkspaceDaemonContract.TABLE);
+    return Stream.of(
+        IdpContract.TABLE,
+        ContainersContract.TABLE,
+        WorkspaceDaemonContract.TABLE,
+        RunnerFramesContract.TABLE);
   }
 
   @ParameterizedTest

@@ -109,6 +109,13 @@ public final class GoldenMasters {
   public static final Provider WORKSPACE_DAEMON =
       new Provider("qits-workspace-daemon", "qits-workspace-daemon");
 
+  /**
+   * qits-workspaces-runner-daemon: the frames a workspace runner sends this service on its socket
+   * (qits-950, A2) — a provider of messages, not of HTTP answers ({@link #messageInteraction}).
+   */
+  public static final Provider WORKSPACES_RUNNER =
+      new Provider("qits-workspaces-runner-daemon", "qits-workspaces-runner");
+
   /** The provider, as the pact names it: the repository name, never the bare application name. */
   public static final String PROVIDER = PROJECTS.repository();
 
@@ -348,6 +355,15 @@ public final class GoldenMasters {
       return new Trigger("ui", app, "interaction", interaction);
     }
 
+    /**
+     * What made a message PROVIDER send its frame (qits-950): {@code kind} is the index's own —
+     * {@code frame} (the frame it answered), {@code event} or {@code schedule} — keyed by the kind,
+     * and {@code app} is the provider's repository, because the cause sits on the sending side.
+     */
+    public static Trigger sent(Provider provider, String kind, String value) {
+      return new Trigger(kind, provider.repository(), kind, value);
+    }
+
     /** The {@code qits-trigger} group, all values strings, in a fixed key order. */
     public Map<String, String> reference() {
       Map<String, String> ref = new LinkedHashMap<>();
@@ -548,6 +564,119 @@ public final class GoldenMasters {
         });
   }
 
+  // --- the message pact (qits-950) --------------------------------------------------------------
+
+  /** The prefix of a recorded frame's operationId: {@code frame:<type>}. */
+  public static final String FRAME_PREFIX = "frame:";
+
+  /**
+   * The {@code qits-trigger} a message provider recorded for one (state, frame): the index entry's
+   * {@code trigger} group, {@code {kind, <kind>: value}}, as {@link Trigger#sent}.
+   */
+  public static Trigger recordedTrigger(Provider provider, String state, String operationId) {
+    JsonNode trigger = operationNode(provider, state, operationId).path("trigger");
+    String kind = trigger.path("kind").asText();
+    String value = trigger.path(kind).asText();
+    if (kind.isBlank() || value.isBlank()) {
+      throw new IllegalStateException(
+          provider.application() + "'s golden master " + state + "/" + operationId
+              + " records no trigger {kind, <kind>}: " + trigger);
+    }
+    return Trigger.sent(provider, kind, value);
+  }
+
+  /** Every {@code frame:<type>} operation {@code provider} records, as (state, operationId). */
+  public static List<Map.Entry<String, String>> recordedFrames(Provider provider) {
+    List<Map.Entry<String, String>> out = new ArrayList<>();
+    for (JsonNode state : index(provider).root().path("states")) {
+      for (JsonNode op : state.path("operations")) {
+        String id = op.path("operationId").asText();
+        if (id.startsWith(FRAME_PREFIX)) {
+          out.add(Map.entry(state.path("name").asText(), id));
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Add the V4 {@code Asynchronous/Messages} interaction for one recorded frame of {@code
+   * provider}: {@code given(state, params)}, the recorded frame as the message contents (JSON) with
+   * the matchers below, and {@code comments.references} — {@code qits-call} {@code {app, frame}}
+   * and {@code qits-trigger}, the cause on the sending side.
+   *
+   * <p><b>The whole frame is the contract</b>, nothing cut to {@code consumes}: the codec decodes
+   * every field, and what the service does not act on it still stores (a health check's report).
+   * The matchers are {@link #interaction}'s, read off the index's {@code frozen} lists, with two
+   * differences a frame needs. {@code $.type} is exact: it is the frame itself, the key the
+   * recording is filed under, and a type match would let any frame stand for any other. And an
+   * array whose object elements do not share one key set — a health check's {@code checks[]}, each
+   * check carrying data of its own shape — is matched element by element at its recorded length,
+   * because one merged template would demand every check's keys of every check. {@code
+   * frozen.numbers} needs nothing of its own: a number is type-matched anyway.
+   *
+   * <p>{@code trigger} must be the one the index records ({@link #recordedTrigger}): a row naming
+   * another cause than the provider's would put a false {@code qits-trigger} in the pact.
+   */
+  public static PactBuilder messageInteraction(
+      PactBuilder builder, Provider provider, String state, String operationId, Trigger trigger) {
+    Objects.requireNonNull(trigger, "trigger: every interaction names the cause of its frame");
+    Trigger recorded = recordedTrigger(provider, state, operationId);
+    if (!recorded.equals(trigger)) {
+      throw new IllegalStateException(
+          provider.application() + " records " + state + "/" + operationId + " as sent on "
+              + recorded.reference() + ", and the row names " + trigger.reference());
+    }
+    JsonNode node = operationNode(provider, state, operationId);
+    String frame = node.path("frame").asText();
+    if (!operationId.equals(FRAME_PREFIX + frame)) {
+      throw new IllegalStateException(
+          "golden master " + state + "/" + operationId + " is no frame entry (frame: '" + frame
+              + "')");
+    }
+    Operation op = operation(provider, state, operationId);
+    DslPart body = messageBody(op, frame);
+    Map<String, Object> references = new LinkedHashMap<>();
+    Map<String, String> call = new LinkedHashMap<>();
+    call.put("app", provider.repository());
+    call.put("frame", frame);
+    references.put("qits-call", call);
+    references.put("qits-trigger", trigger.reference());
+    return builder.expectsToReceiveMessageInteraction(
+        description(operationId, trigger),
+        message -> {
+          message.state(state, new LinkedHashMap<String, Object>(op.params()));
+          message.withContents(contents -> contents.withContent(body));
+          // As for HTTP: no DSL for an arbitrary comment group, and the V4 model writes it verbatim.
+          message.getInteraction().getComments().put("references", Json.toJson(references));
+          return message;
+        });
+  }
+
+  /** The recorded frame as a message body: {@link #messageInteraction}'s matchers. */
+  static DslPart messageBody(Operation op, String frame) {
+    JsonNode recorded = json(op.provider(), op.state(), op.operationId());
+    if (!recorded.isObject() || !frame.equals(recorded.path("type").asText())) {
+      throw new IllegalStateException(
+          "golden master " + op.state() + "/" + op.operationId() + " is no '" + frame
+              + "' frame: " + recorded);
+    }
+    PactDslJsonBody root = new PactDslJsonBody();
+    fillObject(root, Shape.of(recorded), "$", op, true);
+    return root;
+  }
+
+  private static JsonNode operationNode(Provider provider, String state, String operationId) {
+    for (JsonNode op : stateNode(provider, state).path("operations")) {
+      if (operationId.equals(op.path("operationId").asText())) {
+        return op;
+      }
+    }
+    throw new IllegalArgumentException(
+        provider.application() + "'s golden masters record no operation " + operationId
+            + " in state '" + state + "'");
+  }
+
   /** {@link #interaction(PactBuilder, Provider, String, String, Trigger, DslPart, List)} for a GET. */
   public static PactBuilder interaction(
       PactBuilder builder,
@@ -571,7 +700,7 @@ public final class GoldenMasters {
               + ": only an object or array body is supported, got " + recorded.getNodeType());
     }
     PactDslJsonBody root = new PactDslJsonBody();
-    fillObject(root, Shape.of(recorded), "$", op);
+    fillObject(root, Shape.of(recorded), "$", op, false);
     return root;
   }
 
@@ -588,7 +717,7 @@ public final class GoldenMasters {
         "$".equals(op.listFilteredTo())
             ? PactDslJsonArray.arrayMinLike(n, n)
             : PactDslJsonArray.arrayMinMaxLike(n, n, n);
-    fillObject(template, array.element, "$[*]", op);
+    fillObject(template, array.element, "$[*]", op, false);
     return template.closeObject();
   }
 
@@ -753,25 +882,58 @@ public final class GoldenMasters {
 
   // --- the body ---------------------------------------------------------------------------------
 
-  private static void fillObject(PactDslJsonBody target, Shape shape, String path, Operation op) {
+  /**
+   * @param message a frame's body ({@link #messageBody}): {@code $.type} exact, and an array of
+   *     objects with differing key sets matched element by element
+   */
+  private static void fillObject(
+      PactDslJsonBody target, Shape shape, String path, Operation op, boolean message) {
     for (Map.Entry<String, Shape> field : shape.fields.entrySet()) {
       String name = field.getKey();
       Shape child = field.getValue();
       String childPath = path + "." + name;
       switch (child.kind) {
         case NULL -> target.nullValue(name);
-        case LEAF -> leaf(target, name, child, childPath, op);
+        case LEAF -> {
+          if (message && "$.type".equals(childPath)) {
+            target.stringValue(name, child.example.asText());
+          } else {
+            leaf(target, name, child, childPath, op);
+          }
+        }
         case OBJECT -> {
           if (child.nullable) {
             throw unsupported(op, childPath, "an object that is null in some elements");
           }
           PactDslJsonBody nested = target.object(name);
-          fillObject(nested, child, childPath, op);
+          fillObject(nested, child, childPath, op, message);
           nested.closeObject();
         }
-        case ARRAY -> array(target, name, child, childPath, op);
+        case ARRAY -> {
+          if (message && child.mixedObjects()) {
+            positional(target, name, child, childPath, op);
+          } else {
+            array(target, name, child, childPath, op, message);
+          }
+        }
       }
     }
+  }
+
+  /**
+   * An array of objects that do not share one key set, element by element at its recorded length:
+   * no min/max rule, so pact compares the length exactly, and each element carries its own
+   * matchers. The frozen lists still name its leaves by {@code [*]}.
+   */
+  private static void positional(
+      PactDslJsonBody target, String name, Shape array, String path, Operation op) {
+    PactDslJsonArray elements = target.array(name);
+    for (Shape element : array.elements) {
+      PactDslJsonBody nested = elements.object();
+      fillObject(nested, element, path + "[*]", op, true);
+      nested.closeObject();
+    }
+    elements.closeArray();
   }
 
   private static void leaf(
@@ -806,7 +968,7 @@ public final class GoldenMasters {
   }
 
   private static void array(
-      PactDslJsonBody target, String name, Shape array, String path, Operation op) {
+      PactDslJsonBody target, String name, Shape array, String path, Operation op, boolean message) {
     if (array.nullable) {
       throw unsupported(op, path, "an array that is null in some elements");
     }
@@ -824,7 +986,7 @@ public final class GoldenMasters {
       case OBJECT -> {
         PactDslJsonBody template =
             filtered ? target.minArrayLike(name, n, n) : target.minMaxArrayLike(name, n, n, n);
-        fillObject(template, element, elementPath, op);
+        fillObject(template, element, elementPath, op, message);
         DslPart closed = template.closeObject();
         ((PactDslJsonArray) closed).closeArray();
       }
@@ -912,6 +1074,37 @@ public final class GoldenMasters {
     final LinkedHashMap<String, Shape> fields = new LinkedHashMap<>();
     Shape element;
     int length;
+    /** An array's elements, each its own shape and never merged. */
+    final List<Shape> elements = new ArrayList<>();
+
+    /**
+     * An array of objects that are not all one structure: their keys differ at some depth, or a
+     * key holds an object in one and something else in another. A leaf and a null count as one
+     * structure (a merge makes that {@code type OR null}), and a nested array as opaque (its own
+     * elements are judged where it is built).
+     */
+    boolean mixedObjects() {
+      if (kind != Kind.ARRAY
+          || elements.size() < 2
+          || !elements.stream().allMatch(e -> e.kind == Kind.OBJECT)) {
+        return false;
+      }
+      String first = elements.get(0).structure();
+      return elements.stream().anyMatch(e -> !e.structure().equals(first));
+    }
+
+    private String structure() {
+      return switch (kind) {
+        case NULL, LEAF -> "*";
+        case ARRAY -> "[]";
+        case OBJECT -> {
+          StringBuilder out = new StringBuilder("{");
+          new java.util.TreeMap<>(fields)
+              .forEach((key, child) -> out.append(key).append(':').append(child.structure()).append(','));
+          yield out.append('}').toString();
+        }
+      };
+    }
 
     static Shape of(JsonNode node) {
       Shape shape = new Shape();
@@ -930,6 +1123,7 @@ public final class GoldenMasters {
         shape.length = node.size();
         for (JsonNode e : node) {
           shape.element = shape.element == null ? of(e) : merge(shape.element, of(e));
+          shape.elements.add(of(e));
         }
       } else {
         shape.kind = Kind.LEAF;
