@@ -48,7 +48,9 @@ import java.util.UUID;
  *       client pair ({@code /idp/api/clients}) or a token ({@code /idp/api/tokens}, a workspace's
  *       or an agent's), commissioned when the scheduler starts a slot or places an agent ({@code
  *       AgentService.reconcile}), listed and handed back by {@code
- *       CommissionReconciler.reconcile}.
+ *       CommissionReconciler.reconcile}, and a token handed back with its container ({@code
+ *       deleteWorkspaceContainer}, {@code discardWorkspace}, {@code recreateWorkspaceContainer}, and
+ *       the scheduler's removal of a slot or an agent).
  *   <li>{@link IdpRunnerCommissioner} — a runner's registration token ({@code createRunner}, {@code
  *       rotateRunnerRegistrationToken}) and its own client, with the spent token deleted ({@code
  *       registerRunner}).
@@ -205,6 +207,15 @@ public final class IdpContract {
                   basic(null),
                   List.of(),
                   (url, params) -> commissionerAgainst(url, params).deleteToken(params.get("tokenId"))),
+              // A workspace's token goes back with its container (qits-950, B1): the container
+              // delete door, a discard, and a recreate (whose next container is minted a fresh one)
+              // each hand it back through WorkspaceService.decommissionFor or deleteToken(clearToken),
+              // and the scheduler does for a slot it removes and an agent it removes. The request is
+              // the reconcile's; what the rows add is the chain from each verb to the delete.
+              tokenHandback(Trigger.operation("deleteWorkspaceContainer")),
+              tokenHandback(Trigger.operation("discardWorkspace")),
+              tokenHandback(Trigger.operation("recreateWorkspaceContainer")),
+              tokenHandback(RECONCILE),
               // --- a runner's credentials ------------------------------------------------------
               ContractRow.of(
                   CREATE_RUNNER,
@@ -588,6 +599,17 @@ public final class IdpContract {
    * mock server and the state: the grant, the audience, the token path and the client
    * authentication are what ships.
    */
+  /** {@code trigger} handing a workspace's or an agent's token back: 204 for a token idp holds. */
+  private static ContractRow tokenHandback(Trigger trigger) {
+    return ContractRow.of(
+        trigger,
+        A_TOKEN,
+        "deleteToken",
+        basic(null),
+        List.of(),
+        (url, params) -> commissionerAgainst(url, params).deleteToken(params.get("tokenId")));
+  }
+
   static String mintAgainst(String mockUrl, Map<String, String> params) throws Exception {
     String[] pair = pair(params);
     OidcClientConfig shipped =
