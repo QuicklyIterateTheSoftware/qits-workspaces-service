@@ -2954,6 +2954,7 @@ paths:
         - qits:agent
   /workspaces/api/workspaces/{id}/delete-container:
     post:
+      operationId: deleteWorkspaceContainer
       parameters:
       - name: id
         in: path
@@ -2981,6 +2982,7 @@ paths:
         - qits:admin-agent
   /workspaces/api/workspaces/{id}/discard:
     post:
+      operationId: discardWorkspace
       parameters:
       - name: id
         in: path

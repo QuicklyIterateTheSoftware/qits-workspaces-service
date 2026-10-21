@@ -210,6 +210,7 @@ public class WorkspaceController {
    */
   @POST
   @Path("/{id}/delete-container")
+  @Operation(operationId = "deleteWorkspaceContainer")
   public WorkspaceDto deleteContainer(
       @PathParam("id") Long id) {
     workspaceService.deleteContainer(id);
@@ -266,6 +267,7 @@ public class WorkspaceController {
    */
   @POST
   @Path("/{id}/discard")
+  @Operation(operationId = "discardWorkspace")
   public DiscardWorkspaceRequest.Response discard(
       @PathParam("id") Long id,
       @QueryParam("ignore-changes") @DefaultValue("false") boolean ignoreChanges,
