@@ -1,0 +1,77 @@
+{
+  "consumer": {
+    "name": "qits-workspaces-runner-daemon"
+  },
+  "provider": {
+    "name": "qits-workspaces-service"
+  },
+  "interactions": [
+    {
+      "type": "Synchronous/HTTP",
+      "description": "registerRunner: registerRunner",
+      "providerStates": [
+        {
+          "name": "an unregistered runner"
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/workspaces/api/runners/00000000-0000-4000-8000-000000000020/register"
+      },
+      "response": {
+        "status": 200
+      },
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces",
+            "operationId": "registerRunner"
+          },
+          "qits-trigger": {
+            "kind": "event",
+            "app": "qits-workspaces-runner-daemon",
+            "event": "StartupEvent"
+          }
+        }
+      }
+    },
+    {
+      "type": "Asynchronous/Messages",
+      "description": "workspaces-runner:reserve: take",
+      "providerStates": [
+        {
+          "name": "a runner in service with a free slot and a queued workspace"
+        }
+      ],
+      "contents": {
+        "contentType": "application/json",
+        "encoded": false,
+        "content": {
+          "type": "take",
+          "rowId": 1
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspaces",
+            "frame": "take"
+          },
+          "qits-trigger": {
+            "kind": "event",
+            "app": "qits-workspaces-service",
+            "event": "workspaces-runner:reserve"
+          }
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "4.0"
+    }
+  }
+}

@@ -10,6 +10,8 @@ import au.com.dius.pact.provider.junit5.PactVerificationContext;
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider;
 import au.com.dius.pact.provider.junitsupport.Provider;
 import au.com.dius.pact.provider.junitsupport.State;
+import au.com.dius.pact.provider.junitsupport.filter.InteractionFilter;
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter;
 import au.com.dius.pact.provider.junitsupport.loader.PactSource;
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -49,14 +51,28 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * hold it ({@code createRunner}'s {@code "name": "{runnerName}"}), and pact-jvm's own {@code
  * ProviderState} generators reach only a path or a value the consumer marked. Nothing else about
  * the request, and nothing about the response or a matching rule, is touched.
+ *
+ * <p><b>It verifies the HTTP interactions and only those</b> (qits-950): {@link #HTTP_ONLY} keeps
+ * every {@code Synchronous/HTTP} interaction (a V3 request/response one reads as that too) and
+ * drops every other kind before an invocation is made of it. A consumer pact jar may carry message
+ * interactions — qits-workspaces-runner-daemon's will, for the frames this service sends its
+ * runners — and an {@link HttpTestTarget} cannot run one ({@code UnsupportedOperationException:
+ * Only request/response interactions…}); those are a message verifier's. {@code
+ * ConsumerPactVerificationFilterTest} holds both halves.
  */
 @QuarkusTest
 @Provider(ConsumerPactVerificationTest.PROVIDER)
 @PactSource(ClasspathPactLoader.class)
+@PactFilter(
+    value = ConsumerPactVerificationTest.HTTP_ONLY,
+    filter = InteractionFilter.ByInteractionType.class)
 class ConsumerPactVerificationTest {
 
   /** The provider as a consumer pact names it: the repository name. */
   static final String PROVIDER = "qits-workspaces-service";
+
+  /** The one interaction type this verifier runs: pact-jvm's V4 name for request/response. */
+  static final String HTTP_ONLY = "Synchronous/HTTP";
 
   static {
     System.setProperty("pact_do_not_track", "true");
