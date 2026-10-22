@@ -104,6 +104,15 @@ public class AgentWorktree extends PanacheEntityBase implements CausedRow {
   @Column(name = "block_source", columnDefinition = "text")
   public String blockSource;
 
+  /**
+   * The subject that set the item's explicit block, as qits-projects names it with an {@code
+   * EXPLICIT} or {@code BOTH} source (qits-1511, {@code V29}); null otherwise. An {@code EXPLICIT}
+   * block whose author is this agent's own {@link #commissionedTokenSubject} does not exempt it
+   * from the nudge.
+   */
+  @Column(name = "block_author", columnDefinition = "text")
+  public String blockAuthor;
+
   /** What is still to be said: the instruction until the first start, then delivered turns. */
   @Column(name = "pending_text", columnDefinition = "text")
   public String pendingText;
@@ -167,7 +176,8 @@ public class AgentWorktree extends PanacheEntityBase implements CausedRow {
   /**
    * Nudges in a row with no other turn between them (qits-1460, {@code V28}). Set back to 0 where a
    * turn that is not a nudge is written (dispatch instruction, delivery, a wait's wake) and when a
-   * wait is declared; at {@code qits.workspace.agent.nudge-limit} the agent is nudged no more.
+   * wait is declared; at {@code qits.workspace.agent.nudge-limit} the agent is nudged no more. Each
+   * nudge in a row waits twice as long as the one before (qits-1511).
    */
   @Column(name = "nudge_count", nullable = false)
   public int nudgeCount;

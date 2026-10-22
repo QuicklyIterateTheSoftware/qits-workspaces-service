@@ -91,12 +91,15 @@ import org.jboss.logging.Logger;
  *       to a new workspace while the runners have free slots (an admin agent: a new DIRECT admin
  *       workspace), else to a workspace whose agents have all yielded, else it stays QUEUED.
  *   <li><b>Yield</b>: a RUNNING agent that has waited for input longer than {@code
- *       qits.workspace.agent.yield-after} gives up its slot when another agent wants it. Only the
- *       row changes: no daemon call, and its harness keeps running.
+ *       qits.workspace.agent.yield-after} — counted from its last frame or typed turn too, so a
+ *       turn not yet taken is not yielded from under it — gives up its slot when another agent
+ *       wants it. Only the row changes: no daemon call, and its harness keeps running.
  *   <li><b>Nudge</b> (qits-1460): a dispatched agent that ended its turn with no open wait and no
  *       explicit block on its item, and has been quiet for {@code qits.workspace.agent.nudge-after},
- *       is handed {@link #nudgeText} as its next turn — at most {@code
- *       qits.workspace.agent.nudge-limit} times in a row ({@link #nudgeIdle}).
+ *       is handed {@link #nudgeText} as its next turn — or {@link #selfBlockedNudgeText}, when the
+ *       only block is an explicit one it set itself (qits-1511) — at most {@code
+ *       qits.workspace.agent.nudge-limit} times in a row, each waiting twice as long as the one
+ *       before ({@link #nudgeIdle}).
  *   <li><b>Drive</b>: a RUNNING agent whose daemon answers is started (again after a daemon restart:
  *       its credential lives only in daemon memory) and is told what it has still to hear. A placed
  *       YIELDED agent is started too when this process has not started it on its daemon's current
@@ -261,8 +264,11 @@ public class AgentService {
   @ConfigProperty(name = "qits.workspace.agent.nudge-after", defaultValue = "PT20M")
   Duration nudgeAfter;
 
-  /** At most this many nudges in a row, with no other turn between them (qits-1460). */
-  @ConfigProperty(name = "qits.workspace.agent.nudge-limit", defaultValue = "1")
+  /**
+   * At most this many nudges in a row, with no other turn between them (qits-1460), each waiting
+   * twice as long as the one before (qits-1511).
+   */
+  @ConfigProperty(name = "qits.workspace.agent.nudge-limit", defaultValue = "3")
   int nudgeLimit;
 
   /** A push the daemon reported, kept until its repository name maps to an id. */
@@ -273,9 +279,6 @@ public class AgentService {
 
   /** How long a push whose repository cannot be named is tried again before it is given up. */
   static final Duration PUSH_RETRY_LIMIT = Duration.ofHours(1);
-
-  /** The cause relayed to qits-projects when a turn is typed into an agent that was waiting. */
-  static final String CAUSE_TURN = "TurnDelivered";
 
   /**
    * The cause relayed to qits-projects when a waiting agent is removed and no other live agent of
@@ -440,7 +443,7 @@ public class AgentService {
                 agent.pendingText = trimmed(request.instruction());
                 agent.gitRefs = GitRefs.write(gitRefsFor(wrapperBranch, defaultBranch));
                 agent.createdAt = Instant.now();
-                applyFacts(agent, request.facts(), null);
+                applyFacts(agent, request.facts(), null, null);
                 agents.persist(agent);
                 agents.flush();
               });
@@ -534,7 +537,7 @@ public class AgentService {
             .call(
                 () -> {
                   AgentWorktree agent = agents.findById(id);
-                  applyFacts(agent, request.facts(), null);
+                  applyFacts(agent, request.facts(), null, null);
                   if (isDropped(agent.entityStatus)) {
                     // Dispatched again, so no longer dropped (qits-1276). Facts without a status
                     // left the stale word, and the pass would obsolete the agent straight back;
@@ -660,15 +663,19 @@ public class AgentService {
   /**
    * Store the work item's title, status word and blocked flag on its agent, and tell a running
    * harness live. The facts are what the daemon names the session after, and the status is what
-   * the cleanup sweep reads (VERIFIED, DONE or DROPPED, D4).
+   * the cleanup sweep reads (VERIFIED, DONE or DROPPED, D4). {@code blockedBy} is the subject that
+   * set an explicit block, where qits-projects names one (qits-1511): stored as {@code
+   * blockAuthor}, which {@link #nudgeable} reads.
    */
-  public EntityMark markEntity(String workId, EntityFacts facts, String blockSource) {
-    return mark(workId, facts, blockSource, false);
+  public EntityMark markEntity(
+      String workId, EntityFacts facts, String blockSource, String blockedBy) {
+    return mark(workId, facts, blockSource, blockedBy, false);
   }
 
   /** {@link #markEntity} for the blocked flag alone; title and status stay. */
-  public EntityMark markBlocked(String workId, boolean blocked, String blockSource) {
-    return mark(workId, new EntityFacts(null, null, blocked), blockSource, true);
+  public EntityMark markBlocked(
+      String workId, boolean blocked, String blockSource, String blockedBy) {
+    return mark(workId, new EntityFacts(null, null, blocked), blockSource, blockedBy, true);
   }
 
   /**
@@ -678,7 +685,8 @@ public class AgentService {
    * notification still name the primary row — ACTIVE, else the newest OBSOLETE — the same row
    * {@code findLiveByWorkId} picks.
    */
-  private EntityMark mark(String workId, EntityFacts facts, String blockSource, boolean blockedOnly) {
+  private EntityMark mark(
+      String workId, EntityFacts facts, String blockSource, String blockedBy, boolean blockedOnly) {
     List<AgentWorktree> stored =
         QuarkusTransaction.requiringNew()
             .call(
@@ -688,8 +696,9 @@ public class AgentService {
                     if (blockedOnly) {
                       agent.entityBlocked = facts.blocked();
                       agent.blockSource = trimmed(blockSource);
+                      agent.blockAuthor = trimmed(blockedBy);
                     } else {
-                      applyFacts(agent, facts, blockSource);
+                      applyFacts(agent, facts, blockSource, blockedBy);
                     }
                   }
                   return live;
@@ -914,7 +923,9 @@ public class AgentService {
   /**
    * An activity frame for one agent: the activity time, the waiting state and the session. A flip
    * of the waiting state is relayed to qits-projects (qits-895), which derives the item's BLOCKED
-   * from it; the relay is now per agent and stored, so a reconnect does not repeat it. A YIELDED
+   * from it; the relay is now per agent and stored, so a reconnect does not repeat it. The BUSY
+   * frame of a typed turn's {@code UserPromptSubmit} is the flip that ends a wait: typing the turn
+   * ({@link #drive}, a wait's wake) does not clear {@code waitingSince} (qits-1511). A YIELDED
    * agent that works again (a person typed in its terminal) is RUNNING again, so it counts as
    * holding its slot.
    *
@@ -1385,7 +1396,7 @@ public class AgentService {
                       for (AgentWorktree agent : live) {
                         if (agent.runState != AgentRunState.RUNNING
                             || agent.waitingSince == null
-                            || (agent.waitingSince.isAfter(before) && !onAWait.contains(agent.id))
+                            || !quietLongEnough(agent, before, onAWait.contains(agent.id))
                             || agent.pendingText != null) {
                           continue;
                         }
@@ -1424,6 +1435,24 @@ public class AgentService {
     }
   }
 
+  /**
+   * Whether a waiting agent has been quiet long enough to yield (qits-1511). The clock is the later
+   * of {@code waitingSince} and {@code lastActivityAt}: a turn typed into a waiting agent leaves
+   * {@code waitingSince} standing until the harness's BUSY frame clears it, and stamps {@code
+   * lastActivityAt}, so in the seconds between the typing and that frame the agent is not yielded
+   * from under its new turn. An agent on a declared wait yields at once (qits-1153, W5) — but only
+   * while nothing came since it stopped; after a typed turn it is debounced like any other.
+   */
+  private static boolean quietLongEnough(AgentWorktree agent, Instant before, boolean onAWait) {
+    boolean since =
+        agent.lastActivityAt != null && agent.lastActivityAt.isAfter(agent.waitingSince);
+    if (onAWait && !since) {
+      return true;
+    }
+    Instant quietSince = since ? agent.lastActivityAt : agent.waitingSince;
+    return !quietSince.isAfter(before);
+  }
+
   /** The nudge (qits-1460): short, and naming the three ways out of a turn. */
   static String nudgeText(String workId) {
     return "You ended your turn with no open wait and no block on "
@@ -1434,12 +1463,27 @@ public class AgentService {
   }
 
   /**
+   * The nudge for an agent that blocked its own item and declared no wait (qits-1511): wait on
+   * what the platform can see, or leave the block for a person.
+   */
+  static String selfBlockedNudgeText(String workId) {
+    return "You blocked "
+        + workId
+        + " yourself and have no open wait. If what you wait on is a release request, a CI run or"
+        + " a work item, declare it with `qits wait …` so the platform wakes you when it moves, and"
+        + " end your turn; if only a person can move it, leave the block as it is and end your"
+        + " turn.";
+  }
+
+  /**
    * Step 3b, after the yield and before the drive (qits-1460): nudge a dispatched agent that ended
    * its turn with nothing open. Nothing else wakes such an agent: a wait match or timeout, a
    * dispatch phase and a delivery are the only turns it gets, so one that stops without declaring a
    * wait or a block sat idle until a person noticed.
    *
-   * <p>An agent is nudged when every one of {@link #nudgeable} holds and it has no OPEN wait. An
+   * <p>An agent is nudged when every one of {@link #nudgeable} holds and it has no OPEN wait. One
+   * that blocked its own item ({@link #selfBlocked}) is nudged too, with {@link
+   * #selfBlockedNudgeText} and reason {@link AgentNudged#SELF_BLOCKED} (qits-1511). An
    * item between phases (REFINED, READY_FOR_DEV, IMPLEMENTED) is not nudged: its agent's phase is
    * done, and the next turn is the platform's dispatch of the next phase, not a nudge. The
    * quiet clock is {@code max(waitingSince, lastActivityAt)}: {@code waitingSince} is the only
@@ -1450,7 +1494,9 @@ public class AgentService {
    * and said by {@link #drive} — a YIELDED agent is resumed for it first.
    *
    * <p>Not again: every frame moves {@code lastActivityAt}, the nudge's own delivery included, so a
-   * counter is the guard. At most {@link #nudgeLimit} nudges go out in a row; {@code nudge_count}
+   * counter is the guard. At most {@link #nudgeLimit} nudges go out in a row, each waiting twice as
+   * long as the one before (qits-1511): the k-th needs {@code after × 2^(k-1)} of quiet, on the
+   * same clock — 20, 40 and 80 minutes by default ({@link #quietNeeded}). {@code nudge_count}
    * goes back to 0 only where another turn is written (dispatch instruction, delivery, a wait's
    * wake) or a wait is declared — never in {@link #drive}, so the nudge's own delivery does not
    * count. An agent that answers a nudge with nothing stays idle, its item showing it waits for
@@ -1499,7 +1545,9 @@ public class AgentService {
                           || !waitRows.findOpenByAgents(List.of(id)).isEmpty()) {
                         return null;
                       }
-                      row.pendingText = nudgeText(row.workId);
+                      boolean self = selfBlocked(row);
+                      row.pendingText =
+                          self ? selfBlockedNudgeText(row.workId) : nudgeText(row.workId);
                       row.nudgedAt = now;
                       row.nudgeCount = row.nudgeCount + 1;
                       return new AgentNudged(
@@ -1508,6 +1556,7 @@ public class AgentService {
                           idOf(row.workspaceId),
                           row.repositoryId,
                           row.nudgeCount,
+                          self ? AgentNudged.SELF_BLOCKED : AgentNudged.IDLE,
                           now);
                     });
         if (event == null) {
@@ -1516,7 +1565,7 @@ public class AgentService {
         LOG.infof(
             "Agent %s of work item %s ended its turn with nothing open and was quiet for %s:"
                 + " nudged (%d of %d)",
-            id, event.workId(), after, event.nudgeCount(), limit);
+            id, event.workId(), quietNeeded(after, event.nudgeCount() - 1), event.nudgeCount(), limit);
         announce(event);
         nudged = true;
       }
@@ -1530,8 +1579,9 @@ public class AgentService {
    * Every condition of a nudge but the open waits, read off the row (qits-1460): ACTIVE, placed
    * (RUNNING or YIELDED) with no start refused, dispatched on a work item that is neither closed nor
    * between phases ({@link #BETWEEN_PHASES}), with
-   * nothing pending, not explicitly blocked, waiting for input, quiet for {@code after}, and under
-   * {@code limit}.
+   * nothing pending, not explicitly blocked by anybody but itself ({@link #selfBlocked}), waiting
+   * for input, under {@code limit}, and quiet for
+   * {@link #quietNeeded} — {@code after} doubled for every nudge it has had in a row.
    */
   private static boolean nudgeable(AgentWorktree agent, Instant now, Duration after, int limit) {
     if (agent.state != AgentState.ACTIVE
@@ -1541,7 +1591,7 @@ public class AgentService {
         || isClosed(agent.entityStatus)
         || isBetweenPhases(agent.entityStatus)
         || agent.pendingText != null
-        || explicitlyBlocked(agent)
+        || (explicitlyBlocked(agent) && !selfBlocked(agent))
         || agent.waitingSince == null
         || agent.nudgeCount >= limit) {
       return false;
@@ -1550,7 +1600,16 @@ public class AgentService {
         agent.lastActivityAt != null && agent.lastActivityAt.isAfter(agent.waitingSince)
             ? agent.lastActivityAt
             : agent.waitingSince;
-    return !quietSince.plus(after).isAfter(now);
+    return !quietSince.plus(quietNeeded(after, agent.nudgeCount)).isAfter(now);
+  }
+
+  /**
+   * The quiet time the next nudge needs when {@code nudgesInARow} went out already (qits-1511):
+   * {@code after × 2^nudgesInARow}, so the k-th nudge in a row waits twice as long as the one
+   * before. The exponent is capped, far beyond any sensible limit, so the product cannot overflow.
+   */
+  static Duration quietNeeded(Duration after, int nudgesInARow) {
+    return after.multipliedBy(1L << Math.min(Math.max(nudgesInARow, 0), 20));
   }
 
   /**
@@ -1559,6 +1618,20 @@ public class AgentService {
    * — exactly what a nudge is for — so it does not count. A block with no source (a dispatch's facts
    * name none) is read as explicit: not nudging is the safe side.
    */
+  /**
+   * Whether the agent blocked its own item (qits-1511): {@code EXPLICIT} exactly — not {@code BOTH},
+   * not a missing source — set by its own commissioned token's subject, as qits-projects names it in
+   * {@code blockedBy}. Such an agent is nudged like an unblocked one, with {@link
+   * #selfBlockedNudgeText}: it may be waiting on something the platform can wake it for, and never
+   * said so. A block anybody else set still exempts it.
+   */
+  static boolean selfBlocked(AgentWorktree agent) {
+    return Boolean.TRUE.equals(agent.entityBlocked)
+        && "EXPLICIT".equals(agent.blockSource)
+        && agent.commissionedTokenSubject != null
+        && agent.commissionedTokenSubject.equals(agent.blockAuthor);
+  }
+
   private static boolean explicitlyBlocked(AgentWorktree agent) {
     if (!Boolean.TRUE.equals(agent.entityBlocked)) {
       return false;
@@ -1729,25 +1802,23 @@ public class AgentService {
     }
     pendingSince.remove(agent.id);
     Instant now = Instant.now();
-    AgentWorktree told =
-        QuarkusTransaction.requiringNew()
-            .call(
-                () -> {
-                  AgentWorktree row = agents.findById(agent.id);
-                  if (Objects.equals(row.pendingText, text)) {
-                    row.pendingText = null;
-                  }
-                  row.pendingCompact = false;
-                  boolean was = row.waitingSince != null;
-                  row.waitingSince = null;
-                  row.lastActivityAt = now;
-                  return was ? row : null;
-                });
-    if (told != null) {
-      // The agent was waiting and now has a turn. qits-projects heard the waiting flip, so it
-      // hears this one too: the hook that follows the turn finds nothing left to flip.
-      waits.relayActivity(told.workId, told.id, false, CAUSE_TURN, told.sessionId, now);
-    }
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agents.findById(agent.id);
+              if (Objects.equals(row.pendingText, text)) {
+                row.pendingText = null;
+              }
+              row.pendingCompact = false;
+              // Typed is not taken (qits-1511): waitingSince stays until the harness says it works.
+              // Its UserPromptSubmit is a BUSY frame, and onActivity clears waitingSince on that
+              // flip and relays it to qits-projects — so the item's "waiting for you" clears when
+              // the agent starts working, not when text was typed. A turn the harness swallows (a
+              // permission dialog took it) sends no such frame: the agent still reads as waiting,
+              // and the nudge and the yield still see it. lastActivityAt restarts both their quiet
+              // clocks, so neither acts in the seconds before that frame arrives.
+              row.lastActivityAt = now;
+            });
   }
 
   /**
@@ -2479,7 +2550,12 @@ public class AgentService {
         : repository.mainBranch();
   }
 
-  private static void applyFacts(AgentWorktree agent, EntityFacts facts, String blockSource) {
+  /**
+   * A dispatch passes no block source and no author: its block, if any, reads as explicit and set
+   * by somebody else, which is the side that does not nudge.
+   */
+  private static void applyFacts(
+      AgentWorktree agent, EntityFacts facts, String blockSource, String blockedBy) {
     if (facts == null) {
       return;
     }
@@ -2492,6 +2568,7 @@ public class AgentService {
     }
     agent.entityBlocked = normalized.blocked();
     agent.blockSource = trimmed(blockSource);
+    agent.blockAuthor = trimmed(blockedBy);
   }
 
   static String describe(AgentDaemon.CleanupCheck check) {

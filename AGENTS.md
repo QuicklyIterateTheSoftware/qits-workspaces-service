@@ -212,6 +212,10 @@ a `CausedRow`, so no `ArchRulesTest` decision; see "Agents and the workspaces th
 default 0`) to `agent_worktree`: when the scheduler last nudged an idle agent, and how many nudges
 in a row it has had. Columns on a `CausedRow`, so no `ArchRulesTest` decision; see "Agents and the
 workspaces they run in", Nudge.
+**`V29__agent_block_author.sql`** (qits-1511) adds `block_author` (nullable `text`) to
+`agent_worktree`: the subject qits-projects names as having set the item's explicit block. An agent
+whose own subject set an `EXPLICIT` block is still nudged. A column on a `CausedRow`, so no
+`ArchRulesTest` decision; see "Agents and the workspaces they run in", Nudge.
 
 **`V18__dispatch_command_id.sql` adds `dispatch_command_id` to `workspace`** (qits-895): the daemon
 command the last launch this service made started, replaced by every accepted launch
@@ -536,6 +540,13 @@ agent's open waits in `waitingOn` — see "Declared waits"), through the `AgentW
 (`wiring/HttpAgentWaitingReporter` → `POST /projects/api/work/{workId}/agent-waiting`). A frame naming
 no agent is a person's own session and relays nothing. The registry also keeps the last state per
 agent (`AgentActivityView`), which the scheduler reads to say a turn at a turn boundary.
+**Typing a turn does not clear `waiting_since`** (qits-1511): neither the drive nor a wait's wake
+touches it, only the BUSY frame of the turn's `UserPromptSubmit` does — an ordinary flip, relayed
+like any other, so the item's "waiting for you" clears when the agent starts working. The drive
+used to clear it and relay `TurnDelivered` at once; a turn the harness swallowed (typed into a
+permission dialog) then left an idle agent that read as busy, never nudged and never yielded. The
+drive stamps `last_activity_at`, which restarts the nudge's and the yield's quiet clocks, so
+neither acts in the seconds before the BUSY frame arrives.
 
 ## The protocol is a dependency, and its version is the workspace image
 
@@ -994,6 +1005,9 @@ makes every daemon call, one pass at a time, kicked after each door and every
    (qits-1212). The write is the yield: a candidate that is no longer RUNNING when its row is read
    again yields nothing, so nothing is logged and nobody is placed on its account. A yielded agent
    that works again (`awaitingInput: false`, say a person typed in its terminal) is RUNNING again.
+   The wait is counted from the later of `waiting_since` and `last_activity_at` (qits-1511), so a
+   turn just typed — which leaves `waiting_since` until its BUSY frame — is not yielded from under
+   it; an agent on a declared wait yields at once only while no frame or turn came since it stopped.
 4. **Nudge** (qits-1460, `nudgeIdle`) — nothing else wakes a dispatched agent that ends its turn
    without declaring a wait or a block: it used to sit idle, its item showing "waiting for you",
    until a person noticed (qits-1149, qits-1163 and qits-1383 sat ~8 h on 2026-10-19). An agent is
@@ -1003,7 +1017,13 @@ makes every daemon call, one pass at a time, kicked after each door and every
    platform's own dispatch (a person approves REFINED→READY_FOR_DEV, the platform starts implement
    and verify), so "carry on with the phase" would push it into work nobody started — with no pending text, no OPEN wait and no explicit block
    (`entity_blocked` with `block_source` `EXPLICIT` or `BOTH`, or no source at all; the derived
-   `AGENT_WAITING` block alone is the stall itself and does not exempt it), and has been quiet for
+   `AGENT_WAITING` block alone is the stall itself and does not exempt it) — **except a block the
+   agent set itself** (qits-1511): `EXPLICIT` exactly, with `block_author` equal to its own
+   `commissioned_token_subject`. That agent is nudged like an unblocked one, same clock, limit and
+   spacing, with a text of its own ("You blocked <workId> yourself and have no open wait. If what you
+   wait on is a release request, a CI run or a work item, declare it with `qits wait …` …; if only a
+   person can move it, leave the block …") and `reason` `SELF_BLOCKED`; `BOTH`, no source, no
+   author or anybody else's still exempt it — and has been quiet for
    `qits.workspace.agent.nudge-after` (20 min; zero or negative switches it off) counted from the
    later of `waiting_since` and `last_activity_at`. `waiting_since` is the clock because hooks fire
    only at turn boundaries — a 40-minute build sends no frame, so `last_activity_at` alone would
@@ -1012,9 +1032,10 @@ makes every daemon call, one pass at a time, kicked after each door and every
    re-checked on the locked row, written to `pending_text` ("You ended your turn with no open wait
    and no block on <workId>. Carry on…; or … `qits wait …` …; or … `work_block` …"), `nudged_at`
    and `nudge_count` stamped (`V28`), `AgentNudged` announced, the pass kicked; a YIELDED agent is
-   resumed for it. **At most `qits.workspace.agent.nudge-limit` (1) nudges in a row**: every frame,
-   the nudge's own delivery included, moves `last_activity_at`, so the guard is the counter, not
-   activity since the nudge. `nudge_count` goes back to 0 where a turn that is not a nudge is
+   resumed for it. **At most `qits.workspace.agent.nudge-limit` (3) nudges in a row, each waiting
+   twice as long as the one before** (qits-1511): the k-th needs `nudge-after × 2^(k-1)` of quiet on
+   the same clock — 20, 40 and 80 minutes by default. Every frame, the nudge's own delivery
+   included, moves `last_activity_at`, so the guard is the counter, not activity since the nudge. `nudge_count` goes back to 0 where a turn that is not a nudge is
    written — the dispatch instruction, a delivery (`appendTurn`), a wait's wake — and when a wait is
    declared, never in `drive`. An agent that answers its nudge with nothing stays idle for a person.
    Every agent has a work item (D24), so a person-created agent is nudged like a dispatched one; a
@@ -1072,8 +1093,10 @@ pass and the next frames: every placed agent, RUNNING or YIELDED, is started aga
   `entries[].agent`.
 - `POST …/delivery` `{workId, text, compactFirst}` → `{agentId, delivered, launched, resumed,
   detail}`; `agentId: null` is "nobody works on it", never a 404, and nothing is created.
-- `POST …/entity` `{workId, title, status, blocked, blockSource?}` and `…/blocked` `{workId, blocked,
-  blockSource?}` → `{agentId, applied}`.
+- `POST …/entity` `{workId, title, status, blocked, blockSource?, blockedBy?}` and `…/blocked`
+  `{workId, blocked, blockSource?, blockedBy?}` → `{agentId, applied}`. `blockedBy` (qits-1511) is
+  the subject that set an `EXPLICIT` or `BOTH` block, as qits-projects names it; stored as
+  `block_author`, rewritten on every mark.
 - `POST /workspaces/api/branches/resolution?repositoryId=` → `{resolved, agentIds}`: every ACTIVE
   agent whose wrapper branch it is becomes OBSOLETE; a branch an agent merely pushed marks nobody.
   An old-model workspace on the branch resolves as before.
@@ -1133,8 +1156,8 @@ event name, optional expiry) and gets a turn when it happens:
   read after the close committed — so an item whose agent is working still shows what it waits on.
   A declare and a cancel always relay, with `waiting` = whether the agent waits for input and cause
   `Wait` while a label remains, else `WaitCancelled`; a wait is normally declared mid-turn, which
-  used to relay nothing at all. A busy relay keeps its own cause (`TurnDelivered`,
-  `AgentDispatched`, the hook); qits-projects stores the label regardless and the cause only while
+  used to relay nothing at all. A busy relay keeps its own cause (`AgentDispatched`,
+  the hook); qits-projects stores the label regardless and the cause only while
   waiting. The one relay that names no label is a removal's (`AgentRemoved`): its OPEN waits are
   cancelled by the next sweep, which relays nothing, so the label would outlive the agent.
   `AgentDto.waitingOn` shows the labels,
@@ -1158,7 +1181,7 @@ payload's top-level fields:
 | `AgentStartRefused` | the four, `detail` (the daemon's refusal, or the never-came-up sentence) | |
 | `AgentRequeued` | the four (`workspaceId` is the one it left), `reason`, `detail` | `WORKSPACE_FAILED`, `WORKSPACE_GONE` |
 | `AgentYielded` | the four | |
-| `AgentNudged` | the four, `nudgeCount` (this nudge included) | |
+| `AgentNudged` | the four, `nudgeCount` (this nudge included), `reason` | `IDLE`, `SELF_BLOCKED` |
 | `AgentResumed` | the four, `reason` | `TURN_PENDING`, `WORKS_AGAIN` |
 | `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs; both absent for a dropped item) — one per agent | |
 | `AgentCleanupDeferred` | the four, `reason`, `detail` | `ITEM_NOT_CLOSED`, `RECENTLY_ACTIVE`, `TURN_PENDING`, `HARNESS_BUSY`, `DAEMON_NOT_CONNECTED`, `NO_DAEMON_CLIENT`, `CHECK_UNANSWERED`, `BUSY_IN_BACKGROUND`, `REMOVAL_UNANSWERED`, `LEFTOVER_WORK_PROMPTED` |

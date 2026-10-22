@@ -1,0 +1,15 @@
+-- WHO BLOCKED THE ITEM (qits-1511).
+--
+-- An agent whose item carries an explicit block is never nudged (qits-1460): somebody said the
+-- item cannot go on. But an agent that blocked its own item with work_block, on something the
+-- platform can wake it for (a release request, a CI run, a work item) and declared no wait, then
+-- sat idle for good. qits-projects now names the subject that set an EXPLICIT block (or BOTH) when
+-- it marks the item, and block_author stores it. An EXPLICIT block whose author is the agent's own
+-- commissioned_token_subject still earns a nudge, with a text of its own; any other author, BOTH,
+-- or no source keeps the exemption.
+--
+-- Null: no author named (no block, a derived block, a dispatch's facts, or a caller that predates
+-- the field). Rewritten on every mark, like block_source.
+--
+-- A column on agent_worktree, an entity that is already a CausedRow: no ArchRulesTest decision.
+alter table agent_worktree add column block_author text;

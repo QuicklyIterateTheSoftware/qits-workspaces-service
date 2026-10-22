@@ -446,9 +446,8 @@ public class AgentServiceTest {
 
     // An admin agent always gets a new slot, so queue one by hand to stand for a full runner.
     agentIn(null, true, AgentRunState.QUEUED);
-    // The first agent has waited for input since long before the yield time.
-    QuarkusTransaction.requiringNew()
-        .run(() -> agents.findById(UUID.fromString(firstId)).waitingSince = Instant.now().minusSeconds(3600));
+    // The first agent has waited for input since long before the yield time, with no frame since.
+    backdateQuiet(firstId, Duration.ofHours(1));
     List<String> before = daemon.callsFor(firstId);
 
     service.yieldBlocked();
@@ -468,6 +467,55 @@ public class AgentServiceTest {
     assertEquals(AgentRunState.RUNNING, row(firstId).runState);
     assertTrue(daemon.callsFor(firstId).contains("turn " + slot + " " + firstId + " your answer"));
     liveness.markDead(slot);
+  }
+
+  /** The agent waited for input since {@code ago}, and nothing came since: no frame, no turn. */
+  private void backdateQuiet(String agentId, Duration ago) {
+    Instant at = Instant.now().minus(ago);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agents.findById(UUID.fromString(agentId));
+              row.waitingSince = at;
+              row.lastActivityAt = at;
+            });
+  }
+
+  @Test
+  void aTurnJustTypedIntoAWaitingAgentIsNotYieldedFromUnderIt() throws InterruptedException {
+    // qits-1511: typing no longer clears waitingSince, so the yield must not read the old clock in
+    // the seconds before the turn's UserPromptSubmit arrives.
+    AgentService.Dispatch first = dispatch("w-typed-yield", true, null);
+    String firstId = first.agent().agentId();
+    Long slot = first.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      assertTrue(service.isStarted(UUID.fromString(firstId)));
+      Thread.sleep(100);
+      backdateQuiet(firstId, Duration.ofHours(1));
+      service.deliver("w-typed-yield", "your answer", false);
+      service.reconcile();
+      assertTrue(
+          daemon.callsFor(firstId).contains("turn " + slot + " " + firstId + " your answer"));
+      assertNull(row(firstId).pendingText, "said");
+      assertNotNull(row(firstId).waitingSince, "typed is not taken");
+
+      agentIn(null, true, AgentRunState.QUEUED);
+      service.yieldBlocked();
+      assertEquals(AgentRunState.RUNNING, row(firstId).runState, "not yielded right after its turn");
+
+      // The harness swallowed the turn: no BUSY frame came, and it is quiet again. It yields.
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  agents.findById(UUID.fromString(firstId)).lastActivityAt =
+                      Instant.now().minusSeconds(3600));
+      service.yieldBlocked();
+      assertEquals(AgentRunState.YIELDED, row(firstId).runState);
+    } finally {
+      liveness.markDead(slot);
+    }
   }
 
   @Test
@@ -533,7 +581,7 @@ public class AgentServiceTest {
 
     // Entity updates reach it again.
     AgentService.EntityMark mark =
-        service.markEntity("w-reconnect", new EntityFacts("A title", "IMPLEMENTED", false), null);
+        service.markEntity("w-reconnect", new EntityFacts("A title", "IMPLEMENTED", false), null, null);
     assertTrue(mark.applied());
     assertTrue(daemon.callsFor(agentId).contains("entity " + slot + " " + agentId + " IMPLEMENTED"));
 
@@ -964,7 +1012,7 @@ public class AgentServiceTest {
     service.cleanUp();
     assertEquals(AgentState.OBSOLETE, row(agentId).state);
 
-    service.markEntity("w-release", new EntityFacts("A title", "VERIFIED", false), null);
+    service.markEntity("w-release", new EntityFacts("A title", "VERIFIED", false), null, null);
     QuarkusTransaction.requiringNew()
         .run(() -> agents.findById(id).lastActivityAt = Instant.now().minusSeconds(3600));
     service.cleanUp();
@@ -1008,7 +1056,7 @@ public class AgentServiceTest {
     UUID id = UUID.fromString(agentId);
     releaseWrapperOf(agentId);
 
-    service.markEntity(workId, new EntityFacts("A title", status, false), null);
+    service.markEntity(workId, new EntityFacts("A title", status, false), null, null);
     liveness.markLive(slot);
     service.reconcile(); // deterministically past the agent's start, so it stops touching lastActivityAt
     QuarkusTransaction.requiringNew()
@@ -1029,7 +1077,7 @@ public class AgentServiceTest {
     liveness.markLive(dispatched.agent().workspaceRowId());
     service.reconcile(); // deterministically past the agent's start
     script.accept(agentId);
-    service.markEntity(workId, new EntityFacts(null, status, false), null);
+    service.markEntity(workId, new EntityFacts(null, status, false), null, null);
     QuarkusTransaction.requiringNew()
         .run(
             () ->
@@ -1163,7 +1211,7 @@ public class AgentServiceTest {
     liveness.markLive(slot);
     try {
       service.reconcile();
-      service.markEntity("w-reopened", new EntityFacts(null, "DROPPED", false), null);
+      service.markEntity("w-reopened", new EntityFacts(null, "DROPPED", false), null, null);
       service.reconcile();
       assertEquals(
           AgentState.OBSOLETE, row(agentId).state, "the drop obsoletes it; active lately, so kept");
@@ -1200,7 +1248,7 @@ public class AgentServiceTest {
       assertEquals(1, obsoleteEventsOf(agentId).size(), "obsoleted once, by the drop only");
 
       // The item's next mark says what it is now; still ACTIVE.
-      service.markEntity("w-reopened", new EntityFacts(null, "REPORTED", false), null);
+      service.markEntity("w-reopened", new EntityFacts(null, "REPORTED", false), null, null);
       service.reconcile();
       assertEquals(AgentState.ACTIVE, row(agentId).state);
       assertEquals("REPORTED", row(agentId).entityStatus);
@@ -1217,7 +1265,7 @@ public class AgentServiceTest {
     liveness.markLive(slot);
     try {
       service.reconcile();
-      service.markEntity("w-dropped-recent", new EntityFacts(null, "DROPPED", false), null);
+      service.markEntity("w-dropped-recent", new EntityFacts(null, "DROPPED", false), null, null);
       QuarkusTransaction.requiringNew()
           .run(() -> agents.findById(UUID.fromString(agentId)).lastActivityAt = Instant.now());
 
@@ -1260,7 +1308,7 @@ public class AgentServiceTest {
     UUID id = UUID.fromString(agentId);
     releaseWrapperOf(agentId);
 
-    service.markEntity("w-implemented", new EntityFacts("A title", "IMPLEMENTED", false), null);
+    service.markEntity("w-implemented", new EntityFacts("A title", "IMPLEMENTED", false), null, null);
     liveness.markLive(slot);
     QuarkusTransaction.requiringNew()
         .run(() -> agents.findById(id).lastActivityAt = Instant.now().minusSeconds(3600));
@@ -1298,7 +1346,7 @@ public class AgentServiceTest {
     releaseWrapperOf(secondId);
     assertEquals(2, liveRowsOf("w-two-obsolete"), "both agents stand, both OBSOLETE");
 
-    service.markEntity("w-two-obsolete", new EntityFacts("A title", "DONE", false), null);
+    service.markEntity("w-two-obsolete", new EntityFacts("A title", "DONE", false), null, null);
 
     assertEquals("DONE", row(firstId).entityStatus, "the older row is not left behind");
     assertEquals("DONE", row(secondId).entityStatus);
@@ -1394,7 +1442,7 @@ public class AgentServiceTest {
             List.of("qits-ci-service"),
             List.of(new AgentDaemon.CleanupCheck.Unpushed("qits-ci-service", null, 2))));
     service.resolveReleasedBranch(repoId, "ticket/w-dirty", "2026.1.1", "abc", null);
-    service.markEntity("w-dirty", new EntityFacts(null, "VERIFIED", false), null);
+    service.markEntity("w-dirty", new EntityFacts(null, "VERIFIED", false), null, null);
     QuarkusTransaction.requiringNew()
         .run(() -> agents.findById(id).lastActivityAt = Instant.now().minusSeconds(3600));
 
@@ -1495,7 +1543,7 @@ public class AgentServiceTest {
     service.reconcile();
     script.accept(agentId);
     releaseWrapperOf(agentId);
-    service.markEntity(workId, new EntityFacts(null, "VERIFIED", false), null);
+    service.markEntity(workId, new EntityFacts(null, "VERIFIED", false), null, null);
     QuarkusTransaction.requiringNew()
         .run(
             () ->
@@ -1606,27 +1654,41 @@ public class AgentServiceTest {
   }
 
   @Test
-  void aTurnTypedIntoAWaitingAgentTellsQitsProjectsItNoLongerWaits() {
+  void aTurnTypedIntoAWaitingAgentTellsQitsProjectsItNoLongerWaitsOnceItsPromptIsSubmitted() {
     // qits-1198: the agent waited, a phase turn was typed into it, and qits-projects kept it
-    // blocked while it worked, because the turn cleared the flag here without saying so.
-    AgentService.Dispatch dispatched = dispatch("w-blocked", true, null);
+    // blocked while it worked. qits-1511: the typing itself says nothing and leaves waitingSince;
+    // the BUSY frame of the turn's UserPromptSubmit is the flip, and that flip is relayed.
+    String workId = uniqueWorkId("w-blocked");
+    AgentService.Dispatch dispatched = dispatch(workId, true, null);
     String agentId = dispatched.agent().agentId();
     Long slot = dispatched.agent().workspaceRowId();
     liveness.markLive(slot);
-    service.reconcile();
-    service.onActivity(row(agentId).workspaceId, agentId, Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
+    try {
+      service.reconcile();
+      service.onActivity(row(agentId).workspaceId, agentId, Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
+      Instant waitingSince = row(agentId).waitingSince;
+      assertNotNull(waitingSince);
 
-    service.deliver("w-blocked", "implement it", false);
-    service.reconcile();
-    service.onActivity(row(agentId).workspaceId, agentId, Boolean.FALSE, "s-1", "UserPromptSubmit", System.currentTimeMillis());
+      service.deliver(workId, "implement it", false);
+      service.reconcile();
+      assertTrue(daemon.callsFor(agentId).contains("turn " + slot + " " + agentId + " implement it"));
+      AgentWorktree typed = row(agentId);
+      assertNull(typed.pendingText, "said");
+      assertEquals(waitingSince, typed.waitingSince, "typing does not clear waitingSince");
+      assertTrue(typed.lastActivityAt.isAfter(waitingSince), "the typing restarts the quiet clock");
+      List<FakeAgentWaitingReporter.Report> beforeFrame = reporter.reportsFor(workId);
+      assertTrue(beforeFrame.get(beforeFrame.size() - 1).waiting(), "nothing relayed on typing");
 
-    List<FakeAgentWaitingReporter.Report> reports =
-        reporter.reportsFor("w-blocked").stream()
-            .filter(r -> !AgentService.CAUSE_DISPATCHED.equals(r.cause()))
-            .toList();
-    assertFalse(reports.isEmpty());
-    assertFalse(reports.get(reports.size() - 1).waiting(), "the last word qits-projects heard");
-    liveness.markDead(slot);
+      service.onActivity(row(agentId).workspaceId, agentId, Boolean.FALSE, "s-1", "UserPromptSubmit", System.currentTimeMillis());
+      assertNull(row(agentId).waitingSince, "the BUSY frame clears it");
+
+      List<FakeAgentWaitingReporter.Report> reports = reporter.reportsFor(workId);
+      FakeAgentWaitingReporter.Report last = reports.get(reports.size() - 1);
+      assertFalse(last.waiting(), "the last word qits-projects heard");
+      assertEquals("UserPromptSubmit", last.cause());
+    } finally {
+      liveness.markDead(slot);
+    }
   }
 
   /** A work item id no other test (or earlier run of this one) reported on. */
@@ -1944,7 +2006,7 @@ public class AgentServiceTest {
     assertTrue(service.isStarted(UUID.fromString(agentId)));
     assertNull(row(agentId).pendingText, "the instruction was handed over");
     // dispatch() says REFINED, which is between phases; a quiet agent mid-phase is the subject.
-    service.markEntity(workId, new EntityFacts(null, "IMPLEMENTING", false), null);
+    service.markEntity(workId, new EntityFacts(null, "IMPLEMENTING", false), null, null);
     endedItsTurn(agentId, quiet);
     return agentId;
   }
@@ -1994,13 +2056,16 @@ public class AgentServiceTest {
       assertEquals("w-nudge-once", event.workId());
       assertEquals(slot.toString(), event.workspaceId());
       assertEquals(1, event.nudgeCount());
+      assertEquals(AgentNudged.IDLE, event.reason());
 
       service.reconcile();
       assertEquals(1, nudgeTurns(agentId), daemon.callsFor(agentId).toString());
       assertNull(row(agentId).pendingText, "said");
       assertEquals(1, row(agentId).nudgeCount, "its own delivery does not reset the count");
 
-      // A second sweep finds nothing: the delivery cleared waitingSince.
+      // A second sweep finds nothing: the delivery restarted the quiet clock, and the limit is
+      // reached. waitingSince stays until a BUSY frame (qits-1511).
+      assertNotNull(row(agentId).waitingSince);
       service.nudgeIdle(NUDGE_AFTER, 1);
       // It answers the nudge with nothing: a new Stop, and another quiet period.
       service.onActivity(
@@ -2012,6 +2077,39 @@ public class AgentServiceTest {
       assertEquals(1, nudgeTurns(agentId), "no second nudge");
       assertEquals(1, nudgesOf(agentId).size());
       assertNull(row(agentId).pendingText);
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void threeNudgesInARowEachWaitTwiceAsLongThenNone() {
+    // qits-1511: with the defaults, 20, 40 and 80 minutes of quiet, then no fourth.
+    String agentId = quietAgent("w-nudge-thrice", NUDGE_AFTER.minusMinutes(1));
+    Long slot = row(agentId).workspaceId;
+    try {
+      int[] minutes = {20, 40, 80};
+      for (int k = 1; k <= 3; k++) {
+        Duration needed = Duration.ofMinutes(minutes[k - 1]);
+        assertEquals(needed, AgentService.quietNeeded(NUDGE_AFTER, k - 1));
+        endedItsTurn(agentId, needed.minusMinutes(1));
+        service.nudgeIdle(NUDGE_AFTER, 3);
+        assertEquals(k - 1, row(agentId).nudgeCount, "not yet: nudge " + k + " needs " + needed);
+
+        endedItsTurn(agentId, needed.plusMinutes(1));
+        service.nudgeIdle(NUDGE_AFTER, 3);
+        assertEquals(k, row(agentId).nudgeCount, "nudge " + k + " after " + needed);
+        assertEquals(k, nudgesOf(agentId).get(k - 1).nudgeCount());
+        service.reconcile();
+        assertEquals(k, nudgeTurns(agentId), daemon.callsFor(agentId).toString());
+      }
+
+      endedItsTurn(agentId, Duration.ofDays(2));
+      service.nudgeIdle(NUDGE_AFTER, 3);
+      service.reconcile();
+      assertEquals(3, row(agentId).nudgeCount, "the limit");
+      assertEquals(3, nudgeTurns(agentId), "no fourth nudge");
+      assertEquals(3, nudgesOf(agentId).size());
     } finally {
       liveness.markDead(slot);
     }
@@ -2070,6 +2168,33 @@ public class AgentServiceTest {
     }
   }
 
+  @Test
+  void aTurnTheHarnessSwallowedLeavesTheAgentNudgeableOnceQuietAgain() {
+    // qits-1511: the turn was typed into a permission dialog; no UserPromptSubmit, no Stop.
+    String agentId = quietAgent("w-nudge-swallowed", NUDGE_AFTER.plusMinutes(1));
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.deliver("w-nudge-swallowed", "next step", false);
+      service.reconcile();
+      assertTrue(daemon.callsFor(agentId).contains("turn " + slot + " " + agentId + " next step"));
+      assertNotNull(row(agentId).waitingSince, "still waiting: no BUSY frame came");
+
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      assertEquals(0, row(agentId).nudgeCount, "the typing restarted the quiet clock");
+
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  agents.findById(UUID.fromString(agentId)).lastActivityAt =
+                      Instant.now().minus(NUDGE_AFTER.plusMinutes(1)));
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      assertEquals(1, row(agentId).nudgeCount);
+      assertEquals(AgentService.nudgeText("w-nudge-swallowed"), row(agentId).pendingText);
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
   private void assertNotNudgedWithAnOpenWait(String agentId) {
     int before = nudgesOf(agentId).size();
     service.nudgeIdle(NUDGE_AFTER, 5);
@@ -2089,19 +2214,118 @@ public class AgentServiceTest {
   void anExplicitBlockExemptsTheAgentAndTheDerivedWaitingBlockDoesNot() {
     String explicit = quietAgent("w-nudge-explicit", NUDGE_AFTER.plusMinutes(1));
     liveness.markDead(row(explicit).workspaceId);
-    service.markBlocked("w-nudge-explicit", true, "EXPLICIT");
+    service.markBlocked("w-nudge-explicit", true, "EXPLICIT", null);
     endedItsTurn(explicit, NUDGE_AFTER.plusMinutes(1));
     assertNotNudged(explicit);
 
-    service.markBlocked("w-nudge-explicit", true, "BOTH");
+    service.markBlocked("w-nudge-explicit", true, "BOTH", null);
     assertNotNudged(explicit);
 
     String derived = quietAgent("w-nudge-derived", NUDGE_AFTER.plusMinutes(1));
     liveness.markDead(row(derived).workspaceId);
-    service.markBlocked("w-nudge-derived", true, "AGENT_WAITING");
+    service.markBlocked("w-nudge-derived", true, "AGENT_WAITING", null);
     endedItsTurn(derived, NUDGE_AFTER.plusMinutes(1));
     service.nudgeIdle(NUDGE_AFTER, 1);
     assertEquals(1, row(derived).nudgeCount, "the stalled agent's own derived block is no reason");
+  }
+
+  /** The agent's own token subject, given one if the fixture minted none. */
+  private String subjectOf(String agentId) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              AgentWorktree row = agents.findById(UUID.fromString(agentId));
+              if (row.commissionedTokenSubject == null) {
+                row.commissionedTokenSubject = "tok-workspace-agent-" + agentId;
+              }
+              return row.commissionedTokenSubject;
+            });
+  }
+
+  @Test
+  void anAgentThatBlockedItsOwnItemWithNoWaitIsNudgedToDeclareOne() {
+    // qits-1511: it called work_block on a release request it could have waited on, and sat idle.
+    String agentId = quietAgent("w-nudge-self", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(agentId).workspaceId);
+    String self = subjectOf(agentId);
+    service.markBlocked("w-nudge-self", true, "EXPLICIT", self);
+    assertEquals(self, row(agentId).blockAuthor);
+    endedItsTurn(agentId, NUDGE_AFTER.plusMinutes(1));
+
+    service.nudgeIdle(NUDGE_AFTER, 3);
+
+    AgentWorktree nudged = row(agentId);
+    assertEquals(1, nudged.nudgeCount);
+    assertEquals(AgentService.selfBlockedNudgeText("w-nudge-self"), nudged.pendingText);
+    assertTrue(nudged.pendingText.startsWith("You blocked w-nudge-self yourself"), nudged.pendingText);
+    assertEquals(AgentNudged.SELF_BLOCKED, nudgesOf(agentId).get(0).reason());
+
+    // Same spacing as any nudge: the second needs twice the quiet.
+    QuarkusTransaction.requiringNew()
+        .run(() -> agents.findById(UUID.fromString(agentId)).pendingText = null);
+    endedItsTurn(agentId, NUDGE_AFTER.plusMinutes(1));
+    service.nudgeIdle(NUDGE_AFTER, 3);
+    assertEquals(1, row(agentId).nudgeCount);
+    endedItsTurn(agentId, NUDGE_AFTER.multipliedBy(2).plusMinutes(1));
+    service.nudgeIdle(NUDGE_AFTER, 3);
+    assertEquals(2, row(agentId).nudgeCount);
+  }
+
+  @Test
+  void aBlockSetByAnybodyElseOrBothOrWithAnOpenWaitStillExemptsTheAgent() {
+    String other = quietAgent("w-nudge-other", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(other).workspaceId);
+    subjectOf(other);
+    service.markBlocked("w-nudge-other", true, "EXPLICIT", "a-person");
+    endedItsTurn(other, NUDGE_AFTER.plusMinutes(1));
+    assertNotNudged(other);
+
+    String both = quietAgent("w-nudge-both", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(both).workspaceId);
+    service.markEntity(
+        "w-nudge-both",
+        new EntityFacts(null, "IMPLEMENTING", true),
+        "BOTH",
+        subjectOf(both));
+    endedItsTurn(both, NUDGE_AFTER.plusMinutes(1));
+    assertNotNudged(both);
+
+    String waiting = quietAgent("w-nudge-self-wait", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(waiting).workspaceId);
+    service.markBlocked("w-nudge-self-wait", true, "EXPLICIT", subjectOf(waiting));
+    waits.create(
+        UUID.fromString(waiting), "release-request 9", EventSelection.of("ReleaseRequestStateChanged"), null);
+    endedItsTurn(waiting, NUDGE_AFTER.plusHours(1));
+    assertNotNudged(waiting);
+
+    // A dispatch's facts name no author: its block reads as somebody else's.
+    String unnamed = quietAgent("w-nudge-unnamed", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(unnamed).workspaceId);
+    subjectOf(unnamed);
+    service.markBlocked("w-nudge-unnamed", true, "EXPLICIT", null);
+    endedItsTurn(unnamed, NUDGE_AFTER.plusMinutes(1));
+    assertNotNudged(unnamed);
+  }
+
+  @Test
+  void theMarksStoreTheBlockAuthorAndClearItWhenNoneIsNamed() {
+    String agentId = quietAgent("w-block-author", NUDGE_AFTER.plusHours(1));
+    liveness.markDead(row(agentId).workspaceId);
+
+    service.markEntity(
+        "w-block-author", new EntityFacts(null, "IMPLEMENTING", true), "EXPLICIT", " sub-1 ");
+    assertEquals("sub-1", row(agentId).blockAuthor);
+    assertEquals("EXPLICIT", row(agentId).blockSource);
+
+    service.markBlocked("w-block-author", true, "BOTH", "sub-2");
+    assertEquals("sub-2", row(agentId).blockAuthor);
+    assertEquals("BOTH", row(agentId).blockSource);
+
+    service.markBlocked("w-block-author", false, null, null);
+    assertNull(row(agentId).blockAuthor);
+    service.markEntity("w-block-author", new EntityFacts(null, "IMPLEMENTING", true), "EXPLICIT", "sub-3");
+    service.markEntity("w-block-author", new EntityFacts(null, "IMPLEMENTING", false), null, null);
+    assertNull(row(agentId).blockAuthor);
   }
 
   @Test
@@ -2141,7 +2365,7 @@ public class AgentServiceTest {
   void aClosedItemsAgentIsNotNudged() {
     String agentId = quietAgent("w-nudge-closed", NUDGE_AFTER.plusMinutes(1));
     liveness.markDead(row(agentId).workspaceId);
-    service.markEntity("w-nudge-closed", new EntityFacts(null, "VERIFIED", false), null);
+    service.markEntity("w-nudge-closed", new EntityFacts(null, "VERIFIED", false), null, null);
     endedItsTurn(agentId, NUDGE_AFTER.plusMinutes(1));
     assertNotNudged(agentId);
   }
@@ -2150,7 +2374,7 @@ public class AgentServiceTest {
   void anAgentBetweenPhasesIsNotNudgedAndOneMidPhaseIs() {
     String between = quietAgent("w-nudge-refined", NUDGE_AFTER.plusMinutes(1));
     liveness.markDead(row(between).workspaceId);
-    service.markEntity("w-nudge-refined", new EntityFacts(null, "refined", false), null);
+    service.markEntity("w-nudge-refined", new EntityFacts(null, "refined", false), null, null);
     endedItsTurn(between, NUDGE_AFTER.plusMinutes(1));
     assertNotNudged(between);
 

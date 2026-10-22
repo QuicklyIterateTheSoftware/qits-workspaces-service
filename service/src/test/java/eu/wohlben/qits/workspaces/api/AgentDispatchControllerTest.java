@@ -1,6 +1,8 @@
 package eu.wohlben.qits.workspaces.api;
 
 import static io.restassured.RestAssured.given;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
@@ -9,6 +11,8 @@ import static org.hamcrest.Matchers.nullValue;
 
 import eu.wohlben.qits.archrules.NecessaryTestProfileDuplication;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -69,6 +73,8 @@ public class AgentDispatchControllerTest {
   }
 
   @Inject FakeRepositoryLookup repositories;
+
+  @Inject AgentWorktreeRepository agentRows;
 
   private static final String API = "/workspaces/api/agent-dispatches";
 
@@ -196,6 +202,54 @@ public class AgentDispatchControllerTest {
         .then()
         .body("entityStatus", equalTo("IMPLEMENTING"))
         .body("entityBlocked", equalTo(true));
+  }
+
+  @Test
+  void entityAndBlockedStoreWhoSetTheBlock() {
+    // qits-1511: qits-projects names the subject of an EXPLICIT (or BOTH) block in blockedBy.
+    String repoId = repository();
+    String workId = "w-" + UUID.randomUUID();
+    String agentId =
+        given()
+            .contentType(ContentType.JSON)
+            .body(dispatch(repoId, workId))
+            .post(API)
+            .then()
+            .statusCode(200)
+            .extract()
+            .path("agent.agentId");
+
+    Map<String, Object> entity = new LinkedHashMap<>();
+    entity.put("workId", workId);
+    entity.put("status", "IMPLEMENTING");
+    entity.put("blocked", true);
+    entity.put("blockSource", "EXPLICIT");
+    entity.put("blockedBy", "subject-a");
+    given().contentType(ContentType.JSON).body(entity).post(API + "/entity").then().statusCode(200);
+    assertEquals("subject-a", blockAuthorOf(agentId));
+
+    given()
+        .contentType(ContentType.JSON)
+        .body(Map.of("workId", workId, "blocked", true, "blockSource", "BOTH", "blockedBy", "subject-b"))
+        .post(API + "/blocked")
+        .then()
+        .statusCode(200)
+        .body("agentId", equalTo(agentId));
+    assertEquals("subject-b", blockAuthorOf(agentId));
+
+    // A caller that names nobody: no author.
+    given()
+        .contentType(ContentType.JSON)
+        .body(Map.of("workId", workId, "blocked", true, "blockSource", "EXPLICIT"))
+        .post(API + "/blocked")
+        .then()
+        .statusCode(200);
+    assertNull(blockAuthorOf(agentId));
+  }
+
+  private String blockAuthorOf(String agentId) {
+    return QuarkusTransaction.requiringNew()
+        .call(() -> agentRows.findById(UUID.fromString(agentId)).blockAuthor);
   }
 
   @Test

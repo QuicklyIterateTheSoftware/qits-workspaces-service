@@ -193,8 +193,13 @@ public class AgentDispatchController {
     }
   }
 
+  /**
+   * {@code blockedBy}: the subject that set the item's explicit block, which qits-projects sends
+   * with an {@code EXPLICIT} or {@code BOTH} source (qits-1511). Optional; an agent whose own
+   * subject set an {@code EXPLICIT} block is still nudged.
+   */
   public static record MarkBlockedRequest(
-      @NotBlank String workId, boolean blocked, String blockSource) {}
+      @NotBlank String workId, boolean blocked, String blockSource, String blockedBy) {}
 
   @POST
   @Path("/blocked")
@@ -209,15 +214,18 @@ public class AgentDispatchController {
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @Operation(operationId = "markAgentDispatchBlocked")
   public AgentService.EntityMark blocked(@Valid MarkBlockedRequest request) {
-    return agents.markBlocked(request.workId(), request.blocked(), request.blockSource());
+    return agents.markBlocked(
+        request.workId(), request.blocked(), request.blockSource(), request.blockedBy());
   }
 
+  /** {@code blockedBy} as on {@link MarkBlockedRequest} (qits-1511). */
   public static record MarkEntityRequest(
       @NotBlank String workId,
       String title,
       String status,
       @NotNull Boolean blocked,
-      String blockSource) {}
+      String blockSource,
+      String blockedBy) {}
 
   @POST
   @Path("/entity")
@@ -236,7 +244,8 @@ public class AgentDispatchController {
     return agents.markEntity(
         request.workId(),
         new EntityFacts(request.title(), request.status(), request.blocked().booleanValue()),
-        request.blockSource());
+        request.blockSource(),
+        request.blockedBy());
   }
 
   public static record ListAgentRefsRequest() {
