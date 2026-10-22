@@ -214,7 +214,7 @@ in a row it has had. Columns on a `CausedRow`, so no `ArchRulesTest` decision; s
 workspaces they run in", Nudge.
 **`V29__agent_block_author.sql`** (qits-1511) adds `block_author` (nullable `text`) to
 `agent_worktree`: the subject qits-projects names as having set the item's explicit block. An agent
-whose own subject set an `EXPLICIT` block is still nudged. A column on a `CausedRow`, so no
+whose own subject set an `EXPLICIT` or `BOTH` block is still nudged. A column on a `CausedRow`, so no
 `ArchRulesTest` decision; see "Agents and the workspaces they run in", Nudge.
 
 **`V18__dispatch_command_id.sql` adds `dispatch_command_id` to `workspace`** (qits-895): the daemon
@@ -1018,12 +1018,14 @@ makes every daemon call, one pass at a time, kicked after each door and every
    and verify), so "carry on with the phase" would push it into work nobody started — with no pending text, no OPEN wait and no explicit block
    (`entity_blocked` with `block_source` `EXPLICIT` or `BOTH`, or no source at all; the derived
    `AGENT_WAITING` block alone is the stall itself and does not exempt it) — **except a block the
-   agent set itself** (qits-1511): `EXPLICIT` exactly, with `block_author` equal to its own
-   `commissioned_token_subject`. That agent is nudged like an unblocked one, same clock, limit and
+   agent set itself** (qits-1511): `EXPLICIT` or `BOTH`, with `block_author` equal to its own
+   `commissioned_token_subject` — `BOTH` is the normal state of exactly the agent this nudge is for,
+   since the derived `AGENT_WAITING` block joins an idle self-blocked agent's explicit one within
+   qits-projects' debounce. That agent is nudged like an unblocked one, same clock, limit and
    spacing, with a text of its own ("You blocked <workId> yourself and have no open wait. If what you
    wait on is a release request, a CI run or a work item, declare it with `qits wait …` …; if only a
-   person can move it, leave the block …") and `reason` `SELF_BLOCKED`; `BOTH`, no source, no
-   author or anybody else's still exempt it — and has been quiet for
+   person can move it, leave the block …") and `reason` `SELF_BLOCKED`; a block with no source, or
+   one set by anybody else, still exempts it — and has been quiet for
    `qits.workspace.agent.nudge-after` (20 min; zero or negative switches it off) counted from the
    later of `waiting_since` and `last_activity_at`. `waiting_since` is the clock because hooks fire
    only at turn boundaries — a 40-minute build sends no frame, so `last_activity_at` alone would

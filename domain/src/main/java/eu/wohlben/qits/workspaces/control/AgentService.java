@@ -1732,15 +1732,20 @@ public class AgentService {
    * name none) is read as explicit: not nudging is the safe side.
    */
   /**
-   * Whether the agent blocked its own item (qits-1511): {@code EXPLICIT} exactly — not {@code BOTH},
-   * not a missing source — set by its own commissioned token's subject, as qits-projects names it in
-   * {@code blockedBy}. Such an agent is nudged like an unblocked one, with {@link
-   * #selfBlockedNudgeText}: it may be waiting on something the platform can wake it for, and never
-   * said so. A block anybody else set still exempts it.
+   * Whether the agent blocked its own item (qits-1511): {@code EXPLICIT} or {@code BOTH} — not a
+   * missing source — set by its own commissioned token's subject, as qits-projects names it in
+   * {@code blockedBy}. {@code BOTH} is the normal state of exactly the agent this nudge is for: the
+   * derived {@code AGENT_WAITING} block joins an idle self-blocked agent's explicit one once
+   * qits-projects' AgentWaiting sweep re-announces the item, within its debounce — so an agent that
+   * blocks its own item and then sits idle with no open wait reads {@code BOTH}, not {@code
+   * EXPLICIT}, by the time this is asked. Such an agent is nudged like an unblocked one, with
+   * {@link #selfBlockedNudgeText}: it may be waiting on something the platform can wake it for, and
+   * never said so. The explicit block's author is what decides — a block a person set, or with no
+   * author, still exempts the agent whether the source is {@code EXPLICIT} or {@code BOTH}.
    */
   static boolean selfBlocked(AgentWorktree agent) {
     return Boolean.TRUE.equals(agent.entityBlocked)
-        && "EXPLICIT".equals(agent.blockSource)
+        && ("EXPLICIT".equals(agent.blockSource) || "BOTH".equals(agent.blockSource))
         && agent.commissionedTokenSubject != null
         && agent.commissionedTokenSubject.equals(agent.blockAuthor);
   }
