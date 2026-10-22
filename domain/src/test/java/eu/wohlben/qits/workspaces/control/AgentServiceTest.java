@@ -69,6 +69,7 @@ public class AgentServiceTest {
   @Inject FakeCredentialCommissioner commissioner;
   @Inject RecordingLifecycleAnnouncer announced;
   @Inject AgentWaits waits;
+  @Inject FakeAgentActivityView activityView;
 
   private String repoId;
 
@@ -2430,5 +2431,174 @@ public class AgentServiceTest {
     service.nudgeIdle(NUDGE_AFTER, 0);
     assertEquals(0, row(agentId).nudgeCount);
     assertNull(row(agentId).pendingText);
+  }
+
+  // --- the stale-idle repair (qits-1511) ---------------------------------------------------------
+
+  private static final Duration STALE_AFTER = Duration.ofMinutes(65);
+
+  /**
+   * A quiet agent whose turn-ended report never came: {@code waitingSince} null, its last frame
+   * {@code quiet} ago, its daemon reading it {@code state} (null: no reading, daemon not connected).
+   * Its slot's liveness is dropped so a background pass does not drive it.
+   */
+  private String staleAgent(String workId, Duration quiet, AgentActivityState state) {
+    String agentId = quietAgent(workId, quiet);
+    liveness.markDead(row(agentId).workspaceId);
+    Instant at = Instant.now().minus(quiet);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agents.findById(UUID.fromString(agentId));
+              row.waitingSince = null;
+              row.lastActivityAt = at;
+            });
+    if (state != null) {
+      activityView.report(agentId, state);
+    }
+    return agentId;
+  }
+
+  private List<FakeAgentWaitingReporter.Report> staleIdleRelays(String workId) {
+    return reporter.reportsFor(workId).stream()
+        .filter(r -> AgentService.CAUSE_STALE_IDLE.equals(r.cause()))
+        .toList();
+  }
+
+  private void assertNotRepaired(String agentId, Duration after) {
+    service.repairStaleIdle(after);
+    AgentWorktree row = row(agentId);
+    assertNull(row.waitingSince, "not treated as waiting");
+    assertEquals(List.of(), staleIdleRelays(row.workId));
+  }
+
+  @Test
+  void anIdleAgentWithNoTurnEndedReportIsTreatedAsWaitingAndThenNudged() {
+    String agentId = staleAgent("w-stale-idle", Duration.ofMinutes(70), AgentActivityState.IDLE);
+    try {
+      Instant last = row(agentId).lastActivityAt;
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      assertEquals(0, row(agentId).nudgeCount, "no waitingSince: the nudge cannot see it");
+
+      service.repairStaleIdle(STALE_AFTER);
+
+      AgentWorktree repaired = row(agentId);
+      assertEquals(last, repaired.waitingSince, "waiting since its last frame");
+      List<FakeAgentWaitingReporter.Report> relays = staleIdleRelays("w-stale-idle");
+      assertEquals(1, relays.size(), reporter.reportsFor("w-stale-idle").toString());
+      assertTrue(relays.get(0).waiting());
+      assertEquals(last.toEpochMilli(), relays.get(0).at());
+
+      service.repairStaleIdle(STALE_AFTER);
+      assertEquals(1, staleIdleRelays("w-stale-idle").size(), "a second pass repairs nothing");
+
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      assertEquals(1, row(agentId).nudgeCount, "nudgeable at once: 70 min of quiet");
+      assertEquals(AgentService.nudgeText("w-stale-idle"), row(agentId).pendingText);
+    } finally {
+      activityView.forget(agentId);
+    }
+  }
+
+  @Test
+  void aWaitingAgentWithNoTurnEndedReportIsRepaired() {
+    String agentId = staleAgent("w-stale-waiting", Duration.ofMinutes(70), AgentActivityState.WAITING);
+    try {
+      service.repairStaleIdle(STALE_AFTER);
+      assertEquals(row(agentId).lastActivityAt, row(agentId).waitingSince);
+      assertEquals(1, staleIdleRelays("w-stale-waiting").size());
+    } finally {
+      activityView.forget(agentId);
+    }
+  }
+
+  @Test
+  void aBusyAgentIsNotRepairedHoweverLongItIsQuiet() {
+    String agentId = staleAgent("w-stale-busy", Duration.ofHours(3), AgentActivityState.BUSY);
+    try {
+      assertNotRepaired(agentId, STALE_AFTER);
+    } finally {
+      activityView.forget(agentId);
+    }
+  }
+
+  @Test
+  void anAgentWithNoReadingIsNotRepaired() {
+    // No activity known: its daemon is not connected, so nothing says it is idle.
+    String agentId = staleAgent("w-stale-unknown", Duration.ofHours(3), null);
+    assertNotRepaired(agentId, STALE_AFTER);
+
+    activityView.report(agentId, AgentActivityState.ENDED);
+    try {
+      assertNotRepaired(agentId, STALE_AFTER);
+    } finally {
+      activityView.forget(agentId);
+    }
+  }
+
+  @Test
+  void anAgentQuietForLessThanTheGraceIsNotRepaired() {
+    String agentId = staleAgent("w-stale-recent", Duration.ofMinutes(30), AgentActivityState.IDLE);
+    try {
+      assertNotRepaired(agentId, STALE_AFTER);
+    } finally {
+      activityView.forget(agentId);
+    }
+  }
+
+  @Test
+  void anAgentWithSomethingPendingIsNotRepaired() {
+    String agentId = staleAgent("w-stale-pending", Duration.ofMinutes(70), AgentActivityState.IDLE);
+    try {
+      QuarkusTransaction.requiringNew()
+          .run(() -> agents.findById(UUID.fromString(agentId)).pendingText = "a turn to say");
+      assertNotRepaired(agentId, STALE_AFTER);
+    } finally {
+      activityView.forget(agentId);
+    }
+  }
+
+  @Test
+  void aQueuedOrObsoleteAgentIsNotRepaired() {
+    AgentService.Dispatch queued = dispatch("w-stale-queued", false, null);
+    String queuedId = queued.agent().agentId();
+    assertEquals(AgentRunState.QUEUED, row(queuedId).runState);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                agents.findById(UUID.fromString(queuedId)).lastActivityAt =
+                    Instant.now().minus(Duration.ofHours(2)));
+    activityView.report(queuedId, AgentActivityState.IDLE);
+
+    String obsoleteId =
+        staleAgent("w-stale-obsolete", Duration.ofMinutes(70), AgentActivityState.IDLE);
+    releaseWrapperOf(obsoleteId);
+    assertEquals(AgentState.OBSOLETE, row(obsoleteId).state);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agents.findById(UUID.fromString(obsoleteId));
+              row.waitingSince = null;
+              row.pendingText = null;
+              row.lastActivityAt = Instant.now().minus(Duration.ofMinutes(70));
+            });
+    try {
+      assertNotRepaired(queuedId, STALE_AFTER);
+      assertNotRepaired(obsoleteId, STALE_AFTER);
+    } finally {
+      activityView.forget(queuedId);
+      activityView.forget(obsoleteId);
+    }
+  }
+
+  @Test
+  void aZeroStaleTimeSwitchesTheRepairOff() {
+    String agentId = staleAgent("w-stale-off", Duration.ofHours(3), AgentActivityState.IDLE);
+    try {
+      assertNotRepaired(agentId, Duration.ZERO);
+      assertNotRepaired(agentId, Duration.ofMinutes(-1));
+    } finally {
+      activityView.forget(agentId);
+    }
   }
 }

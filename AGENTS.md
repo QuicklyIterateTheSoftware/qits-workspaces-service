@@ -1041,6 +1041,18 @@ makes every daemon call, one pass at a time, kicked after each door and every
    Every agent has a work item (D24), so a person-created agent is nudged like a dispatched one; a
    turn a person types in its terminal does not reset the count. The domain suite pins `nudge-after`
    at a year, because its fixtures backdate `waiting_since`, and drives `nudgeIdle(after, limit)`.
+
+   **Stale idle** (qits-1511, `repairStaleIdle`, run just before the yield): the yield and the nudge
+   both need `waiting_since`, and a qits-workspace-daemon from before qits-1511 could swallow a
+   turn's Stop — a running workspace keeps the daemon it booted with — leaving an agent idle with no
+   `waiting_since` for good (qits-950's agent sat 11 h so on 2026-10-22). So a placed ACTIVE agent
+   (RUNNING or YIELDED, no start refused) with no `waiting_since` and no pending text, which its
+   daemon reads IDLE or WAITING (never BUSY; no reading or ENDED is left alone) and which sent no
+   frame for `qits.workspace.agent.stale-idle-after` (65 min, just past the daemon's 60 min
+   background-work grace; zero or negative switches it off), gets `waiting_since = last_activity_at`
+   on the locked row, relayed to qits-projects as a waiting flip with cause `StaleIdle` at that
+   time. Its quiet clock is then already past `nudge-after`, so it is nudged in the same pass. The
+   domain suite pins the key at a year and drives `repairStaleIdle(after)`.
 5. **Drive** — a RUNNING agent whose daemon answers is started with `POST agent-worktrees` (its
    instruction, session, entity facts and credential; `mode: INTERACTIVE`, the harness's TUI in a
    terminal), and its pending turn is said at a turn boundary (`/turn`; BUSY waits up to the launch

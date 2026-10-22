@@ -90,6 +90,12 @@ import org.jboss.logging.Logger;
  *   <li><b>Place</b>: each QUEUED agent goes to an empty workspace of its wrapper and posture, else
  *       to a new workspace while the runners have free slots (an admin agent: a new DIRECT admin
  *       workspace), else to a workspace whose agents have all yielded, else it stays QUEUED.
+ *   <li><b>Repair stale idle</b> (qits-1511): a placed ACTIVE agent its daemon reads IDLE or
+ *       WAITING, with no {@code waitingSince}, nothing pending, and no frame for {@code
+ *       qits.workspace.agent.stale-idle-after} — longer than the daemon's background-work grace — is
+ *       treated as waiting since its last frame, so the yield and the nudge see it. A daemon that
+ *       swallowed the Stop of a turn would otherwise leave it idle for good ({@link
+ *       #repairStaleIdle}).
  *   <li><b>Yield</b>: a RUNNING agent that has waited for input longer than {@code
  *       qits.workspace.agent.yield-after} — counted from its last frame or typed turn too, so a
  *       turn not yet taken is not yielded from under it — gives up its slot when another agent
@@ -271,6 +277,14 @@ public class AgentService {
   @ConfigProperty(name = "qits.workspace.agent.nudge-limit", defaultValue = "3")
   int nudgeLimit;
 
+  /**
+   * How long an agent its daemon reads IDLE or WAITING may go with no frame and no {@code
+   * waitingSince} before it is treated as waiting since its last frame (qits-1511, {@link
+   * #repairStaleIdle}); zero or negative: never. Just past the daemon's background-work grace.
+   */
+  @ConfigProperty(name = "qits.workspace.agent.stale-idle-after", defaultValue = "PT65M")
+  Duration staleIdleAfter;
+
   /** A push the daemon reported, kept until its repository name maps to an id. */
   private record PendingPush(UUID agentId, String repositoryName, String branch, String sha, Instant pushedAt) {}
 
@@ -291,6 +305,12 @@ public class AgentService {
    * has not waited yet, and must not inherit the previous agent's wait.
    */
   static final String CAUSE_DISPATCHED = "AgentDispatched";
+
+  /**
+   * The cause relayed to qits-projects when an idle agent with no turn-ended report is treated as
+   * waiting ({@link #repairStaleIdle}, qits-1511).
+   */
+  static final String CAUSE_STALE_IDLE = "StaleIdle";
 
   /** How long an OBSOLETE agent must be idle before the cleanup sweep looks at it (D4). */
   @ConfigProperty(name = "qits.workspace.agent.cleanup-idle", defaultValue = "PT30S")
@@ -1175,6 +1195,7 @@ public class AgentService {
       }
       resumeYielded();
       placeQueued();
+      repairStaleIdle();
       yieldBlocked();
       nudgeIdle();
       driveRunning();
@@ -1451,6 +1472,98 @@ public class AgentService {
     }
     Instant quietSince = since ? agent.lastActivityAt : agent.waitingSince;
     return !quietSince.isAfter(before);
+  }
+
+  /**
+   * Step 2b, before the yield (qits-1511): an agent whose turn ended but whose row never heard it is
+   * treated as waiting since its last frame. A qits-workspace-daemon from before qits-1511 could
+   * swallow a turn's Stop, and a running workspace keeps the daemon it booted with: such an agent
+   * reads IDLE or WAITING, has no {@code waitingSince}, and the yield and the nudge — which both
+   * need one — never see it again.
+   *
+   * <p>Repaired when every one of {@link #staleIdle} holds and the daemon of its workspace reads it
+   * IDLE or WAITING. BUSY is a turn in progress, and no reading at all (the daemon is not connected,
+   * or the session ENDED) says nothing about it: both are left alone. The quiet time is past the
+   * daemon's own background-work grace, so the daemon itself would call it idle. The write is
+   * re-checked on the locked row, and relayed to qits-projects as a waiting flip ({@link
+   * #CAUSE_STALE_IDLE}) at {@code lastActivityAt}, as {@link #onActivity} relays a Stop.
+   */
+  void repairStaleIdle() {
+    repairStaleIdle(staleIdleAfter);
+  }
+
+  /** {@link #repairStaleIdle()} with the quiet time given, for a test to stand anywhere. */
+  void repairStaleIdle(Duration after) {
+    if (after == null || after.isZero() || after.isNegative() || !activity.isResolvable()) {
+      return;
+    }
+    synchronized (passLock) {
+      Instant now = Instant.now();
+      AgentActivityView view = activity.get();
+      List<UUID> candidates =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () ->
+                      agents.findPlacedLive().stream()
+                          .filter(a -> staleIdle(a, now, after) && readsIdle(view, a.id))
+                          .map(a -> a.id)
+                          .toList());
+      boolean repaired = false;
+      for (UUID id : candidates) {
+        AgentWorktree written =
+            QuarkusTransaction.requiringNew()
+                .call(
+                    () -> {
+                      AgentWorktree row =
+                          agents
+                              .findByIdOptional(id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                              .orElse(null);
+                      if (row == null || !staleIdle(row, now, after) || !readsIdle(view, id)) {
+                        return null;
+                      }
+                      row.waitingSince = row.lastActivityAt;
+                      return row;
+                    });
+        if (written == null) {
+          continue;
+        }
+        LOG.infof(
+            "Agent %s read %s with no frame for %s and no turn-ended report: treated as waiting"
+                + " since %s",
+            id,
+            view.activityOf(id.toString()).orElse(null),
+            after,
+            written.lastActivityAt);
+        waits.relayActivity(
+            written.workId, id, true, CAUSE_STALE_IDLE, written.sessionId, written.lastActivityAt);
+        repaired = true;
+      }
+      if (repaired) {
+        kick();
+      }
+    }
+  }
+
+  /**
+   * Every row condition of {@link #repairStaleIdle} (qits-1511): ACTIVE, placed (RUNNING or
+   * YIELDED) with no start refused, no {@code waitingSince}, nothing pending, and no frame for
+   * {@code after}.
+   */
+  private static boolean staleIdle(AgentWorktree agent, Instant now, Duration after) {
+    return agent.state == AgentState.ACTIVE
+        && (agent.runState == AgentRunState.RUNNING || agent.runState == AgentRunState.YIELDED)
+        && agent.workspaceId != null
+        && agent.startRefusal == null
+        && agent.waitingSince == null
+        && agent.pendingText == null
+        && agent.lastActivityAt != null
+        && !agent.lastActivityAt.plus(after).isAfter(now);
+  }
+
+  /** Whether the agent's daemon reads it IDLE or WAITING: not BUSY, not ENDED, not unknown. */
+  private static boolean readsIdle(AgentActivityView view, UUID id) {
+    AgentActivityState state = view.activityOf(id.toString()).orElse(null);
+    return state == AgentActivityState.IDLE || state == AgentActivityState.WAITING;
   }
 
   /** The nudge (qits-1460): short, and naming the three ways out of a turn. */
