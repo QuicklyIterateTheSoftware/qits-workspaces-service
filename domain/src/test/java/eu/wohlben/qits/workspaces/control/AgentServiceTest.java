@@ -2273,7 +2273,7 @@ public class AgentServiceTest {
   }
 
   @Test
-  void aBlockSetByAnybodyElseOrBothOrWithAnOpenWaitStillExemptsTheAgent() {
+  void aBlockSetByAnybodyElseOrWithAnOpenWaitStillExemptsTheAgent() {
     String other = quietAgent("w-nudge-other", NUDGE_AFTER.plusMinutes(1));
     liveness.markDead(row(other).workspaceId);
     subjectOf(other);
@@ -2281,15 +2281,17 @@ public class AgentServiceTest {
     endedItsTurn(other, NUDGE_AFTER.plusMinutes(1));
     assertNotNudged(other);
 
-    String both = quietAgent("w-nudge-both", NUDGE_AFTER.plusMinutes(1));
-    liveness.markDead(row(both).workspaceId);
+    // BOTH is the agent's own derived-plus-explicit state, but the author names somebody else.
+    String bothOther = quietAgent("w-nudge-both-other", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(bothOther).workspaceId);
+    subjectOf(bothOther);
     service.markEntity(
-        "w-nudge-both",
+        "w-nudge-both-other",
         new EntityFacts(null, "IMPLEMENTING", true),
         "BOTH",
-        subjectOf(both));
-    endedItsTurn(both, NUDGE_AFTER.plusMinutes(1));
-    assertNotNudged(both);
+        "a-person");
+    endedItsTurn(bothOther, NUDGE_AFTER.plusMinutes(1));
+    assertNotNudged(bothOther);
 
     String waiting = quietAgent("w-nudge-self-wait", NUDGE_AFTER.plusMinutes(1));
     liveness.markDead(row(waiting).workspaceId);
@@ -2306,6 +2308,27 @@ public class AgentServiceTest {
     service.markBlocked("w-nudge-unnamed", true, "EXPLICIT", null);
     endedItsTurn(unnamed, NUDGE_AFTER.plusMinutes(1));
     assertNotNudged(unnamed);
+  }
+
+  @Test
+  void aSelfBlockedAgentIdlePastTheDebounceReadsBothAndIsStillNudged() {
+    // qits-1511: qits-projects' AgentWaiting sweep re-announces the item once the derived
+    // AGENT_WAITING block joins the agent's own explicit one, so a self-blocked idle agent's row
+    // reads BOTH, not EXPLICIT, by the time nudgeIdle asks. BOTH must not read as somebody else's
+    // block when the explicit block's own author is this agent.
+    String agentId = quietAgent("w-nudge-self-both", NUDGE_AFTER.plusMinutes(1));
+    liveness.markDead(row(agentId).workspaceId);
+    String self = subjectOf(agentId);
+    service.markBlocked("w-nudge-self-both", true, "BOTH", self);
+    assertEquals(self, row(agentId).blockAuthor);
+    endedItsTurn(agentId, NUDGE_AFTER.plusMinutes(1));
+
+    service.nudgeIdle(NUDGE_AFTER, 3);
+
+    AgentWorktree nudged = row(agentId);
+    assertEquals(1, nudged.nudgeCount);
+    assertEquals(AgentService.selfBlockedNudgeText("w-nudge-self-both"), nudged.pendingText);
+    assertEquals(AgentNudged.SELF_BLOCKED, nudgesOf(agentId).get(0).reason());
   }
 
   @Test
