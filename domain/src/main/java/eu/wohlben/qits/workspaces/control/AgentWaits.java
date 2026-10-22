@@ -482,8 +482,10 @@ public class AgentWaits {
       return null;
     }
     agent.pendingText = agent.pendingText == null ? turn : agent.pendingText + "\n\n" + turn;
-    // It is about to work, not waiting: the next Stop is a fresh flip.
-    agent.waitingSince = null;
+    // waitingSince stays (qits-1511): a wake is a turn to be typed, not one the harness took. The
+    // BUSY frame of its UserPromptSubmit is the flip that clears it, and the Stop after that turn
+    // is a fresh flip again. A wake the harness swallows leaves the agent waiting, so the nudge
+    // still finds it; the pending text keeps the nudge and the yield off until it is said.
     // A turn that is not a nudge: a later quiet period earns a fresh nudge (qits-1460).
     agent.nudgeCount = 0;
     return agent;

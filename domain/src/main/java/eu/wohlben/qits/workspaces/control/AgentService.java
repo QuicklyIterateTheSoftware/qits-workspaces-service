@@ -91,8 +91,9 @@ import org.jboss.logging.Logger;
  *       to a new workspace while the runners have free slots (an admin agent: a new DIRECT admin
  *       workspace), else to a workspace whose agents have all yielded, else it stays QUEUED.
  *   <li><b>Yield</b>: a RUNNING agent that has waited for input longer than {@code
- *       qits.workspace.agent.yield-after} gives up its slot when another agent wants it. Only the
- *       row changes: no daemon call, and its harness keeps running.
+ *       qits.workspace.agent.yield-after} — counted from its last frame or typed turn too, so a
+ *       turn not yet taken is not yielded from under it — gives up its slot when another agent
+ *       wants it. Only the row changes: no daemon call, and its harness keeps running.
  *   <li><b>Nudge</b> (qits-1460): a dispatched agent that ended its turn with no open wait and no
  *       explicit block on its item, and has been quiet for {@code qits.workspace.agent.nudge-after},
  *       is handed {@link #nudgeText} as its next turn — at most {@code
@@ -273,9 +274,6 @@ public class AgentService {
 
   /** How long a push whose repository cannot be named is tried again before it is given up. */
   static final Duration PUSH_RETRY_LIMIT = Duration.ofHours(1);
-
-  /** The cause relayed to qits-projects when a turn is typed into an agent that was waiting. */
-  static final String CAUSE_TURN = "TurnDelivered";
 
   /**
    * The cause relayed to qits-projects when a waiting agent is removed and no other live agent of
@@ -914,7 +912,9 @@ public class AgentService {
   /**
    * An activity frame for one agent: the activity time, the waiting state and the session. A flip
    * of the waiting state is relayed to qits-projects (qits-895), which derives the item's BLOCKED
-   * from it; the relay is now per agent and stored, so a reconnect does not repeat it. A YIELDED
+   * from it; the relay is now per agent and stored, so a reconnect does not repeat it. The BUSY
+   * frame of a typed turn's {@code UserPromptSubmit} is the flip that ends a wait: typing the turn
+   * ({@link #drive}, a wait's wake) does not clear {@code waitingSince} (qits-1511). A YIELDED
    * agent that works again (a person typed in its terminal) is RUNNING again, so it counts as
    * holding its slot.
    *
@@ -1385,7 +1385,7 @@ public class AgentService {
                       for (AgentWorktree agent : live) {
                         if (agent.runState != AgentRunState.RUNNING
                             || agent.waitingSince == null
-                            || (agent.waitingSince.isAfter(before) && !onAWait.contains(agent.id))
+                            || !quietLongEnough(agent, before, onAWait.contains(agent.id))
                             || agent.pendingText != null) {
                           continue;
                         }
@@ -1422,6 +1422,24 @@ public class AgentService {
         placeQueued();
       }
     }
+  }
+
+  /**
+   * Whether a waiting agent has been quiet long enough to yield (qits-1511). The clock is the later
+   * of {@code waitingSince} and {@code lastActivityAt}: a turn typed into a waiting agent leaves
+   * {@code waitingSince} standing until the harness's BUSY frame clears it, and stamps {@code
+   * lastActivityAt}, so in the seconds between the typing and that frame the agent is not yielded
+   * from under its new turn. An agent on a declared wait yields at once (qits-1153, W5) — but only
+   * while nothing came since it stopped; after a typed turn it is debounced like any other.
+   */
+  private static boolean quietLongEnough(AgentWorktree agent, Instant before, boolean onAWait) {
+    boolean since =
+        agent.lastActivityAt != null && agent.lastActivityAt.isAfter(agent.waitingSince);
+    if (onAWait && !since) {
+      return true;
+    }
+    Instant quietSince = since ? agent.lastActivityAt : agent.waitingSince;
+    return !quietSince.isAfter(before);
   }
 
   /** The nudge (qits-1460): short, and naming the three ways out of a turn. */
@@ -1729,25 +1747,23 @@ public class AgentService {
     }
     pendingSince.remove(agent.id);
     Instant now = Instant.now();
-    AgentWorktree told =
-        QuarkusTransaction.requiringNew()
-            .call(
-                () -> {
-                  AgentWorktree row = agents.findById(agent.id);
-                  if (Objects.equals(row.pendingText, text)) {
-                    row.pendingText = null;
-                  }
-                  row.pendingCompact = false;
-                  boolean was = row.waitingSince != null;
-                  row.waitingSince = null;
-                  row.lastActivityAt = now;
-                  return was ? row : null;
-                });
-    if (told != null) {
-      // The agent was waiting and now has a turn. qits-projects heard the waiting flip, so it
-      // hears this one too: the hook that follows the turn finds nothing left to flip.
-      waits.relayActivity(told.workId, told.id, false, CAUSE_TURN, told.sessionId, now);
-    }
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agents.findById(agent.id);
+              if (Objects.equals(row.pendingText, text)) {
+                row.pendingText = null;
+              }
+              row.pendingCompact = false;
+              // Typed is not taken (qits-1511): waitingSince stays until the harness says it works.
+              // Its UserPromptSubmit is a BUSY frame, and onActivity clears waitingSince on that
+              // flip and relays it to qits-projects — so the item's "waiting for you" clears when
+              // the agent starts working, not when text was typed. A turn the harness swallows (a
+              // permission dialog took it) sends no such frame: the agent still reads as waiting,
+              // and the nudge and the yield still see it. lastActivityAt restarts both their quiet
+              // clocks, so neither acts in the seconds before that frame arrives.
+              row.lastActivityAt = now;
+            });
   }
 
   /**

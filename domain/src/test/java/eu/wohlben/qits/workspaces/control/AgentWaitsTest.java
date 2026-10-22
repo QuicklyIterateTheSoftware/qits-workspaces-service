@@ -328,6 +328,33 @@ public class AgentWaitsTest {
     assertTrue(after.pendingText.contains("\"ticket e-1 verified\" matched"), after.pendingText);
   }
 
+  /**
+   * A wake is typed, not taken (qits-1511): waitingSince stays until the BUSY frame of its
+   * UserPromptSubmit, so a wake the harness swallows still reads as waiting. It is a turn that is
+   * not a nudge: the count starts again.
+   */
+  @Test
+  void aWakeLeavesTheAgentWaitingAndResetsTheNudgeCount() {
+    UUID id = agent("w-wake-waiting");
+    Instant stopped = Instant.ofEpochMilli(System.currentTimeMillis() - 600_000);
+    inASlot(id, "waits-wake-", AgentRunState.RUNNING, stopped);
+    waits.create(id, "ticket e-1 verified", verified(), null);
+    QuarkusTransaction.requiringNew().run(() -> agents.findById(id).nudgeCount = 2);
+
+    assertEquals(
+        1,
+        waits.onEvent(
+            "ev-wake-waiting",
+            "EntityTransitioned",
+            Instant.now(),
+            "{\"entities\":[{\"entityId\":\"e-1\",\"status\":\"VERIFIED\"}]}"));
+
+    AgentWorktree woken = row(id);
+    assertNotNull(woken.pendingText);
+    assertEquals(stopped, woken.waitingSince, "the wake does not clear waitingSince");
+    assertEquals(0, woken.nudgeCount, "a wake is a turn that is not a nudge");
+  }
+
   /** A timeout wakes a yielded agent the same way (qits-1212). */
   @Test
   void aTimeoutOnAYieldedAgentMakesItRunning() {

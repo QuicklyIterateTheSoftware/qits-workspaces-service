@@ -446,9 +446,8 @@ public class AgentServiceTest {
 
     // An admin agent always gets a new slot, so queue one by hand to stand for a full runner.
     agentIn(null, true, AgentRunState.QUEUED);
-    // The first agent has waited for input since long before the yield time.
-    QuarkusTransaction.requiringNew()
-        .run(() -> agents.findById(UUID.fromString(firstId)).waitingSince = Instant.now().minusSeconds(3600));
+    // The first agent has waited for input since long before the yield time, with no frame since.
+    backdateQuiet(firstId, Duration.ofHours(1));
     List<String> before = daemon.callsFor(firstId);
 
     service.yieldBlocked();
@@ -468,6 +467,55 @@ public class AgentServiceTest {
     assertEquals(AgentRunState.RUNNING, row(firstId).runState);
     assertTrue(daemon.callsFor(firstId).contains("turn " + slot + " " + firstId + " your answer"));
     liveness.markDead(slot);
+  }
+
+  /** The agent waited for input since {@code ago}, and nothing came since: no frame, no turn. */
+  private void backdateQuiet(String agentId, Duration ago) {
+    Instant at = Instant.now().minus(ago);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agents.findById(UUID.fromString(agentId));
+              row.waitingSince = at;
+              row.lastActivityAt = at;
+            });
+  }
+
+  @Test
+  void aTurnJustTypedIntoAWaitingAgentIsNotYieldedFromUnderIt() throws InterruptedException {
+    // qits-1511: typing no longer clears waitingSince, so the yield must not read the old clock in
+    // the seconds before the turn's UserPromptSubmit arrives.
+    AgentService.Dispatch first = dispatch("w-typed-yield", true, null);
+    String firstId = first.agent().agentId();
+    Long slot = first.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      assertTrue(service.isStarted(UUID.fromString(firstId)));
+      Thread.sleep(100);
+      backdateQuiet(firstId, Duration.ofHours(1));
+      service.deliver("w-typed-yield", "your answer", false);
+      service.reconcile();
+      assertTrue(
+          daemon.callsFor(firstId).contains("turn " + slot + " " + firstId + " your answer"));
+      assertNull(row(firstId).pendingText, "said");
+      assertNotNull(row(firstId).waitingSince, "typed is not taken");
+
+      agentIn(null, true, AgentRunState.QUEUED);
+      service.yieldBlocked();
+      assertEquals(AgentRunState.RUNNING, row(firstId).runState, "not yielded right after its turn");
+
+      // The harness swallowed the turn: no BUSY frame came, and it is quiet again. It yields.
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  agents.findById(UUID.fromString(firstId)).lastActivityAt =
+                      Instant.now().minusSeconds(3600));
+      service.yieldBlocked();
+      assertEquals(AgentRunState.YIELDED, row(firstId).runState);
+    } finally {
+      liveness.markDead(slot);
+    }
   }
 
   @Test
@@ -1606,27 +1654,41 @@ public class AgentServiceTest {
   }
 
   @Test
-  void aTurnTypedIntoAWaitingAgentTellsQitsProjectsItNoLongerWaits() {
+  void aTurnTypedIntoAWaitingAgentTellsQitsProjectsItNoLongerWaitsOnceItsPromptIsSubmitted() {
     // qits-1198: the agent waited, a phase turn was typed into it, and qits-projects kept it
-    // blocked while it worked, because the turn cleared the flag here without saying so.
-    AgentService.Dispatch dispatched = dispatch("w-blocked", true, null);
+    // blocked while it worked. qits-1511: the typing itself says nothing and leaves waitingSince;
+    // the BUSY frame of the turn's UserPromptSubmit is the flip, and that flip is relayed.
+    String workId = uniqueWorkId("w-blocked");
+    AgentService.Dispatch dispatched = dispatch(workId, true, null);
     String agentId = dispatched.agent().agentId();
     Long slot = dispatched.agent().workspaceRowId();
     liveness.markLive(slot);
-    service.reconcile();
-    service.onActivity(row(agentId).workspaceId, agentId, Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
+    try {
+      service.reconcile();
+      service.onActivity(row(agentId).workspaceId, agentId, Boolean.TRUE, "s-1", "Stop", System.currentTimeMillis());
+      Instant waitingSince = row(agentId).waitingSince;
+      assertNotNull(waitingSince);
 
-    service.deliver("w-blocked", "implement it", false);
-    service.reconcile();
-    service.onActivity(row(agentId).workspaceId, agentId, Boolean.FALSE, "s-1", "UserPromptSubmit", System.currentTimeMillis());
+      service.deliver(workId, "implement it", false);
+      service.reconcile();
+      assertTrue(daemon.callsFor(agentId).contains("turn " + slot + " " + agentId + " implement it"));
+      AgentWorktree typed = row(agentId);
+      assertNull(typed.pendingText, "said");
+      assertEquals(waitingSince, typed.waitingSince, "typing does not clear waitingSince");
+      assertTrue(typed.lastActivityAt.isAfter(waitingSince), "the typing restarts the quiet clock");
+      List<FakeAgentWaitingReporter.Report> beforeFrame = reporter.reportsFor(workId);
+      assertTrue(beforeFrame.get(beforeFrame.size() - 1).waiting(), "nothing relayed on typing");
 
-    List<FakeAgentWaitingReporter.Report> reports =
-        reporter.reportsFor("w-blocked").stream()
-            .filter(r -> !AgentService.CAUSE_DISPATCHED.equals(r.cause()))
-            .toList();
-    assertFalse(reports.isEmpty());
-    assertFalse(reports.get(reports.size() - 1).waiting(), "the last word qits-projects heard");
-    liveness.markDead(slot);
+      service.onActivity(row(agentId).workspaceId, agentId, Boolean.FALSE, "s-1", "UserPromptSubmit", System.currentTimeMillis());
+      assertNull(row(agentId).waitingSince, "the BUSY frame clears it");
+
+      List<FakeAgentWaitingReporter.Report> reports = reporter.reportsFor(workId);
+      FakeAgentWaitingReporter.Report last = reports.get(reports.size() - 1);
+      assertFalse(last.waiting(), "the last word qits-projects heard");
+      assertEquals("UserPromptSubmit", last.cause());
+    } finally {
+      liveness.markDead(slot);
+    }
   }
 
   /** A work item id no other test (or earlier run of this one) reported on. */
@@ -2000,7 +2062,9 @@ public class AgentServiceTest {
       assertNull(row(agentId).pendingText, "said");
       assertEquals(1, row(agentId).nudgeCount, "its own delivery does not reset the count");
 
-      // A second sweep finds nothing: the delivery cleared waitingSince.
+      // A second sweep finds nothing: the delivery restarted the quiet clock, and the limit is
+      // reached. waitingSince stays until a BUSY frame (qits-1511).
+      assertNotNull(row(agentId).waitingSince);
       service.nudgeIdle(NUDGE_AFTER, 1);
       // It answers the nudge with nothing: a new Stop, and another quiet period.
       service.onActivity(
@@ -2065,6 +2129,33 @@ public class AgentServiceTest {
       service.nudgeIdle(NUDGE_AFTER, 1);
       service.reconcile();
       assertEquals(2, nudgeTurns(agentId), daemon.callsFor(agentId).toString());
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aTurnTheHarnessSwallowedLeavesTheAgentNudgeableOnceQuietAgain() {
+    // qits-1511: the turn was typed into a permission dialog; no UserPromptSubmit, no Stop.
+    String agentId = quietAgent("w-nudge-swallowed", NUDGE_AFTER.plusMinutes(1));
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.deliver("w-nudge-swallowed", "next step", false);
+      service.reconcile();
+      assertTrue(daemon.callsFor(agentId).contains("turn " + slot + " " + agentId + " next step"));
+      assertNotNull(row(agentId).waitingSince, "still waiting: no BUSY frame came");
+
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      assertEquals(0, row(agentId).nudgeCount, "the typing restarted the quiet clock");
+
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  agents.findById(UUID.fromString(agentId)).lastActivityAt =
+                      Instant.now().minus(NUDGE_AFTER.plusMinutes(1)));
+      service.nudgeIdle(NUDGE_AFTER, 1);
+      assertEquals(1, row(agentId).nudgeCount);
+      assertEquals(AgentService.nudgeText("w-nudge-swallowed"), row(agentId).pendingText);
     } finally {
       liveness.markDead(slot);
     }

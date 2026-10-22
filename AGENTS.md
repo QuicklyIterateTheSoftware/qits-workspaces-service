@@ -536,6 +536,13 @@ agent's open waits in `waitingOn` — see "Declared waits"), through the `AgentW
 (`wiring/HttpAgentWaitingReporter` → `POST /projects/api/work/{workId}/agent-waiting`). A frame naming
 no agent is a person's own session and relays nothing. The registry also keeps the last state per
 agent (`AgentActivityView`), which the scheduler reads to say a turn at a turn boundary.
+**Typing a turn does not clear `waiting_since`** (qits-1511): neither the drive nor a wait's wake
+touches it, only the BUSY frame of the turn's `UserPromptSubmit` does — an ordinary flip, relayed
+like any other, so the item's "waiting for you" clears when the agent starts working. The drive
+used to clear it and relay `TurnDelivered` at once; a turn the harness swallowed (typed into a
+permission dialog) then left an idle agent that read as busy, never nudged and never yielded. The
+drive stamps `last_activity_at`, which restarts the nudge's and the yield's quiet clocks, so
+neither acts in the seconds before the BUSY frame arrives.
 
 ## The protocol is a dependency, and its version is the workspace image
 
@@ -994,6 +1001,9 @@ makes every daemon call, one pass at a time, kicked after each door and every
    (qits-1212). The write is the yield: a candidate that is no longer RUNNING when its row is read
    again yields nothing, so nothing is logged and nobody is placed on its account. A yielded agent
    that works again (`awaitingInput: false`, say a person typed in its terminal) is RUNNING again.
+   The wait is counted from the later of `waiting_since` and `last_activity_at` (qits-1511), so a
+   turn just typed — which leaves `waiting_since` until its BUSY frame — is not yielded from under
+   it; an agent on a declared wait yields at once only while no frame or turn came since it stopped.
 4. **Nudge** (qits-1460, `nudgeIdle`) — nothing else wakes a dispatched agent that ends its turn
    without declaring a wait or a block: it used to sit idle, its item showing "waiting for you",
    until a person noticed (qits-1149, qits-1163 and qits-1383 sat ~8 h on 2026-10-19). An agent is
@@ -1133,8 +1143,8 @@ event name, optional expiry) and gets a turn when it happens:
   read after the close committed — so an item whose agent is working still shows what it waits on.
   A declare and a cancel always relay, with `waiting` = whether the agent waits for input and cause
   `Wait` while a label remains, else `WaitCancelled`; a wait is normally declared mid-turn, which
-  used to relay nothing at all. A busy relay keeps its own cause (`TurnDelivered`,
-  `AgentDispatched`, the hook); qits-projects stores the label regardless and the cause only while
+  used to relay nothing at all. A busy relay keeps its own cause (`AgentDispatched`,
+  the hook); qits-projects stores the label regardless and the cause only while
   waiting. The one relay that names no label is a removal's (`AgentRemoved`): its OPEN waits are
   cancelled by the next sweep, which relays nothing, so the label would outlive the agent.
   `AgentDto.waitingOn` shows the labels,
