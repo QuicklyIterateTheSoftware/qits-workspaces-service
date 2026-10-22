@@ -2082,6 +2082,39 @@ public class AgentServiceTest {
   }
 
   @Test
+  void threeNudgesInARowEachWaitTwiceAsLongThenNone() {
+    // qits-1511: with the defaults, 20, 40 and 80 minutes of quiet, then no fourth.
+    String agentId = quietAgent("w-nudge-thrice", NUDGE_AFTER.minusMinutes(1));
+    Long slot = row(agentId).workspaceId;
+    try {
+      int[] minutes = {20, 40, 80};
+      for (int k = 1; k <= 3; k++) {
+        Duration needed = Duration.ofMinutes(minutes[k - 1]);
+        assertEquals(needed, AgentService.quietNeeded(NUDGE_AFTER, k - 1));
+        endedItsTurn(agentId, needed.minusMinutes(1));
+        service.nudgeIdle(NUDGE_AFTER, 3);
+        assertEquals(k - 1, row(agentId).nudgeCount, "not yet: nudge " + k + " needs " + needed);
+
+        endedItsTurn(agentId, needed.plusMinutes(1));
+        service.nudgeIdle(NUDGE_AFTER, 3);
+        assertEquals(k, row(agentId).nudgeCount, "nudge " + k + " after " + needed);
+        assertEquals(k, nudgesOf(agentId).get(k - 1).nudgeCount());
+        service.reconcile();
+        assertEquals(k, nudgeTurns(agentId), daemon.callsFor(agentId).toString());
+      }
+
+      endedItsTurn(agentId, Duration.ofDays(2));
+      service.nudgeIdle(NUDGE_AFTER, 3);
+      service.reconcile();
+      assertEquals(3, row(agentId).nudgeCount, "the limit");
+      assertEquals(3, nudgeTurns(agentId), "no fourth nudge");
+      assertEquals(3, nudgesOf(agentId).size());
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
   void aDeliveryResetsTheCountSoALaterQuietPeriodIsNudgedAgain() {
     String agentId = quietAgent("w-nudge-delivery", NUDGE_AFTER.plusMinutes(1));
     Long slot = row(agentId).workspaceId;

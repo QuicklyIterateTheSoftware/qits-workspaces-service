@@ -97,7 +97,8 @@ import org.jboss.logging.Logger;
  *   <li><b>Nudge</b> (qits-1460): a dispatched agent that ended its turn with no open wait and no
  *       explicit block on its item, and has been quiet for {@code qits.workspace.agent.nudge-after},
  *       is handed {@link #nudgeText} as its next turn — at most {@code
- *       qits.workspace.agent.nudge-limit} times in a row ({@link #nudgeIdle}).
+ *       qits.workspace.agent.nudge-limit} times in a row, each waiting twice as long as the one
+ *       before ({@link #nudgeIdle}).
  *   <li><b>Drive</b>: a RUNNING agent whose daemon answers is started (again after a daemon restart:
  *       its credential lives only in daemon memory) and is told what it has still to hear. A placed
  *       YIELDED agent is started too when this process has not started it on its daemon's current
@@ -262,8 +263,11 @@ public class AgentService {
   @ConfigProperty(name = "qits.workspace.agent.nudge-after", defaultValue = "PT20M")
   Duration nudgeAfter;
 
-  /** At most this many nudges in a row, with no other turn between them (qits-1460). */
-  @ConfigProperty(name = "qits.workspace.agent.nudge-limit", defaultValue = "1")
+  /**
+   * At most this many nudges in a row, with no other turn between them (qits-1460), each waiting
+   * twice as long as the one before (qits-1511).
+   */
+  @ConfigProperty(name = "qits.workspace.agent.nudge-limit", defaultValue = "3")
   int nudgeLimit;
 
   /** A push the daemon reported, kept until its repository name maps to an id. */
@@ -1468,7 +1472,9 @@ public class AgentService {
    * and said by {@link #drive} — a YIELDED agent is resumed for it first.
    *
    * <p>Not again: every frame moves {@code lastActivityAt}, the nudge's own delivery included, so a
-   * counter is the guard. At most {@link #nudgeLimit} nudges go out in a row; {@code nudge_count}
+   * counter is the guard. At most {@link #nudgeLimit} nudges go out in a row, each waiting twice as
+   * long as the one before (qits-1511): the k-th needs {@code after × 2^(k-1)} of quiet, on the
+   * same clock — 20, 40 and 80 minutes by default ({@link #quietNeeded}). {@code nudge_count}
    * goes back to 0 only where another turn is written (dispatch instruction, delivery, a wait's
    * wake) or a wait is declared — never in {@link #drive}, so the nudge's own delivery does not
    * count. An agent that answers a nudge with nothing stays idle, its item showing it waits for
@@ -1534,7 +1540,7 @@ public class AgentService {
         LOG.infof(
             "Agent %s of work item %s ended its turn with nothing open and was quiet for %s:"
                 + " nudged (%d of %d)",
-            id, event.workId(), after, event.nudgeCount(), limit);
+            id, event.workId(), quietNeeded(after, event.nudgeCount() - 1), event.nudgeCount(), limit);
         announce(event);
         nudged = true;
       }
@@ -1548,8 +1554,8 @@ public class AgentService {
    * Every condition of a nudge but the open waits, read off the row (qits-1460): ACTIVE, placed
    * (RUNNING or YIELDED) with no start refused, dispatched on a work item that is neither closed nor
    * between phases ({@link #BETWEEN_PHASES}), with
-   * nothing pending, not explicitly blocked, waiting for input, quiet for {@code after}, and under
-   * {@code limit}.
+   * nothing pending, not explicitly blocked, waiting for input, under {@code limit}, and quiet for
+   * {@link #quietNeeded} — {@code after} doubled for every nudge it has had in a row.
    */
   private static boolean nudgeable(AgentWorktree agent, Instant now, Duration after, int limit) {
     if (agent.state != AgentState.ACTIVE
@@ -1568,7 +1574,16 @@ public class AgentService {
         agent.lastActivityAt != null && agent.lastActivityAt.isAfter(agent.waitingSince)
             ? agent.lastActivityAt
             : agent.waitingSince;
-    return !quietSince.plus(after).isAfter(now);
+    return !quietSince.plus(quietNeeded(after, agent.nudgeCount)).isAfter(now);
+  }
+
+  /**
+   * The quiet time the next nudge needs when {@code nudgesInARow} went out already (qits-1511):
+   * {@code after × 2^nudgesInARow}, so the k-th nudge in a row waits twice as long as the one
+   * before. The exponent is capped, far beyond any sensible limit, so the product cannot overflow.
+   */
+  static Duration quietNeeded(Duration after, int nudgesInARow) {
+    return after.multipliedBy(1L << Math.min(Math.max(nudgesInARow, 0), 20));
   }
 
   /**

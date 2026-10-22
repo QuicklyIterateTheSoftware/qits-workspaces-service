@@ -1022,9 +1022,10 @@ makes every daemon call, one pass at a time, kicked after each door and every
    re-checked on the locked row, written to `pending_text` ("You ended your turn with no open wait
    and no block on <workId>. Carry on…; or … `qits wait …` …; or … `work_block` …"), `nudged_at`
    and `nudge_count` stamped (`V28`), `AgentNudged` announced, the pass kicked; a YIELDED agent is
-   resumed for it. **At most `qits.workspace.agent.nudge-limit` (1) nudges in a row**: every frame,
-   the nudge's own delivery included, moves `last_activity_at`, so the guard is the counter, not
-   activity since the nudge. `nudge_count` goes back to 0 where a turn that is not a nudge is
+   resumed for it. **At most `qits.workspace.agent.nudge-limit` (3) nudges in a row, each waiting
+   twice as long as the one before** (qits-1511): the k-th needs `nudge-after × 2^(k-1)` of quiet on
+   the same clock — 20, 40 and 80 minutes by default. Every frame, the nudge's own delivery
+   included, moves `last_activity_at`, so the guard is the counter, not activity since the nudge. `nudge_count` goes back to 0 where a turn that is not a nudge is
    written — the dispatch instruction, a delivery (`appendTurn`), a wait's wake — and when a wait is
    declared, never in `drive`. An agent that answers its nudge with nothing stays idle for a person.
    Every agent has a work item (D24), so a person-created agent is nudged like a dispatched one; a

@@ -167,7 +167,8 @@ public class AgentWorktree extends PanacheEntityBase implements CausedRow {
   /**
    * Nudges in a row with no other turn between them (qits-1460, {@code V28}). Set back to 0 where a
    * turn that is not a nudge is written (dispatch instruction, delivery, a wait's wake) and when a
-   * wait is declared; at {@code qits.workspace.agent.nudge-limit} the agent is nudged no more.
+   * wait is declared; at {@code qits.workspace.agent.nudge-limit} the agent is nudged no more. Each
+   * nudge in a row waits twice as long as the one before (qits-1511).
    */
   @Column(name = "nudge_count", nullable = false)
   public int nudgeCount;
