@@ -66,7 +66,7 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1022.64724</qits.workspace-daemon-protocol.version>
+        <qits.workspace-daemon-protocol.version>2026.1022.71117</qits.workspace-daemon-protocol.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -114,7 +114,7 @@
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1019.190811</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1022.75745</qits.projects-golden-masters.version>
         <!-- The other providers' golden masters (qits-1149), the same rule: qits-idp's for the
              commission doors, the peer token mint and the tenant's discovery and keys
              (wiring/IdpContract); qits-containers' for the place and volume doors
