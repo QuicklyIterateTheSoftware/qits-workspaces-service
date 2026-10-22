@@ -104,6 +104,15 @@ public class AgentWorktree extends PanacheEntityBase implements CausedRow {
   @Column(name = "block_source", columnDefinition = "text")
   public String blockSource;
 
+  /**
+   * The subject that set the item's explicit block, as qits-projects names it with an {@code
+   * EXPLICIT} or {@code BOTH} source (qits-1511, {@code V29}); null otherwise. An {@code EXPLICIT}
+   * block whose author is this agent's own {@link #commissionedTokenSubject} does not exempt it
+   * from the nudge.
+   */
+  @Column(name = "block_author", columnDefinition = "text")
+  public String blockAuthor;
+
   /** What is still to be said: the instruction until the first start, then delivered turns. */
   @Column(name = "pending_text", columnDefinition = "text")
   public String pendingText;

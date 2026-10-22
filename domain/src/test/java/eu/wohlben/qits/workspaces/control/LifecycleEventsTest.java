@@ -501,7 +501,7 @@ public class LifecycleEventsTest {
     service.reconcile();
     script.accept(agentId);
     service.resolveReleasedBranch(repoId, "ticket/" + workId, "2026.1.1", "abc", null);
-    service.markEntity(workId, new EntityFacts(null, "VERIFIED", false), null);
+    service.markEntity(workId, new EntityFacts(null, "VERIFIED", false), null, null);
     QuarkusTransaction.requiringNew()
         .run(
             () ->

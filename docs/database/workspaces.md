@@ -49,6 +49,7 @@ erDiagram
   agent_worktree {
     uuid id PK "not null"
     boolean admin "not null"
+    text block_author
     text block_source
     uuid causation_id
     instant cleanup_prompted_at

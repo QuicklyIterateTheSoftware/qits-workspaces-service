@@ -212,6 +212,10 @@ a `CausedRow`, so no `ArchRulesTest` decision; see "Agents and the workspaces th
 default 0`) to `agent_worktree`: when the scheduler last nudged an idle agent, and how many nudges
 in a row it has had. Columns on a `CausedRow`, so no `ArchRulesTest` decision; see "Agents and the
 workspaces they run in", Nudge.
+**`V29__agent_block_author.sql`** (qits-1511) adds `block_author` (nullable `text`) to
+`agent_worktree`: the subject qits-projects names as having set the item's explicit block. An agent
+whose own subject set an `EXPLICIT` block is still nudged. A column on a `CausedRow`, so no
+`ArchRulesTest` decision; see "Agents and the workspaces they run in", Nudge.
 
 **`V18__dispatch_command_id.sql` adds `dispatch_command_id` to `workspace`** (qits-895): the daemon
 command the last launch this service made started, replaced by every accepted launch
@@ -1013,7 +1017,13 @@ makes every daemon call, one pass at a time, kicked after each door and every
    platform's own dispatch (a person approves REFINED→READY_FOR_DEV, the platform starts implement
    and verify), so "carry on with the phase" would push it into work nobody started — with no pending text, no OPEN wait and no explicit block
    (`entity_blocked` with `block_source` `EXPLICIT` or `BOTH`, or no source at all; the derived
-   `AGENT_WAITING` block alone is the stall itself and does not exempt it), and has been quiet for
+   `AGENT_WAITING` block alone is the stall itself and does not exempt it) — **except a block the
+   agent set itself** (qits-1511): `EXPLICIT` exactly, with `block_author` equal to its own
+   `commissioned_token_subject`. That agent is nudged like an unblocked one, same clock, limit and
+   spacing, with a text of its own ("You blocked <workId> yourself and have no open wait. If what you
+   wait on is a release request, a CI run or a work item, declare it with `qits wait …` …; if only a
+   person can move it, leave the block …") and `reason` `SELF_BLOCKED`; `BOTH`, no source, no
+   author or anybody else's still exempt it — and has been quiet for
    `qits.workspace.agent.nudge-after` (20 min; zero or negative switches it off) counted from the
    later of `waiting_since` and `last_activity_at`. `waiting_since` is the clock because hooks fire
    only at turn boundaries — a 40-minute build sends no frame, so `last_activity_at` alone would
@@ -1083,8 +1093,10 @@ pass and the next frames: every placed agent, RUNNING or YIELDED, is started aga
   `entries[].agent`.
 - `POST …/delivery` `{workId, text, compactFirst}` → `{agentId, delivered, launched, resumed,
   detail}`; `agentId: null` is "nobody works on it", never a 404, and nothing is created.
-- `POST …/entity` `{workId, title, status, blocked, blockSource?}` and `…/blocked` `{workId, blocked,
-  blockSource?}` → `{agentId, applied}`.
+- `POST …/entity` `{workId, title, status, blocked, blockSource?, blockedBy?}` and `…/blocked`
+  `{workId, blocked, blockSource?, blockedBy?}` → `{agentId, applied}`. `blockedBy` (qits-1511) is
+  the subject that set an `EXPLICIT` or `BOTH` block, as qits-projects names it; stored as
+  `block_author`, rewritten on every mark.
 - `POST /workspaces/api/branches/resolution?repositoryId=` → `{resolved, agentIds}`: every ACTIVE
   agent whose wrapper branch it is becomes OBSOLETE; a branch an agent merely pushed marks nobody.
   An old-model workspace on the branch resolves as before.
@@ -1169,7 +1181,7 @@ payload's top-level fields:
 | `AgentStartRefused` | the four, `detail` (the daemon's refusal, or the never-came-up sentence) | |
 | `AgentRequeued` | the four (`workspaceId` is the one it left), `reason`, `detail` | `WORKSPACE_FAILED`, `WORKSPACE_GONE` |
 | `AgentYielded` | the four | |
-| `AgentNudged` | the four, `nudgeCount` (this nudge included) | |
+| `AgentNudged` | the four, `nudgeCount` (this nudge included), `reason` | `IDLE`, `SELF_BLOCKED` |
 | `AgentResumed` | the four, `reason` | `TURN_PENDING`, `WORKS_AGAIN` |
 | `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs; both absent for a dropped item) — one per agent | |
 | `AgentCleanupDeferred` | the four, `reason`, `detail` | `ITEM_NOT_CLOSED`, `RECENTLY_ACTIVE`, `TURN_PENDING`, `HARNESS_BUSY`, `DAEMON_NOT_CONNECTED`, `NO_DAEMON_CLIENT`, `CHECK_UNANSWERED`, `BUSY_IN_BACKGROUND`, `REMOVAL_UNANSWERED`, `LEFTOVER_WORK_PROMPTED` |

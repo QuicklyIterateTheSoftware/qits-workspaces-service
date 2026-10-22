@@ -569,6 +569,8 @@ components:
           type: boolean
         blockSource:
           type: string
+        blockedBy:
+          type: string
     MarkEntityRequest:
       type: object
       required:
@@ -585,6 +587,8 @@ components:
         blocked:
           type: boolean
         blockSource:
+          type: string
+        blockedBy:
           type: string
     MergeBranchRequest:
       type: object

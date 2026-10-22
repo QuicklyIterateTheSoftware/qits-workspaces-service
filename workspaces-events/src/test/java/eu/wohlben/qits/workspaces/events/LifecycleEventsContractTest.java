@@ -53,7 +53,9 @@ class LifecycleEventsContractTest {
             AGENT, WORK, "385", REPO, AgentRequeued.WORKSPACE_FAILED, "Workspace 385 did not come up.", AT),
         with(agent, "detail", "reason"));
     out.put(new AgentYielded(AGENT, WORK, "385", REPO, AT), agent);
-    out.put(new AgentNudged(AGENT, WORK, "385", REPO, 1, AT), with(agent, "nudgeCount"));
+    out.put(
+        new AgentNudged(AGENT, WORK, "385", REPO, 1, AgentNudged.SELF_BLOCKED, AT),
+        with(agent, "nudgeCount", "reason"));
     out.put(
         new AgentResumed(AGENT, WORK, "385", REPO, AgentResumed.TURN_PENDING, AT),
         with(agent, "reason"));
