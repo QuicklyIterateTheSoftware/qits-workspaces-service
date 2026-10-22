@@ -666,6 +666,21 @@ public final class GoldenMasters {
     return root;
   }
 
+  /**
+   * The paths whose recorded value the state chose (qits-950): the index's {@code frozen.ids},
+   * {@code strings} and {@code numbers} for one (state, operation) — where a consumer may lay its
+   * own value over a state param's frozen one ({@link PactMessage#text(Map)}). An instant is
+   * matched by shape alone, so it is not one.
+   */
+  public static Set<String> frozenPaths(Provider provider, String state, String operationId) {
+    JsonNode frozen = operationNode(provider, state, operationId).path("frozen");
+    Set<String> out = new java.util.LinkedHashSet<>();
+    for (String list : List.of("ids", "strings", "numbers")) {
+      out.addAll(strings(frozen.path(list)));
+    }
+    return Set.copyOf(out);
+  }
+
   private static JsonNode operationNode(Provider provider, String state, String operationId) {
     for (JsonNode op : stateNode(provider, state).path("operations")) {
       if (operationId.equals(op.path("operationId").asText())) {

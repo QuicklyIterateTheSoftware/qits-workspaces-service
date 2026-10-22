@@ -47,17 +47,25 @@ import java.util.Set;
  * {@link PactMessage} to the row's {@code receive} instead of running a mock server, and the
  * references they carry are {@code qits-call {app, frame}} and a {@code qits-trigger} on the
  * provider's side ({@link GoldenMasters.Trigger#sent}).
+ *
+ * <p><b>{@link #frozenAt}</b> (qits-950): the paths of a message where the provider sets a state
+ * param's frozen value without its index listing them — qits-workspaces-runner's recorder writes
+ * its {@code rowId} 5 into {@code $.rowId}, {@code $.volumes[*]} and the like, and freezes only its
+ * request id under {@code frozen.ids}. A {@link PactMessage} swaps a param's value at the index's
+ * frozen paths and these, and nowhere else.
  */
-public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> rows, Via via) {
+public record ContractTable(
+    GoldenMasters.Provider provider, List<ContractRow> rows, Via via, Set<String> frozenAlso) {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   public ContractTable(GoldenMasters.Provider provider, List<ContractRow> rows) {
-    this(provider, rows, null);
+    this(provider, rows, null, Set.of());
   }
 
   public ContractTable {
     rows = List.copyOf(rows);
+    frozenAlso = Set.copyOf(frozenAlso);
     Set<String> unique = new HashSet<>();
     for (ContractRow row : rows) {
       if (!unique.add(row.description() + "\u0000" + row.state())) {
@@ -69,7 +77,17 @@ public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> r
 
   /** The same table, every interaction stamped {@code qits-via} with {@code library}. */
   public ContractTable via(Via library) {
-    return new ContractTable(provider, rows, library);
+    return new ContractTable(provider, rows, library, frozenAlso);
+  }
+
+  /**
+   * The same table, a message's state params also swapped at {@code paths} ({@code $.a[*].b}):
+   * where the provider writes a param's frozen value though its index lists no such path.
+   */
+  public ContractTable frozenAt(String... paths) {
+    Set<String> all = new HashSet<>(frozenAlso);
+    all.addAll(List.of(paths));
+    return new ContractTable(provider, rows, via, all);
   }
 
   /** {@code qits-workspaces-service_<provider repository>.json}. */
@@ -181,7 +199,13 @@ public record ContractTable(GoldenMasters.Provider provider, List<ContractRow> r
     V4Pact single = pact(List.of(row));
     V4Interaction.AsynchronousMessage message =
         (V4Interaction.AsynchronousMessage) single.getInteractions().get(0);
-    row.receive().run(new PactMessage(message, GoldenMasters.params(provider, row.state())));
+    Set<String> substitutable =
+        new HashSet<>(GoldenMasters.frozenPaths(provider, row.state(), row.operationId()));
+    substitutable.addAll(frozenAlso);
+    row.receive()
+        .run(
+            new PactMessage(
+                message, GoldenMasters.params(provider, row.state()), substitutable));
   }
 
   /** The pending rows whose (state, operation) the pinned golden masters now record. */

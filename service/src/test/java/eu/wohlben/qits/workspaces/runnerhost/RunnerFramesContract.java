@@ -60,7 +60,9 @@ import java.util.concurrent.TimeUnit;
  *
  * <p><b>The runner's frozen values become the row's own</b> ({@link PactMessage#text(Map)}): the
  * runner records {@code rowId} 5 and request {@code 00000000-…-0001}; a row seeds its rows and
- * swaps in their ids, and in the request id the service actually sent. {@code hello}'s {@code
+ * swaps in their ids, and in the request id the service actually sent — only at the request id's
+ * {@code frozen.ids} path and at the row-id paths {@link ContractTable#frozenAt} names, since the
+ * runner's index lists none for its {@code rowId}. {@code hello}'s {@code
  * runnerVersion} (a frozen string) is set to the pin, so the hello is greeted rather than upgraded.
  * Every text fed is first matched against the interaction's rules.
  *
@@ -168,7 +170,10 @@ public final class RunnerFramesContract {
                   frame("estate"),
                   NOT_LOGGED_IN,
                   "loginState",
-                  RunnerFramesContract::theLoginStateIsKept)));
+                  RunnerFramesContract::theLoginStateIsKept)))
+          // Where the runner writes its state's rowId: its index freezes no path for it.
+          .frozenAt(
+              "$.rowId", "$.containers[*].rowId", "$.volumes[*]", "$.heldWorkspaces[*]");
 
   private RunnerFramesContract() {}
 
