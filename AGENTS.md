@@ -1721,7 +1721,33 @@ its message pact is recorded beside the calls, in the same `golden-masters/` tre
 
 `ConsumerPactVerificationTest` verifies HTTP interactions only (`@PactFilter` on
 `Synchronous/HTTP`), so the runner's message pact arriving in its pinned jar costs the HTTP gate
-nothing; the message verifier is wave 3's.
+nothing; the message interactions are `RunnerFramesProviderPactTest`'s.
+
+**`contracts/RunnerFramesProviderPactTest` verifies the runner's message pact (qits-950, A1).**
+`pacts/qits-workspaces-runner-daemon_qits-workspaces-service.json` in the pinned
+`qits-workspaces-runner-daemon-pacts-qits-workspaces-service` jar holds the frames above as Pact V4
+`Asynchronous/Messages`, written by the runner from these golden masters. The verifier is the HTTP
+one's mirror: a `@QuarkusTest`, `@Provider("qits-workspaces-service")`, the same
+`ClasspathPactLoader`, `@PactFilter` on `Asynchronous/Messages`, and a `MessageTestTarget` built with
+the test class's own class loader, so pact-jvm invokes the `@PactVerifyProvider` methods on the
+injected instance.
+
+- **A `@State` per frame state** calls `ProviderStates.setUp` and keeps its params. An unknown state
+  fails in `@BeforeEach`, and so does an interaction without both `comments.references` groups.
+- **A `@PactVerifyProvider` per description** (`<trigger>: frame:<type>`, thirteen of them) looks up
+  the `RunnerFrames.FRAMES` row for (state, `qits-call.frame`). It refuses a `qits-call` naming
+  another app, and a `qits-trigger` that is not that row's `Cause.trigger()`. It then answers
+  `RunnerFrames.send`: the frame made by the real code path and taken off the scripted socket, as
+  recorded but unfrozen. pact-jvm matches it against the interaction's rules. A recorded file or
+  built JSON is never answered.
+- **Zero message interactions pass** (`@IgnoreNoPactsToVerify`). A pin from before 2026.1022.101507
+  carries only the HTTP register pact, which the filter drops. pact-jvm then runs one placeholder
+  invocation with a null context, which both `@BeforeEach` and the template return on, instead of
+  throwing `NoPactsFoundException`. A missing pact jar still fails, because the loader throws on
+  finding no file and `ignoreIoErrors` stays false.
+- **It bites.** Dropping `rowId` from the encoded `take`, or `workspaceImage` from `estate`, in
+  `WorkspaceRunnerMessageCodec` fails exactly those two invocations: `Actual map is missing the
+  following keys`.
 
 **The frames a workspace runner sends are a consumer message pact (qits-950, A2).** The other
 direction: `pacts/qits-workspaces-service_qits-workspaces-runner-daemon.json`, Pact V4
@@ -1747,8 +1773,12 @@ declared under `contracts.pacts.qits-workspaces-runner-daemon` in `release.yml`.
   codec and dispatches it, and the row asserts the effect on the rows, the runner row, the frames
   sent back and the verb or check it answers (`RunnerFrameHarness` holds the beans and cleans up).
   **The runner's frozen values are swapped for the row's** — the message counterpart of an HTTP
-  state param: `PactMessage.text(Map.of("rowId", seeded))` replaces every leaf holding the state's
-  frozen `params.rowId` (or `requestId`), a `hello`'s `runnerVersion` is set to the pin, and every
+  state param: `PactMessage.text(Map.of("rowId", seeded))` replaces a leaf holding the state's
+  frozen `params.rowId` (or `requestId`) **only at a frozen path**: the runner index's
+  `frozen.ids`/`strings`/`numbers` for that (state, frame), plus the table's `frozenAt` paths
+  (`$.rowId`, `$.containers[*].rowId`, `$.volumes[*]`, `$.heldWorkspaces[*]`, because the runner
+  freezes its rowId without listing a path). An equal `slots` or `capabilityVersion` is left alone,
+  and a param that sits at no such path fails. A `hello`'s `runnerVersion` is set to the pin, and every
   text is matched against the interaction's own rules (pact-jvm's `JsonContentMatcher`) before it is
   fed, so the test only ever feeds a message the pact admits.
 - **The receiving guard** is in `contracts/RunnerFramesGuardTest`: the frame types
