@@ -21,6 +21,10 @@ import org.junit.jupiter.api.Test;
  * in the committed document unless it is {@code @Operation(hidden = true)} — see {@code
  * IdentityEchoResource}. The raw Vert.x routes ({@code CaptureCorsRoute}, {@code ContainerProxyRoute})
  * and the daemon control socket appear in no document at all; they are not JAX-RS.
+ *
+ * <p>{@code info.version} in the written document is pinned to {@code 0} by {@code
+ * quarkus.smallrye-openapi.info-version} in the test properties, so the file changes only with the
+ * API, not with each release.
  */
 @QuarkusTest
 public class OpenApiSchemaExportTest {
