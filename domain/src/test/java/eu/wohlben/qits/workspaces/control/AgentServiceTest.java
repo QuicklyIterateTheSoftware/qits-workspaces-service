@@ -433,24 +433,28 @@ public class AgentServiceTest {
   }
 
   @Test
-  void aYieldOnlyFreesTheSlotAndTheHarnessKeepsRunning() throws InterruptedException {
+  void aYieldOnlyFreesTheSlotAndTheHarnessKeepsRunning() {
     AgentService.Dispatch first = dispatch("w-first", true, null);
     String firstId = first.agent().agentId();
     Long slot = first.agent().workspaceRowId();
     liveness.markLive(slot);
     service.reconcile();
     assertTrue(service.isStarted(UUID.fromString(firstId)));
-    // The scheduler coalesces a kick per dispatch/reconnect and runs it on its own thread; let any
-    // still-pending pass from this or an earlier test settle before hand-queuing below, or a stray
+    // The scheduler coalesces a kick per dispatch/reconnect and runs it on its own thread; wait out
+    // any still-pending pass from this or an earlier test before hand-queuing below, or a stray
     // placeQueued() could place that agent itself and starve this test's own yieldBlocked() call.
-    Thread.sleep(100);
+    service.awaitSchedulerIdle();
 
     // An admin agent always gets a new slot, so queue one by hand to stand for a full runner.
-    agentIn(null, true, AgentRunState.QUEUED);
+    UUID queued = agentIn(null, true, AgentRunState.QUEUED);
     // The first agent has waited for input since long before the yield time, with no frame since.
     backdateQuiet(firstId, Duration.ofHours(1));
     List<String> before = daemon.callsFor(firstId);
 
+    assertEquals(
+        AgentRunState.QUEUED,
+        row(queued.toString()).runState,
+        "no stray pass placed the hand-queued agent");
     service.yieldBlocked();
 
     assertEquals(AgentRunState.YIELDED, row(firstId).runState);
@@ -483,7 +487,7 @@ public class AgentServiceTest {
   }
 
   @Test
-  void aTurnJustTypedIntoAWaitingAgentIsNotYieldedFromUnderIt() throws InterruptedException {
+  void aTurnJustTypedIntoAWaitingAgentIsNotYieldedFromUnderIt() {
     // qits-1511: typing no longer clears waitingSince, so the yield must not read the old clock in
     // the seconds before the turn's UserPromptSubmit arrives.
     AgentService.Dispatch first = dispatch("w-typed-yield", true, null);
@@ -493,7 +497,7 @@ public class AgentServiceTest {
     try {
       service.reconcile();
       assertTrue(service.isStarted(UUID.fromString(firstId)));
-      Thread.sleep(100);
+      service.awaitSchedulerIdle();
       backdateQuiet(firstId, Duration.ofHours(1));
       service.deliver("w-typed-yield", "your answer", false);
       service.reconcile();
@@ -502,7 +506,14 @@ public class AgentServiceTest {
       assertNull(row(firstId).pendingText, "said");
       assertNotNull(row(firstId).waitingSince, "typed is not taken");
 
-      agentIn(null, true, AgentRunState.QUEUED);
+      // The deliver and the pass above kick the scheduler (qits-1562); a pass still pending would
+      // place the agent queued below, and with nothing queued the second yield below never happens.
+      service.awaitSchedulerIdle();
+      UUID queued = agentIn(null, true, AgentRunState.QUEUED);
+      assertEquals(
+          AgentRunState.QUEUED,
+          row(queued.toString()).runState,
+          "no stray pass placed the hand-queued agent");
       service.yieldBlocked();
       assertEquals(AgentRunState.RUNNING, row(firstId).runState, "not yielded right after its turn");
 
@@ -512,6 +523,11 @@ public class AgentServiceTest {
               () ->
                   agents.findById(UUID.fromString(firstId)).lastActivityAt =
                       Instant.now().minusSeconds(3600));
+      service.awaitSchedulerIdle();
+      assertEquals(
+          AgentRunState.QUEUED,
+          row(queued.toString()).runState,
+          "no stray pass placed the hand-queued agent");
       service.yieldBlocked();
       assertEquals(AgentRunState.YIELDED, row(firstId).runState);
     } finally {
