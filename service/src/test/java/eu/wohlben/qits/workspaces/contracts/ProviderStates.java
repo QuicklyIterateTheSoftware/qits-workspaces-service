@@ -127,6 +127,15 @@ public class ProviderStates {
   public static final String A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT =
       "a workspace slot qits-system cannot be asked about";
 
+  // The two slot states' names before the cutover, answered as aliases and never recorded: the
+  // consumers' pinned pacts were written against the golden masters that named them so, and they
+  // can take the new names only once this service's golden masters carrying them are published.
+  // Drop both once no pinned consumer pact names them (ConsumerPactVerificationTest says so).
+  public static final String LEGACY_A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE =
+      "a workspace slot running on a runner in service";
+  public static final String LEGACY_A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE =
+      "a stopped workspace slot on a runner in service";
+
   static final String PROJECT_ID = "00000000-0000-4000-8000-00000000000f";
   static final String BUG_TICKET_ID = "00000000-0000-4000-8000-000000000001";
   static final String EPIC_ID = "00000000-0000-4000-8000-000000000006";
@@ -230,7 +239,9 @@ public class ProviderStates {
         A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION,
         A_SLOT_RUNNING_ON_A_TARGET,
         A_STOPPED_SLOT,
-        A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT);
+        A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT,
+        LEGACY_A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE,
+        LEGACY_A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE);
   }
 
   public Map<String, String> params(String state) {
@@ -262,8 +273,10 @@ public class ProviderStates {
       case NO_AGENT_WITH_THAT_ID -> noSuchAgent();
       case AN_AGENT_WAITING_FOR_A_SLOT -> agentWaitingForASlot();
       case A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION -> resolvedSlotWithAnArchivedSession();
-      case A_SLOT_RUNNING_ON_A_TARGET -> slotOnATarget(WorkspaceRuntimeStatus.RUNNING);
-      case A_STOPPED_SLOT -> slotOnATarget(WorkspaceRuntimeStatus.STOPPED);
+      case A_SLOT_RUNNING_ON_A_TARGET, LEGACY_A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE ->
+          slotOnATarget(WorkspaceRuntimeStatus.RUNNING);
+      case A_STOPPED_SLOT, LEGACY_A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE ->
+          slotOnATarget(WorkspaceRuntimeStatus.STOPPED);
       case A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT -> slotQitsSystemCannotBeAskedAbout();
       default -> throw new IllegalArgumentException("No provider state named '" + state + "'");
     };

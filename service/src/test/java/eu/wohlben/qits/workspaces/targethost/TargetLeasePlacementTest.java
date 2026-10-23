@@ -148,12 +148,12 @@ public class TargetLeasePlacementTest {
   }
 
   @Test
-  public void theTargetsReadTheirCapabilitiesWhereTheListingCarriesThem() throws Exception {
+  public void theTargetsReadTheirEngineIdAndHostNameWhereTheRunnerReportedThem() throws Exception {
     UUID id = UUID.randomUUID();
     TargetLeasePlacement placement =
         answering(
             200,
-            "[{\"id\":\"" + id + "\",\"name\":\"lab\",\"capabilities\":{\"engineId\":\"E1\"}},"
+            "[{\"id\":\"" + id + "\",\"name\":\"lab\",\"engineId\":\"E1\",\"hostname\":null},"
                 + "{\"id\":\"" + UUID.randomUUID() + "\",\"name\":\"other\"}]");
 
     var targets = placement.targets();

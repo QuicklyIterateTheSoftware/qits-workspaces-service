@@ -123,11 +123,7 @@ public class TargetLeasePlacement implements TargetPlacement {
     return listed.stream()
         .map(
             t ->
-                new Target(
-                    t.id(),
-                    t.name(),
-                    text(t.capabilities(), "engineId"),
-                    text(t.capabilities(), "hostname")))
+                new Target(t.id(), t.name(), blankless(t.engineId()), blankless(t.hostname())))
         .toList();
   }
 
@@ -216,6 +212,10 @@ public class TargetLeasePlacement implements TargetPlacement {
     } catch (NumberFormatException notANumber) {
       throw new IllegalStateException("the configured pids limit '" + pids + "' is not a number");
     }
+  }
+
+  private static String blankless(String value) {
+    return value == null || value.isBlank() ? null : value.trim();
   }
 
   private static String text(JsonNode node, String field) {

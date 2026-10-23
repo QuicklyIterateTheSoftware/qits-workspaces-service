@@ -44,16 +44,18 @@ import java.util.UUID;
  *
  * <p><b>Every row waits</b> ({@link ContractRow#waiting}): the pinned {@code
  * qits-system-golden-masters} predates the targets module and records none of these states. The
- * rows are written against the states qits-system-service records on its epic branch ({@code no
- * target}, {@code a queued lease}, {@code an unused work volume}, {@code a declared target}); the
+ * rows are written against the states qits-system-service records for this tenant on its epic
+ * branch ({@code a queued workspace lease}, {@code a running workspace lease}, {@code an unused
+ * workspace work volume}, {@code a declared target}); the
  * pin's bump that brings them makes {@code ConsumerPactFilesTest.noPendingRowIsRecordedAlready} fail,
  * and they are switched on then.
  */
 public final class SystemContract {
 
-  static final String NO_TARGET = "no target";
-  static final String A_QUEUED_LEASE = "a queued lease";
-  static final String AN_UNUSED_WORK_VOLUME = "an unused work volume";
+  // qits-system's states recorded for the WORKSPACE tenant, under this service's own bearer.
+  static final String A_QUEUED_LEASE = "a queued workspace lease";
+  static final String A_RUNNING_LEASE = "a running workspace lease";
+  static final String AN_UNUSED_WORK_VOLUME = "an unused workspace work volume";
   static final String A_DECLARED_TARGET = "a declared target";
 
   static final Trigger START = Trigger.operation("ensureWorkspaceContainer");
@@ -76,7 +78,7 @@ public final class SystemContract {
           List.of(
               ContractRow.of(
                       START,
-                      NO_TARGET,
+                      A_QUEUED_LEASE,
                       "createLease",
                       Request.json(createBody()).header("Authorization", BEARER),
                       LEASE,
@@ -130,6 +132,49 @@ public final class SystemContract {
                                   .state()))
                   .waiting(),
               ContractRow.of(
+                      RECONCILE,
+                      A_RUNNING_LEASE,
+                      "getLease",
+                      Request.NONE.header("Authorization", BEARER),
+                      LEASE,
+                      (url, params) -> {
+                        TargetPlacement.Lease lease =
+                            placementAgainst(url, params).get(leaseId(params)).orElseThrow();
+                        assertEquals(TargetPlacement.LeaseState.RUNNING, lease.state());
+                        assertNotNull(lease.targetId());
+                      })
+                  .waiting(),
+              ContractRow.of(
+                      RECONCILE,
+                      A_RUNNING_LEASE,
+                      "listLeases",
+                      Request.NONE.header("Authorization", BEARER),
+                      List.of(
+                          "$[*].id",
+                          "$[*].ownerRef",
+                          "$[*].state",
+                          "$[*].targetId",
+                          "$[*].exitCode",
+                          "$[*].detail",
+                          "$[*].requestedAt"),
+                      (url, params) ->
+                          assertFalse(placementAgainst(url, params).list().isEmpty()))
+                  .waiting(),
+              ContractRow.of(
+                      STOP,
+                      A_RUNNING_LEASE,
+                      "endLease",
+                      Request.NONE.header("Authorization", BEARER),
+                      List.of("$.id", "$.state"),
+                      (url, params) ->
+                          assertEquals(
+                              TargetPlacement.LeaseState.ENDING,
+                              placementAgainst(url, params)
+                                  .end(leaseId(params))
+                                  .orElseThrow()
+                                  .state()))
+                  .waiting(),
+              ContractRow.of(
                       DELETE,
                       AN_UNUSED_WORK_VOLUME,
                       "purgeWorkVolume",
@@ -145,7 +190,7 @@ public final class SystemContract {
                       A_DECLARED_TARGET,
                       "listTargets",
                       Request.NONE,
-                      List.of("$[*].id", "$[*].name"),
+                      List.of("$[*].id", "$[*].name", "$[*].hostname", "$[*].engineId"),
                       (url, params) -> {
                         List<TargetPlacement.Target> targets =
                             placementAgainst(url, params).targets();

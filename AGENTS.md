@@ -1511,8 +1511,9 @@ discard never deletes a main workspace's branch (qits-780), on both placements.
   when its work volume is purged.
 - **Legacy adoption.** A row in `legacy_placement` asks its first lease with `adopt{container,
   volume}` = `qits-workspaces-runner-ws-<rowId>-<oldRunnerId8>` and `pinTargetId` the target whose
-  `engineId`, else `hostname`, else name matches the runner's (`listTargets`; today's listing
-  carries no capabilities, so in practice the name). No match is a WARN and an unpinned lease. The
+  `engineId`, else `hostname`, else name matches the runner's (`listTargets`'
+  `engineId`/`hostname`; the retired runners never reported either, so for their rows the name is
+  the practical match). No match is a WARN and an unpinned lease. The
   name is kept on the row (`adopted_volume`) and every later lease carries it — the runner mounts an
   adopted volume only when the lease names it. The entry goes once the lease is RUNNING. A row a
   retired runner still runs (RUNNING with no lease) is left alone until it is stopped or started.
@@ -1620,7 +1621,9 @@ minimal ensure body) are not used: they pact requests this service never sends.
 **qits-system (epic qits-1481)** is `targethost/SystemContract`, bound to
 `qits.system-golden-masters.version`, its file `pacts/qits-workspaces-service_qits-system-service.json`
 (`release.yml`: `qits-system-service`). **Every row waits**: the pinned golden masters predate the
-targets module. `SystemConsumerPactTest` skips while none is live; `OutboundCallsGuardTest` reads
+targets module. They are written against the states qits-system records for this tenant (`a
+queued workspace lease`, `a running workspace lease`, `an unused workspace work volume`, `a declared
+target`). `SystemConsumerPactTest` skips while none is live; `OutboundCallsGuardTest` reads
 the routes of the waiting rows off its `PENDING_ROUTES` until the recordings exist. The runner's
 frame golden masters and message pacts (qits-950) went with the runner.
 

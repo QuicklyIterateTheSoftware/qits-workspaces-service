@@ -275,4 +275,14 @@ class ConsumerPactVerificationTest {
   Map<String, String> aSlotQitsSystemCannotBeAskedAbout() {
     return states.params(ProviderStates.A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT);
   }
+
+  @State(ProviderStates.LEGACY_A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE)
+  Map<String, String> aSlotRunningOnARunnerInService() {
+    return states.params(ProviderStates.LEGACY_A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE);
+  }
+
+  @State(ProviderStates.LEGACY_A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE)
+  Map<String, String> aStoppedSlotOnARunnerInService() {
+    return states.params(ProviderStates.LEGACY_A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE);
+  }
 }

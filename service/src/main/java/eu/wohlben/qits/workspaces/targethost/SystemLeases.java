@@ -121,9 +121,9 @@ public interface SystemLeases {
       Instant requestedAt) {}
 
   /**
-   * qits-system's {@code Target}, narrowed to its id and name. {@code capabilities} is read when a
-   * listing carries it ({@code engineId}, {@code hostname}); today's does not.
+   * qits-system's {@code Target}, narrowed to what a legacy pin matches on: its id, its name, and
+   * the docker engine's host name and id its runner reported (each null until it did).
    */
   @JsonIgnoreProperties(ignoreUnknown = true)
-  record TargetView(UUID id, String name, JsonNode capabilities) {}
+  record TargetView(UUID id, String name, String hostname, String engineId) {}
 }
