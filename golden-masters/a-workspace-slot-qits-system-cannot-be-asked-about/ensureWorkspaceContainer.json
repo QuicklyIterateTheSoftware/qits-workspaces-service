@@ -1,0 +1,4 @@
+{
+  "message": "Workspace 1 cannot start: qits-system did not take the lease call (qits-system could not be asked: Connection refused)",
+  "code": "TARGET_UNAVAILABLE"
+}

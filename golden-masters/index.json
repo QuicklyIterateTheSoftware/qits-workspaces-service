@@ -29,175 +29,6 @@
       ]
     },
     {
-      "name": "a connected runner",
-      "slug": "a-connected-runner",
-      "params": {
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "listRunners",
-          "method": "GET",
-          "path": "/workspaces/api/runners",
-          "status": 200,
-          "file": "a-connected-runner/listRunners.json",
-          "frozen": {
-            "ids": [
-              "$[*].id"
-            ],
-            "instants": [
-              "$[*].registeredAt",
-              "$[*].lastSeenAt",
-              "$[*].createdAt",
-              "$[*].connectedSince"
-            ],
-            "strings": [
-              "$[*].pinnedVersion"
-            ],
-            "numbers": [],
-            "listFilteredTo": "$"
-          }
-        },
-        {
-          "operationId": "rotateRunnerRegistrationToken",
-          "method": "POST",
-          "path": "/workspaces/api/runners/{runnerId}/registration-token",
-          "status": 409,
-          "file": "a-connected-runner/rotateRunnerRegistrationToken.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
-      "name": "a greenlit runner dialling in at an older version",
-      "slug": "a-greenlit-runner-dialling-in-at-an-older-version",
-      "params": {
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost",
-        "runnerVersion": "2026.101.100000"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "frame:upgrade",
-          "kind": "frame",
-          "frame": "upgrade",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "event",
-            "app": "qits-workspaces-service",
-            "event": "workspaces-runner:hello"
-          },
-          "file": "a-greenlit-runner-dialling-in-at-an-older-version/frame-upgrade.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [
-              "$.image",
-              "$.version"
-            ],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
-      "name": "a greenlit runner dialling in holding a workspace it owns",
-      "slug": "a-greenlit-runner-dialling-in-holding-a-workspace-it-owns",
-      "params": {
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost",
-        "workspaceId": "1"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "frame:ack",
-          "kind": "frame",
-          "frame": "ack",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "event",
-            "app": "qits-workspaces-service",
-            "event": "workspaces-runner:hello"
-          },
-          "file": "a-greenlit-runner-dialling-in-holding-a-workspace-it-owns/frame-ack.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [
-              "$.adoptedWorkspaces[*]"
-            ],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "frame:estate",
-          "kind": "frame",
-          "frame": "estate",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "event",
-            "app": "qits-workspaces-service",
-            "event": "workspaces-runner:hello"
-          },
-          "file": "a-greenlit-runner-dialling-in-holding-a-workspace-it-owns/frame-estate.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [
-              "$.workspaceImage"
-            ],
-            "numbers": [
-              "$.owned[*]"
-            ],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
-      "name": "a greenlit runner dialling in with a workspace queued for it",
-      "slug": "a-greenlit-runner-dialling-in-with-a-workspace-queued-for-it",
-      "params": {
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost",
-        "workspaceId": "1"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "frame:backlog",
-          "kind": "frame",
-          "frame": "backlog",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "event",
-            "app": "qits-workspaces-service",
-            "event": "workspaces-runner:hello"
-          },
-          "file": "a-greenlit-runner-dialling-in-with-a-workspace-queued-for-it/frame-backlog.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
       "name": "a project with agents bound to work items",
       "slug": "a-project-with-agents-bound-to-work-items",
       "params": {
@@ -280,7 +111,7 @@
         "improvementTicketQualifiedId": "contract-00000001-11",
         "projectId": "00000000-0000-4000-8000-00000000000f",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
-        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "targetId": "00000000-0000-4000-8000-000000000020",
         "taskId": "00000000-0000-4000-8000-000000000011"
       },
       "dependsOn": [],
@@ -322,7 +153,8 @@
           "file": "a-project-with-workspace-slots-hosting-agents/listWorkspaces.json",
           "frozen": {
             "ids": [
-              "$.entries[*].workspace.runner.id"
+              "$.entries[*].workspace.leaseId",
+              "$.entries[*].workspace.targetId"
             ],
             "instants": [
               "$.entries[*].workspace.createdAt"
@@ -398,141 +230,6 @@
       ]
     },
     {
-      "name": "a quarantined runner",
-      "slug": "a-quarantined-runner",
-      "params": {
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "greenlightRunner",
-          "method": "POST",
-          "path": "/workspaces/api/runners/{runnerId}/greenlight",
-          "callerRole": "qits:system",
-          "status": 200,
-          "file": "a-quarantined-runner/greenlightRunner.json",
-          "frozen": {
-            "ids": [
-              "$.id"
-            ],
-            "instants": [
-              "$.registeredAt",
-              "$.lastSeenAt",
-              "$.createdAt"
-            ],
-            "strings": [
-              "$.pinnedVersion"
-            ],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
-      "name": "a quarantined runner dialling in",
-      "slug": "a-quarantined-runner-dialling-in",
-      "params": {
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "frame:quarantined",
-          "kind": "frame",
-          "frame": "quarantined",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "event",
-            "app": "qits-workspaces-service",
-            "event": "workspaces-runner:hello"
-          },
-          "file": "a-quarantined-runner-dialling-in/frame-quarantined.json",
-          "frozen": {
-            "ids": [],
-            "instants": [
-              "$.since"
-            ],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
-      "name": "a quarantined runner holding a socket",
-      "slug": "a-quarantined-runner-holding-a-socket",
-      "params": {
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "frame:reinstated",
-          "kind": "frame",
-          "frame": "reinstated",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "operation",
-            "app": "qits-workspaces-service",
-            "operationId": "greenlightRunner"
-          },
-          "file": "a-quarantined-runner-holding-a-socket/frame-reinstated.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
-      "name": "a registered runner",
-      "slug": "a-registered-runner",
-      "params": {
-        "authorization": "Bearer qits_tok_contract-registration",
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "registerRunner",
-          "method": "POST",
-          "path": "/workspaces/api/runners/{runnerId}/register",
-          "headers": {
-            "Authorization": "{authorization}"
-          },
-          "body": {
-            "capabilities": {
-              "docker": true,
-              "arch": "amd64",
-              "os": "linux",
-              "labels": {
-                "site": "home"
-              }
-            }
-          },
-          "status": 409,
-          "file": "a-registered-runner/registerRunner.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
       "name": "a resolved workspace slot with an archived agent session",
       "slug": "a-resolved-workspace-slot-with-an-archived-agent-session",
       "params": {
@@ -597,295 +294,11 @@
       ]
     },
     {
-      "name": "a runner in service",
-      "slug": "a-runner-in-service",
-      "params": {
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "frame:healthCheck",
-          "kind": "frame",
-          "frame": "healthCheck",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "operation",
-            "app": "qits-workspaces-service",
-            "operationId": "requestRunnerHealthcheck"
-          },
-          "file": "a-runner-in-service/frame-healthCheck.json",
-          "frozen": {
-            "ids": [
-              "$.requestId"
-            ],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "frame:probeLogin",
-          "kind": "frame",
-          "frame": "probeLogin",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "operation",
-            "app": "qits-workspaces-service",
-            "operationId": "requestRunnerLoginCheck"
-          },
-          "file": "a-runner-in-service/frame-probeLogin.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "frame:retire",
-          "kind": "frame",
-          "frame": "retire",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "operation",
-            "app": "qits-workspaces-service",
-            "operationId": "deleteRunner"
-          },
-          "file": "a-runner-in-service/frame-retire.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "getRunnerHealth",
-          "method": "GET",
-          "path": "/workspaces/api/runners/{runnerId}/health",
-          "status": 200,
-          "file": "a-runner-in-service/getRunnerHealth.json",
-          "frozen": {
-            "ids": [
-              "$.requestId"
-            ],
-            "instants": [
-              "$.at"
-            ],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "greenlightRunner",
-          "method": "POST",
-          "path": "/workspaces/api/runners/{runnerId}/greenlight",
-          "status": 200,
-          "file": "a-runner-in-service/greenlightRunner.json",
-          "frozen": {
-            "ids": [
-              "$.id"
-            ],
-            "instants": [
-              "$.login.checkedAt",
-              "$.registeredAt",
-              "$.lastSeenAt",
-              "$.lastHealthCheckAt",
-              "$.createdAt",
-              "$.connectedSince",
-              "$.health.at"
-            ],
-            "strings": [
-              "$.kimiLoginCommand",
-              "$.loginCommand",
-              "$.pinnedVersion",
-              "$.version"
-            ],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "listRunners",
-          "method": "GET",
-          "path": "/workspaces/api/runners",
-          "status": 200,
-          "file": "a-runner-in-service/listRunners.json",
-          "frozen": {
-            "ids": [
-              "$[*].id"
-            ],
-            "instants": [
-              "$[*].login.checkedAt",
-              "$[*].registeredAt",
-              "$[*].lastSeenAt",
-              "$[*].lastHealthCheckAt",
-              "$[*].createdAt",
-              "$[*].connectedSince",
-              "$[*].health.at"
-            ],
-            "strings": [
-              "$[*].kimiLoginCommand",
-              "$[*].loginCommand",
-              "$[*].pinnedVersion",
-              "$[*].version"
-            ],
-            "numbers": [],
-            "listFilteredTo": "$"
-          }
-        },
-        {
-          "operationId": "patchRunner",
-          "method": "PATCH",
-          "path": "/workspaces/api/runners/{runnerId}",
-          "body": {
-            "slots": 2,
-            "description": "The build machine under the desk",
-            "workspaceMemoryLimit": "8g",
-            "workspaceMemorySwapLimit": "8g"
-          },
-          "status": 200,
-          "file": "a-runner-in-service/patchRunner.json",
-          "frozen": {
-            "ids": [
-              "$.id"
-            ],
-            "instants": [
-              "$.login.checkedAt",
-              "$.registeredAt",
-              "$.lastSeenAt",
-              "$.lastHealthCheckAt",
-              "$.createdAt",
-              "$.connectedSince",
-              "$.health.at"
-            ],
-            "strings": [
-              "$.kimiLoginCommand",
-              "$.loginCommand",
-              "$.pinnedVersion",
-              "$.version"
-            ],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "requestRunnerHealthcheck",
-          "method": "POST",
-          "path": "/workspaces/api/runners/{runnerId}/healthcheck",
-          "status": 202,
-          "file": "a-runner-in-service/requestRunnerHealthcheck.json",
-          "frozen": {
-            "ids": [
-              "$.requestId"
-            ],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "requestRunnerLoginCheck",
-          "method": "POST",
-          "path": "/workspaces/api/runners/{runnerId}/login-check",
-          "status": 202,
-          "file": null,
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
-      "name": "a runner in service with a free slot and a queued workspace",
-      "slug": "a-runner-in-service-with-a-free-slot-and-a-queued-workspace",
-      "params": {
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost",
-        "workspaceId": "1"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "frame:take",
-          "kind": "frame",
-          "frame": "take",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "event",
-            "app": "qits-workspaces-service",
-            "event": "workspaces-runner:reserve"
-          },
-          "file": "a-runner-in-service-with-a-free-slot-and-a-queued-workspace/frame-take.json",
-          "frozen": {
-            "ids": [
-              "$.spec.env.QITS_WORKSPACE_DAEMON_REPOSITORY_ID",
-              "$.spec.labels.qits.repository"
-            ],
-            "instants": [],
-            "strings": [
-              "$.spec.image",
-              "$.spec.env.QITS_WORKSPACE_DAEMON_URL",
-              "$.spec.env.QITS_WORKSPACE_DAEMON_API_BASE_PATH"
-            ],
-            "numbers": [
-              "$.rowId"
-            ],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
-      "name": "a runner in service with every slot taken",
-      "slug": "a-runner-in-service-with-every-slot-taken",
-      "params": {
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost",
-        "workspaceId": "1"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "frame:nothing",
-          "kind": "frame",
-          "frame": "nothing",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "event",
-            "app": "qits-workspaces-service",
-            "event": "workspaces-runner:reserve"
-          },
-          "file": "a-runner-in-service-with-every-slot-taken/frame-nothing.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
-      "name": "a stopped workspace slot on a runner in service",
-      "slug": "a-stopped-workspace-slot-on-a-runner-in-service",
+      "name": "a stopped workspace slot",
+      "slug": "a-stopped-workspace-slot",
       "params": {
         "agentId": "00000000-0000-4000-8000-0000000000a1",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost",
         "workspaceId": "1"
       },
       "dependsOn": [],
@@ -895,10 +308,10 @@
           "method": "POST",
           "path": "/workspaces/api/workspaces/{workspaceId}/ensure-container",
           "status": 200,
-          "file": "a-stopped-workspace-slot-on-a-runner-in-service/ensureWorkspaceContainer.json",
+          "file": "a-stopped-workspace-slot/ensureWorkspaceContainer.json",
           "frozen": {
             "ids": [
-              "$.workspace.runner.id",
+              "$.workspace.leaseId",
               "$.technicalProcessId"
             ],
             "instants": [
@@ -978,7 +391,7 @@
         "improvementTicketQualifiedId": "contract-00000001-11",
         "projectId": "00000000-0000-4000-8000-00000000000f",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
-        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "targetId": "00000000-0000-4000-8000-000000000020",
         "taskId": "00000000-0000-4000-8000-000000000011",
         "workspaceId": "1"
       },
@@ -1017,27 +430,6 @@
           }
         },
         {
-          "operationId": "deleteRunner",
-          "method": "DELETE",
-          "path": "/workspaces/api/runners/{runnerId}",
-          "status": 409,
-          "file": "a-workspace-slot-hosting-agents/deleteRunner.json",
-          "frozen": {
-            "ids": [
-              "$.workspaces[*].repositoryId"
-            ],
-            "instants": [],
-            "strings": [
-              "$.message"
-            ],
-            "numbers": [
-              "$.workspaceIds[*]",
-              "$.workspaces[*].id"
-            ],
-            "listFilteredTo": null
-          }
-        },
-        {
           "operationId": "getWorkspace",
           "method": "GET",
           "path": "/workspaces/api/workspaces/{workspaceId}",
@@ -1045,7 +437,8 @@
           "file": "a-workspace-slot-hosting-agents/getWorkspace.json",
           "frozen": {
             "ids": [
-              "$.workspace.runner.id"
+              "$.workspace.leaseId",
+              "$.workspace.targetId"
             ],
             "instants": [
               "$.workspace.createdAt"
@@ -1103,13 +496,11 @@
       ]
     },
     {
-      "name": "a workspace slot on a disconnected runner",
-      "slug": "a-workspace-slot-on-a-disconnected-runner",
+      "name": "a workspace slot qits-system cannot be asked about",
+      "slug": "a-workspace-slot-qits-system-cannot-be-asked-about",
       "params": {
         "agentId": "00000000-0000-4000-8000-0000000000a1",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost",
         "workspaceId": "1"
       },
       "dependsOn": [],
@@ -1119,7 +510,7 @@
           "method": "POST",
           "path": "/workspaces/api/workspaces/{workspaceId}/ensure-container",
           "status": 409,
-          "file": "a-workspace-slot-on-a-disconnected-runner/ensureWorkspaceContainer.json",
+          "file": "a-workspace-slot-qits-system-cannot-be-asked-about/ensureWorkspaceContainer.json",
           "frozen": {
             "ids": [],
             "instants": [],
@@ -1135,7 +526,7 @@
           "method": "POST",
           "path": "/workspaces/api/workspaces/{workspaceId}/stop-container",
           "status": 409,
-          "file": "a-workspace-slot-on-a-disconnected-runner/stopWorkspaceContainer.json",
+          "file": "a-workspace-slot-qits-system-cannot-be-asked-about/stopWorkspaceContainer.json",
           "frozen": {
             "ids": [],
             "instants": [],
@@ -1149,68 +540,25 @@
       ]
     },
     {
-      "name": "a workspace slot running on a runner in service",
-      "slug": "a-workspace-slot-running-on-a-runner-in-service",
+      "name": "a workspace slot running on a target",
+      "slug": "a-workspace-slot-running-on-a-target",
       "params": {
         "agentId": "00000000-0000-4000-8000-0000000000a1",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost",
         "workspaceId": "1"
       },
       "dependsOn": [],
       "operations": [
         {
-          "operationId": "frame:delete",
-          "kind": "frame",
-          "frame": "delete",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "operation",
-            "app": "qits-workspaces-service",
-            "operationId": "deleteWorkspaceContainer"
-          },
-          "file": "a-workspace-slot-running-on-a-runner-in-service/frame-delete.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [
-              "$.rowId"
-            ],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "frame:stop",
-          "kind": "frame",
-          "frame": "stop",
-          "path": "/workspaces/runners/socket",
-          "trigger": {
-            "kind": "operation",
-            "app": "qits-workspaces-service",
-            "operationId": "stopWorkspaceContainer"
-          },
-          "file": "a-workspace-slot-running-on-a-runner-in-service/frame-stop.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [
-              "$.rowId"
-            ],
-            "listFilteredTo": null
-          }
-        },
-        {
           "operationId": "stopWorkspaceContainer",
           "method": "POST",
           "path": "/workspaces/api/workspaces/{workspaceId}/stop-container",
           "status": 200,
-          "file": "a-workspace-slot-running-on-a-runner-in-service/stopWorkspaceContainer.json",
+          "file": "a-workspace-slot-running-on-a-target/stopWorkspaceContainer.json",
           "frozen": {
             "ids": [
-              "$.runner.id"
+              "$.leaseId",
+              "$.targetId"
             ],
             "instants": [
               "$.createdAt"
@@ -1629,7 +977,7 @@
         "bugTicketId": "00000000-0000-4000-8000-000000000001",
         "bugTicketQualifiedId": "contract-00000001-10",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
-        "runnerId": "00000000-0000-4000-8000-000000000020",
+        "targetId": "00000000-0000-4000-8000-000000000020",
         "workspaceId": "1"
       },
       "dependsOn": [],
@@ -1642,7 +990,8 @@
           "file": "an-agent-whose-workspace-is-starting/getWorkspace.json",
           "frozen": {
             "ids": [
-              "$.workspace.runner.id"
+              "$.workspace.leaseId",
+              "$.workspace.targetId"
             ],
             "instants": [
               "$.workspace.createdAt"
@@ -2036,159 +1385,6 @@
       ]
     },
     {
-      "name": "an unregistered runner",
-      "slug": "an-unregistered-runner",
-      "params": {
-        "authorization": "Bearer qits_tok_contract-registration",
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "createRunner",
-          "method": "POST",
-          "path": "/workspaces/api/runners",
-          "body": {
-            "name": "{runnerName}",
-            "slots": 1
-          },
-          "status": 409,
-          "file": "an-unregistered-runner/createRunner.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "deleteRunner",
-          "method": "DELETE",
-          "path": "/workspaces/api/runners/{runnerId}",
-          "status": 204,
-          "file": null,
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "getRunnerHealth",
-          "method": "GET",
-          "path": "/workspaces/api/runners/{runnerId}/health",
-          "status": 204,
-          "file": null,
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "listRunners",
-          "method": "GET",
-          "path": "/workspaces/api/runners",
-          "status": 200,
-          "file": "an-unregistered-runner/listRunners.json",
-          "frozen": {
-            "ids": [
-              "$[*].id"
-            ],
-            "instants": [
-              "$[*].createdAt"
-            ],
-            "strings": [
-              "$[*].pinnedVersion"
-            ],
-            "numbers": [],
-            "listFilteredTo": "$"
-          }
-        },
-        {
-          "operationId": "registerRunner",
-          "method": "POST",
-          "path": "/workspaces/api/runners/{runnerId}/register",
-          "headers": {
-            "Authorization": "{authorization}"
-          },
-          "body": {
-            "capabilities": {
-              "docker": true,
-              "arch": "amd64",
-              "os": "linux",
-              "labels": {
-                "site": "home"
-              }
-            }
-          },
-          "status": 200,
-          "file": "an-unregistered-runner/registerRunner.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "requestRunnerHealthcheck",
-          "method": "POST",
-          "path": "/workspaces/api/runners/{runnerId}/healthcheck",
-          "status": 409,
-          "file": "an-unregistered-runner/requestRunnerHealthcheck.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "requestRunnerLoginCheck",
-          "method": "POST",
-          "path": "/workspaces/api/runners/{runnerId}/login-check",
-          "status": 409,
-          "file": "an-unregistered-runner/requestRunnerLoginCheck.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "rotateRunnerRegistrationToken",
-          "method": "POST",
-          "path": "/workspaces/api/runners/{runnerId}/registration-token",
-          "status": 200,
-          "file": "an-unregistered-runner/rotateRunnerRegistrationToken.json",
-          "frozen": {
-            "ids": [
-              "$.runner.id"
-            ],
-            "instants": [
-              "$.runner.createdAt"
-            ],
-            "strings": [
-              "$.runner.pinnedVersion"
-            ],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
       "name": "no agent with that id",
       "slug": "no-agent-with-that-id",
       "params": {
@@ -2202,98 +1398,6 @@
           "path": "/workspaces/api/agents/{agentId}",
           "status": 404,
           "file": "no-agent-with-that-id/getAgent.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        }
-      ]
-    },
-    {
-      "name": "no runners",
-      "slug": "no-runners",
-      "params": {
-        "runnerId": "00000000-0000-4000-8000-000000000020",
-        "runnerName": "localhost"
-      },
-      "dependsOn": [],
-      "operations": [
-        {
-          "operationId": "createRunner",
-          "method": "POST",
-          "path": "/workspaces/api/runners",
-          "body": {
-            "name": "{runnerName}",
-            "slots": 1
-          },
-          "status": 201,
-          "file": "no-runners/createRunner.json",
-          "frozen": {
-            "ids": [
-              "$.runner.id"
-            ],
-            "instants": [
-              "$.runner.createdAt"
-            ],
-            "strings": [
-              "$.runner.pinnedVersion",
-              "$.installLine"
-            ],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "deleteRunner",
-          "method": "DELETE",
-          "path": "/workspaces/api/runners/{runnerId}",
-          "status": 404,
-          "file": "no-runners/deleteRunner.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "getRunnerHealth",
-          "method": "GET",
-          "path": "/workspaces/api/runners/{runnerId}/health",
-          "status": 404,
-          "file": "no-runners/getRunnerHealth.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "greenlightRunner",
-          "method": "POST",
-          "path": "/workspaces/api/runners/{runnerId}/greenlight",
-          "status": 404,
-          "file": "no-runners/greenlightRunner.json",
-          "frozen": {
-            "ids": [],
-            "instants": [],
-            "strings": [],
-            "numbers": [],
-            "listFilteredTo": null
-          }
-        },
-        {
-          "operationId": "rotateRunnerRegistrationToken",
-          "method": "POST",
-          "path": "/workspaces/api/runners/{runnerId}/registration-token",
-          "status": 404,
-          "file": "no-runners/rotateRunnerRegistrationToken.json",
           "frozen": {
             "ids": [],
             "instants": [],

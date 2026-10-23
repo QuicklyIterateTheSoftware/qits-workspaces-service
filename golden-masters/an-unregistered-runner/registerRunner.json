@@ -1,7 +1,0 @@
-{
-  "clientId": "contract-runner-client",
-  "secret": "contract-runner-secret",
-  "tokenUrl": "https://idp.qits.runners.example.test/idp/token",
-  "audience": "qits-platform",
-  "socketUrl": "wss://workspaces.qits.runners.example.test/workspaces/runners/socket"
-}

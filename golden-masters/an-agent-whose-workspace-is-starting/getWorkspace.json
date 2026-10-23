@@ -24,11 +24,9 @@
     "daemonBuildTime": null,
     "daemonOutdated": null,
     "admin": false,
-    "placement": "RUNNER",
-    "runner": {
-      "id": "00000000-0000-4000-8000-000000000020",
-      "name": "localhost"
-    },
+    "placement": "TARGET",
+    "leaseId": "00000000-0000-4000-8000-000000000023",
+    "targetId": "00000000-0000-4000-8000-000000000020",
     "queuedAt": null
   }
 }

@@ -1,7 +1,0 @@
-{
-  "type": "estate",
-  "owned": [
-    1
-  ],
-  "workspaceImage": "registry.qits.runners.example.test/qits/workspace:2026.101.120000"
-}

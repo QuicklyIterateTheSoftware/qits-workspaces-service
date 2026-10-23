@@ -1,4 +1,0 @@
-{
-  "message": "Workspace 1 is on a runner that is offline; it cannot stop until the runner is back",
-  "code": "RUNNER_UNAVAILABLE"
-}

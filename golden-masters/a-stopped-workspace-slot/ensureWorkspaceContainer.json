@@ -10,7 +10,7 @@
     "conflictsWithParent": false,
     "status": "ACTIVE",
     "runtimeStatus": "QUEUED",
-    "runtimeError": null,
+    "runtimeError": "no target has a free WORKSPACE slot",
     "clean": null,
     "agentActivity": null,
     "preamble": null,
@@ -24,12 +24,10 @@
     "daemonBuildTime": null,
     "daemonOutdated": null,
     "admin": false,
-    "placement": "RUNNER",
-    "runner": {
-      "id": "00000000-0000-4000-8000-000000000020",
-      "name": "localhost"
-    },
+    "placement": "TARGET",
+    "leaseId": "00000000-0000-4000-8000-000000000100",
+    "targetId": null,
     "queuedAt": "2026-01-01T00:00:00Z"
   },
-  "technicalProcessId": "00000000-0000-4000-8000-000000000100"
+  "technicalProcessId": "00000000-0000-4000-8000-000000000101"
 }
