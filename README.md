@@ -6,8 +6,8 @@ workspace-daemon registry, the technical-process framework, prompt composition, 
 the routes over all of it — the machine surface at `/workspaces`, its segment. It serves no web
 client; the workspace pages are qits-landing-app's.
 
-Since epic qits-1152 a **workspace** is a slot: one container on a workspace runner (an admin one on
-the platform host), scoped to a project's wrapper, holding one long-lived clone. An **agent** is one
+Since epic qits-1152 a **workspace** is a slot: one container in a WORKSPACE slot of an execution
+target (epic qits-1481; an admin one on the platform host), scoped to a project's wrapper, holding one long-lived clone. An **agent** is one
 work item's coding agent and its worktree inside a workspace; a workspace hosts many agents and runs
 one at a time. The agent's branches are its own: the daemon creates the wrapper branch locally, the
 agent names its submodule branches, and each push is reported back. This service does **not** release
@@ -75,7 +75,7 @@ the consuming application implements:
 | `AgentDaemon` | *implemented here* | `DaemonAgentClient` (the daemon's `agent-worktrees` API through the tunnel); absent means agents are placed but never started |
 | `WorkFiler` | *implemented here* | `HttpWorkFiler` (`POST /projects/api/work`); absent means a capture is a 500 |
 | `CredentialCommissioner` | no | no container is given a platform credential — today's behaviour |
-| `ContainerRuntime` | *implemented here* | `WorkspaceContainers`, over qits-containers — **admin workspaces only**; every regular workspace runs on a workspace runner (`RunnerPlacement`) and never reaches it (qits-780) |
+| `ContainerRuntime` | *implemented here* | `WorkspaceContainers`, over qits-containers — **admin workspaces only**; every regular workspace runs under a qits-system lease (`TargetPlacement`) and never reaches it (qits-780) |
 | `LifecycleAnnouncer` | *implemented here* | `EventstreamLifecycleAnnouncer`, onto the bus (qits-1236); absent means the lifecycle events are not published and nothing else changes |
 
 In the other direction this context publishes `WorkspaceResolved` when a workspace is integrated or
@@ -147,7 +147,7 @@ work item:
 - `POST /workspaces/api/agent-dispatches` `{repositoryId, wrapperBranch, workId, entityId,
   entityTitle, entityStatus, entityBlocked, ticketId?, epicId?, instruction}` → `{agent,
   fresh, agentLaunch, agentIdentity}`: there should be an agent working on this item. Idempotent; a
-  queued agent waits for a free runner slot. `admin: true` is refused: only a person's door makes
+  queued agent waits while a lease of this service already waits for a slot. `admin: true` is refused: only a person's door makes
   an admin agent.
 - `POST …/agent-dispatches/delivery` `{workId, text, compactFirst}` → `{agentId, delivered, launched,
   resumed, detail}`: say this to the item's agent. Never creates one; `agentId: null` is the answer
@@ -218,30 +218,57 @@ else:
 
 ### Where a workspace runs
 
-`Workspace.placement` (DIRECT or RUNNER, `V12`) is decided once, at create, and never changed
-(qits-837, qits-774). The split is by posture and nothing else: **a regular workspace runs on a
-workspace runner (RUNNER), and only admin workspaces use the direct path** — a container on the
-platform host through qits-containers (DIRECT). An admin workspace holds the host's docker socket and
-may not run on a node the platform does not own. `WorkspacePlacements.forNewRow(admin)` writes it.
+`Workspace.placement` (DIRECT or TARGET, `V12`, `V30`) is decided once, at create, and never changed
+(qits-837, qits-774). The split is by posture and nothing else: **a regular workspace runs in a
+WORKSPACE slot of an execution target (TARGET), and only admin workspaces use the direct path** — a
+container on the platform host through qits-containers (DIRECT). An admin workspace holds the host's
+docker socket, which no slot type gives. `WorkspacePlacements.forNewRow(admin)` writes it.
 
 Three things hold the rule, from the schema in:
 
-- **`ck_workspace_runner_posture`** (`V12`, rewritten in `V20`): an admin row is never RUNNER.
-- **`ck_workspace_direct_only_admin`** (`V15`, rewritten in `V20`): an ACTIVE row is RUNNER or admin
-  — so no ACTIVE regular row can be DIRECT. Resolved rows keep their placement as history.
-  `V15` first abandoned the leftover main workspaces of the retired per-project editor (no parent;
-  in SQL, so their default branch stayed on the git host).
+- **`ck_workspace_runner_posture`** (`V12`, rewritten in `V20`): an admin row is never TARGET.
+- **`ck_workspace_direct_only_admin`** (`V15`, rewritten in `V20` and `V30`): an ACTIVE row is
+  TARGET or admin — so no ACTIVE regular row can be DIRECT. Resolved rows keep their placement as
+  history.
 - **The router's refusal**: every DIRECT branch of every verb — start, recreate, stop,
   delete-container, discard, the listing, the clean/pushed probes and the daemon
   proxy's lookup — calls `WorkspacePlacements.requireDirectAllowed` before
   it reaches `ContainerRuntime`, and a regular row there is an ERROR `direct placement refused for
   regular workspace <id>` and an `IllegalStateException`, never a container on the platform host.
 
-The agent scheduler creates a RUNNER slot only while the eligible runners' slots outnumber the RUNNER
-workspaces; otherwise an agent waits QUEUED, with no workspace, until one is free. Dropping every
-runner's slots to 0 parks new agents that way; it never routes them to the platform host. The owner-wide
-qits-containers listing a workspace listing used to make is asked for only when the repository has
-a DIRECT row, so a repository of regular workspaces costs qits-containers nothing.
+### TARGET workspaces: a lease from qits-system (epic qits-1481)
+
+A TARGET row's container runs under a **WORKSPACE lease** qits-system grants on an execution target
+(`targethost/TargetLeasePlacement`, over `qits.system.url`, with this service's own `qits` oidc
+client). The workspace runner this service once registered, and its socket, doors, install line and
+idp kinds, are gone (`V30` drops `workspace_runner`).
+
+- **Start** mints the lease's `workspace` token, composes `LeaseSpec{image, env, user 1000,
+  limits}` (`RunnerWorkspaceSpecs`, never `HOME`, `CLAUDE_CONFIG_DIR` or `BUILDKIT_HOST`), and asks
+  `POST /system/api/leases` with `slotType WORKSPACE`, `ownerRef <rowId>`, `workKey ws-<rowId>`.
+  The row records `lease_id` and waits QUEUED, the lease's `detail` (why it waits) as its
+  `runtimeError`. qits-system not answering is 409 `TARGET_UNAVAILABLE` and the row as it was; a
+  refusal of the request itself fails the row with `TARGET_REFUSED: …`.
+- **The lease's state is the row's** (`TargetLeaseStates`), from qits-system's `TargetLeaseChanged`
+  and a reconcile from `GET /system/api/leases` every
+  `qits.workspaces.target-leases.reconcile-interval` (PT30S): QUEUED → QUEUED, GRANTED →
+  PROVISIONING (`target_id` set), RUNNING → RUNNING once the daemon reported its self-clone, EXITED →
+  STOPPED, FAILED → FAILED, ENDED → STOPPED and the lease cleared. The token is deleted when the
+  lease reports ENDED, EXITED or FAILED.
+- **Stop** ends the lease (`DELETE /system/api/leases/{id}`); the work volume stays on its target.
+  **Delete-container** ends it, waits for ENDED and purges the work volume
+  (`DELETE /system/api/work-volumes/ws-<rowId>`). A resolution ends it, and purges the volume once
+  it is ENDED.
+- **A row a retired runner held** (`legacy_placement`, copied by `V30`) is adopted by its first
+  lease: `adopt{container, volume}` = `qits-workspaces-runner-ws-<rowId>-<oldRunnerId8>` (kept on the
+  row as `adopted_volume`, so every later lease carries it) and `pinTargetId` the target on the same
+  node. `targethost/LegacyRunnerClients` gives the retired runner kinds' idp clients and tokens back
+  at every boot.
+
+The agent scheduler asks for a new regular workspace only while no TARGET row of this service
+waits QUEUED; otherwise an agent waits QUEUED, with no workspace. qits-system decides which target
+has room. The owner-wide qits-containers listing is asked for only when the repository has a DIRECT
+row, so a repository of regular workspaces costs qits-containers nothing.
 
 **Kept for the direct path, deliberately.** All of it serves the admin workspaces, and
 none of it is a leftover of regular DIRECT rows:
@@ -259,12 +286,11 @@ none of it is a leftover of regular DIRECT rows:
   dials home and clones through.
 - The volume and resource keys — `qits.workspace.workspace-volume-prefix`, `claude-volume`,
   `maven-volume`, `pnpm-volume`, `memory-limit`, `memory-swap-limit` — the platform host's volumes
-  and limits for admin containers (the two limits are also the defaults a runner row's
-  own lay over).
+  and limits for admin containers (the limits are a TARGET lease's too).
 - `commissionFor`, `CommissionReconciler` and the `V3` columns — the commissioned client pair is the
   admin container's credential on a deployment with **no** edge plane. With a public
-  `QITS_DOMAIN` an admin container holds a workspace token instead, as every RUNNER row
-  does (qits-1084) — see "The credential a workspace container holds".
+  `QITS_DOMAIN` an admin container holds a workspace token instead, as every TARGET row's
+  lease does (qits-1084) — see "The credential a workspace container holds".
 
 ### The credential a workspace container holds
 
@@ -280,7 +306,7 @@ the superproject's `authenticated-reads-plan.md`.
     QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE   the platform audience, qits-platform (C4)
 
 **On a deployment with a public `QITS_DOMAIN` an admin container holds a workspace token
-instead of that pair** (qits-1084) — the same non-expiring `qits_tok_` every RUNNER container holds,
+instead of that pair** (qits-1084) — the same non-expiring `qits_tok_` every TARGET container holds,
 minted at `POST /idp/api/tokens` and stored on the row. An admin row's is of kind `workspace-admin`
 (so `qits:agent` and `qits:admin-agent`), the editor's of kind `workspace` and unscoped. The
 container carries
@@ -435,8 +461,8 @@ listeners, so refusing while a socket is in reconnect backoff would take file br
 open terminal down for the length of a blip.
 
 **`GET /workspaces/api/pins` says which images a launch by this process would pull** —
-`{generatedAt, pins:[{image, version, launches}]}`, one row per configured pair (`workspace`,
-`runner`), the image registry-relative and a blank version omitted. It is a pin source for
+`{generatedAt, pins:[{image, version, launches}]}`, one row per configured pair (`workspace`; the
+retired runner's image row went with it, epic qits-1481), the image registry-relative and a blank version omitted. It is a pin source for
 qits-artifacts' registry GC, read by qits-platform-orchestrator with a bearer and open to
 `qits:admin` beside `qits:system`, like `/workspaces/api/gc/branches`. It answers the **effective**
 version — what this running process resolved at boot — where qits-configuration answers the

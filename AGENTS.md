@@ -216,6 +216,16 @@ workspaces they run in", Nudge.
 `agent_worktree`: the subject qits-projects names as having set the item's explicit block. An agent
 whose own subject set an `EXPLICIT` or `BOTH` block is still nudged. A column on a `CausedRow`, so no
 `ArchRulesTest` decision; see "Agents and the workspaces they run in", Nudge.
+**`V30__workspace_leases.sql`** (epic qits-1481, qits-1532) retires the workspace runners: it first
+copies every row with a `runner_id` into `legacy_placement(row_id, old_runner_id, engine_id,
+hostname, runner_name)` — `engine_id` and `hostname` from the runner's `capabilities ->> 'engineId'`
+/ `'hostname'`, which qits-workspaces-runner-daemon never reported, so both are null on every row
+and the runner's name is copied as the last way to find its node — then adds `workspace.lease_id`,
+`target_id` and `adopted_volume`, renames placement RUNNER to TARGET (`ck_workspace_placement`,
+`ck_workspace_direct_only_admin` and the new `ck_workspace_lease_placement` rewritten around it),
+stops the rows that were QUEUED or PROVISIONING for a runner, and drops `workspace.runner_id` and
+`workspace_runner`. `LegacyPlacement` is **`@Uncaused`**: the migration writes every row. See
+"Placement: DIRECT and TARGET".
 
 **`V18__dispatch_command_id.sql` adds `dispatch_command_id` to `workspace`** (qits-895): the daemon
 command the last launch this service made started, replaced by every accepted launch
@@ -395,7 +405,7 @@ literal and must carry `/workspaces` itself. Four do, each for its own reason:
   with the row's `commissioned_client_id` — or,
   on a row that holds a workspace token, with its `commissioned_token_subject` instead (qits-812;
   a client id never matches there). Which one is decided by what the row HOLDS
-  (`Workspace.holdsToken`/`boundSubject`), never by its placement: every RUNNER row holds a token,
+  (`Workspace.holdsToken`/`boundSubject`), never by its placement: every TARGET row holds a token,
   and so does a DIRECT admin or editor row on an edge plane (qits-1084), whose daemon then dials
   `wss://workspaces.qits.<domain>/workspaces/daemon/<id>` through the edge rather than the
   `ws://` qits-net address. `DaemonSocketBearerLifetime` drops the bearer's expiry on this path for a
@@ -433,7 +443,7 @@ literal and must carry `/workspaces` itself. Four do, each for its own reason:
   rather than websockets-next for a hard reason: `io.quarkus.websockets.next.Connection` exposes
   `sendBinary` and no `writeQueueFull`/`drainHandler`, and a byte tunnel with no backpressure signal
   is an unbounded heap buffer. `request.toWebSocket()` gives a real `WriteStream`. A token row's
-  dial-back — every RUNNER row, and a DIRECT admin or editor row on an edge plane (qits-1084) —
+  dial-back — every TARGET row, and a DIRECT admin or editor row on an edge plane (qits-1084) —
   comes through the edge and must also carry a validated bearer whose `sub` is the row's token
   subject (`WorkspaceTunnels.DialBack.tokenBound`, captured when the tunnel opens); otherwise the
   same bare 404 an unknown nonce gets. A pair row's dial-back is the nonce alone, as before.
@@ -867,7 +877,7 @@ retain their narrower `MachineAuth` audience/scope checks.
 
 **Every read also takes `qits:agent`; no write does** (phase 4 of the superproject's
 `principal-bound-git-refs-plan.md`: agents keep every read and lose only writes) — with two stated
-exceptions, a workspace runner's health check (qits-850, below) and an agent's own declared waits
+exceptions until qits-1481 (a workspace runner's health check, gone with the runner), and an agent's own declared waits
 (qits-1153, below). It is stated on
 each read METHOD — every `GET`, the three event streams — and never on a class, so a write added to
 a class later does not inherit the agent role. A method-level list replaces the class's, so each one
@@ -897,7 +907,7 @@ every other role. `qits:admin`, `qits:admin-agent` and `qits:system` stay unboun
 2026-10-07). It is the role qits-idp issues, beside `qits:agent`, to an ADMIN workspace's container
 credential (context kind `workspace-admin`), whose agent holds the host's docker socket. It is named
 explicitly right after `qits:admin` at every check — every `@RolesAllowed` list,
-`WorkspaceRunnerController.ADMIN_AGENT_ROLE` beside `ADMIN_ROLE`, `BranchController.requireAdmin` —
+`BranchController.requireAdmin` —
 and never implied by code, so a door that must stay human-only can drop it on its own. A new door
 that admits `qits:admin` lists it too. `AdminAgentAccessTest` pins it, door by door, against
 `qits:agent` alone.
@@ -972,7 +982,7 @@ resolved its row; the `editor` column stays, unread.
 
 ## Agents and the workspaces they run in (epic qits-1152)
 
-A **workspace** is a slot: one container on a runner (an admin one DIRECT on the platform host),
+A **workspace** is a slot: one container under a WORKSPACE lease on an execution target (an admin one DIRECT on the platform host),
 scoped to a project's wrapper, holding one long-lived clone. An **agent** is one work item's coding
 agent and its worktree inside a workspace (`/workspace/agents/<agentId>/<wrapper name>` on the
 daemon). A workspace hosts many agents, and each keeps its harness running while it is placed. The decisions are D1–D26 of the
@@ -995,7 +1005,7 @@ makes every daemon call, one pass at a time, kicked after each door and every
 1. **Resume** — every YIELDED agent with something to hear is RUNNING again at once, even beside
    another RUNNING agent. A resume goes before a new agent (D17).
 2. **Place** — a QUEUED agent goes to an empty workspace of its wrapper and posture, else to a new
-   one while the eligible runners' slots outnumber the RUNNER workspaces (an admin agent always gets
+   one while no TARGET workspace of this service waits QUEUED for a slot (an admin agent always gets
    a new DIRECT admin workspace, D10), else to a workspace whose agents have all yielded, else it
    waits. Never to a workspace where another live agent (ACTIVE or OBSOLETE) of the repository holds
    its wrapper branch: git checks a branch out in one worktree at a time (qits-1217).
@@ -1068,7 +1078,7 @@ makes every daemon call, one pass at a time, kicked after each door and every
    A refused start (409) is stored on the row once per distinct detail (`start_refusal`,
    `start_refused_at`, `AgentDto.startRefusal`/`startRefusedAt`) and tried again every pass; the
    next accepted start clears it (qits-1217). A RUNNING agent whose workspace is FAILED with no
-   daemon (it never came up: `RunnerClaims.awaitDaemon`, or a failed launch) is queued for another
+   daemon (it never came up: `TargetLeaseStates.awaitDaemon`, or a FAILED lease) is queued for another
    workspace, the reason stored as its start refusal; `WorkspaceUnqueued` kicks the pass that does
    it, and a FAILED workspace is never offered as a slot. Only an agent that never started there:
    `started_workspace_id` (`V26`) records where a start was last accepted, which is where the
@@ -1233,7 +1243,7 @@ The rules they keep:
   with a request context activated for the outbox's fallback. `bus/EventWireReflection` registers
   every record for the native image; `EventWireReflectionTest` guards the list.
 - **The tests** assert at the port: `RecordingLifecycleAnnouncer` (domain tests) records, and
-  `LifecycleEventsTest` and `RunnerClaimsTest` drive the transitions;
+  `LifecycleEventsTest` and `WorkspaceTargetPlacementTest` drive the transitions;
   `workspaces-events/…/LifecycleEventsContractTest` pins every wire name and payload field.
 
 **What a slot would lose is asked per agent** (qits-1263, `AgentWorktreeGuard`). The daemon sends
@@ -1269,7 +1279,7 @@ on the wrapper's name.
 ## The credential a workspace container holds
 
 A workspace container gets a **credential of its own** — commissioned at provision, handed back at
-teardown. On a deployment with an edge plane that is a workspace token (`QITS_TOKEN`), for RUNNER
+teardown. On a deployment with an edge plane that is a workspace token (`QITS_TOKEN`), for TARGET
 rows always and for the DIRECT admin and editor rows since qits-1084; on a DIRECT row with no edge
 plane it is an **idp client pair**, injected as `QITS_COMMISSIONED_CLIENT_ID`/`_SECRET`. Most of what
 follows was written about the pair and holds for the token by the same reasoning; the two token
@@ -1330,26 +1340,27 @@ the kind, which qits-idp issues `qits:agent` + `qits:admin-agent`. The flag chan
 the request and never reaches the spec. The reconcile matches both kinds through
 `CredentialCommissioner.isWorkspaceKind`. A live admin container keeps its old `workspace` pair until
 it is recreated or deleted. The token takes the same flag (`commissionToken(rowId, projectId,
-gitRefs, admin)`, qits-1084): a RUNNER row is never admin and passes false, a DIRECT admin row
+gitRefs, admin)`, qits-1084): a TARGET row is never admin and passes false, a DIRECT admin row
 true.
 
-**A RUNNER row holds a workspace token instead of the pair** (qits-625, qits-802): one opaque
+**A TARGET row holds a workspace token per lease** (qits-625, qits-802, epic qits-1481): one opaque
 `qits_tok_` of the `workspace` kind (`CredentialCommissioner.commissionToken`, `POST
-/idp/api/tokens` on the existing `IdpTokens` client), minted by the RUNNER start before the row is
-queued and outside every transaction, stored on the row (`V13`) and composed into the spec as
-`QITS_TOKEN`/`QITS_TOKEN_SUBJECT`. Its lifetime is the container's: a stop keeps it and the next start
-reuses it; delete-container, recreate, discard/integrate and abandon delete it; the reconcile reaps
-every `workspace` token no ACTIVE row names (sparing one younger than `TOKEN_GRACE`). **Absent is not
-supported here**: a RUNNER container has no other credential, so a start that cannot mint fails the
-row with `WORKSPACE_TOKEN_UNAVAILABLE` and queues nothing. The test double mints tokens by default for
+/idp/api/tokens`), minted by the TARGET start immediately before `createLease` and outside every
+transaction, stored on the row (`V13`) and composed into the spec as `QITS_TOKEN`/`QITS_TOKEN_SUBJECT`.
+Its lifetime is the lease's: deleted when the lease reports ENDED, EXITED or FAILED, and a token a
+row still holds at its next start is given back before a fresh one is minted. The reconcile reaps
+every `workspace` token no ACTIVE row holds for a container — a DIRECT row, a TARGET row with a
+lease, or one a retired runner still runs (sparing one younger than `TOKEN_GRACE`). **Absent is not
+supported here**: a TARGET container has no other credential, so a start that cannot mint fails the
+row with `WORKSPACE_TOKEN_UNAVAILABLE` and asks for nothing. The test double mints tokens by default for
 that reason (`unwireTokens()` is the no-issuer case); its pair half still starts unwired.
 
 **A DIRECT admin or editor row holds a workspace token too, whenever there is an edge** (qits-1084).
 Both stay DIRECT for good, but the hourly-minting pair is no longer their credential on a deployment
 with a public domain. `commissionFor` asks `WorkspaceAddressPlanes.plane()` first: when it resolves,
-the container is minted the RUNNER row's `qits_tok_` instead — `workspace-admin` for an admin row,
+the container is minted the TARGET row's `qits_tok_` instead — `workspace-admin` for an admin row,
 `workspace` for the editor, unscoped because the editor names no repository, stating the same Git
-refs the pair would have — through the same `mintToken`/`storeToken` helpers `ensureRunnerToken`
+refs the pair would have — through the same `mintToken`/`storeToken` helpers `mintLeaseToken`
 uses, onto the same three `V13` columns. When it does not (no public `QITS_DOMAIN`), the pair is
 commissioned exactly as before and a WARN says why; the provision is never failed over a missing
 plane. A failed mint fails the provision, as a failed commission does. `decommissionFor` runs first
@@ -1368,7 +1379,7 @@ row switches arm at its next container, never under a running one.
   fails its start with `EDGE_PLANE_UNCONFIGURED` rather than launch on addresses it cannot spend.
 - **Every check reads what the row holds, not its placement**: the socket binding, the tunnel's
   dial-back and a dispatch's `agentIdentity` all go through `Workspace.boundSubject`.
-- **Teardown** is the RUNNER row's: `deleteDirectContainer` and the DIRECT arm of `doDiscard`
+- **Teardown** is the TARGET row's: `deleteDirectContainer` and the DIRECT arm of `doDiscard`
   delete the token beside the pair (`deleteToken(clearToken(…))`); recreate, abandon and a failed
   provision go through `decommissionFor`, which always did both. The reconcile already reaps both
   token kinds by `isWorkspaceKind`.
@@ -1392,7 +1403,7 @@ workspaces they run in"). A workspace is a slot with no branch, and its credenti
 states `gitRefs: []`: it may push nothing, and the daemon pushes with each agent's token.
 
 - **The list is stated, never omitted.** An absent `gitRefs` would let the credential push every
-  ref, so `commissionFor` and the RUNNER mint always pass `List.of()`.
+  ref, so `commissionFor` and the TARGET mint always pass `List.of()`.
 - **The narrowing is gone** (qits-1385): the narrowing bean, the `PUT …/git-refs` updates on both
   doors and the reconcile's resend were removed with nothing to narrow. `V27` drops
   `workspace.git_refs` and `git_refs_pending`; `agent_worktree.git_refs` (`V21`) stays.
@@ -1446,136 +1457,72 @@ Who may ask is `WorkspaceController`'s standing `@RolesAllowed("qits:admin")`: c
 workspace already requires the platform admin role, and the socket is granted per workspace rather
 than per caller. A second role invented here would be a vocabulary qits-idp does not issue.
 
-## Placement: DIRECT and RUNNER (epic qits-624)
+## Placement: DIRECT and TARGET (epics qits-624, qits-1481)
 
 A workspace's container runs either **DIRECT** (the platform host, through qits-containers) or
-**RUNNER** (a workspace runner's node). `Workspace.placement` is written once, by `recordWorkspace`,
-from `WorkspacePlacements.forNewRow(admin)`: **a regular workspace is always RUNNER, and only admin
-workspaces are DIRECT** (qits-774). Since qits-1152 the agent scheduler creates a RUNNER slot only
-while the eligible runners have free slots, so an agent waits QUEUED rather than a row on no runner;
-an old-model row still waits QUEUED with `no enabled workspace runner`
-(`WorkspaceService.NO_ENABLED_RUNNER`). The refusal codes live in `error/RunnerRefusals`.
+**TARGET** (a WORKSPACE slot of an execution target, under a qits-system lease). `Workspace.placement`
+is written once, by `recordWorkspace`, from `WorkspacePlacements.forNewRow(admin)`: **a regular
+workspace is always TARGET, and only admin workspaces are DIRECT** (qits-774). The workspace runner
+this service registered and spoke to over `/workspaces/runners/socket` — its registry, health gate,
+doors (`/workspaces/api/runners/**`), install line, login command, pins, `qits.workspaces.runner.*`
+keys, protocol and toolkit dependencies, golden-master frames and pacts — was deleted in qits-1532;
+`V30` dropped its table. The refusal codes live in `error/TargetRefusals`.
 
-**No regular row is DIRECT any more, and three things hold that** (qits-780): `V15`'s
-`ck_workspace_direct_only_admin` (an ACTIVE row is RUNNER or admin; `V20`), the create rule
-above, and **the router's refusal** — `WorkspacePlacements.requireDirectAllowed(Workspace)`, called at
-every DIRECT branch before `ContainerRuntime` is touched: the top of `beginEnsureContainer`,
-`beginRecreateContainer`, `stopContainer`, `deleteContainer` and `doDiscard`; the ensure ladder's
-snapshot; `ensureContainer(Long)`, the bootstrap runner's manual-run entry, which leaves a
-RUNNING runner row to its runner and asks a stopped one to start first (400); the listing's per-row DIRECT status; `directContainerExists`
-behind `isWorkspaceClean` and the integration source check (a RUNNER row answers
-false there with no call, as the by-name lookup always did); and `DaemonProxyTargets.resolve`. A
-regular row there is an ERROR `direct
-placement refused for regular workspace <id>` and an `IllegalStateException`. The listing asks
-qits-containers only when the repository has a DIRECT row at all. Tests that prove the DIRECT ladder
-use **admin** rows (`createWorkspace(…, admin = true)`); the qits-776 move onto a runner
-(`DirectPlacementMove`, `MoveGate`, the `move-to-runner` door, `DirectMigrationSweep`) and its
-test-side `LegacyDirectRows` are deleted with the rows they existed for.
-
-**A discard never deletes a main workspace's branch** (qits-780): `doDiscard` keeps the ref when the
-row has no `parent` or its branch is the repository's default branch, logging that it kept it, on
-both placements. It used to push the deletion, which is why `V15` abandoned the last leftover main
-workspace in SQL rather than through the door.
+**No regular row is DIRECT, and three things hold that** (qits-780): `ck_workspace_direct_only_admin`
+(an ACTIVE row is TARGET or admin; `V20`, `V30`), the create rule above, and **the router's
+refusal** — `WorkspacePlacements.requireDirectAllowed(Workspace)`, called at every DIRECT branch
+before `ContainerRuntime` is touched. Tests that prove the DIRECT ladder use **admin** rows. A
+discard never deletes a main workspace's branch (qits-780), on both placements.
 
 - **One branch per verb, at its top.** `beginEnsureContainer`, `stopContainer`, `deleteContainer`,
-  `beginRecreateContainer` and `doDiscard` each test `placement == RUNNER` first and hand a RUNNER row
-  to a method in the "RUNNER placement" section of `WorkspaceService`; the DIRECT code below the
-  branch is what it was. `WorkspaceRunnerPlacementTest.aDirectRowNeverReachesThePortAndKeepsItsLadder`
-  is the seam's test: flip a branch and it fails.
-- **`stopContainer`/`deleteContainer` are no longer `@Transactional`**, so the RUNNER arm can wait up
-  to 60 s for its runner's reply outside a transaction (Narayana's default timeout is also 60 s). The
-  DIRECT body runs unchanged inside `QuarkusTransaction.joiningExisting()`.
-- **Start is pull, and creating a RUNNER row is its first start.** `recordWorkspace` writes every
-  row STOPPED; once a RUNNER row committed, the create queues it through the RUNNER start itself
-  (`beginRunnerStart`, unnarrated) — the qits-ci runner model: the service keeps the list of
-  requested workspaces, a runner takes from it. The start is the one path to QUEUED: it builds the
-  edge plane, mints the workspace token when the row holds none (qits-802), then marks the row QUEUED
-  (a compare-and-swap that also requires the token); a runner's `reserve` takes it
-  (`RunnerClaims.reserveFor`, the CAS in `WorkspaceRepository.claimForRunner`, which refuses a row
-  with no token too). `launched` keeps the row PROVISIONING until its daemon reported the self-clone
-  (rung 3's provisioner and windows), then RUNNING; no daemon, or a failed clone, is FAILED.
-- **A slot is started by its create** (`createSlot`): a RUNNER one queued, a DIRECT admin one
-  through `beginEnsureContainer`. (The ad-hoc create door went with qits-1152; `createWorkspace`
-  stays as the writer of old-model rows the suites build on.) An ensure-container right after a
-  create joins the start still running instead of provisioning twice
-  — **but never a start a stop overtook** (qits-1076). A DIRECT stop or container delete counts
-  itself on an in-memory per-row stop marker before it touches anything, and once it commits it
-  releases the start's provision await (`WorkspaceDaemonProvisioner.abandonProvision`) and ends its
-  process (`WorkspaceProcessTracker.end`). The start checks the marker under a per-row guard before
-  every runtime write and before tearing a failed provision down, and on a stop it yields: no `rm`,
-  no FAILED, never RUNNING over STOPPED. An ensure that still finds such a start open answers 409
-  `WORKSPACE_STOPPED_DURING_START` naming the process. `WorkspaceEnsureContainerProcessTest` holds
-  the clone window open with `FakeWorkspaceDaemonProvisioner.holdDirectRows()`.
-  Stop and delete are routed to the owning runner through the `RunnerPlacement` port; resolution
-  never waits on one.
-- **RUNNER rows skip the qits-containers listing**: their persisted status is the runner's word, with
-  `UNAVAILABLE` laid over it on read when the row's runner is not present. It is never stored.
-- **The runner spec shares the DIRECT spec's environment code**: `WorkspaceContainerFactory.identityEnv`
-  and `homeEnv`, written in place in `forWorkspace`. `WorkspaceContainerFactoryGoldenSpecTest` pins the
-  whole DIRECT spec (ordinary, editor and admin rows; the editor and admin each holding the pair and
-  holding a token, qits-1084), order included; `RunnerWorkspaceSpecs`
-  composes the runner's from the same methods, and every address in it from a
-  `WorkspaceAddressPlane` — public `<app>.qits.<domain>` names off `QITS_DOMAIN` alone, the image
-  moved to `registry.qits.<domain>`, no network, no extra host (qits-799). A RUNNER start builds the
-  plane before it queues: a blank, undotted or `*.localhost` domain fails the row with
-  `EDGE_PLANE_UNCONFIGURED` and queues nothing. Its credential is the row's workspace token
-  (`QITS_TOKEN`, `QITS_TOKEN_SUBJECT`, the git helper on the plane's githost), and it carries the
-  DIRECT spec's daemon API token and two path bases; none of the DIRECT pair block.
-- **No direct path to any daemon** (qits-812, qits-780): `DaemonProxyTargets` never answers an
-  origin. A RUNNER row is `NOT_CONNECTED` without asking the runtime, a DIRECT one asks only whether
-  its container runs (`NO_CONTAINER`, 502 "not running"), and `ContainerProxyRoute` and
-  `DaemonAgentClient` answer a missing tunnel as 503 "workspace daemon not connected" / unreachable.
-  The `container:13338` fallback and `qits.workspace.daemon-api-port` are deleted.
-
-### The runners themselves: the doors, the socket and the pin (qits-848/850/851/859)
-
-`api/WorkspaceRunnerController` (`/workspaces/api/runners`) is qits-ci's `CiRunnerController` door
-for door, and the roles are per method: reads `{admin, system, agent}` (`GET …/{id}/health`, the
-newest check in full, among them); create, PATCH, rotate and DELETE `{admin, system}` (the cold
-bootstrap drives them with its own token); greenlight and login-check `qits:admin` alone. The
-health check (`POST …/{id}/healthcheck`, 202 `{requestId}`) is `{admin, system, agent}` — the one
-write an agent may press here, by the owner's decision (qits-850): it reads and self-tests only. `qits:workspaces-runner-registration` opens `register` and
-`install.sh` and nothing else. The register door reads the bearer's `sub` off the validated token,
-so it needs the machine gate on (`qits.auth.machine.required`, true live via
-`QITS_AUTH_MACHINE_REQUIRED`); the tests run under `DaemonControlSocketMachineAuthTest.GateOn` for
-that reason and reuse it rather than adding a profile.
-
-- **The install line and `install.sh` are qits-runner-toolkit's template**, rendered through
-  `InstallScript` with `WorkspaceRunnerInstallScript.IDENTITY` — built from the protocol jar's roots
-  exactly as the runner's own `WorkspacesRunnerIdentity` is. There is no copy of the template here.
-  `quarkus.native.resources.includes` carries the template and the runner pin's version file; both
-  are loaded by a name the native builder cannot see.
-- **The pin is a pom property**, `qits.workspaces-runner-protocol.version`: `WorkspacesRunnerBinary.VERSION`
-  is the version every `hello` is compared with and the image tag an `upgrade` and `install.sh`
-  name. `qits.runner.version` pins both qits-runner-javalib jars with `*:*` exclusions.
-- **Every address is a public one**, from `QITS_DOMAIN` alone (`runnerhost/WorkspaceRunnerAddresses`);
-  an undotted domain is 503 `RUNNER_PLANE_UNCONFIGURED` on create, register and `install.sh`.
-- **`runnerhost/WorkspaceRunnerRegistry` is `CiRunnerRegistry`'s shape**: one session per
-  connection, same version replaces (`ALREADY_CONNECTED`), another version is sent `upgrade` +
-  `ack{0}` and retired when its successor says hello, a 60 s reconnect grace (CI's value, a
-  constant here). A greeted runner gets `ack`, `quarantined` if it is, `estate`, `backlog` and —
-  while it awaits its first one — `healthCheck`; `estate` goes out only from a successful read.
-  `SocketBearerLifetime` is a copy of CI's (qits-545) for this one path.
-- **`runnerhost/WorkspaceRunnerHealth` gates a runner exactly as qits-ci's `CiRunnerHealth` does**
-  (qits-850), without CI's build-failure streak. Quarantined at registration, when it comes back
-  (its first socket after more than the reconnect grace — a reconnect inside it, the rollover
-  successor included, is not one; nor is a reconnect to a freshly started service, whose memory of
-  the drop is gone), and when a check fails or is not answered within
-  `qits.workspaces.runner.healthcheck.timeout` (`no answer`). A check is sent at the greeting of a
-  runner awaiting its first one or coming back, at the greeting of one in service whose stored
-  report's `workspaceImage` is not the pinned image, after a PATCH that changes its slots
-  (qits-948), on demand, and by the sweep on CI's back-off
-  `qits.workspaces.runner.healthcheck.schedule` counted from `quarantined_at`, which a failed check
-  of a runner already out keeps. The whole report sits in `capabilities.health`, bounded on its own;
-  a pass reinstates (`reinstated{by: "health check"}`, `ack{slots}`). A quarantine never touches
-  running workspaces: stop and delete are still routed to the runner.
-- **`runnerhost/RunnerPlacementDriver` is the domain's `RunnerPlacement` port.** Its notifications
-  run after the caller's transaction commits, on the registry's own thread; `stop`/`delete` wait
-  60 s for the reply (`RUNNER_TIMEOUT`, or `RUNNER_UNAVAILABLE` with no socket).
-- **The DTO's live half** — `connected`, `connectedSince`, `pinnedVersion`, the three counts and the
-  two login commands — is laid beside the row by `runnerhost/WorkspaceRunnerViews` through
-  `WorkspaceRunnerMapper.Live`. A login command is null until the runner reported its agent home
-  volume, and a reported name that is not a plain docker volume name is never spliced into it.
+  `beginRecreateContainer` and `doDiscard` each test `placement == TARGET` first and hand the row to
+  the "TARGET placement" section of `WorkspaceService`.
+  `WorkspaceTargetPlacementTest.aDirectRowNeverReachesThePortAndKeepsItsLadder` is the seam's test.
+- **The port is `control/TargetPlacement`**, implemented by `targethost/TargetLeasePlacement` over
+  qits-system's doors (`targethost/SystemLeases`: `createLease`, `listLeases`, `getLease`,
+  `endLease`, `purgeWorkVolume`, `listTargets`; `qits.system.url`, the `qits` oidc client's bearer,
+  `@DefaultBean` so the suites' `FakeTargetPlacement` wins). Absent reads as "no target can be had".
+- **Start** (`beginTargetStart`): the edge plane first (`EDGE_PLANE_UNCONFIGURED` fails the row);
+  a previous lease the row still names is ended and waited for (`TargetPlacement.ENDING_DEADLINE`,
+  else 504 `TARGET_TIMEOUT`), since qits-system holds one live lease per owner ref; then the lease's
+  token is minted (`WORKSPACE_TOKEN_UNAVAILABLE` fails the row), the spec composed
+  (`RunnerWorkspaceSpecs`: image, env without `HOME`/`CLAUDE_CONFIG_DIR`/`BUILDKIT_HOST`, user
+  `1000`, the `qits.workspace.*` limits), and `createLease` asked with `ownerRef <rowId>`, `workKey
+  ws-<rowId>`, `priority 0`. A 4xx refusal fails the row (`TARGET_REFUSED: …`); no answer, a 5xx or
+  a 409 is 409 `TARGET_UNAVAILABLE` with the row untouched; either way the token is deleted. The
+  lease is recorded by a compare-and-swap (`WorkspaceRepository.recordLease`), the row QUEUED with
+  the lease's `detail` as its `runtimeError` (the DTO's existing reason field).
+- **The lease's state is the row's** (`control/TargetLeaseStates`, the runner's `RunnerClaims`
+  successor): `targethost/TargetLeaseEvents` hands it every `TargetLeaseChanged` of owner
+  `qits-workspaces` and slot type WORKSPACE (a live `QitsEventListener` on a transcribed record,
+  `targethost/TargetLeaseChanged`), and every
+  `qits.workspaces.target-leases.reconcile-interval` (PT30S) the listing, where a lease no longer
+  listed reads as ENDED and a live lease no row names, older than two minutes, is ended. QUEUED →
+  QUEUED (detail shown), GRANTED → PROVISIONING (`target_id`), RUNNING → the daemon's self-clone is
+  awaited as rung 3 waits for it, then RUNNING (a RUNNING lease this process never asked for, on a
+  PROVISIONING row, is a restart and reads RUNNING at once), EXITED → STOPPED, FAILED → FAILED with
+  the detail, ENDED → STOPPED with lease and target cleared. EXITED, FAILED and ENDED delete the
+  lease's token; EXITED and FAILED also end the lease, so the next start can ask for another. A row is
+  found by its `lease_id`, never by the owner ref.
+- **Stop** ends the lease and writes STOPPED; the ENDED that follows clears it. **Delete-container**
+  ends it, waits for ENDED, purges `ws-<rowId>`, and clears `lease_id`, `target_id`,
+  `adopted_volume` and the row's `legacy_placement` entry. **Recreate** is that, then a start. A
+  **resolution** ends the lease after its commit; the resolved row keeps naming it until it is ENDED,
+  when its work volume is purged.
+- **Legacy adoption.** A row in `legacy_placement` asks its first lease with `adopt{container,
+  volume}` = `qits-workspaces-runner-ws-<rowId>-<oldRunnerId8>` and `pinTargetId` the target whose
+  `engineId`, else `hostname`, else name matches the runner's (`listTargets`; today's listing
+  carries no capabilities, so in practice the name). No match is a WARN and an unpinned lease. The
+  name is kept on the row (`adopted_volume`) and every later lease carries it — the runner mounts an
+  adopted volume only when the lease names it. The entry goes once the lease is RUNNING. A row a
+  retired runner still runs (RUNNING with no lease) is left alone until it is stopped or started.
+- **`targethost/LegacyRunnerClients`** gives back, at every boot, the idp clients and tokens of
+  kinds `workspaces-runner` and `workspaces-runner-registration`; idempotent, a failure is a WARN.
+- **The agent scheduler** asks for a new regular workspace only while no TARGET row waits QUEUED
+  (`AgentService.targetCapacity`): qits-system decides who has room, this service only keeps from
+  piling up waiting leases.
+- **No direct path to any daemon** (qits-812, qits-780): a TARGET row is `NOT_CONNECTED` in
+  `DaemonProxyTargets` without asking the runtime; its daemon dials home through the edge.
 
 ## The contract with qits-projects: golden masters in, a pact out
 
@@ -1638,7 +1585,7 @@ pact-jvm upgrade stops writing it. `trigger` is required: a null one throws.
 
 **Published only on change.** `release.yml` declares one `contracts.pacts` entry per provider
 (`qits-events-service`, `qits-projects-service`, `qits-idp-service`, `qits-containers-service`,
-`qits-workspace-daemon`, and since qits-950 `qits-workspaces-runner-daemon`), and
+`qits-workspace-daemon`, and since qits-1481 `qits-system-service`), and
 qits-ci packages each `pacts/qits-workspaces-service_<provider>.json` as
 `eu.wohlben.qits:qits-workspaces-service-pacts-<provider>`, published only when it changed since the
 newest published jar — there is no repository-side gate or module anymore; `pacts-jar/` and
@@ -1670,126 +1617,12 @@ masked, so a client bump alone is no contract change. The file keeps the two-par
 client ships from the provider's own repository. The kit's own fixed rows (the `editor` workload, a
 minimal ensure body) are not used: they pact requests this service never sends.
 
-**The frames this service sends a workspace runner are golden masters too (qits-950, A1).** The
-runner socket is the one boundary of the RUNNER flow no HTTP pact covers, so the provider half of
-its message pact is recorded beside the calls, in the same `golden-masters/` tree and the same
-`GoldenMasterRecordingTest` run (compare by default, `-Dgolden.update=true` rewrites):
-
-- **`contracts/RunnerFrames.FRAMES` is the table**: one row per (provider state, frame type, cause).
-  Thirteen frames, every one this service builds: `ack`, `estate`, `backlog`, `quarantined`,
-  `upgrade` (a runner's `hello`), `take`, `nothing` (its `reserve`), `stop`, `delete` (the
-  `stopWorkspaceContainer` / `deleteWorkspaceContainer` doors), `probeLogin`, `healthCheck`,
-  `retire` (`requestRunnerLoginCheck`, `requestRunnerHealthcheck`, `deleteRunner`) and
-  `reinstated` (`greenlightRunner`). The frames it only receives are never built here.
-- **A frame comes off the socket, never off a constructor.** Each state leaves `localhost` on a
-  `ProviderStates.ScriptedRunner` socket that keeps every text `WorkspaceRunnerRegistry.send` hands
-  it — the codec's JSON, byte for byte what goes on the wire. `RunnerFrames.send` forgets what the
-  setting up cost, makes the frame happen the way it does live (the runner's frame handed to the
-  registry or to `RunnerReservations` as `WorkspaceRunnerSocket` dispatches it, or the door pressed
-  over HTTP) and takes the first text of that type. The states are `ProviderStates`' own, seven of
-  them new (`a greenlit runner dialling in …`, `a quarantined runner …`, `a runner in service with
-  …`); the stop, delete, login, health and retire frames reuse `a workspace slot running on a runner
-  in service` and `a runner in service`.
-- **The index entry of a frame** is an operation with no method, query or status:
-
-      {"operationId": "frame:take", "kind": "frame", "frame": "take",
-       "path": "/workspaces/runners/socket",
-       "trigger": {"kind": "event", "app": "qits-workspaces-service",
-                   "event": "workspaces-runner:reserve"},
-       "file": "<state-slug>/frame-take.json",
-       "frozen": {"ids": [], "instants": [], "strings": [...], "numbers": [...],
-                  "listFilteredTo": null}}
-
-  `path` is the socket the frame travels on; `trigger` is the `qits-trigger` group a message pact
-  names (an operation of this service, or the runner's own frame as `workspaces-runner:<type>`).
-  The file is named `frame-<type>.json`, never with the key's colon, so every checkout can hold it.
-  The HTTP entries are untouched; a reader that only looks operations up by id (qits-pact-consumer's
-  `GoldenMasters`) never sees a frame, and qits-docs renders one with an empty method and status.
-- **Frozen like an answer, plus the frame's own row fields** (`Freezer.frames()`): `rowId`, the
-  `owned` list and the base's `adoptedWorkspaces`/`heldWorkspaces` strings freeze to the state's
-  write order. It is a mode because the HTTP answers use `owned` for a count. The image tags a bump
-  moves are fixed at `FIXED_VERSION`; a row id inside an address (`take`'s daemon url and api base
-  path) has only that segment frozen (`Frame.rowIdIn`), so a change to the rest of the address is
-  still drift.
-- **`contracts/RunnerFramesGuardTest` is A3's sending side.** It reads the frames off the code —
-  every class of the sealed `WorkspacesRunnerMessage` and `LifecycleMessage` sets that this
-  module's main bytecode constructs (`new`, or a static factory of the frame's class such as
-  `Retire.deleted`) — and fails naming each one with no `frame:<type>` in the committed index, and
-  each recorded one nothing builds any more. The protocol marks no direction on a class, so "built
-  here" is "can be sent from here". A type is the record's simple name with a lower-case first
-  letter, held to the protocol jars' type constants.
-
-`ConsumerPactVerificationTest` verifies HTTP interactions only (`@PactFilter` on
-`Synchronous/HTTP`), so the runner's message pact arriving in its pinned jar costs the HTTP gate
-nothing; the message interactions are `RunnerFramesProviderPactTest`'s.
-
-**`contracts/RunnerFramesProviderPactTest` verifies the runner's message pact (qits-950, A1).**
-`pacts/qits-workspaces-runner-daemon_qits-workspaces-service.json` in the pinned
-`qits-workspaces-runner-daemon-pacts-qits-workspaces-service` jar holds the frames above as Pact V4
-`Asynchronous/Messages`, written by the runner from these golden masters. The verifier is the HTTP
-one's mirror: a `@QuarkusTest`, `@Provider("qits-workspaces-service")`, the same
-`ClasspathPactLoader`, `@PactFilter` on `Asynchronous/Messages`, and a `MessageTestTarget` built with
-the test class's own class loader, so pact-jvm invokes the `@PactVerifyProvider` methods on the
-injected instance.
-
-- **A `@State` per frame state** calls `ProviderStates.setUp` and keeps its params. An unknown state
-  fails in `@BeforeEach`, and so does an interaction without both `comments.references` groups.
-- **A `@PactVerifyProvider` per description** (`<trigger>: frame:<type>`, thirteen of them) looks up
-  the `RunnerFrames.FRAMES` row for (state, `qits-call.frame`). It refuses a `qits-call` naming
-  another app, and a `qits-trigger` that is not that row's `Cause.trigger()`. It then answers
-  `RunnerFrames.send`: the frame made by the real code path and taken off the scripted socket, as
-  recorded but unfrozen. pact-jvm matches it against the interaction's rules. A recorded file or
-  built JSON is never answered.
-- **Zero message interactions pass** (`@IgnoreNoPactsToVerify`). A pin from before 2026.1022.101507
-  carries only the HTTP register pact, which the filter drops. pact-jvm then runs one placeholder
-  invocation with a null context, which both `@BeforeEach` and the template return on, instead of
-  throwing `NoPactsFoundException`. A missing pact jar still fails, because the loader throws on
-  finding no file and `ignoreIoErrors` stays false.
-- **It bites.** Dropping `rowId` from the encoded `take`, or `workspaceImage` from `estate`, in
-  `WorkspaceRunnerMessageCodec` fails exactly those two invocations: `Actual map is missing the
-  following keys`.
-
-**The frames a workspace runner sends are a consumer message pact (qits-950, A2).** The other
-direction: `pacts/qits-workspaces-service_qits-workspaces-runner-daemon.json`, Pact V4
-`Asynchronous/Messages`, built from the runner's golden masters
-(`eu.wohlben.qits:qits-workspaces-runner-golden-masters`, pinned at
-`qits.workspaces-runner-golden-masters.version`; index provider `qits-workspaces-runner`) and
-declared under `contracts.pacts.qits-workspaces-runner-daemon` in `release.yml`.
-
-- **`runnerhost/RunnerFramesContract` is the table**: one `ContractRow.message(trigger, state,
-  frame, receive)` per recorded (state, frame) — seventeen rows over the eleven frames. It is an
-  ordinary `ContractTable`, so `ConsumerPactFilesTest` compares and rewrites its file and asserts
-  the references like the HTTP tables'. A message row's `qits-call` is `{app, frame}` and its
-  `qits-trigger` is the cause **on the runner's side**, as the index records it (`{kind: frame,
-  frame: take}`, `{kind: event, event: reconnect}`, `{kind: schedule, schedule: exit-watch}`), with
-  `app` the runner's repository; `GoldenMasters.messageInteraction` refuses a row naming another.
-- **Matchers as the HTTP helper's** (`frozen` lists: ids → uuid, instants → the ISO regex, every
-  other leaf → type, arrays `minMaxArrayLike(n, n)` against one merged template), with two message
-  rules: `$.type` is exact (it is the frame), and an array whose objects are not one structure —
-  `healthChecked`'s `checks[]` — is matched element by element at its recorded length.
-- **`runnerhost/RunnerFramesConsumerPactTest` runs every row against the real thing**, one
-  parameterized invocation per row on `GateOn`: a `FakeWorkspacesRunner` writes the pact message's
-  text verbatim onto the real socket (`sendText`), `WorkspaceRunnerSocket` decodes it with the real
-  codec and dispatches it, and the row asserts the effect on the rows, the runner row, the frames
-  sent back and the verb or check it answers (`RunnerFrameHarness` holds the beans and cleans up).
-  **The runner's frozen values are swapped for the row's** — the message counterpart of an HTTP
-  state param: `PactMessage.text(Map.of("rowId", seeded))` replaces a leaf holding the state's
-  frozen `params.rowId` (or `requestId`) **only at a frozen path**: the runner index's
-  `frozen.ids`/`strings`/`numbers` for that (state, frame), plus the table's `frozenAt` paths
-  (`$.rowId`, `$.containers[*].rowId`, `$.volumes[*]`, `$.heldWorkspaces[*]`, because the runner
-  freezes its rowId without listing a path). An equal `slots` or `capabilityVersion` is left alone,
-  and a param that sits at no such path fails. A `hello`'s `runnerVersion` is set to the pin, and every
-  text is matched against the interaction's own rules (pact-jvm's `JsonContentMatcher`) before it is
-  fed, so the test only ever feeds a message the pact admits.
-- **The receiving guard** is in `contracts/RunnerFramesGuardTest`: the frame types
-  `WorkspaceRunnerSocket.onMessage` dispatches are read off its bytecode (the pattern switch's
-  `SwitchBootstraps.typeSwitch` labels), and each needs a `RunnerFramesContract` row, by name; so
-  does every frame type the pinned runner golden masters record. A row for a frame the socket no
-  longer dispatches fails too.
-- **Effects worth knowing**: `exited` only stops the row (from RUNNING/PROVISIONING) — its
-  `exitCode` is decoded and kept nowhere, and no runtime error is written; an empty `inventory`
-  changes nothing only for rows with no live container — an owned RUNNING row would be STOPPED and a
-  PROVISIONING one queued again; `launched` leaves the row PROVISIONING until the daemon reports.
+**qits-system (epic qits-1481)** is `targethost/SystemContract`, bound to
+`qits.system-golden-masters.version`, its file `pacts/qits-workspaces-service_qits-system-service.json`
+(`release.yml`: `qits-system-service`). **Every row waits**: the pinned golden masters predate the
+targets module. `SystemConsumerPactTest` skips while none is live; `OutboundCallsGuardTest` reads
+the routes of the waiting rows off its `PENDING_ROUTES` until the recordings exist. The runner's
+frame golden masters and message pacts (qits-950) went with the runner.
 
 ## Tests
 
@@ -1882,10 +1715,10 @@ declared under `contracts.pacts.qits-workspaces-runner-daemon` in `release.yml`.
   default would put credential environment into every container the suite launches and quietly
   change what dozens of unrelated tests are about. `wire()` turns it on, `reset()` turns it off, and
   a test class that wires it resets in `@AfterEach` — a class that forgets leaks its issuer into
-  whatever runs next. Its TOKEN half is wired by default instead (a RUNNER start cannot queue without
-  one); that changes no DIRECT container because the suites pin `qits.workspace.domain` empty, so an
+  whatever runs next. Its TOKEN half is wired by default instead (a TARGET start cannot ask for a lease
+  without one); that changes no DIRECT container because the suites pin `qits.workspace.domain` empty, so an
   admin or editor row only mints a token where a test installs a `WorkspaceAddressPlanes` mock
-  (`DirectWorkspaceTokenTest`, `WorkspaceRunnerPlacementTest`).
+  (`DirectWorkspaceTokenTest`, `WorkspaceTargetPlacementTest`).
 - Integration tests needing real docker, a built `qits/workspace` image and the daemon binary **are**
   in this repo — `Daemon*IT`, tagged `extended`, `DaemonApiGateIT` the largest of them. They
   self-skip (`assumeTrue`) when docker or the image is absent, and `skipITs=true` is the default
