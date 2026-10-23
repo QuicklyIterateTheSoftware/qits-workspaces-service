@@ -28,7 +28,7 @@ import java.util.Optional;
  *
  * <h2>The container is asked about only behind the router's refusal</h2>
  *
- * <p>A RUNNER row's container is on a runner's node, so it answers {@link
+ * <p>A TARGET row's container is in a slot of an execution target, so it answers {@link
  * Reachability#NOT_CONNECTED} without asking the {@link ContainerRuntime} anything (qits-812). A
  * DIRECT row — admin and editor only, {@link WorkspacePlacements#requireDirectAllowed} — is asked
  * whether its container runs, so a stopped one says "start it" rather than "not connected".
@@ -75,7 +75,7 @@ public class DaemonProxyTargets {
       return Reachability.NO_WORKSPACE;
     }
     Workspace workspace = found.get();
-    if (workspace.placement == WorkspacePlacement.RUNNER) {
+    if (workspace.placement == WorkspacePlacement.TARGET) {
       return Reachability.NOT_CONNECTED;
     }
     WorkspacePlacements.requireDirectAllowed(workspace);

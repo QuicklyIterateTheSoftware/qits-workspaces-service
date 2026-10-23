@@ -6,7 +6,7 @@ import java.util.Locale;
 
 /**
  * <b>Every address a workspace container that reaches the platform through the edge is told</b> —
- * every RUNNER-placed one, and a DIRECT one holding a workspace token (qits-1084) — as one value, composed from the
+ * every TARGET-placed one, and a DIRECT one holding a workspace token (qits-1084) — as one value, composed from the
  * platform's public domain and nothing else (qits-625, qits-799). qits-ci's {@code StepAddressPlane}
  * is the shape.
  *

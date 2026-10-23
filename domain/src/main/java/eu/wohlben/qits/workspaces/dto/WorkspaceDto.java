@@ -5,6 +5,7 @@ import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import java.time.Instant;
+import java.util.UUID;
 
 /**
  * @param id the workspace's identifier — the generated surrogate key, which is what routes, the
@@ -29,7 +30,8 @@ import java.time.Instant;
  * @param runtimeStatus the container's runtime state (RUNNING/STOPPED/PROVISIONING/FAILED),
  *     independent of {@code status}: the branch is the source of truth, the container is a
  *     recreatable cache of it
- * @param runtimeError when {@code runtimeStatus} is FAILED, why the last re-provision failed. Also
+ * @param runtimeError when {@code runtimeStatus} is FAILED, why the last re-provision failed; when it
+ *     is QUEUED on a TARGET workspace, why its lease waits (the lease's {@code detail}). Also
  *     set on a RUNNING workspace whose coding agent was killed rather than finished — {@code
  *     AGENT_OOM_KILLED: …} or {@code AGENT_KILLED: …}, with the exit code and, where the daemon
  *     could read it, the memory cap (see {@code AgentKills}). That is the one thing telling such a
@@ -45,8 +47,7 @@ import java.time.Instant;
  *     (BUSY/WAITING/IDLE/ENDED, in that precedence), as last reported by {@code workspace-daemon}
  *     hearing the agent's lifecycle hooks; {@code null} when no tracked agent is running (or the
  *     daemon's socket isn't live / none has reported yet) — daemon-socket-live and self-healing:
- *     known under RUNNING, and under UNAVAILABLE on a RUNNER row whose runner is offline while the
- *     session is still up through the edge. {@code ENDED} means every
+ *     known under RUNNING. {@code ENDED} means every
  *     tracked session in this workspace has finished
  *     <em>recently</em>: the host holds it for {@code qits.workspace.agent-activity.ended-ttl-ms}
  *     and then lets it fall back to {@code null}. It is a real value and not a transient — the
@@ -67,8 +68,7 @@ import java.time.Instant;
  * @param daemonConnectedAt when the workspace's in-container {@code workspace-daemon} registered
  *     its control socket — the workspace's "connected since" (docs/epics/qits-workspace-registry/).
  *     {@code null} when unknown: like {@code agentActivity}, the registry only knows it while the
- *     daemon's socket is live — {@code runtimeStatus} RUNNING, or UNAVAILABLE on a RUNNER row whose
- *     runner is offline while the session is still up through the edge — and it resets on each
+ *     daemon's socket is live — {@code runtimeStatus} RUNNING — and it resets on each
  *     daemon (re)connect (it is not a durable first-registered time)
  * @param daemonVersion the release version of the daemon binary the running container is on (Maven
  *     {@code project.version}); {@code null} when unknown (no live daemon, or an older daemon image
@@ -88,12 +88,15 @@ import java.time.Instant;
  *     are privileged cannot say so, and "which ones have the socket" is the question this whole
  *     posture exists to keep answerable
  * @param placement where the workspace's container runs: {@code DIRECT} on the platform host, or
- *     {@code RUNNER} on a workspace runner's node. Decided at create and never changed: DIRECT for
- *     admin workspaces only, RUNNER for every regular one (qits-780)
- * @param runner the runner a RUNNER workspace is placed on, with its name; null for every DIRECT
- *     workspace and for a RUNNER workspace no runner has taken yet
- * @param queuedAt when a RUNNER workspace was last asked to start, while it waits for a slot
- *     ({@code runtimeStatus} {@code QUEUED}); null otherwise
+ *     {@code TARGET} in a WORKSPACE slot of an execution target (epic qits-1481). Decided at create
+ *     and never changed: DIRECT for admin workspaces only, TARGET for every regular one (qits-780)
+ * @param leaseId the qits-system lease a TARGET workspace's container runs under; null for every
+ *     DIRECT workspace and for a TARGET workspace with no live lease
+ * @param targetId the execution target that lease was granted on; null while it waits (QUEUED) and
+ *     whenever there is no lease
+ * @param queuedAt when a TARGET workspace was last asked to start, while its lease waits for a slot
+ *     ({@code runtimeStatus} {@code QUEUED}, with the lease's {@code detail} — why it waits — in
+ *     {@code runtimeError}); null otherwise
  */
 public record WorkspaceDto(
     Long id,
@@ -121,5 +124,6 @@ public record WorkspaceDto(
     Boolean daemonOutdated,
     boolean admin,
     WorkspacePlacement placement,
-    WorkspaceRunnerRefDto runner,
+    UUID leaseId,
+    UUID targetId,
     Instant queuedAt) {}

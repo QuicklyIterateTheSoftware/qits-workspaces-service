@@ -10,9 +10,11 @@ package eu.wohlben.qits.workspaces.entity;
  * #PROVISIONING} and {@link #FAILED} are persisted so the UI can offer a recreate action and, on
  * failure, tell the user <em>why</em> (see {@code Workspace.runtimeError}).
  *
- * <p><b>Two values belong to RUNNER placement only</b> ({@code V12}). {@link #QUEUED} is
- * <em>persisted</em>: the column admits it, and a runner's reserve reads it. {@link #UNAVAILABLE}
- * is <em>computed only</em>: it is laid over a read and never written, and the column's check
+ * <p><b>Two values belong to TARGET placement only</b> ({@code V12}). {@link #QUEUED} is
+ * <em>persisted</em>: the row's lease waits for a slot, and {@code Workspace.runtimeError} carries
+ * the lease's {@code detail} (why it waits). {@link #UNAVAILABLE} is no longer produced (epic
+ * qits-1481): it was laid over a row whose workspace runner was offline, and a lease has no such
+ * state. It stays in the enum so a client's exhaustive switch keeps compiling; the column's check
  * refuses it.
  */
 public enum WorkspaceRuntimeStatus {
@@ -25,14 +27,13 @@ public enum WorkspaceRuntimeStatus {
   /** The last re-provision attempt failed; {@code Workspace.runtimeError} holds the reason. */
   FAILED,
   /**
-   * A RUNNER row that was asked to start and waits for a slot on a runner. <b>Persisted</b>: {@code
-   * Workspace.queuedAt} says since when, and a runner's reserve takes the oldest.
+   * A TARGET row whose lease waits for a slot. <b>Persisted</b>: {@code Workspace.queuedAt} says since
+   * when, and {@code Workspace.runtimeError} why (the lease's {@code detail}).
    */
   QUEUED,
   /**
-   * A RUNNER row whose owning runner has been offline beyond the reconnect grace. <b>Computed only,
-   * never stored</b>: it is laid over the persisted status on every read, and the column's check
-   * refuses it, so a reconnect clears it without a write.
+   * Not produced since epic qits-1481: it was a TARGET row whose workspace runner was offline beyond
+   * the reconnect grace. Never stored; the column's check refuses it.
    */
   UNAVAILABLE
 }

@@ -13,24 +13,24 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * Keeps a RUNNER workspace's daemon control socket open past the bearer it was opened with
+ * Keeps a TARGET workspace's daemon control socket open past the bearer it was opened with
  * (qits-625, qits-812).
  *
- * <p><b>A copy in shape of qits-ci-service's {@code runnerhost/SocketBearerLifetime}</b> (qits-545),
- * as this service's own {@code runnerhost.SocketBearerLifetime} is for the runner socket. What it
+ * <p><b>A copy in shape of qits-ci-service's {@code runnerhost/SocketBearerLifetime}</b> (qits-545).
+ * What it
  * undoes, in that class's words: quarkus-oidc stamps every identity it builds from a bearer with
  * {@code quarkus.identity.expire-time} — the token's {@code exp} — and websockets-next arms a timer
  * on that attribute for every connection it admits and closes it "Authentication expired" when it
- * fires; there is no key to turn that off. A RUNNER row's daemon dials through the edge with its
+ * fires; there is no key to turn that off. A TARGET row's daemon dials through the edge with its
  * workspace {@code qits_tok_}, and the edge forwards that as a JWT that lives 300 seconds — so with
- * the attribute in place no runner-placed daemon could hold its socket for longer than five
+ * the attribute in place no target-placed daemon could hold its socket for longer than five
  * minutes.
  *
  * <p><b>Why dropping the attribute is right rather than refreshing the token.</b> The socket is
  * authenticated at the upgrade and nowhere after it, by design ({@link DaemonAgentBindingCheck}
  * binds the caller to the row's token subject there). The daemon has no fresh JWT to present
- * mid-connection — the JWT is the edge's, not its own. What cuts a RUNNER daemon off is the row's
- * token: delete-container, recreate and resolution delete it, and the next dial is refused at the
+ * mid-connection — the JWT is the edge's, not its own. What cuts a TARGET daemon off is the row's
+ * token: the lease's end, delete-container, recreate and resolution delete it, and the next dial is refused at the
  * edge.
  *
  * <p><b>Only {@code /workspaces/daemon/{id}}, and only a token subject ({@code tok-…}).</b> Exactly

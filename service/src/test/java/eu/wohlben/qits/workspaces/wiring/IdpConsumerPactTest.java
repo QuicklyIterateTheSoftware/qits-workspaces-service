@@ -5,8 +5,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * <b>The consumer half of the qits-idp contract</b>: every live row of {@link IdpContract}, each
- * made by this service's real code — {@link IdpCredentialCommissioner} and {@link
- * IdpRunnerCommissioner} over the real generated clients, the shipped {@code qits} oidc client for
+ * made by this service's real code — {@link IdpCredentialCommissioner} over the real generated
+ * clients, the shipped {@code qits} oidc client for
  * the peer bearer — against a pact mock server of its own. The committed pact file is {@code
  * ConsumerPactFilesTest}'s.
  *

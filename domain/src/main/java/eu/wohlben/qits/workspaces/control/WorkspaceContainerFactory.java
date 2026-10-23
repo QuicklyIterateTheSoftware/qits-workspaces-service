@@ -187,8 +187,8 @@ public class WorkspaceContainerFactory {
    * so no per-tool {@code -Xmx} plumbing is needed. Blank/absent disables the cap; the shipped
    * default is {@code 4g}. Optional because SmallRye treats an empty property value as "no value".
    *
-   * <p>The platform host's value: a RUNNER workspace gets it only when its runner's row sets no
-   * {@code workspaceMemoryLimit} of its own ({@code RunnerWorkspaceSpecs.limitsFor}, qits-951). The
+   * <p>Every placement's value: a TARGET workspace's lease carries it too ({@code
+   * RunnerWorkspaceSpecs}, epic qits-1481). The
    * swap key below is the same kind of default.
    */
   @ConfigProperty(name = "qits.workspace.memory-limit")
@@ -266,7 +266,7 @@ public class WorkspaceContainerFactory {
   /**
    * The edge plane a DIRECT row that holds a workspace token is addressed through (qits-1084): a
    * {@code qits_tok_} only works through the public edge, which exchanges it for a JWT, so such a
-   * container's dial-home, MCP and git addresses are the plane's public names — exactly as a RUNNER
+   * container's dial-home, MCP and git addresses are the plane's public names — exactly as a TARGET
    * spec's are ({@link RunnerWorkspaceSpecs}). Asked only when the row holds a token, so a
    * pair-holding row never reads it. An {@code Instance<>} for every port's reason here: the
    * hand-built unit-test factory leaves it unresolvable, and then the plane is composed from this
@@ -459,14 +459,14 @@ public class WorkspaceContainerFactory {
   @ConfigProperty(name = "qits.workspace.daemon-api-token", defaultValue = "qits-workspace-daemon")
   String daemonApiToken;
 
-  /** {@link #daemonApiToken}, for the RUNNER spec, which writes the same value (qits-625). */
+  /** {@link #daemonApiToken}, for the TARGET spec, which writes the same value (qits-625). */
   String daemonApiToken() {
     return daemonApiToken;
   }
 
   /**
    * The image's git config naming its credential helper: {@code GIT_CONFIG_GLOBAL} on a container
-   * that holds a credential, DIRECT pair or RUNNER token alike.
+   * that holds a credential, DIRECT pair or TARGET token alike.
    */
   static final String GIT_CONFIG_GLOBAL = "/etc/qits-gitconfig";
 
@@ -663,7 +663,7 @@ public class WorkspaceContainerFactory {
     // only spent by the public edge, which exchanges it for a JWT; presented on qits-net straight to
     // a service it is an unknown bearer. So an admin or editor row holding one takes every address
     // it dials — the daemon socket, the MCP server and the git base — from the plane, exactly
-    // as a RUNNER spec does, through the same method (addressEnv). Everything else DIRECT stays:
+    // as a TARGET spec does, through the same method (addressEnv). Everything else DIRECT stays:
     // qits-net, the extra host, the docker socket, the editor block, the host-to-daemon tunnel. A
     // row holding the pair (or nothing) keeps the internal addresses below, byte for byte.
     Optional<WorkspaceToken> token = workspaceToken(rowId);
@@ -721,7 +721,7 @@ public class WorkspaceContainerFactory {
     //
     // A row that holds a workspace token instead (qits-1084) carries that and none of the pair
     // block: QITS_TOKEN, its subject, and the git helper told the plane's githost — tokenEnv, the
-    // RUNNER spec's own lines. No token url and no audience: nothing in the container mints.
+    // TARGET spec's own lines. No token url and no audience: nothing in the container mints.
     if (edge != null) {
       tokenEnv(token.get().token(), token.get().subject(), edge, container::env);
     } else {
@@ -834,7 +834,7 @@ public class WorkspaceContainerFactory {
    * The four addresses a container that reaches the platform through the edge is told, every one a
    * public name off {@code plane}, in the DIRECT spec's order: the daemon's dial-home socket ({@code
    * wss} on the workspaces vhost), the central MCP server and the git base it self-clones from.
-   * Shared by the RUNNER spec ({@link RunnerWorkspaceSpecs}) and a DIRECT row that holds a workspace
+   * Shared by the TARGET spec ({@link RunnerWorkspaceSpecs}) and a DIRECT row that holds a workspace
    * token (qits-1084), so the two cannot drift.
    */
   static void addressEnv(WorkspaceAddressPlane plane, long rowId, BiConsumer<String, String> env) {
@@ -849,7 +849,7 @@ public class WorkspaceContainerFactory {
    * one host it may answer for, the plane's githost ({@code QITS_GIT_AUTH_HOST}). Every consumer in
    * the container prefers {@code QITS_TOKEN} — the git helper, the CLI, the daemon's dial-home and
    * the MCP config — so nothing else is needed: no client pair, no token url, no audience. Shared by
-   * the RUNNER spec and a token-holding DIRECT row.
+   * the TARGET spec and a token-holding DIRECT row.
    */
   static void tokenEnv(
       String token, String subject, WorkspaceAddressPlane plane, BiConsumer<String, String> env) {

@@ -1,15 +1,16 @@
 package eu.wohlben.qits.workspaces.entity;
 
 /**
- * Where a workspace's container runs ({@code Workspace.placement}, {@code V12}). Decided when the
- * workspace is created and never changed afterwards.
+ * Where a workspace's container runs ({@code Workspace.placement}, {@code V12}, {@code V30}).
+ * Decided when the workspace is created and never changed afterwards.
  */
 public enum WorkspacePlacement {
-  /** On the platform host, through qits-containers. Every admin and editor workspace is DIRECT. */
+  /** On the platform host, through qits-containers. Every admin workspace is DIRECT. */
   DIRECT,
   /**
-   * On a workspace runner's node. The runner takes the row from the queue, and the row stays with
-   * that runner ({@code Workspace.runnerId}) while its volume lives there.
+   * In a WORKSPACE slot of an execution target (epic qits-1481): the row's container runs under a
+   * qits-system lease ({@code Workspace.leaseId}), and its work volume {@code ws-<rowId>} stays on
+   * the target that first held it.
    */
-  RUNNER
+  TARGET
 }

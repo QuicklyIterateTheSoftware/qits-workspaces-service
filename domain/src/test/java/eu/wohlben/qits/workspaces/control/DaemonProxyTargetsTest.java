@@ -75,7 +75,7 @@ class DaemonProxyTargetsTest {
   void aRunnerRowIsNotConnectedAndTheRuntimeIsNeverAsked() {
     assertEquals(
         DaemonProxyTargets.Reachability.NOT_CONNECTED,
-        targets(row(WorkspacePlacement.RUNNER, false)).resolve(7L));
+        targets(row(WorkspacePlacement.TARGET, false)).resolve(7L));
     assertTrue(runtimeCalls.isEmpty(), runtimeCalls.toString());
   }
 

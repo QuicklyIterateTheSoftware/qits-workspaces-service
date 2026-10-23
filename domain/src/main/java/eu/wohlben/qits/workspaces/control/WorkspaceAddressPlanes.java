@@ -11,7 +11,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * and the hosts this deployment spells its own registry by — the registry host of {@code
  * qits.workspace.image-repo}, and {@code
  * registry.<env>.localhost:8080}, the machine spelling the estate's committed files use. Read at
- * the moment of asking, so the RUNNER start's check and the claim's composition see one answer.
+ * the moment of asking, so the TARGET start's check and the claim's composition see one answer.
  *
  * <p><b>It reads the two image keys itself rather than through {@link WorkspaceContainerFactory}</b>,
  * and only for their registry host. {@link WorkspaceService} injects this bean, and the factory
@@ -39,7 +39,7 @@ public class WorkspaceAddressPlanes {
   Optional<String> imageRepo;
 
   /**
-   * The plane a RUNNER workspace is composed from, and a DIRECT admin row that holds a
+   * The plane a TARGET workspace is composed from, and a DIRECT admin row that holds a
    * workspace token is addressed through (qits-1084).
    *
    * @throws EdgePlaneUnconfigured when the domain is no public domain

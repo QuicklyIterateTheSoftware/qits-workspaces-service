@@ -37,7 +37,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * <p>The pacts come off the test classpath ({@link ClasspathPactLoader}): a consumer publishes
  * {@code pacts/<consumer>_qits-workspaces-service.json} in a jar, and this repository pins that jar
  * as a test dependency (today: qits-landing-app's, qits-projects', qits-artifacts',
- * qits-bootstrap's, qits-orchestrator's, qits-workspaces-runner-daemon's and the qits CLI's). Each
+ * qits-bootstrap's, qits-orchestrator's and the qits CLI's). Each
  * interaction runs against this {@code @QuarkusTest} over real HTTP as the {@code %test} dev user.
  *
  * <p>Every {@code @State} method delegates to {@link ProviderStates}. {@link #target} fails a state
@@ -55,7 +55,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * <p><b>It verifies the HTTP interactions and only those</b> (qits-950): {@link #HTTP_ONLY} keeps
  * every {@code Synchronous/HTTP} interaction (a V3 request/response one reads as that too) and
  * drops every other kind before an invocation is made of it. A consumer pact jar may carry message
- * interactions — qits-workspaces-runner-daemon's will, for the frames this service sends its
+ * interactions — qits-workspaces-runner-daemon's did, for the frames this service sent its
  * runners — and an {@link HttpTestTarget} cannot run one ({@code UnsupportedOperationException:
  * Only request/response interactions…}); those are a message verifier's. {@code
  * ConsumerPactVerificationFilterTest} holds both halves.
@@ -211,31 +211,6 @@ class ConsumerPactVerificationTest {
     return states.params(ProviderStates.A_CONFIGURED_WORKSPACE_IMAGE);
   }
 
-  @State(ProviderStates.NO_RUNNERS)
-  Map<String, String> noRunners() {
-    return states.params(ProviderStates.NO_RUNNERS);
-  }
-
-  @State(ProviderStates.AN_UNREGISTERED_RUNNER)
-  Map<String, String> anUnregisteredRunner() {
-    return states.params(ProviderStates.AN_UNREGISTERED_RUNNER);
-  }
-
-  @State(ProviderStates.A_REGISTERED_RUNNER)
-  Map<String, String> aRegisteredRunner() {
-    return states.params(ProviderStates.A_REGISTERED_RUNNER);
-  }
-
-  @State(ProviderStates.A_CONNECTED_RUNNER)
-  Map<String, String> aConnectedRunner() {
-    return states.params(ProviderStates.A_CONNECTED_RUNNER);
-  }
-
-  @State(ProviderStates.A_QUARANTINED_RUNNER)
-  Map<String, String> aQuarantinedRunner() {
-    return states.params(ProviderStates.A_QUARANTINED_RUNNER);
-  }
-
   @State(ProviderStates.A_PROJECT_WITH_WORKSPACE_SLOTS)
   Map<String, String> aProjectWithWorkspaceSlots() {
     return states.params(ProviderStates.A_PROJECT_WITH_WORKSPACE_SLOTS);
@@ -286,23 +261,18 @@ class ConsumerPactVerificationTest {
     return states.params(ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION);
   }
 
-  @State(ProviderStates.A_RUNNER_IN_SERVICE)
-  Map<String, String> aRunnerInService() {
-    return states.params(ProviderStates.A_RUNNER_IN_SERVICE);
+  @State(ProviderStates.A_SLOT_RUNNING_ON_A_TARGET)
+  Map<String, String> aSlotRunningOnATarget() {
+    return states.params(ProviderStates.A_SLOT_RUNNING_ON_A_TARGET);
   }
 
-  @State(ProviderStates.A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE)
-  Map<String, String> aSlotRunningOnARunnerInService() {
-    return states.params(ProviderStates.A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE);
+  @State(ProviderStates.A_STOPPED_SLOT)
+  Map<String, String> aStoppedSlot() {
+    return states.params(ProviderStates.A_STOPPED_SLOT);
   }
 
-  @State(ProviderStates.A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE)
-  Map<String, String> aStoppedSlotOnARunnerInService() {
-    return states.params(ProviderStates.A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE);
-  }
-
-  @State(ProviderStates.A_SLOT_ON_A_DISCONNECTED_RUNNER)
-  Map<String, String> aSlotOnADisconnectedRunner() {
-    return states.params(ProviderStates.A_SLOT_ON_A_DISCONNECTED_RUNNER);
+  @State(ProviderStates.A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT)
+  Map<String, String> aSlotQitsSystemCannotBeAskedAbout() {
+    return states.params(ProviderStates.A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT);
   }
 }

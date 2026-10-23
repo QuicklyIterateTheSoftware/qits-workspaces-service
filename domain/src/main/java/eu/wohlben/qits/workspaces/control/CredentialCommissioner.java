@@ -169,14 +169,14 @@ public interface CredentialCommissioner {
   /**
    * Mint the {@code qits_tok_} for the workspace row {@code rowId}, or empty when this deployment has
    * no issuer to ask. The {@link #commission} of a row that reaches the platform through the edge:
-   * every RUNNER row, and — whenever an edge plane resolves (qits-1084) — a DIRECT admin or editor
+   * every TARGET row, and — whenever an edge plane resolves (qits-1084) — a DIRECT admin or editor
    * row too. The same context, the same {@code project} claim (null is unscoped), the same Git refs
    * (null states nothing) and the same fail-closed answer to a refused list. The value is answered
    * once.
    *
    * <p><b>{@code admin} picks the kind</b> exactly as it does for {@link #commission(Long, String,
    * List, boolean)}: {@link #ADMIN_CONTEXT_KIND} for an admin row, {@link #CONTEXT_KIND} for every
-   * other. A RUNNER row is never admin, so a RUNNER mint always passes false.
+   * other. A TARGET row is never admin, so a TARGET mint always passes false.
    *
    * @throws RuntimeException when an issuer is configured and the call did not succeed
    */

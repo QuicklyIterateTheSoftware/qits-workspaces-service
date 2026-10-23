@@ -207,7 +207,7 @@ class DaemonStreamRouteRunnerTest {
               var row = workspaceRepository.findActiveById(id).orElseThrow();
               // A regular row: an admin one is never RUNNER (ck_workspace_runner_posture).
               row.admin = false;
-              row.placement = WorkspacePlacement.RUNNER;
+              row.placement = WorkspacePlacement.TARGET;
               row.commissionedTokenId = "tok-id-" + id;
               row.commissionedTokenSubject = subject;
               row.commissionedToken = "qits_tok_" + id;

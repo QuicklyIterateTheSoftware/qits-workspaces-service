@@ -50,7 +50,7 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
   @Inject RepositoryAddressResolver nameResolver;
 
   /**
-   * What a RUNNER row's daemon answers (qits-625): its container is on a runner's node, which no
+   * What a TARGET row's daemon answers (qits-625): its container is in a target's slot, which no
    * fake runtime here holds, so the double does not clone — it answers this, by row id. Reported at
    * once by default: a daemon that dialled home and found its clone done.
    */
@@ -59,8 +59,8 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
   private static final Function<Long, Optional<ProvisionResult>> DAEMON_REPORTS =
       id -> Optional.of(ProvisionResult.ok(""));
 
-  /** Answer every following RUNNER row with {@code answer}; empty is "no daemon dialled home". */
-  public void answerRunnerRows(Function<Long, Optional<ProvisionResult>> answer) {
+  /** Answer every following TARGET row with {@code answer}; empty is "no daemon dialled home". */
+  public void answerTargetRows(Function<Long, Optional<ProvisionResult>> answer) {
     runnerAnswer = answer;
   }
 
@@ -103,7 +103,7 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
     }
   }
 
-  /** Back to answering RUNNER rows at once, and to cloning DIRECT rows without a hold. */
+  /** Back to answering TARGET rows at once, and to cloning DIRECT rows without a hold. */
   public void reset() {
     runnerAnswer = DAEMON_REPORTS;
     holdDirect = false;
@@ -136,7 +136,7 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
                           .orElseThrow(
                               () ->
                                   new IllegalStateException("no such workspace " + workspaceId));
-                  if (ws.placement == WorkspacePlacement.RUNNER) {
+                  if (ws.placement == WorkspacePlacement.TARGET) {
                     return RUNNER;
                   }
                   if (ws.branch == null || ws.branch.isBlank()) {
@@ -307,6 +307,6 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
 
   private record Target(String repoId, String label, String branch, String url) {}
 
-  /** The marker a RUNNER row reads as: answered by {@link #runnerAnswer}, never cloned. */
+  /** The marker a TARGET row reads as: answered by {@link #runnerAnswer}, never cloned. */
   private static final Target RUNNER = new Target(null, null, null, null);
 }

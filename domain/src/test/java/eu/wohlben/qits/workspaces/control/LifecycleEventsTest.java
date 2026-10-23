@@ -42,7 +42,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The lifecycle events (qits-1236), as {@link AgentService}, {@link WorkspaceService} and {@link
- * RunnerClaims} announce them through {@link LifecycleAnnouncer}: which event each transition
+ * TargetLeaseStates} announce them through {@link LifecycleAnnouncer}: which event each transition
  * says, with which ids and reason words, and that a throttled or repeated transition says it once.
  * {@link RecordingLifecycleAnnouncer} records; {@link AgentServiceTest}'s harness drives. The
  * scheduler also runs background passes, so every assertion selects this test's own agent or
@@ -87,7 +87,7 @@ public class LifecycleEventsTest {
         .run(
             () ->
                 workspaces.findActiveByRepositoryId(repoId).stream()
-                    .filter(w -> w.placement == WorkspacePlacement.RUNNER)
+                    .filter(w -> w.placement == WorkspacePlacement.TARGET)
                     .forEach(w -> w.status = WorkspaceStatus.ABANDONED));
     commissioner.reset();
   }
@@ -457,7 +457,7 @@ public class LifecycleEventsTest {
                   runtime == WorkspaceRuntimeStatus.FAILED
                       ? "no workspace-daemon dialed home within 30000ms"
                       : null;
-              row.placement = admin ? WorkspacePlacement.DIRECT : WorkspacePlacement.RUNNER;
+              row.placement = admin ? WorkspacePlacement.DIRECT : WorkspacePlacement.TARGET;
               row.admin = admin;
               workspaces.persist(row);
               return row.id;

@@ -23,7 +23,7 @@ public class DomainException extends RuntimeException {
 
   /**
    * A refusal that names itself: {@code code} is a stable word a client branches on (e.g. {@code
-   * RUNNER_OWNS_WORKSPACES}), answered beside the message. Null for the refusals that have none.
+   * TARGET_UNAVAILABLE}), answered beside the message. Null for the refusals that have none.
    */
   public DomainException(int statusCode, String code, String message) {
     super(message);

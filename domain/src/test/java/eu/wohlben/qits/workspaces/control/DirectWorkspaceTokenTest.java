@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Test;
  * fallback is asserted only as the other side of a switch. A row holds one or the other, never both,
  * and every teardown that gives the pair back deletes the token too.
  *
- * <p>The plane is installed per test with {@link QuarkusMock}, as {@code WorkspaceRunnerPlacementTest}
+ * <p>The plane is installed per test with {@link QuarkusMock}, as {@code WorkspaceTargetPlacementTest}
  * installs it; a test that wants the fallback installs none.
  */
 @QuarkusTest

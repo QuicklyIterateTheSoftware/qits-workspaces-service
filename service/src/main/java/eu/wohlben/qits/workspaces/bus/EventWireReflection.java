@@ -16,6 +16,7 @@ import eu.wohlben.qits.workspaces.events.AgentYielded;
 import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
 import eu.wohlben.qits.workspaces.events.WorkspaceRemoved;
 import eu.wohlben.qits.workspaces.events.WorkspaceStarted;
+import eu.wohlben.qits.workspaces.targethost.TargetLeaseChanged;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 /**
@@ -32,7 +33,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
  * registration's completeness, and only the running binary proves it.
  *
  * <p><b>Why these types.</b> The fourteen records are what {@link EventstreamLifecycleAnnouncer}
- * publishes. {@link EventEnvelope} is the PUT body. {@link EventFrame} is what arrives on {@code
+ * publishes. {@link TargetLeaseChanged} is qits-system's, which {@code
+ * targethost/TargetLeaseEvents} receives bound to that record (epic qits-1481). {@link EventEnvelope} is the PUT body. {@link EventFrame} is what arrives on {@code
  * /events/stream} for {@link AgentWaitListener}, which reads the frame's fields and hands the
  * payload on as a string — so it binds nothing else, but the frame itself is bound.
  *
@@ -57,6 +59,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
       WorkspaceStarted.class,
       WorkspaceFailed.class,
       WorkspaceRemoved.class,
+      TargetLeaseChanged.class,
       EventEnvelope.class,
       EventFrame.class
     },

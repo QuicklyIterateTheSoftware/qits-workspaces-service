@@ -24,10 +24,9 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
  * service's own static client. Only a static {@code qits:system} client may commission a token
  * (qits-idp {@code IdpTokensController.commission}), and this service's is one.
  *
- * <p><b>Written for more than one kind.</b> It mints a workspace runner's registration token
- * ({@code IdpRunnerCommissioner}) and the per-workspace token of kind {@code workspace} a RUNNER row
- * holds (qits-625, {@code IdpCredentialCommissioner}), which is why the request carries {@code
- * claims} and {@code gitRefs} although the runner states neither.
+ * <p>It mints the per-lease token of kind {@code workspace} a TARGET row holds (qits-625, epic
+ * qits-1481, {@code IdpCredentialCommissioner}) and an agent's, and {@code
+ * targethost/LegacyRunnerClients} lists and deletes the retired runners' tokens through it.
  *
  * <p><b>The value is answered once.</b> qits-idp stores a hash; the listing never carries a value,
  * and a caller that loses one deletes the token and commissions again.
@@ -58,7 +57,7 @@ public interface IdpTokens {
   /**
    * What a caller asks for: the context the token is for, and optionally what that context is about
    * ({@code claims}) and may push ({@code gitRefs}). Absent members state nothing, which is what a
-   * runner's registration token asks for.
+   * the retired runners' registration tokens asked for.
    */
   record TokenRequest(
       String contextKind,

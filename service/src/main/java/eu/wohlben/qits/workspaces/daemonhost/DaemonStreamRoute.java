@@ -39,11 +39,11 @@ import org.jboss.logging.Logger;
  * and bound to the workspace it was sent to. An unknown or already-claimed nonce gets a bare 404
  * that says nothing about which of the two it was.
  *
- * <h2>A RUNNER row's dial-back also carries its token (qits-625, qits-812)</h2>
+ * <h2>A TARGET row's dial-back also carries its token (qits-625, qits-812)</h2>
  *
- * <p>A runner-placed daemon dials back through the edge, which refuses an anonymous upgrade, so it
+ * <p>A target-placed daemon dials back through the edge, which refuses an anonymous upgrade, so it
  * sends {@code Authorization: Bearer $QITS_TOKEN} and the edge forwards a JWT. For a nonce parked
- * for a RUNNER row ({@link WorkspaceTunnels.DialBack}) the nonce is then the second factor: the
+ * for a TARGET row ({@link WorkspaceTunnels.DialBack}) the nonce is then the second factor: the
  * request must carry a bearer this service's OIDC tenant validated, and its {@code sub} must be the
  * row's token subject. Anything else — no bearer, another subject, an identity that is not a
  * validated token — gets the same bare 404 an unknown nonce gets, and the parked socket is dropped.
@@ -104,7 +104,7 @@ public class DaemonStreamRoute {
 
   /**
    * Whether a dial-back presenting {@code identity} may take a stream parked under {@code dialBack}:
-   * always for a DIRECT row's (the nonce is the whole authentication), and for a RUNNER row's only
+   * always for a DIRECT row's (the nonce is the whole authentication), and for a TARGET row's only
    * when {@code identity} is a validated token whose {@code sub} is the row's bound subject.
    */
   static boolean admits(WorkspaceTunnels.DialBack dialBack, SecurityIdentity identity) {

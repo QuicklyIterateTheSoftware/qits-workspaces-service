@@ -91,7 +91,7 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
   @Inject @RestClient IdpClients clients;
 
   /**
-   * The token half (qits-625, qits-1084): the workspace token of a RUNNER row, and of a DIRECT admin
+   * The token half (qits-625, qits-1084): the workspace token of a TARGET row, and of a DIRECT admin
    * or editor row on an edge plane — minted, scoped, listed, deleted.
    */
   @Inject @RestClient IdpTokens tokens;
@@ -158,7 +158,7 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
 
   /**
    * The patient loop every commission this service makes runs through: the workspace credential
-   * above and a runner's client and registration token ({@link IdpRunnerCommissioner}). It asks
+   * and token above. It asks
    * {@code attempt} until it answers, holding through the failures that are about the moment ({@link
    * #holdThrough}) for {@code patience}, and throws naming {@code what} once the window is spent or
    * a failure is an answer about the request.
@@ -446,8 +446,8 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
   }
 
   /**
-   * {@link #authorization()} for any holder of the three keys, so {@link IdpRunnerCommissioner}
-   * answers "not wired" by exactly the same rule.
+   * {@link #authorization()} for any holder of the three keys, so every caller answers "not wired"
+   * by exactly the same rule.
    */
   static String authorization(
       boolean enabled, Optional<String> clientId, Optional<String> clientSecret) {

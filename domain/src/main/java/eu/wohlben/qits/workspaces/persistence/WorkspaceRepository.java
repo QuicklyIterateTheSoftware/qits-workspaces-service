@@ -8,7 +8,6 @@ import io.quarkus.hibernate.orm.panache.PanacheRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
@@ -143,14 +142,29 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
   }
 
   /**
-   * Every workspace token id an ACTIVE RUNNER row currently holds (qits-625) — {@link
-   * #liveCommissionedClientIds} for the token arm of the reconcile. A token no ACTIVE row names is
-   * an orphan, and so is one a recreate replaced.
+   * Every workspace token id an ACTIVE row currently holds for a container (qits-625, epic
+   * qits-1481) — {@link #liveCommissionedClientIds} for the token arm of the reconcile. A token no
+   * ACTIVE row names is an orphan, so is one a recreate replaced, and so is one a TARGET row holds
+   * with no live lease behind it.
    */
   public List<String> liveCommissionedTokenIds() {
     return list("status = ?1 and commissionedTokenId is not null", WorkspaceStatus.ACTIVE).stream()
+        .filter(WorkspaceRepository::holdsTokenForAContainer)
         .map(w -> w.commissionedTokenId)
         .toList();
+  }
+
+  /**
+   * Whether a row's token is still some container's (epic qits-1481): a DIRECT row's always, a
+   * TARGET row's while it has a live lease — and while it reads RUNNING with none, which is a row a
+   * retired runner still runs, its daemon dialling home on that token until its next start adopts
+   * it. A STOPPED or FAILED TARGET row with no lease holds a token nothing runs with.
+   */
+  private static boolean holdsTokenForAContainer(Workspace row) {
+    return row.placement != WorkspacePlacement.TARGET
+        || row.leaseId != null
+        || (row.runtimeStatus != WorkspaceRuntimeStatus.STOPPED
+            && row.runtimeStatus != WorkspaceRuntimeStatus.FAILED);
   }
 
   /**
@@ -162,22 +176,17 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
   }
 
   /**
-   * How many ACTIVE RUNNER rows hold a runner slot or wait for one: the slots in use against the
-   * runners' capacity (qits-1228). RUNNING and PROVISIONING hold one, as {@link
-   * #countLiveOnRunner} counts them; QUEUED waits for one, with or without a runner, so a slot
-   * queued earlier in the same pass is counted before the next is created. A STOPPED or FAILED row
-   * holds none whatever its {@code runnerId} says, and an old-model row left that way must not eat
-   * capacity for good.
+   * How many ACTIVE TARGET rows wait for a slot: their lease is QUEUED (epic qits-1481). The agent
+   * scheduler creates a new regular workspace only while this is zero, so a busy estate queues
+   * agents rather than leases; a slot asked for earlier in the same pass is counted before the next
+   * is created.
    */
-  public long countHoldingRunnerSlots() {
+  public long countWaitingForTarget() {
     return count(
-        "status = ?1 and placement = ?2 and runtimeStatus in ?3",
+        "status = ?1 and placement = ?2 and runtimeStatus = ?3",
         WorkspaceStatus.ACTIVE,
-        WorkspacePlacement.RUNNER,
-        List.of(
-            WorkspaceRuntimeStatus.QUEUED,
-            WorkspaceRuntimeStatus.PROVISIONING,
-            WorkspaceRuntimeStatus.RUNNING));
+        WorkspacePlacement.TARGET,
+        WorkspaceRuntimeStatus.QUEUED);
   }
 
   // --- Any-status (history / discovery) ----------------------------------------------------------
@@ -256,155 +265,46 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
     return ids == null ? List.of() : ids.stream().filter(Objects::nonNull).distinct().toList();
   }
 
-  // --- runner placement (V12) ---------------------------------------------------------------------
-  // Each over ACTIVE rows, which is what ix_workspace_runner covers.
+  // --- target placement (V30, epic qits-1481) ---------------------------------------------------
 
-  /**
-   * How many of this runner's ACTIVE workspaces hold a slot right now: RUNNING, or PROVISIONING (a
-   * take the runner has not answered yet). The server's count of a runner's used slots, which wins
-   * over the runner's own.
-   */
-  public long countLiveOnRunner(UUID runnerId) {
-    return count(
-        "runnerId = ?1 and status = ?2 and runtimeStatus in ?3",
-        runnerId,
-        WorkspaceStatus.ACTIVE,
-        List.of(WorkspaceRuntimeStatus.RUNNING, WorkspaceRuntimeStatus.PROVISIONING));
+  /** The row running under {@code leaseId}, whatever its status, or null. */
+  public Workspace findByLeaseId(UUID leaseId) {
+    return leaseId == null ? null : find("leaseId", leaseId).firstResult();
   }
 
-  /** How many ACTIVE workspaces this runner owns, whatever their containers are doing. */
-  public long countActiveOnRunner(UUID runnerId) {
-    return count("runnerId = ?1 and status = ?2", runnerId, WorkspaceStatus.ACTIVE);
+  /** {@link #findByLeaseId}, locked for an update that has to see the row as it is. */
+  public Workspace lockByLeaseId(UUID leaseId) {
+    return leaseId == null
+        ? null
+        : find("leaseId", leaseId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
   }
 
-  /** The ACTIVE rows {@code runnerId} owns, by id. */
-  public List<Workspace> findActiveOnRunner(UUID runnerId) {
-    return list("runnerId = ?1 and status = ?2 order by id", runnerId, WorkspaceStatus.ACTIVE);
+  /** Every row that names a lease, whatever its status: what the lease reconcile compares. */
+  public List<Workspace> findWithLease() {
+    return list("leaseId is not null order by id");
   }
 
   /**
-   * The QUEUED rows sticky to {@code runnerId}: placed on it before, and waiting for one of its
-   * slots. Never-placed rows any runner may take are not counted; they are no runner's yet.
+   * A start's write, once qits-system answered the lease (epic qits-1481): the row records the lease
+   * and its target and waits QUEUED, stamped {@code queuedAt}, the lease's {@code detail} as its
+   * runtime error. A compare-and-swap on a STOPPED or FAILED TARGET row that names no lease and
+   * holds a token, so a stop or a second start in between changes nothing: answers 0 or 1.
    */
-  public long countQueuedOnRunner(UUID runnerId) {
-    return count(
-        "runnerId = ?1 and status = ?2 and runtimeStatus = ?3",
-        runnerId,
-        WorkspaceStatus.ACTIVE,
-        WorkspaceRuntimeStatus.QUEUED);
-  }
-
-  /** The row ids of the ACTIVE workspaces this runner owns, oldest first. */
-  public List<Long> findActiveIdsOnRunner(UUID runnerId) {
-    return list("runnerId = ?1 and status = ?2 order by id", runnerId, WorkspaceStatus.ACTIVE)
-        .stream()
-        .map(w -> w.id)
-        .toList();
-  }
-
-  /**
-   * Start for a RUNNER row: STOPPED or FAILED becomes QUEUED, stamped {@code queuedAt}, keeping its
-   * runner. A compare-and-swap, so two starts and a start racing anything else change the row once:
-   * answers how many rows changed, 0 or 1.
-   *
-   * <p><b>Only a row that holds its workspace token is queued</b> (qits-625): a RUNNER container's
-   * every hop is the token, so a row without one must never become claimable. The start mints it
-   * first; this clause is the rule as the swap keeps it.
-   */
-  public int queueForRunner(Long id, Instant queuedAt) {
+  public int recordLease(
+      Long id, UUID leaseId, UUID targetId, String detail, String adoptedVolume, Instant queuedAt) {
     return update(
-        "runtimeStatus = ?1, queuedAt = ?2, runtimeError = null where id = ?3 and status = ?4"
-            + " and placement = ?5 and runtimeStatus in ?6 and commissionedTokenId is not null",
+        "leaseId = ?1, targetId = ?2, runtimeStatus = ?3, runtimeError = ?4, adoptedVolume = ?5,"
+            + " queuedAt = ?6 where id = ?7 and status = ?8 and placement = ?9 and runtimeStatus in"
+            + " ?10 and leaseId is null and commissionedTokenId is not null",
+        leaseId,
+        targetId,
         WorkspaceRuntimeStatus.QUEUED,
+        detail,
+        adoptedVolume,
         queuedAt,
         id,
         WorkspaceStatus.ACTIVE,
-        WorkspacePlacement.RUNNER,
+        WorkspacePlacement.TARGET,
         List.of(WorkspaceRuntimeStatus.STOPPED, WorkspaceRuntimeStatus.FAILED));
-  }
-
-  /**
-   * Stop for a QUEUED RUNNER row: back to STOPPED with no frame, because nothing runs anywhere yet.
-   * A compare-and-swap against a runner's claim: 0 when a runner took the row first.
-   */
-  public int unqueueForRunner(Long id) {
-    return update(
-        "runtimeStatus = ?1, queuedAt = null where id = ?2 and status = ?3 and placement = ?4"
-            + " and runtimeStatus = ?5",
-        WorkspaceRuntimeStatus.STOPPED,
-        id,
-        WorkspaceStatus.ACTIVE,
-        WorkspacePlacement.RUNNER,
-        WorkspaceRuntimeStatus.QUEUED);
-  }
-
-  /**
-   * <b>Reserve is the claim</b> (qits-849): a QUEUED RUNNER row that is unplaced or already this
-   * runner's becomes PROVISIONING on it. The WHERE clause is the whole race: of two runners updating
-   * one never-placed row, the second re-reads it PROVISIONING after the first commits and changes
-   * nothing. Answers the changed-row count, 0 or 1. A row holding no workspace token is never
-   * claimed (qits-625), whatever wrote it QUEUED.
-   */
-  public int claimForRunner(Long id, UUID runnerId) {
-    return update(
-        "runnerId = ?1, runtimeStatus = ?2, runtimeError = null where id = ?3 and status = ?4"
-            + " and placement = ?5 and runtimeStatus = ?6 and (runnerId is null or runnerId = ?1)"
-            + " and commissionedTokenId is not null",
-        runnerId,
-        WorkspaceRuntimeStatus.PROVISIONING,
-        id,
-        WorkspaceStatus.ACTIVE,
-        WorkspacePlacement.RUNNER,
-        WorkspaceRuntimeStatus.QUEUED);
-  }
-
-  /**
-   * The QUEUED rows a runner's reserve may take, in the order it takes them: its own sticky rows
-   * first, then never-placed ones, each oldest {@code queuedAt} first.
-   */
-  public List<Long> queuedCandidatesFor(UUID runnerId) {
-    List<Long> candidates = new ArrayList<>();
-    candidates.addAll(
-        getEntityManager()
-            .createQuery(
-                "select w.id from Workspace w where w.status = :active and w.placement = :runner"
-                    + " and w.runtimeStatus = :queued and w.runnerId = :r"
-                    + " order by w.queuedAt, w.id",
-                Long.class)
-            .setParameter("active", WorkspaceStatus.ACTIVE)
-            .setParameter("runner", WorkspacePlacement.RUNNER)
-            .setParameter("queued", WorkspaceRuntimeStatus.QUEUED)
-            .setParameter("r", runnerId)
-            .getResultList());
-    candidates.addAll(
-        getEntityManager()
-            .createQuery(
-                "select w.id from Workspace w where w.status = :active and w.placement = :runner"
-                    + " and w.runtimeStatus = :queued and w.runnerId is null"
-                    + " order by w.queuedAt, w.id",
-                Long.class)
-            .setParameter("active", WorkspaceStatus.ACTIVE)
-            .setParameter("runner", WorkspacePlacement.RUNNER)
-            .setParameter("queued", WorkspaceRuntimeStatus.QUEUED)
-            .getResultList());
-    return candidates;
-  }
-
-  /** A runner's backlog: the QUEUED RUNNER rows it may take, its own and the unplaced ones. */
-  public long countBacklogFor(UUID runnerId) {
-    return count(
-        "placement = ?1 and runtimeStatus = ?2 and status = ?3 and (runnerId is null or runnerId"
-            + " = ?4)",
-        WorkspacePlacement.RUNNER,
-        WorkspaceRuntimeStatus.QUEUED,
-        WorkspaceStatus.ACTIVE,
-        runnerId);
-  }
-
-  /** This runner's ACTIVE rows, locked for an update that has to see them as they are. */
-  public List<Workspace> lockActiveOnRunner(UUID runnerId) {
-    return find("runnerId = ?1 and status = ?2 order by id", runnerId, WorkspaceStatus.ACTIVE)
-        .withLock(LockModeType.PESSIMISTIC_WRITE)
-        .list();
   }
 }

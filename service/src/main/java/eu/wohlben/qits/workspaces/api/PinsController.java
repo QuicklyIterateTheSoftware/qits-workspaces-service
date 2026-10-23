@@ -1,7 +1,6 @@
 package eu.wohlben.qits.workspaces.api;
 
 import eu.wohlben.qits.workspaces.control.WorkspaceContainerFactory;
-import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerPins;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
@@ -47,10 +46,9 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * is asking the same question. Nothing is registered for reflection — the method returns its record
  * type rather than a bare {@link jakarta.ws.rs.core.Response}, so the native build indexes it.
  *
- * <p><b>The workspace runner's image is a pin too</b> (epic qits-624), {@code launches: runner}: this
- * process does not start it, but every install script it renders and every {@code upgrade} it
- * sends names it, and a node pulls it cold the next time either is acted on — the same reason the
- * launch pins need keeping. It is {@link WorkspaceRunnerPins#version}, the protocol jar's version.
+ * <p>The workspace runner's image was a pin here too ({@code launches: runner}, epic qits-624) until
+ * the runner was retired (epic qits-1481): a workspace runs in a target's slot now, and the target's
+ * runner is qits-system's to pin.
  */
 @Path("/pins")
 @Produces(MediaType.APPLICATION_JSON)
@@ -59,14 +57,12 @@ public class PinsController {
 
   @Inject WorkspaceContainerFactory containerFactory;
 
-  @Inject WorkspaceRunnerPins runnerPins;
-
   /**
    * One image a launch would pull.
    *
    * @param image the registry-relative repository, host segment stripped
    * @param version the calver tag this process resolved at boot
-   * @param launches what starting it would be — {@code workspace} or {@code runner}
+   * @param launches what starting it would be — {@code workspace}
    */
   public record LaunchPin(String image, String version, String launches) {}
 
@@ -83,10 +79,7 @@ public class PinsController {
   public LaunchPins pins() {
     return new LaunchPins(
         Instant.now(),
-        pins(
-            containerFactory.imageRepo(),
-            containerFactory.imageVersion(),
-            runnerPins.version()));
+        pins(containerFactory.imageRepo(), containerFactory.imageVersion()));
   }
 
   /**
@@ -95,14 +88,7 @@ public class PinsController {
    * worth proving without a config profile per case.
    */
   static List<LaunchPin> pins(String imageRepo, String imageVersion) {
-    return pins(imageRepo, imageVersion, null);
-  }
-
-  /** {@link #pins(String, String)} with the workspace runner's image beside it. */
-  static List<LaunchPin> pins(String imageRepo, String imageVersion, String runnerVersion) {
-    return Stream.of(
-            pin(imageRepo, imageVersion, "workspace"),
-            pin(WorkspaceRunnerPins.IMAGE_REPOSITORY, runnerVersion, "runner"))
+    return Stream.of(pin(imageRepo, imageVersion, "workspace"))
         .flatMap(Optional::stream)
         .sorted(Comparator.comparing(LaunchPin::image).thenComparing(LaunchPin::launches))
         .toList();

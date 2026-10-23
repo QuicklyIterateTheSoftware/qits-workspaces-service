@@ -2,14 +2,11 @@ package eu.wohlben.qits.workspaces.api;
 
 import eu.wohlben.qits.workspaces.error.DomainException;
 import eu.wohlben.qits.workspaces.error.IntegrateConflictException;
-import eu.wohlben.qits.workspaces.error.RunnerOwnsWorkspacesException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -32,8 +29,7 @@ import java.util.Map;
  * discriminator the prose was already trying to encode.
  *
  * <p>A refusal that names itself ({@link DomainException#code()}, qits-ci's {@code code} member)
- * adds {@code code} the same additive way, and {@link RunnerOwnsWorkspacesException} adds the
- * {@code workspaceIds} the runner still owns.
+ * adds {@code code} the same additive way.
  */
 @Provider
 public class WorkspacesExceptionMapper implements ExceptionMapper<DomainException> {
@@ -49,19 +45,6 @@ public class WorkspacesExceptionMapper implements ExceptionMapper<DomainExceptio
     body.put("message", message);
     if (exception.code() != null) {
       body.put("code", exception.code());
-    }
-    if (exception instanceof RunnerOwnsWorkspacesException owns) {
-      body.put("workspaceIds", owns.workspaceIds());
-      List<Map<String, Object>> workspaces = new ArrayList<>();
-      for (RunnerOwnsWorkspacesException.OwnedWorkspace owned : owns.workspaces()) {
-        // A map rather than the record, so a null branch is written as null like every other key.
-        Map<String, Object> entry = new LinkedHashMap<>();
-        entry.put("id", owned.id());
-        entry.put("repositoryId", owned.repositoryId());
-        entry.put("branch", owned.branch());
-        workspaces.add(entry);
-      }
-      body.put("workspaces", workspaces);
     }
     if (exception instanceof IntegrateConflictException conflict) {
       body.put("reason", conflict.reason().name());

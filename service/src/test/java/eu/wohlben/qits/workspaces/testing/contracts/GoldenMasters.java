@@ -109,12 +109,8 @@ public final class GoldenMasters {
   public static final Provider WORKSPACE_DAEMON =
       new Provider("qits-workspace-daemon", "qits-workspace-daemon");
 
-  /**
-   * qits-workspaces-runner-daemon: the frames a workspace runner sends this service on its socket
-   * (qits-950, A2) — a provider of messages, not of HTTP answers ({@link #messageInteraction}).
-   */
-  public static final Provider WORKSPACES_RUNNER =
-      new Provider("qits-workspaces-runner-daemon", "qits-workspaces-runner");
+  /** qits-system: the lease, work-volume and target doors (epic qits-1481). */
+  public static final Provider SYSTEM = new Provider("qits-system-service", "qits-system");
 
   /** The provider, as the pact names it: the repository name, never the bare application name. */
   public static final String PROVIDER = PROJECTS.repository();

@@ -32,7 +32,6 @@ import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspacePromptAttachmentRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspacePromptDraftRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
-import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -68,7 +67,7 @@ import org.jboss.logging.Logger;
  * <b>Agents, and the workspaces they run in</b> (qits-1152, decisions D2–D7, D10, D14–D18, D22,
  * D24 of the superproject's {@code agent-workspace-decoupling-plan.md}).
  *
- * <p>A workspace is a <em>slot</em>: one container on a runner, scoped to a project's wrapper. An
+ * <p>A workspace is a <em>slot</em>: one container on an execution target, scoped to a project's wrapper. An
  * agent is one work item's coding agent and its worktree inside a workspace. A workspace hosts many
  * agents. An agent waiting for input yields its slot when another agent wants it: its harness keeps
  * running, and the workspace takes one more agent. It is RUNNING again once it has something to
@@ -88,7 +87,7 @@ import org.jboss.logging.Logger;
  *   <li><b>Resume</b>: every YIELDED agent that has something to hear is RUNNING again at once,
  *       even beside another RUNNING agent — a resume goes before a new agent (D17).
  *   <li><b>Place</b>: each QUEUED agent goes to an empty workspace of its wrapper and posture, else
- *       to a new workspace while the runners have free slots (an admin agent: a new DIRECT admin
+ *       to a new workspace while no lease of this service waits for a slot (an admin agent: a new DIRECT admin
  *       workspace), else to a workspace whose agents have all yielded, else it stays QUEUED.
  *   <li><b>Repair stale idle</b> (qits-1511): a placed ACTIVE agent its daemon reads IDLE or
  *       WAITING, with no {@code waitingSince}, nothing pending, and no frame for {@code
@@ -217,8 +216,6 @@ public class AgentService {
   @Inject AgentBranchRepository agentBranches;
 
   @Inject WorkspaceRepository workspaceRepository;
-
-  @Inject WorkspaceRunnerRepository runnerRepository;
 
   @Inject WorkspaceService workspaces;
 
@@ -375,13 +372,13 @@ public class AgentService {
   /**
    * The agents taken out of a FAILED workspace (qits-1233), by id. The first time the agent is
    * placed again at once; every further time in a row waits {@link #REQUEUE_BACKOFF}, doubled up to
-   * {@link #REQUEUE_BACKOFF_MAX}, so a runner that keeps failing is not handed a new workspace every
+   * {@link #REQUEUE_BACKOFF_MAX}, so a target that keeps failing is not handed a new workspace every
    * pass. An accepted start ends the row. In memory: a restart places it again at once.
    */
   private final Map<UUID, Requeued> requeued = new ConcurrentHashMap<>();
 
   /**
-   * The queued agents whose wait for a runner slot was logged, so it is logged once and not every
+   * The queued agents whose wait for a workspace slot was logged, so it is logged once and not every
    * pass (qits-1228). An agent leaves it when it is placed or no longer queued, so a re-queue logs
    * again and the set never outgrows the queue.
    */
@@ -1127,7 +1124,7 @@ public class AgentService {
   }
 
   /**
-   * A workspace's start ended other than by a launch — among others a runner workspace whose daemon
+   * A workspace's start ended other than by a launch — among others a target workspace whose daemon
    * never dialed home is FAILED (qits-1233). A pass now, so {@link #drive} takes its agents out of
    * it on the next pass rather than on the next timer. After the firing transaction committed.
    */
@@ -1243,9 +1240,9 @@ public class AgentService {
           continue;
         }
         Long slot = QuarkusTransaction.requiringNew().call(() -> emptySlotFor(agent));
-        RunnerCapacity capacity = null;
+        TargetCapacity capacity = null;
         if (slot == null) {
-          capacity = agent.admin ? null : runnerCapacity();
+          capacity = agent.admin ? null : targetCapacity();
           if (capacity == null || capacity.free()) {
             try {
               slot = workspaces.createSlot(agent.repositoryId, agent.admin).id;
@@ -1261,10 +1258,10 @@ public class AgentService {
         if (slot == null) {
           if (capacity != null && !capacity.free() && waitingForCapacity.add(agent.id)) {
             LOG.infof(
-                "Agent %s stays queued for a runner slot: runner slots %d, in use or queued %d",
+                "Agent %s stays queued for a workspace slot: %d workspace(s) of this service wait"
+                    + " for one already",
                 agent.id,
-                capacity.slots(),
-                capacity.inUse());
+                capacity.waiting());
           }
           continue;
         }
@@ -1370,24 +1367,21 @@ public class AgentService {
   }
 
   /**
-   * The eligible runners' slots against the RUNNER workspaces in use or queued for one ({@link
-   * WorkspaceRepository#countHoldingRunnerSlots}), read together. A new regular workspace may be
-   * created while it is {@link RunnerCapacity#free}; an admin one needs none (DIRECT, on the
+   * Whether a new regular workspace may be asked for (epic qits-1481): while no TARGET row of this
+   * service waits QUEUED for a slot ({@link WorkspaceRepository#countWaitingForTarget}). qits-system
+   * decides which target has room; this service only keeps from piling leases up in its queue, as it
+   * kept from creating rows no runner could take. An admin workspace needs none (DIRECT, on the
    * platform host).
    */
-  RunnerCapacity runnerCapacity() {
+  TargetCapacity targetCapacity() {
     return QuarkusTransaction.requiringNew()
-        .call(
-            () ->
-                new RunnerCapacity(
-                    runnerRepository.eligibleSlots(),
-                    workspaceRepository.countHoldingRunnerSlots()));
+        .call(() -> new TargetCapacity(workspaceRepository.countWaitingForTarget()));
   }
 
-  /** The runner slots there are, and how many of them are in use or queued for. */
-  record RunnerCapacity(long slots, long inUse) {
+  /** How many of this service's workspaces wait for a slot. */
+  record TargetCapacity(long waiting) {
     boolean free() {
-      return slots > inUse;
+      return waiting == 0;
     }
   }
 

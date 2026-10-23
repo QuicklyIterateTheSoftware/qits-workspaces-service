@@ -26,7 +26,7 @@ public class WorkspaceChangePublisher {
   }
 
   /**
-   * A RUNNER-placed workspace's runtime status changed (QUEUED, taken, launched, stopped, ...) with
+   * A TARGET-placed workspace's runtime status changed (QUEUED, granted, running, stopped, ...) with
    * no container event this host would otherwise announce. Fired as {@code GIT_STATUS} on the
    * workspace's channel and its repository's, because that is the hint on which the SPA already
    * re-reads the workspace row and the branch tree.

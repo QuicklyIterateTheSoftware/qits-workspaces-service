@@ -222,6 +222,30 @@ public class CommissionReconcilerTest {
     }
   }
 
+  /**
+   * A TARGET row's token with no live lease behind it (epic qits-1481): a stopped row whose lease
+   * ended, which a crash left holding it. Nothing runs with it, so it is reaped.
+   */
+  @Test
+  public void aStoppedTargetRowsTokenWithNoLeaseIsReaped() {
+    Long row = runnerRowHolding("tok-no-lease");
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Workspace w = workspaceRepository.findById(row);
+              w.leaseId = null;
+              w.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+            });
+    commissioner.plantToken(
+        "tok-no-lease",
+        CredentialCommissioner.CONTEXT_KIND,
+        row.toString(),
+        Instant.now().minus(Duration.ofHours(1)));
+
+    assertEquals(1, reconciler.reapWorkspaceTokens(Instant.now()));
+    assertEquals(List.of("tok-no-lease"), commissioner.tokensDeleted());
+  }
+
   /** An ACTIVE DIRECT admin row holding the workspace token {@code tokenId}, and no pair. */
   private Long directAdminRowHolding(String tokenId) {
     return QuarkusTransaction.requiringNew()
@@ -245,7 +269,7 @@ public class CommissionReconcilerTest {
             });
   }
 
-  /** An ACTIVE RUNNER row holding the workspace token {@code tokenId}, written directly. */
+  /** An ACTIVE TARGET row holding the workspace token {@code tokenId} of its live lease. */
   private Long runnerRowHolding(String tokenId) {
     return QuarkusTransaction.requiringNew()
         .call(
@@ -256,8 +280,9 @@ public class CommissionReconcilerTest {
               w.repositoryId = "repo-" + label;
               w.branch = label;
               w.status = WorkspaceStatus.ACTIVE;
-              w.placement = WorkspacePlacement.RUNNER;
-              w.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+              w.placement = WorkspacePlacement.TARGET;
+              w.runtimeStatus = WorkspaceRuntimeStatus.QUEUED;
+              w.leaseId = UUID.randomUUID();
               w.commissionedTokenId = tokenId;
               w.commissionedTokenSubject = "tok-workspace-" + label;
               w.commissionedToken = "qits_tok_" + label;

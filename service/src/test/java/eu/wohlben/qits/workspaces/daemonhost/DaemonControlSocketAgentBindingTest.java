@@ -138,7 +138,7 @@ class DaemonControlSocketAgentBindingTest {
             () -> {
               var row = workspaceRepository.findActiveById(rowId).orElseThrow();
               row.admin = false;
-              row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
+              row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
               row.commissionedTokenId = "tok-id-" + rowId;
               row.commissionedTokenSubject = subject;
               row.commissionedToken = "qits_tok_" + rowId;

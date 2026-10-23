@@ -12,8 +12,8 @@ import java.util.List;
  * too, but they live on a shared volume and are fetched per workspace on their own routes rather
  * than inlined — a session is megabytes of JSONL, and this record is what a page loads first.
  *
- * <p>{@code placement} is where the container ran. A RUNNER workspace's transcripts were written on
- * its runner's node, which this service cannot read, so a client says so instead of offering an
+ * <p>{@code placement} is where the container ran. A TARGET workspace's transcripts were written on
+ * its target, which this service cannot read, so a client says so instead of offering an
  * archive that will be empty (epic qits-624, accepted and deferred).
  */
 public record WorkspaceHistoryDetailDto(

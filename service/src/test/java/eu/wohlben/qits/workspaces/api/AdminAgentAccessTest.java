@@ -118,16 +118,6 @@ class AdminAgentAccessTest {
         .statusCode(admitted());
   }
 
-  /** WorkspaceRunnerController: ADMIN_AGENT_ROLE beside ADMIN_ROLE, on the admin-only doors too. */
-  @Test
-  void anAdminAgentGreenlightsARunnerAndAnAgentStillMayNot() {
-    String runner = "/workspaces/api/runners/" + UUID.randomUUID();
-    asAdminAgent().post(runner + "/greenlight").then().statusCode(admitted());
-    asAdminAgent().post(runner + "/login-check").then().statusCode(admitted());
-    asAgent().post(runner + "/greenlight").then().statusCode(403);
-    asAgent().post(runner + "/login-check").then().statusCode(403);
-  }
-
   @Test
   void anAdminAgentDispatchesAndAnAgentStillMayNot() {
     Map<String, Object> body =

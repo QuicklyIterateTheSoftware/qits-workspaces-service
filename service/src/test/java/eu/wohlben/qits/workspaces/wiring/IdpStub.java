@@ -107,18 +107,6 @@ public final class IdpStub implements AutoCloseable {
     return commissioner;
   }
 
-  /** {@link IdpRunnerCommissioner} wired against this stub, its patience a second. */
-  public IdpRunnerCommissioner runnerCommissioner() {
-    IdpRunnerCommissioner commissioner = new IdpRunnerCommissioner();
-    commissioner.enabled = true;
-    commissioner.clientId = Optional.of("dev-qits-workspaces");
-    commissioner.clientSecret = Optional.of("service-secret");
-    commissioner.patience = Duration.ofSeconds(1);
-    commissioner.clients = client(IdpClients.class);
-    commissioner.tokens = client(IdpTokens.class);
-    return commissioner;
-  }
-
   @Override
   public void close() {
     server.stop(0);

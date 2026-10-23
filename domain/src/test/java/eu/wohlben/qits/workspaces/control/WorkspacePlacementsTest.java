@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The pure placement rule (qits-837, qits-774), proved with no database and no socket: admin is
- * always DIRECT, and a regular workspace is always RUNNER — there is no runner-eligibility
+ * always DIRECT, and a regular workspace is always TARGET — there is no slot-availability
  * arm and no stated-placement arm left to consult.
  */
 class WorkspacePlacementsTest {
@@ -21,8 +21,8 @@ class WorkspacePlacementsTest {
   }
 
   @Test
-  void aRegularWorkspaceIsAlwaysRunner() {
-    assertEquals(WorkspacePlacement.RUNNER, WorkspacePlacements.forNewRow(false));
+  void aRegularWorkspaceIsAlwaysTarget() {
+    assertEquals(WorkspacePlacement.TARGET, WorkspacePlacements.forNewRow(false));
   }
 
   // --- the router's refusal (qits-780) -----------------------------------------------------------

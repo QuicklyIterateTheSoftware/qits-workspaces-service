@@ -76,6 +76,28 @@ public class AgentDispatchControllerTest {
 
   @Inject AgentWorktreeRepository agentRows;
 
+  @Inject eu.wohlben.qits.workspaces.persistence.WorkspaceRepository workspaceRows;
+
+  /**
+   * A TARGET row of {@code repoId}, QUEUED: a lease of this service waits already, so a dispatch
+   * queues its agent rather than asking for another workspace (AgentService.targetCapacity).
+   */
+  private void aLeaseWaits(String repoId) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              eu.wohlben.qits.workspaces.entity.Workspace row =
+                  new eu.wohlben.qits.workspaces.entity.Workspace();
+              row.repositoryId = repoId;
+              row.workspaceId = "waiting";
+              row.branch = "waiting";
+              row.status = eu.wohlben.qits.workspaces.entity.WorkspaceStatus.ACTIVE;
+              row.runtimeStatus = eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus.QUEUED;
+              row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
+              workspaceRows.persist(row);
+            });
+  }
+
   private static final String API = "/workspaces/api/agent-dispatches";
 
   private String repository() {
@@ -99,8 +121,9 @@ public class AgentDispatchControllerTest {
   }
 
   @Test
-  void aDispatchWithNoRunnerQueuesTheAgentAndARepressAnswersIt() {
+  void aDispatchWhileALeaseWaitsQueuesTheAgentAndARepressAnswersIt() {
     String repoId = repository();
+    aLeaseWaits(repoId);
     String workId = "w-" + UUID.randomUUID();
 
     String agentId =

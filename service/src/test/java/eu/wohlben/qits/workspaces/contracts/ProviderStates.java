@@ -1,27 +1,12 @@
 package eu.wohlben.qits.workspaces.contracts;
 
 import eu.wohlben.qits.agents.ClaudeCodeAgent;
-import eu.wohlben.qits.runner.protocol.Hello;
-import eu.wohlben.qits.runner.protocol.RunnerCapabilities;
-import eu.wohlben.qits.runner.protocol.health.CheckResult;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
+import eu.wohlben.qits.workspaces.control.FakeTargetPlacement;
+import eu.wohlben.qits.workspaces.control.TargetPlacement;
+import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlane;
 import eu.wohlben.qits.workspaces.control.WorkspacePromptDraftService;
 import eu.wohlben.qits.workspaces.daemonhost.StubDaemonTunnels;
-import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerHealth;
-import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerMessageCodec;
-import eu.wohlben.qits.workspacesrunner.protocol.Delete;
-import eu.wohlben.qits.workspacesrunner.protocol.Deleted;
-import eu.wohlben.qits.workspacesrunner.protocol.HealthCheck;
-import eu.wohlben.qits.workspacesrunner.protocol.HealthChecked;
-import eu.wohlben.qits.workspacesrunner.protocol.Inventory;
-import eu.wohlben.qits.workspacesrunner.protocol.LoginPresence;
-import eu.wohlben.qits.workspacesrunner.protocol.LoginState;
-import eu.wohlben.qits.workspacesrunner.protocol.ProbeLogin;
-import eu.wohlben.qits.workspacesrunner.protocol.Stop;
-import eu.wohlben.qits.workspacesrunner.protocol.Stopped;
-import eu.wohlben.qits.workspacesrunner.protocol.WorkspacesRunnerBinary;
-import eu.wohlben.qits.workspacesrunner.protocol.WorkspacesRunnerProtocol;
-import io.smallrye.mutiny.Uni;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServer;
 import java.nio.charset.StandardCharsets;
@@ -32,7 +17,6 @@ import eu.wohlben.qits.workspaces.control.TechnicalProcessRegistry;
 import eu.wohlben.qits.workspaces.control.TestGit;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes;
-import eu.wohlben.qits.workspaces.control.WorkspaceRunners;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.entity.AgentRunState;
 import eu.wohlben.qits.workspaces.entity.AgentState;
@@ -43,21 +27,14 @@ import eu.wohlben.qits.workspaces.persistence.AgentWaitRepository;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
-import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
-import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerAddresses;
-import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerAddressesFixture;
-import eu.wohlben.qits.workspaces.runnerhost.WorkspaceRunnerRegistry;
-import eu.wohlben.qits.workspaces.wiring.IdpRunnerCommissioner;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusMock;
-import io.quarkus.websockets.next.WebSocketConnection;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.io.File;
-import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -92,8 +69,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  *
  * <p>The states the round-2 consumers asked for (qits-1149) add three repositories with a real git
  * origin — {@code …0014} (a dispatch), {@code …0015} (a released branch) and {@code …0016} (a branch
- * sweep), each built fresh once per JVM — and one workspace runner, {@code …0020}, named {@code
- * localhost} as the cold bootstrap names its own.
+ * sweep), each built fresh once per JVM. A slot that runs does so under a lease, {@code …0023}, on
+ * an execution target, {@code …0020} (epic qits-1481): {@link FakeTargetPlacement} stands for
+ * qits-system.
  *
  * <p>Other tests share this database, so every state first removes the rows bound to its ids, and
  * {@link #cleanUp} removes them again.
@@ -122,12 +100,6 @@ public class ProviderStates {
   public static final String REPOSITORIES_WITH_MERGED_BRANCHES =
       "repositories with merged branches";
   public static final String A_CONFIGURED_WORKSPACE_IMAGE = "a configured workspace image";
-  public static final String NO_RUNNERS = "no runners";
-  public static final String AN_UNREGISTERED_RUNNER = "an unregistered runner";
-  // The runner toolkit's register door (qits-1163), as qits-runner-toolkit-contracts names it.
-  public static final String A_REGISTERED_RUNNER = "a registered runner";
-  public static final String A_CONNECTED_RUNNER = "a connected runner";
-  public static final String A_QUARANTINED_RUNNER = "a quarantined runner";
 
   // The landing app's workspace pages (epic qits-1230): a project's slots and their agents, one
   // slot, and one item's agent while its slot's container comes up.
@@ -138,8 +110,7 @@ public class ProviderStates {
       "an agent whose workspace is starting";
 
   // The rest of the landing app's workspace UI (epic qits-1230): the agent page's chat and its
-  // actions (qits-1241, qits-1243), a resolved slot's record, the slot's container buttons, and the
-  // runners page (qits-1244).
+  // actions (qits-1241, qits-1243), a resolved slot's record and the slot's container buttons.
   public static final String AN_AGENT_WITH_A_SAVED_PROMPT_DRAFT =
       "an agent with a saved prompt draft";
   public static final String AN_AGENT_WITH_NO_PROMPT_DRAFT = "an agent with no prompt draft";
@@ -150,31 +121,11 @@ public class ProviderStates {
   public static final String AN_AGENT_WITH_LEFTOVER_WORK = "an agent with leftover work";
   public static final String A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION =
       "a resolved workspace slot with an archived agent session";
-  public static final String A_RUNNER_IN_SERVICE = "a runner in service";
-  public static final String A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE =
-      "a workspace slot running on a runner in service";
-  public static final String A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE =
-      "a stopped workspace slot on a runner in service";
-  public static final String A_SLOT_ON_A_DISCONNECTED_RUNNER =
-      "a workspace slot on a disconnected runner";
-
-  // The states the frames this service sends a workspace runner are recorded in (qits-950, A1):
-  // each leaves localhost on a recording socket (runnerFramesSent), and RunnerFrames sends the
-  // frame from it by the real code path. A runner "dialling in" holds a socket and has not said
-  // hello yet.
-  public static final String A_RUNNER_DIALLING_IN_HOLDING_ITS_WORKSPACE =
-      "a greenlit runner dialling in holding a workspace it owns";
-  public static final String A_RUNNER_DIALLING_IN_WITH_A_QUEUED_WORKSPACE =
-      "a greenlit runner dialling in with a workspace queued for it";
-  public static final String A_RUNNER_DIALLING_IN_AT_AN_OLDER_VERSION =
-      "a greenlit runner dialling in at an older version";
-  public static final String A_QUARANTINED_RUNNER_DIALLING_IN = "a quarantined runner dialling in";
-  public static final String A_QUARANTINED_RUNNER_HOLDING_A_SOCKET =
-      "a quarantined runner holding a socket";
-  public static final String A_RUNNER_IN_SERVICE_WITH_A_QUEUED_WORKSPACE =
-      "a runner in service with a free slot and a queued workspace";
-  public static final String A_RUNNER_IN_SERVICE_WITH_EVERY_SLOT_TAKEN =
-      "a runner in service with every slot taken";
+  // The slot's container buttons on a lease (epic qits-1481).
+  public static final String A_SLOT_RUNNING_ON_A_TARGET = "a workspace slot running on a target";
+  public static final String A_STOPPED_SLOT = "a stopped workspace slot";
+  public static final String A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT =
+      "a workspace slot qits-system cannot be asked about";
 
   static final String PROJECT_ID = "00000000-0000-4000-8000-00000000000f";
   static final String BUG_TICKET_ID = "00000000-0000-4000-8000-000000000001";
@@ -186,28 +137,17 @@ public class ProviderStates {
   static final String DISPATCH_REPOSITORY_ID = "00000000-0000-4000-8000-000000000014";
   static final String RELEASED_REPOSITORY_ID = "00000000-0000-4000-8000-000000000015";
   static final String SWEPT_REPOSITORY_ID = "00000000-0000-4000-8000-000000000016";
-  static final String RUNNER_ID = "00000000-0000-4000-8000-000000000020";
-  static final String RUNNER_NAME = "localhost";
-
-  /** The registration token the fake qits-idp hands out, and its id and subject. */
-  static final String REGISTRATION_TOKEN = "qits_tok_contract-registration";
-
-  static final String REGISTRATION_TOKEN_ID = "00000000-0000-4000-8000-000000000021";
-  static final String REGISTRATION_SUBJECT = "contract-runner-registration";
 
   /**
-   * The registration token as a runner presents it, the register door's {@code authorization}
-   * param: {@link ContractBearers} turns it into the edge's JWT for {@link #REGISTRATION_SUBJECT}.
+   * The repository of the one TARGET row a waiting lease stands for: while it waits, a dispatch
+   * queues its agent rather than asking for another workspace (AgentService.targetCapacity).
    */
-  static final String REGISTRATION_BEARER = "Bearer " + REGISTRATION_TOKEN;
+  static final String WAITING_REPOSITORY_ID = "00000000-0000-4000-8000-000000000017";
+  /** The execution target a running slot's lease is granted on. */
+  static final String TARGET_ID = "00000000-0000-4000-8000-000000000020";
 
-  /** The register door's role, as the edge's JWT for a registration token carries it. */
-  static final String REGISTRATION_ROLE = "qits:workspaces-runner-registration";
-
-  /** The client the fake qits-idp commissions for a registering runner. */
-  static final String RUNNER_CLIENT_ID = "contract-runner-client";
-
-  static final String RUNNER_CLIENT_SECRET = "contract-runner-secret";
+  /** The lease a running slot's container runs under. */
+  static final String LEASE_ID = "00000000-0000-4000-8000-000000000023";
 
   /** The bug ticket's branch, and the branch every ticket-bound state here stands on. */
   static final String TICKET_BRANCH = "ticket/invoice-totals-are-off-by-one-cent";
@@ -246,12 +186,9 @@ public class ProviderStates {
   @Inject AgentWaitRepository agentWaits;
   @Inject WorkspaceService workspaceService;
   @Inject FakeRepositoryLookup repositories;
-  @Inject WorkspaceRunners runners;
-  @Inject WorkspaceRunnerRegistry runnerRegistry;
+  @Inject FakeTargetPlacement targets;
   @Inject TechnicalProcessRegistry technicalProcesses;
   @Inject WorkspacePromptDraftService promptDrafts;
-  @Inject WorkspaceRunnerHealth runnerHealth;
-  @Inject WorkspaceRunnerMessageCodec runnerCodec;
   @Inject Vertx vertx;
   @Inject ContractBearers bearers;
 
@@ -263,12 +200,6 @@ public class ProviderStates {
 
   @ConfigProperty(name = "qits.workspaces.data-dir")
   String dataDir;
-
-  /** The connection {@link #A_CONNECTED_RUNNER} admitted, closed again by {@link #cleanUp}. */
-  private volatile WorkspaceRunnerRegistry.Session runnerSession;
-
-  /** The scripted socket of the state's runner, when it holds one: what it was sent. */
-  private volatile ScriptedRunner scriptedRunner;
 
   /** The start {@link #AN_AGENT_WHOSE_WORKSPACE_IS_STARTING} left open, ended by {@link #cleanUp}. */
   private volatile TechnicalProcess startingProcess;
@@ -287,11 +218,6 @@ public class ProviderStates {
         AN_AGENT_WAITING_ON_A_CI_RUN,
         REPOSITORIES_WITH_MERGED_BRANCHES,
         A_CONFIGURED_WORKSPACE_IMAGE,
-        NO_RUNNERS,
-        AN_UNREGISTERED_RUNNER,
-        A_REGISTERED_RUNNER,
-        A_CONNECTED_RUNNER,
-        A_QUARANTINED_RUNNER,
         A_PROJECT_WITH_WORKSPACE_SLOTS,
         A_WORKSPACE_SLOT_HOSTING_AGENTS,
         AN_AGENT_WHOSE_WORKSPACE_IS_STARTING,
@@ -302,17 +228,9 @@ public class ProviderStates {
         AN_AGENT_WHOSE_DAEMON_IS_NOT_CONNECTED,
         AN_AGENT_WITH_LEFTOVER_WORK,
         A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION,
-        A_RUNNER_IN_SERVICE,
-        A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE,
-        A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE,
-        A_SLOT_ON_A_DISCONNECTED_RUNNER,
-        A_RUNNER_DIALLING_IN_HOLDING_ITS_WORKSPACE,
-        A_RUNNER_DIALLING_IN_WITH_A_QUEUED_WORKSPACE,
-        A_RUNNER_DIALLING_IN_AT_AN_OLDER_VERSION,
-        A_QUARANTINED_RUNNER_DIALLING_IN,
-        A_QUARANTINED_RUNNER_HOLDING_A_SOCKET,
-        A_RUNNER_IN_SERVICE_WITH_A_QUEUED_WORKSPACE,
-        A_RUNNER_IN_SERVICE_WITH_EVERY_SLOT_TAKEN);
+        A_SLOT_RUNNING_ON_A_TARGET,
+        A_STOPPED_SLOT,
+        A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT);
   }
 
   public Map<String, String> params(String state) {
@@ -334,11 +252,6 @@ public class ProviderStates {
       case AN_AGENT_WAITING_ON_A_CI_RUN -> agentDeclaringAWait("runId", CI_RUN_ID);
       case REPOSITORIES_WITH_MERGED_BRANCHES -> mergedBranches();
       case A_CONFIGURED_WORKSPACE_IMAGE -> new Setup(new TreeMap<>(), List.of());
-      case NO_RUNNERS -> noRunners();
-      case AN_UNREGISTERED_RUNNER -> unregisteredRunner();
-      case A_REGISTERED_RUNNER -> registeredRunner();
-      case A_CONNECTED_RUNNER -> connectedRunner();
-      case A_QUARANTINED_RUNNER -> quarantinedRunner();
       case A_PROJECT_WITH_WORKSPACE_SLOTS -> slotsHostingAgents(false);
       case A_WORKSPACE_SLOT_HOSTING_AGENTS -> slotsHostingAgents(true);
       case AN_AGENT_WHOSE_WORKSPACE_IS_STARTING -> agentWhoseWorkspaceIsStarting();
@@ -349,19 +262,9 @@ public class ProviderStates {
       case NO_AGENT_WITH_THAT_ID -> noSuchAgent();
       case AN_AGENT_WAITING_FOR_A_SLOT -> agentWaitingForASlot();
       case A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION -> resolvedSlotWithAnArchivedSession();
-      case A_RUNNER_IN_SERVICE -> runnerInService();
-      case A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE ->
-          slotOnARunnerInService(WorkspaceRuntimeStatus.RUNNING);
-      case A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE ->
-          slotOnARunnerInService(WorkspaceRuntimeStatus.STOPPED);
-      case A_SLOT_ON_A_DISCONNECTED_RUNNER -> slotOnADisconnectedRunner();
-      case A_RUNNER_DIALLING_IN_HOLDING_ITS_WORKSPACE -> runnerDiallingInHoldingItsWorkspace();
-      case A_RUNNER_DIALLING_IN_WITH_A_QUEUED_WORKSPACE -> runnerDiallingInWithAQueuedWorkspace();
-      case A_RUNNER_DIALLING_IN_AT_AN_OLDER_VERSION -> runnerDiallingIn(true);
-      case A_QUARANTINED_RUNNER_DIALLING_IN -> runnerDiallingIn(false);
-      case A_QUARANTINED_RUNNER_HOLDING_A_SOCKET -> quarantinedRunnerHoldingASocket();
-      case A_RUNNER_IN_SERVICE_WITH_A_QUEUED_WORKSPACE -> runnerInServiceWithAQueuedWorkspace();
-      case A_RUNNER_IN_SERVICE_WITH_EVERY_SLOT_TAKEN -> runnerInServiceWithEverySlotTaken();
+      case A_SLOT_RUNNING_ON_A_TARGET -> slotOnATarget(WorkspaceRuntimeStatus.RUNNING);
+      case A_STOPPED_SLOT -> slotOnATarget(WorkspaceRuntimeStatus.STOPPED);
+      case A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT -> slotQitsSystemCannotBeAskedAbout();
       default -> throw new IllegalArgumentException("No provider state named '" + state + "'");
     };
   }
@@ -384,9 +287,9 @@ public class ProviderStates {
               workspaces.delete("repositoryId = ?1", WRAPPER_REPOSITORY_ID);
               workspaces.delete("workId in ?1", List.copyOf(WORK_IDS));
               workspaces.delete("repositoryId in ?1", GIT_REPOSITORIES);
+              workspaces.delete("repositoryId = ?1", WAITING_REPOSITORY_ID);
             });
-    // After the rows: a runner that still holds an ACTIVE workspace refuses its delete.
-    removeRunners();
+    targets.reset();
   }
 
   /**
@@ -418,22 +321,6 @@ public class ProviderStates {
         workspaceService.discardWorkspace(id, null, true);
       } catch (RuntimeException e) {
         // The row is deleted below either way; a teardown that failed leaves only files under target/.
-      }
-    }
-  }
-
-  /** The runner this class writes, and any runner a recorded create named {@code localhost}. */
-  private void removeRunners() {
-    WorkspaceRunnerRegistry.Session session = runnerSession;
-    runnerSession = null;
-    scriptedRunner = null;
-    if (session != null) {
-      runnerRegistry.onClose(session);
-    }
-    for (WorkspaceRunner runner : runners.list()) {
-      if (runner.id.toString().equals(RUNNER_ID) || RUNNER_NAME.equals(runner.name)) {
-        runners.delete(runner.id);
-        runnerRegistry.deleted(runner.id);
       }
     }
   }
@@ -565,13 +452,26 @@ public class ProviderStates {
   static final String WRAPPER_BRANCH = "ticket/contract-00000001-10";
   static final String PUSHED_BRANCH = WRAPPER_BRANCH + "-totals";
 
-  /** A wrapper repository and a ticket nobody dispatched yet; no runner, so a dispatch queues. */
+  /**
+   * A wrapper repository and a ticket nobody dispatched yet. A lease of this service waits already
+   * (one TARGET row of another repository, QUEUED), so a dispatch queues its agent.
+   */
   private Setup ticketToDispatch() {
     // An agent's credential is minted only where it can be spent: through an edge plane.
-    QuarkusMock.installMockForType(
-        WorkspaceRunnerAddressesFixture.planesWithDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
-        WorkspaceAddressPlanes.class);
+    anEdgePlane();
     buildOrigins();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Workspace waiting = new Workspace();
+              waiting.repositoryId = WAITING_REPOSITORY_ID;
+              waiting.workspaceId = "contract-waiting";
+              waiting.branch = "contract-waiting";
+              waiting.status = WorkspaceStatus.ACTIVE;
+              waiting.runtimeStatus = WorkspaceRuntimeStatus.QUEUED;
+              waiting.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
+              workspaces.persist(waiting);
+            });
     Map<String, String> params = new TreeMap<>();
     params.put("repositoryId", DISPATCH_REPOSITORY_ID);
     params.put("ticketId", BUG_TICKET_ID);
@@ -603,7 +503,7 @@ public class ProviderStates {
     return new Setup(params, List.copyOf(ids));
   }
 
-  /** One ACTIVE agent on the bug ticket, holding a slot that waits for a runner. */
+  /** One ACTIVE agent on the bug ticket, holding a slot whose lease waits. */
   private Setup agentOnATicket() {
     List<Long> ids = new ArrayList<>();
     QuarkusTransaction.requiringNew()
@@ -683,7 +583,7 @@ public class ProviderStates {
   static final String AGENT_QUEUED_ID = "00000000-0000-4000-8000-0000000000a5";
 
   /**
-   * The wrapper's one slot, RUNNING on the connected runner {@code localhost}, hosting two ACTIVE
+   * The wrapper's one slot, RUNNING under its lease on the target, hosting two ACTIVE
    * agents: the bug ticket's, which holds the slot and waits on a release request (a declared wait,
    * so nobody is waiting on a person), and the epic's, which yielded it. The improvement ticket's
    * agent is QUEUED: no slot was free, so it names none.
@@ -693,13 +593,12 @@ public class ProviderStates {
    * every entry whose text holds that small number.
    */
   private Setup slotsHostingAgents(boolean withSlot) {
-    connectedRunner();
     repositories.register(WRAPPER_REPOSITORY_ID);
     List<Long> ids = new ArrayList<>();
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
-              Long slot = slot(WorkspaceRuntimeStatus.RUNNING, UUID.fromString(RUNNER_ID));
+              Long slot = slot(WorkspaceRuntimeStatus.RUNNING, true);
               ids.add(slot);
               agent(AGENT_EPIC_ID, slot, AgentState.ACTIVE, AgentRunState.YIELDED, EPIC);
               agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
@@ -713,7 +612,7 @@ public class ProviderStates {
             });
     Map<String, String> params = params();
     params.put("agentId", AGENT_ACTIVE_ID);
-    params.put("runnerId", RUNNER_ID);
+    params.put("targetId", TARGET_ID);
     if (withSlot) {
       params.put("workspaceId", String.valueOf(ids.get(0)));
     }
@@ -722,17 +621,16 @@ public class ProviderStates {
 
   /**
    * The bug ticket's agent, waiting on a release request, in the wrapper's slot while that slot's
-   * container comes up on {@code localhost}: the slot is PROVISIONING and its start is a live
-   * technical process, past its {@code queued} segment and in its {@code container} one.
+   * container comes up on its target: the slot is PROVISIONING under a granted lease and its start
+   * is a live technical process, past its {@code queued} segment and in its {@code container} one.
    */
   private Setup agentWhoseWorkspaceIsStarting() {
-    connectedRunner();
     repositories.register(WRAPPER_REPOSITORY_ID);
     List<Long> ids = new ArrayList<>();
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
-              Long slot = slot(WorkspaceRuntimeStatus.PROVISIONING, UUID.fromString(RUNNER_ID));
+              Long slot = slot(WorkspaceRuntimeStatus.PROVISIONING, true);
               ids.add(slot);
               agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
               openWait();
@@ -740,7 +638,7 @@ public class ProviderStates {
     TechnicalProcess start =
         technicalProcesses.begin(WRAPPER_REPOSITORY_ID, SLOT_LABEL, ids.get(0));
     start.openSegment("queued");
-    start.appendLine("queued", "waiting for a slot on " + RUNNER_NAME);
+    start.appendLine("queued", "Asking for a workspace slot.");
     start.settleSegment("queued", true);
     start.openSegment("container");
     start.appendLine("container", "pulling the workspace image");
@@ -750,7 +648,7 @@ public class ProviderStates {
     params.put("bugTicketId", BUG_TICKET_ID);
     params.put("bugTicketQualifiedId", "contract-00000001-10");
     params.put("repositoryId", WRAPPER_REPOSITORY_ID);
-    params.put("runnerId", RUNNER_ID);
+    params.put("targetId", TARGET_ID);
     params.put("workspaceId", String.valueOf(ids.get(0)));
     return new Setup(params, List.copyOf(ids));
   }
@@ -812,29 +710,7 @@ public class ProviderStates {
 
   static final String DRAFT_PROMPT = "Check the rounding in the invoice totals.";
 
-  /** The agent home volume the runner in service reports. */
-  static final String DOT_CLAUDE_VOLUME = "qits-workspaces-runner-dot-claude-contract";
-
-  /**
-   * Its login commands, recorded with the workspace image's version as {@link
-   * GoldenMasterRecordingTest#FIXED_VERSION}: a bump moves the image, not the command.
-   */
-  static final String CLAUDE_LOGIN_COMMAND =
-      "docker run --rm -it --user 1000 --entrypoint claude -v "
-          + DOT_CLAUDE_VOLUME
-          + ":/claude-home -e HOME=/claude-home -e CLAUDE_CONFIG_DIR=/claude-home/.claude"
-          + " registry.qits.runners.example.test/qits/workspace:"
-          + GoldenMasterRecordingTest.FIXED_VERSION;
-
-  static final String KIMI_LOGIN_COMMAND =
-      "docker run --rm -it --user 1000 --entrypoint kimi -v "
-          + DOT_CLAUDE_VOLUME
-          + ":/claude-home -e HOME=/claude-home -e KIMI_CODE_HOME=/claude-home/.kimi-code"
-          + " registry.qits.runners.example.test/qits/workspace:"
-          + GoldenMasterRecordingTest.FIXED_VERSION
-          + " login";
-
-  /** The workspace token a stopped slot keeps, so its start re-presents it rather than minting. */
+  /** The workspace token a running slot's lease carries. */
   static final String SLOT_TOKEN_ID = "00000000-0000-4000-8000-000000000022";
 
   /** When the resolved slot's agent was created, worked and was removed: fixed, so lines are too. */
@@ -847,20 +723,19 @@ public class ProviderStates {
   private static volatile HttpServer leftoverDaemon;
 
   /**
-   * The bug ticket's agent, RUNNING in the wrapper's slot, which runs on the connected runner
-   * {@code localhost}. With {@code draft}, it holds a saved prompt draft. With {@code leftover}, the
+   * The bug ticket's agent, RUNNING in the wrapper's slot, which runs under its lease on the
+   * target. With {@code draft}, it holds a saved prompt draft. With {@code leftover}, the
    * slot's daemon answers through its tunnel and its cleanup check finds work that never reached
    * the git host (a dirty submodule, an unpushed commit on the wrapper branch); without, the slot's
    * daemon is not connected — as it is for every slot in this suite.
    */
   private Setup agentInARunningSlot(boolean draft, boolean leftover) {
-    connectedRunner();
     repositories.register(WRAPPER_REPOSITORY_ID);
     List<Long> ids = new ArrayList<>();
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
-              Long slot = slot(WorkspaceRuntimeStatus.RUNNING, UUID.fromString(RUNNER_ID));
+              Long slot = slot(WorkspaceRuntimeStatus.RUNNING, true);
               ids.add(slot);
               agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
             });
@@ -914,7 +789,7 @@ public class ProviderStates {
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
-              Long slot = slot(WorkspaceRuntimeStatus.STOPPED, UUID.fromString(RUNNER_ID));
+              Long slot = slot(WorkspaceRuntimeStatus.STOPPED, false);
               ids.add(slot);
               Workspace row = workspaces.findById(slot);
               row.status = WorkspaceStatus.ABANDONED;
@@ -978,248 +853,44 @@ public class ProviderStates {
         + "\"}}";
   }
 
-  /**
-   * {@code localhost}, registered, greenlit, connected and greeted at the pin, answering every
-   * frame the host sends as a healthy runner would ({@link ScriptedRunner}): its newest health
-   * check passed, and its node reports Claude signed in and Kimi not.
-   */
-  private Setup runnerInService() {
-    // The login commands name the workspace image by its public address.
+  /** The edge plane a start composes the lease spec from: a public domain. */
+  private static void anEdgePlane() {
     QuarkusMock.installMockForType(
-        WorkspaceRunnerAddressesFixture.withDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
-        WorkspaceRunnerAddresses.class);
-    quarantinedRunner();
-    WorkspaceRunner runner = runners.greenlight(UUID.fromString(RUNNER_ID));
-    WorkspaceRunnerRegistry.Session session = dialIn(runner);
-    runnerRegistry.onHello(session, hello(WorkspacesRunnerBinary.VERSION, List.of()));
-    runnerHealth.request(runner.id);
-    runnerRegistry.onInventory(session, new Inventory(List.of(), List.of(), DOT_CLAUDE_VOLUME));
-    runnerRegistry.onLoginState(session, scriptedRunner.loginState());
-    return new Setup(runnerParams(), List.of());
-  }
-
-  // --- the frames this service sends a runner (qits-950) ------------------------------------------
-
-  /** The version an older runner dials in at: below any pin a release train writes. */
-  static final String OLDER_RUNNER_VERSION = "2026.101.100000";
-
-  /**
-   * Every frame the state's runner was sent on its socket, oldest first, as the JSON text that
-   * went on the wire ({@link WorkspaceRunnerRegistry#send} hands the codec's text to the socket,
-   * and the socket here keeps it). Empty when the state's runner holds no recording socket.
-   */
-  public List<String> runnerFramesSent() {
-    ScriptedRunner scripted = scriptedRunner;
-    return scripted == null ? List.of() : List.copyOf(scripted.sent);
-  }
-
-  /** Forgets what the state's runner was sent so far: the frames its setting up cost. */
-  public void forgetRunnerFrames() {
-    ScriptedRunner scripted = scriptedRunner;
-    if (scripted != null) {
-      scripted.sent.clear();
-    }
-  }
-
-  /** The state's runner connection, admitted and perhaps not greeted yet; null when it has none. */
-  public WorkspaceRunnerRegistry.Session runnerSession() {
-    return runnerSession;
-  }
-
-  /** What a runner at {@code version} says first, holding {@code held} (row ids as strings). */
-  static Hello hello(String version, List<String> held) {
-    return new Hello(
-        version,
-        WorkspacesRunnerProtocol.CAPABILITY_VERSION,
-        1,
-        new RunnerCapabilities(true, "amd64", "linux", Map.of()),
-        held,
-        Map.of());
-  }
-
-  /** {@code runner} admitted on a {@link ScriptedRunner}'s socket, which records what it is sent. */
-  private WorkspaceRunnerRegistry.Session dialIn(WorkspaceRunner runner) {
-    return dialIn(runner, true);
-  }
-
-  /**
-   * {@link #dialIn(WorkspaceRunner)}, its health checks left unanswered unless {@code
-   * answersChecks}: a quarantined runner that passed its check would be reinstated by it.
-   */
-  private WorkspaceRunnerRegistry.Session dialIn(WorkspaceRunner runner, boolean answersChecks) {
-    ScriptedRunner scripted = new ScriptedRunner(answersChecks);
-    WorkspaceRunnerRegistry.Session session = runnerRegistry.admit(runner, scripted.connection());
-    scripted.session = session;
-    scriptedRunner = scripted;
-    runnerSession = session;
-    return session;
-  }
-
-  /** Public addresses for a runner: the image names an estate, a take and an upgrade carry. */
-  private static void addressingRunners() {
-    QuarkusMock.installMockForType(
-        WorkspaceRunnerAddressesFixture.withDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
-        WorkspaceRunnerAddresses.class);
-    QuarkusMock.installMockForType(
-        WorkspaceRunnerAddressesFixture.planesWithDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
+        new WorkspaceAddressPlanes() {
+          @Override
+          public WorkspaceAddressPlane plane() {
+            return WorkspaceAddressPlane.of(
+                "targets.example.test", List.of("registry.dev.localhost:8080"));
+          }
+        },
         WorkspaceAddressPlanes.class);
   }
 
   /**
-   * {@code localhost}, greenlit, on a socket and not greeted yet, owning the wrapper's slot, which
-   * its container still runs: its hello names the slot as held.
+   * The wrapper's slot, {@code runtime}, hosting the bug ticket's agent: RUNNING under its lease on
+   * the target (qits-system holds the lease RUNNING, so a stop leaves it ENDING), or STOPPED with no
+   * lease and no token (so a start mints one and asks for a lease, which waits QUEUED).
    */
-  private Setup runnerDiallingInHoldingItsWorkspace() {
-    addressingRunners();
-    quarantinedRunner();
-    WorkspaceRunner runner = runners.greenlight(UUID.fromString(RUNNER_ID));
-    List<Long> ids = new ArrayList<>();
-    QuarkusTransaction.requiringNew()
-        .run(() -> ids.add(slot(WorkspaceRuntimeStatus.RUNNING, runner.id)));
-    dialIn(runner);
-    Map<String, String> params = runnerParams();
-    params.put("workspaceId", String.valueOf(ids.get(0)));
-    return new Setup(params, List.copyOf(ids));
-  }
-
-  /**
-   * {@code localhost}, greenlit, on a socket and not greeted yet, with the wrapper's slot QUEUED
-   * for it (sticky to it) and nothing else queued anywhere: its backlog is that one row. Other
-   * tests share the store, so every unplaced QUEUED row they left is abandoned first.
-   */
-  private Setup runnerDiallingInWithAQueuedWorkspace() {
-    addressingRunners();
-    quarantinedRunner();
-    WorkspaceRunner runner = runners.greenlight(UUID.fromString(RUNNER_ID));
-    List<Long> ids = new ArrayList<>();
-    QuarkusTransaction.requiringNew()
-        .run(
-            () -> {
-              abandonUnplacedQueuedRows();
-              ids.add(queuedSlot(runner.id));
-            });
-    dialIn(runner);
-    Map<String, String> params = runnerParams();
-    params.put("workspaceId", String.valueOf(ids.get(0)));
-    return new Setup(params, List.copyOf(ids));
-  }
-
-  /**
-   * {@code localhost} on a socket and not greeted yet: greenlit and holding nothing when {@code
-   * greenlit}, else quarantined as registration leaves it. Whatever version it says hello at is
-   * the trigger's — an older one is the one a greenlit runner is told to upgrade from.
-   */
-  private Setup runnerDiallingIn(boolean greenlit) {
-    addressingRunners();
-    quarantinedRunner();
-    WorkspaceRunner runner =
-        greenlit
-            ? runners.greenlight(UUID.fromString(RUNNER_ID))
-            : runners.get(UUID.fromString(RUNNER_ID));
-    dialIn(runner, greenlit);
-    Map<String, String> params = runnerParams();
-    if (greenlit) {
-      params.put("runnerVersion", OLDER_RUNNER_VERSION);
-    }
-    return new Setup(params, List.of());
-  }
-
-  /**
-   * {@code localhost}, quarantined as registration leaves it, greeted on a recording socket; the
-   * health check its greeting was sent is still unanswered, so only a person lifts the quarantine.
-   */
-  private Setup quarantinedRunnerHoldingASocket() {
-    addressingRunners();
-    quarantinedRunner();
-    WorkspaceRunnerRegistry.Session session =
-        dialIn(runners.get(UUID.fromString(RUNNER_ID)), false);
-    runnerRegistry.onHello(session, hello(WorkspacesRunnerBinary.VERSION, List.of()));
-    return new Setup(runnerParams(), List.of());
-  }
-
-  /**
-   * {@link #runnerInService}, its one slot free, and the wrapper's slot QUEUED for it — sticky to
-   * it, so its reserve takes this row and no other a test left in the queue.
-   */
-  private Setup runnerInServiceWithAQueuedWorkspace() {
-    addressingRunners();
-    runnerInService();
-    repositories.register(WRAPPER_REPOSITORY_ID);
-    List<Long> ids = new ArrayList<>();
-    QuarkusTransaction.requiringNew().run(() -> ids.add(queuedSlot(UUID.fromString(RUNNER_ID))));
-    Map<String, String> params = runnerParams();
-    params.put("workspaceId", String.valueOf(ids.get(0)));
-    return new Setup(params, List.copyOf(ids));
-  }
-
-  /** {@link #runnerInService}, its one slot held by the wrapper's RUNNING slot: it takes nothing. */
-  private Setup runnerInServiceWithEverySlotTaken() {
-    addressingRunners();
-    runnerInService();
-    List<Long> ids = new ArrayList<>();
-    QuarkusTransaction.requiringNew()
-        .run(() -> ids.add(slot(WorkspaceRuntimeStatus.RUNNING, UUID.fromString(RUNNER_ID))));
-    Map<String, String> params = runnerParams();
-    params.put("workspaceId", String.valueOf(ids.get(0)));
-    return new Setup(params, List.copyOf(ids));
-  }
-
-  /**
-   * The wrapper's slot QUEUED for {@code runnerId} with the workspace token a RUNNER start mints
-   * before it queues (no row is claimable without one).
-   */
-  private Long queuedSlot(UUID runnerId) {
-    Long slot = slot(WorkspaceRuntimeStatus.QUEUED, runnerId);
-    Workspace row = workspaces.findById(slot);
-    row.queuedAt = Instant.now();
-    row.commissionedTokenId = SLOT_TOKEN_ID;
-    row.commissionedTokenSubject = "contract-workspace-token";
-    row.commissionedToken = "qits_tok_contract-workspace";
-    workspaces.flush();
-    return slot;
-  }
-
-  /** Every ACTIVE RUNNER row QUEUED on no runner, abandoned: what any runner's backlog counts. */
-  private void abandonUnplacedQueuedRows() {
-    workspaces.update(
-        "status = ?1 where placement = ?2 and runtimeStatus = ?3 and status = ?4 and runnerId is"
-            + " null",
-        WorkspaceStatus.ABANDONED,
-        eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER,
-        WorkspaceRuntimeStatus.QUEUED,
-        WorkspaceStatus.ACTIVE);
-  }
-
-  /**
-   * The wrapper's slot on {@link #runnerInService}, {@code runtime}, hosting the bug ticket's
-   * agent: RUNNING while the slot runs, YIELDED while it is stopped. A stopped slot keeps the
-   * workspace token its container was launched with, so starting it again queues it at once.
-   */
-  private Setup slotOnARunnerInService(WorkspaceRuntimeStatus runtime) {
-    // A start is only queued where a runner's container could reach home: an edge plane.
-    QuarkusMock.installMockForType(
-        WorkspaceRunnerAddressesFixture.planesWithDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
-        WorkspaceAddressPlanes.class);
-    runnerInService();
+  private Setup slotOnATarget(WorkspaceRuntimeStatus runtime) {
+    anEdgePlane();
     repositories.register(WRAPPER_REPOSITORY_ID);
     boolean running = runtime == WorkspaceRuntimeStatus.RUNNING;
     List<Long> ids = new ArrayList<>();
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
-              Long slot = slot(runtime, UUID.fromString(RUNNER_ID));
+              Long slot = slot(runtime, running);
               ids.add(slot);
-              Workspace row = workspaces.findById(slot);
-              row.commissionedTokenId = SLOT_TOKEN_ID;
-              row.commissionedTokenSubject = "contract-workspace-token";
-              row.commissionedToken = "qits_tok_contract-workspace";
               agent(
                   AGENT_ACTIVE_ID,
                   slot,
                   AgentState.ACTIVE,
                   running ? AgentRunState.RUNNING : AgentRunState.YIELDED);
             });
-    Map<String, String> params = runnerParams();
+    if (running) {
+      seedLease(ids.get(0), TargetPlacement.LeaseState.RUNNING);
+    }
+    Map<String, String> params = new TreeMap<>();
     params.put("agentId", AGENT_ACTIVE_ID);
     params.put("repositoryId", WRAPPER_REPOSITORY_ID);
     params.put("workspaceId", String.valueOf(ids.get(0)));
@@ -1227,103 +898,43 @@ public class ProviderStates {
   }
 
   /**
-   * The wrapper's slot, RUNNING on {@code localhost} as it last reported, with the bug ticket's
-   * agent in it — and {@code localhost}, registered and greenlit, holds no connection: it dropped.
+   * The wrapper's slot, STOPPED, still naming the lease it was stopped from (qits-system reported
+   * it ENDING), with the bug ticket's agent in it — and qits-system cannot be asked anything: a start
+   * cannot end the old lease, nor a stop the current one.
    */
-  private Setup slotOnADisconnectedRunner() {
-    quarantinedRunner();
-    runners.greenlight(UUID.fromString(RUNNER_ID));
+  private Setup slotQitsSystemCannotBeAskedAbout() {
+    anEdgePlane();
     repositories.register(WRAPPER_REPOSITORY_ID);
     List<Long> ids = new ArrayList<>();
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
-              Long slot = slot(WorkspaceRuntimeStatus.RUNNING, UUID.fromString(RUNNER_ID));
+              Long slot = slot(WorkspaceRuntimeStatus.STOPPED, true);
               ids.add(slot);
-              agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
+              agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.YIELDED);
             });
-    Map<String, String> params = runnerParams();
+    seedLease(ids.get(0), TargetPlacement.LeaseState.ENDING);
+    targets.unreachable(
+        new TargetPlacement.LeaseRefused(
+            -1, null, "qits-system could not be asked: Connection refused", null));
+    Map<String, String> params = new TreeMap<>();
     params.put("agentId", AGENT_ACTIVE_ID);
     params.put("repositoryId", WRAPPER_REPOSITORY_ID);
     params.put("workspaceId", String.valueOf(ids.get(0)));
     return new Setup(params, List.copyOf(ids));
   }
 
-  /**
-   * A runner on a socket that answers what the host asks as a healthy runner does, at once and on
-   * the asking thread: a {@code stop} with {@code stopped}, a {@code delete} with {@code deleted},
-   * a {@code healthCheck} with a passing {@code healthChecked}, a {@code probeLogin} with its
-   * {@code loginState}. Everything else it takes and says nothing. Answering on the asking thread
-   * is what keeps a recording deterministic: the answer is in before the door returns. It keeps
-   * every frame it is sent, as the text that went on the wire (qits-950).
-   */
-  private final class ScriptedRunner {
-
-    volatile WorkspaceRunnerRegistry.Session session;
-
-    /** Every frame this socket was sent, as its text. */
-    final List<String> sent = new java.util.concurrent.CopyOnWriteArrayList<>();
-
-    /** Whether a {@code healthCheck} is answered; a quarantined state's runner leaves it open. */
-    private final boolean answersChecks;
-
-    ScriptedRunner(boolean answersChecks) {
-      this.answersChecks = answersChecks;
-    }
-
-    /** Checked now: a login checked before the connection began proves nothing of its image. */
-    LoginState loginState() {
-      return new LoginState(LoginPresence.PRESENT, LoginPresence.ABSENT, Instant.now().toString());
-    }
-
-    WebSocketConnection connection() {
-      return (WebSocketConnection)
-          Proxy.newProxyInstance(
-              ProviderStates.class.getClassLoader(),
-              new Class<?>[] {WebSocketConnection.class},
-              (proxy, method, args) ->
-                  switch (method.getName()) {
-                    case "id" -> "contract-runner-in-service";
-                    case "isOpen" -> Boolean.TRUE;
-                    case "isClosed" -> Boolean.FALSE;
-                    case "hashCode" -> System.identityHashCode(proxy);
-                    case "equals" -> proxy == args[0];
-                    case "toString" -> "contract-runner-in-service";
-                    case "sendText" -> {
-                      sent.add(String.valueOf(args[0]));
-                      answer(String.valueOf(args[0]));
-                      yield Uni.createFrom().voidItem();
-                    }
-                    default ->
-                        Uni.class.isAssignableFrom(method.getReturnType())
-                            ? Uni.createFrom().voidItem()
-                            : null;
-                  });
-    }
-
-    private void answer(String frame) {
-      WorkspaceRunnerRegistry.Session to = session;
-      if (to == null) {
-        return;
-      }
-      switch (runnerCodec.decode(frame)) {
-        case Stop stop -> runnerRegistry.onStopped(to, new Stopped(stop.rowId()));
-        case Delete delete -> runnerRegistry.onDeleted(to, new Deleted(delete.rowId()));
-        case HealthCheck check when answersChecks ->
-            runnerRegistry.onHealthChecked(
-                to,
-                new HealthChecked(
-                    true,
-                    "2 checks passed",
-                    check.requestId(),
-                    List.of(
-                        new CheckResult("docker", true, "27.1", Map.of("version", "27.1")),
-                        new CheckResult(
-                            "selfTest", true, "the workspace image started", Map.of()))));
-        case ProbeLogin ignored -> runnerRegistry.onLoginState(to, loginState());
-        default -> {}
-      }
-    }
+  /** The slot's lease, as qits-system holds it, granted on the target. */
+  private void seedLease(Long slot, TargetPlacement.LeaseState state) {
+    targets.seed(
+        new TargetPlacement.Lease(
+            UUID.fromString(LEASE_ID),
+            String.valueOf(slot),
+            state,
+            UUID.fromString(TARGET_ID),
+            null,
+            null,
+            Instant.now()));
   }
 
   /**
@@ -1369,20 +980,29 @@ public class ProviderStates {
     return server.actualPort();
   }
 
-  /** A slot workspace of the wrapper, on a runner, naming no branch (qits-1152). */
+  /** A slot workspace of the wrapper, on no lease yet, naming no branch (qits-1152). */
   private Long slot(WorkspaceRuntimeStatus runtime) {
-    return slot(runtime, null);
+    return slot(runtime, false);
   }
 
-  /** A slot workspace of the wrapper, placed on {@code runnerId} (null: no runner took it yet). */
-  private Long slot(WorkspaceRuntimeStatus runtime, UUID runnerId) {
+  /**
+   * A slot workspace of the wrapper; with {@code leased}, under {@link #LEASE_ID} on {@link
+   * #TARGET_ID}, holding the lease's token.
+   */
+  private Long slot(WorkspaceRuntimeStatus runtime, boolean leased) {
     Workspace row = new Workspace();
-    row.runnerId = runnerId;
+    if (leased) {
+      row.leaseId = UUID.fromString(LEASE_ID);
+      row.targetId = UUID.fromString(TARGET_ID);
+      row.commissionedTokenId = SLOT_TOKEN_ID;
+      row.commissionedTokenSubject = "contract-workspace-token";
+      row.commissionedToken = "qits_tok_contract-workspace";
+    }
     row.repositoryId = WRAPPER_REPOSITORY_ID;
     row.workspaceId = SLOT_LABEL;
     row.status = WorkspaceStatus.ACTIVE;
     row.runtimeStatus = runtime;
-    row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
+    row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
     workspaces.persist(row);
     workspaces.flush();
     return row.id;
@@ -1449,126 +1069,6 @@ public class ProviderStates {
     agentRows.flush();
   }
 
-  private static Map<String, String> runnerParams() {
-    Map<String, String> params = new TreeMap<>();
-    params.put("runnerId", RUNNER_ID);
-    params.put("runnerName", RUNNER_NAME);
-    return params;
-  }
-
-  /** No runner at all, and a qits-idp that commissions: a create answers the install line. */
-  private Setup noRunners() {
-    commissioningRunners();
-    return new Setup(runnerParams(), List.of());
-  }
-
-  /**
-   * {@code localhost}, declared and never registered; its registration token is presented as the
-   * {@code authorization} param, so the register door answers it its client.
-   */
-  private Setup unregisteredRunner() {
-    commissioningRunners();
-    declareRunner();
-    return new Setup(presentingItsRegistrationToken(), List.of());
-  }
-
-  /**
-   * {@code localhost}, registered already: its registration token, presented as the {@code
-   * authorization} param, opens nothing now (the register door answers 409).
-   */
-  private Setup registeredRunner() {
-    commissioningRunners();
-    quarantinedRunner();
-    return new Setup(presentingItsRegistrationToken(), List.of());
-  }
-
-  /** The runner params, plus the registration token's bearer granted as the edge would forward it. */
-  private Map<String, String> presentingItsRegistrationToken() {
-    bearers.grant(REGISTRATION_BEARER, REGISTRATION_SUBJECT, REGISTRATION_ROLE);
-    Map<String, String> params = runnerParams();
-    params.put("authorization", REGISTRATION_BEARER);
-    return params;
-  }
-
-  /** {@code localhost}, registered and quarantined, as registration leaves a runner. */
-  private Setup quarantinedRunner() {
-    declareRunner();
-    runners.markRegistered(UUID.fromString(RUNNER_ID), "contract-runner-client", null);
-    return new Setup(runnerParams(), List.of());
-  }
-
-  /** {@code localhost}, registered, greenlit and holding an open socket. */
-  private Setup connectedRunner() {
-    quarantinedRunner();
-    WorkspaceRunner runner = runners.greenlight(UUID.fromString(RUNNER_ID));
-    runnerSession = runnerRegistry.admit(runner, openConnection());
-    return new Setup(runnerParams(), List.of());
-  }
-
-  private void declareRunner() {
-    runners.create(
-        UUID.fromString(RUNNER_ID),
-        RUNNER_NAME,
-        null,
-        1,
-        REGISTRATION_TOKEN_ID,
-        REGISTRATION_SUBJECT);
-  }
-
-  /**
-   * A qits-idp that hands out the one registration token, and a public domain to address a runner
-   * by — both for the current test only, as {@code WorkspaceRunnerControllerTest} installs them.
-   */
-  private static void commissioningRunners() {
-    QuarkusMock.installMockForType(
-        new IdpRunnerCommissioner() {
-          @Override
-          public boolean enabled() {
-            return true;
-          }
-
-          @Override
-          public IssuedToken registrationToken(UUID runnerId) {
-            return new IssuedToken(REGISTRATION_TOKEN_ID, REGISTRATION_TOKEN, REGISTRATION_SUBJECT);
-          }
-
-          @Override
-          public RunnerClient runnerClient(UUID runnerId) {
-            return new RunnerClient(RUNNER_CLIENT_ID, RUNNER_CLIENT_SECRET);
-          }
-
-          @Override
-          public void decommissionClient(String runnerClientId) {}
-
-          @Override
-          public boolean deleteToken(String tokenId) {
-            return true;
-          }
-        },
-        IdpRunnerCommissioner.class);
-    QuarkusMock.installMockForType(
-        WorkspaceRunnerAddressesFixture.withDomain(WorkspaceRunnerAddressesFixture.DOMAIN),
-        WorkspaceRunnerAddresses.class);
-  }
-
-  /** A socket that is open and says nothing: all the registry reads of one to call it connected. */
-  private static WebSocketConnection openConnection() {
-    return (WebSocketConnection)
-        Proxy.newProxyInstance(
-            ProviderStates.class.getClassLoader(),
-            new Class<?>[] {WebSocketConnection.class},
-            (proxy, method, args) ->
-                switch (method.getName()) {
-                  case "id" -> "contract-runner-connection";
-                  case "isOpen" -> Boolean.TRUE;
-                  case "isClosed" -> Boolean.FALSE;
-                  case "hashCode" -> System.identityHashCode(proxy);
-                  case "equals" -> proxy == args[0];
-                  case "toString" -> "contract-runner-connection";
-                  default -> null;
-                });
-  }
-
   /** Builds the three git origins once per JVM, over whatever an earlier run left under target/. */
   private void buildOrigins() {
     if (!ORIGINS_BUILT.compareAndSet(false, true)) {
@@ -1606,8 +1106,8 @@ public class ProviderStates {
     row.branch = branch;
     row.status = status;
     row.runtimeStatus = runtime;
-    // A regular workspace runs on a runner: an ACTIVE regular DIRECT row is refused (V15, qits-780).
-    row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
+    // A regular workspace runs on a target: an ACTIVE regular DIRECT row is refused (V15, qits-780).
+    row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
     row.workId = workId;
     row.entityId = qualifiedId;
     if (workId != null && workId.equals(EPIC_ID)) {

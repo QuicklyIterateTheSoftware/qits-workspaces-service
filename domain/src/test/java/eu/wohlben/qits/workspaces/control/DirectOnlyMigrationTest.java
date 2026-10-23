@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Test;
  * exists for — an ACTIVE regular DIRECT row — so the test drops the check inside a transaction of
  * its own, writes the rows, runs the statement read straight out of the migration file, asserts, and
  * ROLLS BACK: postgres DDL is transactional, so the constraint is back the moment the test ends and
- * nothing it wrote survives. The check itself is {@code WorkspaceRunnersTest}'s.
+ * nothing it wrote survives. The check itself is V20 and V30's.
  */
 @QuarkusTest
 public class DirectOnlyMigrationTest {
@@ -81,8 +81,8 @@ public class DirectOnlyMigrationTest {
       ddl.execute("alter table workspace drop constraint ck_workspace_direct_only_admin");
     }
     long directMain = insert(connection, tag + "-dm", "DIRECT", false, null);
-    long runnerMain = insert(connection, tag + "-rm", "RUNNER", false, "");
-    long runnerWork = insert(connection, tag + "-rw", "RUNNER", false, "main");
+    long runnerMain = insert(connection, tag + "-rm", "TARGET", false, "");
+    long runnerWork = insert(connection, tag + "-rw", "TARGET", false, "main");
     long directWork = insert(connection, tag + "-dw", "DIRECT", false, "main");
     long adminMain = insert(connection, tag + "-am", "DIRECT", true, null);
 

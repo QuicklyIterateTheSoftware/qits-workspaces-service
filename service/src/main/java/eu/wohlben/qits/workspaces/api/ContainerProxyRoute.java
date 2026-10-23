@@ -341,7 +341,7 @@ public class ContainerProxyRoute {
     }
     switch (resolved.absence()) {
       case NO_WORKSPACE -> respond(rc, 404, "No workspace here.");
-      // No tunnel: there is no other origin to fall back on. A RUNNER row's container is on a
+      // No tunnel: there is no other origin to fall back on. A TARGET row's container is on a
       // runner's node, and a daemon too old for the tunnel has no route any more (qits-780).
       case NOT_CONNECTED -> respond(rc, 503, "workspace daemon not connected");
       case NO_CONTAINER ->

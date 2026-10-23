@@ -7,16 +7,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
-import eu.wohlben.qits.workspaces.entity.WorkspaceRunner;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * The runner launch spec (qits-851, qits-799, qits-802): the DIRECT spec's identity, behaviour,
- * handshake and home environment, every address off the {@link WorkspaceAddressPlane}, the row's
- * workspace token, the public image, four logical mounts, the factory labels and the limits — and
- * none of the wire aliases or the client pair a DIRECT container carries. Plain JUnit over the golden test's fixture, so the DIRECT spec it is compared
+ * The lease spec (qits-851, qits-799, qits-802, epic qits-1481): {@code LeaseSpec{image, env, user,
+ * limits}} with the DIRECT spec's identity, behaviour, handshake and home environment, every address
+ * off the {@link WorkspaceAddressPlane}, the row's workspace token, the public image, user 1000 and
+ * the configured limits — and none of the wire aliases or the client pair a DIRECT container
+ * carries, nor any env key the WORKSPACE slot policy owns. Plain JUnit over the golden test's fixture, so the DIRECT spec it is compared
  * with is the pinned one.
  */
 class RunnerWorkspaceSpecsTest {
@@ -29,7 +29,7 @@ class RunnerWorkspaceSpecsTest {
     row.branch = "task/a";
     row.parent = "epic/b";
     row.entityId = "qits-614";
-    row.placement = WorkspacePlacement.RUNNER;
+    row.placement = WorkspacePlacement.TARGET;
     row.commissionedTokenId = "tok-id-7";
     row.commissionedTokenSubject = "tok-workspace-7";
     row.commissionedToken = "qits_tok_seven";
@@ -51,25 +51,21 @@ class RunnerWorkspaceSpecsTest {
   }
 
   @Test
-  void composesThePublicImageTheFourMountsTheLabelsAndTheLimits() {
+  void composesThePublicImageTheImagesUserAndTheConfiguredLimits() {
     RunnerLaunchSpec spec = spec();
 
     assertEquals("registry.qits.wohlben.eu/qits/workspace:2026.1001.120000", spec.image());
-    assertEquals(
-        List.of(
-            new RunnerLaunchSpec.Mount(RunnerLaunchSpec.Volume.WORKSPACE, "/workspace"),
-            new RunnerLaunchSpec.Mount(RunnerLaunchSpec.Volume.DOT_CLAUDE, "/claude-home"),
-            new RunnerLaunchSpec.Mount(RunnerLaunchSpec.Volume.M2, "/caches/m2"),
-            new RunnerLaunchSpec.Mount(RunnerLaunchSpec.Volume.PNPM, "/caches/pnpm")),
-        spec.mounts());
-    assertEquals(
-        List.of("qits.repository", "qits.workspace", "qits.branch", "qits.parent", "qits.project"),
-        List.copyOf(spec.labels().keySet()));
-    assertEquals("proj-1", spec.labels().get("qits.project"));
-    assertTrue(
-        spec.labels().keySet().stream().noneMatch(k -> k.startsWith("qits.workspaces.runner.")));
+    assertEquals("1000", spec.user(), "never root: the workspace image's own user");
     assertEquals(new RunnerLaunchSpec.Limits("4g", "8g", "4096", "2", 600), spec.limits());
-    assertTrue(spec.init());
+  }
+
+  /** The WORKSPACE slot policy's keys: qits-system refuses a lease naming one. */
+  @Test
+  void carriesNoEnvKeyTheSlotPolicyOwns() {
+    for (String key : List.of("HOME", "CLAUDE_CONFIG_DIR", "BUILDKIT_HOST")) {
+      assertFalse(spec().env().containsKey(key), key);
+    }
+    assertEquals("/claude-home/.kimi-code", spec().env().get("KIMI_CODE_HOME"));
   }
 
   @Test
@@ -102,7 +98,6 @@ class RunnerWorkspaceSpecsTest {
             "GIT_AUTHOR_EMAIL",
             "GIT_COMMITTER_NAME",
             "GIT_COMMITTER_EMAIL",
-            "CLAUDE_CONFIG_DIR",
             "KIMI_CODE_HOME",
             "MAVEN_OPTS",
             "npm_config_store_dir");
@@ -115,7 +110,7 @@ class RunnerWorkspaceSpecsTest {
     expected.addAll(credential);
     expected.addAll(home);
     expected.add("QITS_DOMAIN");
-    assertEquals(expected, List.copyOf(spec.env().keySet()), "the runner env is these, in order");
+    assertEquals(expected, List.copyOf(spec.env().keySet()), "the lease env is these, in order");
     List<String> shared = new java.util.ArrayList<>(identity);
     shared.addAll(paths);
     shared.add("QITS_WORKSPACE_DAEMON_API_TOKEN");
@@ -141,7 +136,7 @@ class RunnerWorkspaceSpecsTest {
    * wire alias, internal name or local spelling in any value, and the image on the public registry.
    */
   @Test
-  void aRunnerSpecNamesOnlyPublicEdgeHosts() {
+  void aLeaseSpecNamesOnlyPublicEdgeHosts() {
     RunnerLaunchSpec spec = spec();
 
     for (Map.Entry<String, String> e : spec.env().entrySet()) {
@@ -202,7 +197,7 @@ class RunnerWorkspaceSpecsTest {
    * mechanism, not a credential.
    */
   @Test
-  void theRunnerAndDirectCredentialSetsAreDisjoint() {
+  void theTargetAndDirectCredentialSetsAreDisjoint() {
     // The golden fixture's DIRECT row holds a commissioned pair.
     WorkspaceContainerFactory factory = WorkspaceContainerFactoryGoldenSpecTest.factory();
     Map<String, String> direct =
@@ -245,75 +240,13 @@ class RunnerWorkspaceSpecsTest {
       assertFalse(key.startsWith("QITS_TOKEN"), key);
       assertFalse(key.equals("GIT_CONFIG_GLOBAL"), key);
     }
-    // The record has no field for a network, an extra host, the docker socket or a user at all;
-    // what it does carry is asserted whole above. The component list says so.
+    // The record has no field for a mount, a network, an extra host or the docker socket: those
+    // are the slot policy's. The component list says so.
     assertEquals(
-        List.of("image", "env", "mounts", "labels", "limits", "init"),
+        List.of("image", "env", "user", "limits"),
         java.util.Arrays.stream(RunnerLaunchSpec.class.getRecordComponents())
             .map(java.lang.reflect.RecordComponent::getName)
             .toList());
-  }
-
-  // --- the taking runner's memory limits (qits-951) ----------------------------------------------
-
-  private static WorkspaceRunner runner(String memory, String swap) {
-    WorkspaceRunner runner = new WorkspaceRunner();
-    runner.workspaceMemoryLimit = memory;
-    runner.workspaceMemorySwapLimit = swap;
-    return runner;
-  }
-
-  private static RunnerLaunchSpec.Limits limitsOn(WorkspaceRunner runner) {
-    return specs(WorkspaceContainerFactoryGoldenSpecTest.factory())
-        .compose(row(), PLANE, runner)
-        .limits();
-  }
-
-  @Test
-  void aRunnerThatSetsBothLimitsGetsBoth() {
-    assertEquals(
-        new RunnerLaunchSpec.Limits("12g", "16g", "4096", "2", 600),
-        limitsOn(runner("12g", "16g")));
-    assertEquals(
-        new RunnerLaunchSpec.Limits("12g", "-1", "4096", "2", 600), limitsOn(runner("12g", "-1")));
-  }
-
-  @Test
-  void aRunnerThatSetsNoLimitGetsThePlatformDefaults() {
-    RunnerLaunchSpec.Limits defaults = new RunnerLaunchSpec.Limits("4g", "8g", "4096", "2", 600);
-    assertEquals(defaults, limitsOn(runner(null, null)));
-    assertEquals(defaults, limitsOn(null), "no runner row reads as one that sets nothing");
-    assertEquals(defaults, spec().limits());
-  }
-
-  /** A row's memory is never paired with the default swap: 12g beside 8g is refused by docker. */
-  @Test
-  void aRunnerThatSetsOnlyMemoryGetsSwapEqualToIt() {
-    assertEquals(
-        new RunnerLaunchSpec.Limits("12g", "12g", "4096", "2", 600), limitsOn(runner("12g", null)));
-    assertEquals(
-        new RunnerLaunchSpec.Limits("2g", "2g", "4096", "2", 600),
-        limitsOn(runner("2g", null)),
-        "a smaller memory is a hard cap too, not the default 8g of swap");
-  }
-
-  @Test
-  void anUnlimitedSwapAloneKeepsTheDefaultMemory() {
-    assertEquals(
-        new RunnerLaunchSpec.Limits("4g", "-1", "4096", "2", 600), limitsOn(runner(null, "-1")));
-  }
-
-  /** The DIRECT spec takes no runner, and keeps the configured limits whatever a runner sets. */
-  @Test
-  void aDirectSpecIsUnaffectedByAnyRunner() {
-    WorkspaceContainerFactory factory = WorkspaceContainerFactoryGoldenSpecTest.factory();
-    specs(factory).compose(row(), PLANE, runner("12g", "16g"));
-
-    WorkspaceContainer direct =
-        factory.forWorkspace("repo12345678abc", "work", 7L, "task/a", "epic/b", "qits-614");
-    assertEquals("4g", direct.memory());
-    assertEquals("8g", direct.memorySwap());
-    assertEquals(new RunnerLaunchSpec.Limits("4g", "8g", "4096", "2", 600), factory.limits());
   }
 
   @Test

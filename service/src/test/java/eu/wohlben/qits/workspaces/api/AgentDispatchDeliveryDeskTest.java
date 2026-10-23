@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
  * door's own role list; this class is {@code deliver}'s.
  *
  * <p>Under {@link DaemonControlSocketMachineAuthTest.GateOn}, reused ({@code
- * WorkspaceRunnerControllerTest} does the same): a desk token's {@code project} claim is only
+ * AdminAgentAccessTest} binds its own): a desk token's {@code project} claim is only
  * readable off a validated bearer's {@code JsonWebToken} principal, and with the machine gate off
  * there is none to read it from. A person's or a peer service's role still arrives as the edge
  * asserts it, in {@code X-Qits-Roles}.

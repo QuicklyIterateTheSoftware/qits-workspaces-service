@@ -3,7 +3,7 @@ package eu.wohlben.qits.workspaces.control;
 /**
  * The credential a workspace container that reaches the platform through the edge holds (qits-625,
  * qits-802, qits-1084): one opaque {@code qits_tok_}, minted by this service at qits-idp and deleted
- * with the container it was minted for. Every RUNNER row's container holds one ({@code workspace}
+ * with the container it was minted for. Every TARGET row's lease holds one ({@code workspace}
  * kind); a DIRECT admin or editor row's holds one too whenever the deployment has an edge plane
  * ({@code workspace-admin} for an admin row, {@code workspace} for the editor). The counterpart is
  * {@link WorkspaceCredential}'s client pair, which a DIRECT row on no edge plane still holds; a row

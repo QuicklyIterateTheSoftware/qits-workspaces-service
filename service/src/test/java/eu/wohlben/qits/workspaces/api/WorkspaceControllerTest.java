@@ -26,13 +26,8 @@ public class WorkspaceControllerTest {
   @jakarta.inject.Inject
   eu.wohlben.qits.workspaces.control.WorkspaceService workspaceService;
 
-  @jakarta.inject.Inject eu.wohlben.qits.workspaces.control.WorkspaceRunners runners;
-
   @jakarta.inject.Inject
   eu.wohlben.qits.workspaces.control.TechnicalProcessRegistry technicalProcesses;
-
-  @jakarta.inject.Inject
-  eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository runnerRepository;
 
   @jakarta.inject.Inject
   eu.wohlben.qits.workspaces.persistence.WorkspaceRepository workspaceRepository;

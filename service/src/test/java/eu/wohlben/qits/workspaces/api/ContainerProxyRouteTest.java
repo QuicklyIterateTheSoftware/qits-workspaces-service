@@ -448,7 +448,7 @@ public class ContainerProxyRouteTest {
     repositories.register(repoId);
     Long id = workspaceService.createWorkspace(repoId, "runner", "master", "runner", null).id;
     assertEquals(
-        eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER,
+        eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET,
         io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
             .call(() -> workspaceRepository.findActiveById(id).orElseThrow().placement));
 

@@ -5,11 +5,11 @@ import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.IntegrateConflictException;
 import eu.wohlben.qits.workspaces.error.InternalServerErrorException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
-import eu.wohlben.qits.workspaces.error.RunnerRefusals;
+import eu.wohlben.qits.workspaces.error.DomainException;
+import eu.wohlben.qits.workspaces.error.TargetRefusals;
 import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
 import eu.wohlben.qits.workspaces.events.WorkspaceStarted;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
-import eu.wohlben.qits.workspaces.dto.WorkspaceRunnerRefDto;
 import eu.wohlben.qits.workspaces.dto.WorkItemWorkspaceDto;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspaceEvent;
@@ -26,7 +26,7 @@ import eu.wohlben.qits.workspaces.gitmirror.RepoMirror;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceEventRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
-import eu.wohlben.qits.workspaces.persistence.WorkspaceRunnerRepository;
+import eu.wohlben.qits.workspaces.persistence.LegacyPlacementRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -66,8 +66,8 @@ public class WorkspaceService {
 
   @Inject WorkspaceRepository workspaceRepository;
 
-  /** The runners' names, for the workspaces placed on one. */
-  @Inject WorkspaceRunnerRepository runnerRepository;
+  /** The rows a retired workspaces runner held, adopted by their first lease (epic qits-1481). */
+  @Inject LegacyPlacementRepository legacyPlacements;
 
   @Inject WorkspaceEventRepository workspaceEventRepository;
 
@@ -93,24 +93,30 @@ public class WorkspaceService {
   @Inject WorkspaceContainerEventPublisher containerEvents;
 
   /**
-   * Optional: the runners' sockets, for the RUNNER-placed rows (epic qits-624). Absent reads as no
-   * runner connected — see {@link RunnerPlacement}. A DIRECT row never reaches it.
+   * Optional: qits-system's leases, for the TARGET-placed rows (epic qits-1481). Absent reads as no
+   * target can be had — see {@link TargetPlacement}. A DIRECT row never reaches it.
    */
-  @Inject Instance<RunnerPlacement> runnerPlacement;
+  @Inject Instance<TargetPlacement> targetPlacement;
 
   /**
    * {@code WorkspaceStarted} and {@code WorkspaceFailed} for a DIRECT row, and {@code
-   * WorkspaceFailed} for a RUNNER row refused before the queue (qits-1236): once per transition,
+   * WorkspaceFailed} for a TARGET row refused before its lease (qits-1236): once per transition,
    * after the write committed. Absent: nothing is announced.
    */
   @Inject Instance<LifecycleAnnouncer> lifecycle;
 
-  /** The runner session's writes, and the start processes a runner's launch settles. */
-  @Inject RunnerClaims runnerClaims;
+  /** What a lease's state does to its row, and the start processes a lease's launch settles. */
+  @Inject TargetLeaseStates leaseStates;
 
   /**
-   * The edge address plane a RUNNER row is composed from (qits-625): built by the RUNNER start
-   * before it queues, so a deployment with no public domain fails the row rather than queueing it.
+   * The lease spec a TARGET row's container runs from (qits-851, epic qits-1481): composed by the
+   * start, after the token is minted and before the lease is asked for.
+   */
+  @Inject RunnerWorkspaceSpecs leaseSpecs;
+
+  /**
+   * The edge address plane a TARGET row is composed from (qits-625): built by the TARGET start
+   * before it asks for a lease, so a deployment with no public domain fails the row instead.
    */
   @Inject WorkspaceAddressPlanes addressPlanes;
 
@@ -433,8 +439,7 @@ public class WorkspaceService {
   }
 
   /**
-   * {@code work} once the caller's transaction has committed, or now when there is none — {@code
-   * RunnerPlacementDriver}'s idiom. A rolled-back stop ends nothing; the start it would have ended
+   * {@code work} once the caller's transaction has committed, or now when there is none. A rolled-back stop ends nothing; the start it would have ended
    * then finds the count moved, yields, and stops the container itself.
    */
   private void afterCommit(Runnable work) {
@@ -658,7 +663,7 @@ public class WorkspaceService {
    * <p><b>Which credential: a workspace token whenever there is an edge, else the pair</b>
    * (qits-1084). Only admin and editor rows provision here, and they stay DIRECT for good; given an
    * edge plane ({@link WorkspaceAddressPlanes#plane} resolves) the container is minted the same
-   * non-expiring {@code qits_tok_} a RUNNER row holds — kind {@code workspace-admin} for an admin row,
+   * non-expiring {@code qits_tok_} a TARGET row holds — kind {@code workspace-admin} for an admin row,
    * {@code workspace} for the editor — stored on the row's token columns, and the factory addresses
    * it through the edge. With no public {@code QITS_DOMAIN} it is commissioned the client pair as
    * before, and that is logged at WARN rather than failing the provision.
@@ -699,7 +704,7 @@ public class WorkspaceService {
     List<String> statedRefs = List.of();
     // THE WORKSPACE TOKEN, WHENEVER THERE IS AN EDGE (qits-1084). An admin or editor row stays
     // DIRECT for good, but its container no longer needs an hourly-minting client pair: given an
-    // edge plane it holds the same non-expiring qits_tok_ a RUNNER row does — `workspace-admin` for
+    // edge plane it holds the same non-expiring qits_tok_ a TARGET row does — `workspace-admin` for
     // an admin row, `workspace` for the editor (unscoped: it names no repository, so no project) —
     // with the same Git refs the pair would have stated, and the factory addresses it through the
     // edge (a token only works there). No plane — no public QITS_DOMAIN — is the one case the pair
@@ -766,7 +771,7 @@ public class WorkspaceService {
   }
 
   /**
-   * The mint both token paths make — a RUNNER start ({@link #ensureRunnerToken}) and a DIRECT
+   * The mint both token paths make — a TARGET start ({@link #mintLeaseToken}) and a DIRECT
    * provision on an edge plane ({@link #commissionFor}): the row's project claim, the Git refs the
    * caller states as {@code statedRefs}, and the kind {@code admin} picks.
    */
@@ -858,7 +863,7 @@ public class WorkspaceService {
     if (!commissioner.isResolvable() || rowId == null) {
       return;
     }
-    // [clientId, tokenId]: a row holds one or the other — the token on a RUNNER row (qits-625) and on
+    // [clientId, tokenId]: a row holds one or the other — the token on a TARGET row (qits-625) and on
     // a DIRECT row on an edge plane (qits-1084), the pair on a DIRECT row on none.
     String[] held =
         QuarkusTransaction.requiringNew()
@@ -955,7 +960,7 @@ public class WorkspaceService {
     // Live container set (one listing call to the orchestrator), so RUNNING stays accurate even
     // when container state changed out-of-band; the persisted column carries the
     // STOPPED/PROVISIONING/FAILED signal otherwise. Asked only when a row here is on the direct
-    // path at all (qits-780: in practice an admin one) — a repository of RUNNER rows, which is every
+    // path at all (qits-780: in practice an admin one) — a repository of TARGET rows, which is every
     // regular workspace, costs qits-containers nothing.
     Set<String> runningIds =
         rows.stream().noneMatch(wt -> wt.placement == WorkspacePlacement.DIRECT)
@@ -972,10 +977,6 @@ public class WorkspaceService {
     // repos' live daemons — the notion is registry-wide, not per-repository.
     WorkspaceDaemonInfo.Info latestDaemon =
         daemonInfo.isResolvable() ? latestDaemon(daemonInfo.get().all()) : null;
-    // The runners' names, in one read, and none at all when no row is on a runner.
-    Map<UUID, String> runnerNames =
-        runnerRepository.namesById(
-            rows.stream().map(w -> w.runnerId).filter(Objects::nonNull).collect(Collectors.toSet()));
     return rows.stream()
         .map(
             wt -> {
@@ -989,21 +990,16 @@ public class WorkspaceService {
                       && ab.ahead() > 0
                       && ab.behind() > 0
                       && wouldConflict(mirror, wt.parent, branch);
-              // A RUNNER row's container is not qits-containers', so that listing says nothing
-              // about it: its persisted status is the runner's word, under the UNAVAILABLE overlay.
+              // A TARGET row's container is not qits-containers', so that listing says nothing
+              // about it: its persisted status is its lease's word (TargetLeaseStates).
               WorkspaceRuntimeStatus runtime =
-                  wt.placement == WorkspacePlacement.RUNNER
-                      ? runnerRuntime(wt)
+                  wt.placement == WorkspacePlacement.TARGET
+                      ? wt.runtimeStatus
                       : directRuntime(wt, runningIds);
               // Clean/dirty, agent activity and the registry facts below are known only while the
-              // daemon's socket is live. That is RUNNING for a DIRECT row, but a RUNNER row's
-              // UNAVAILABLE is only the runner being unreachable — its daemon dials in through the
-              // edge, not through the runner, so the socket can still be live underneath the
-              // overlay. The registry ports are self-evicting (empty once the socket drops), so
-              // they are the ones that get to decide, not runtime.
-              boolean daemonReadable =
-                  runtime == WorkspaceRuntimeStatus.RUNNING
-                      || runtime == WorkspaceRuntimeStatus.UNAVAILABLE;
+              // daemon's socket is live, which is RUNNING. The registry ports are self-evicting
+              // (empty once the socket drops).
+              boolean daemonReadable = runtime == WorkspaceRuntimeStatus.RUNNING;
               // Clean/dirty is always null (no badge): it was the slot-wide GitStatus frame, which
               // no daemon sends since protocol 10 (qits-1152). The field stays in the view for its
               // consumers; what a slot would lose is now asked per agent, on demand, by the
@@ -1047,7 +1043,8 @@ public class WorkspaceService {
                   daemonOutdated(info, latestDaemon),
                   wt.admin,
                   wt.placement,
-                  runnerRef(wt.runnerId, runnerNames),
+                  wt.leaseId,
+                  wt.targetId,
                   wt.queuedAt);
             })
         .toList();
@@ -1138,31 +1135,6 @@ public class WorkspaceService {
         : wt.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
             ? WorkspaceRuntimeStatus.STOPPED
             : wt.runtimeStatus;
-  }
-
-  /**
-   * The runner a row is placed on, with its name from {@code names}; null when the row is on none.
-   * A runner row that is gone leaves the id with no name.
-   */
-  private static WorkspaceRunnerRefDto runnerRef(UUID runnerId, Map<UUID, String> names) {
-    return runnerId == null ? null : new WorkspaceRunnerRefDto(runnerId, names.get(runnerId));
-  }
-
-  /**
-   * A RUNNER row's runtime status as read: the persisted one, with {@code UNAVAILABLE} laid over it
-   * when the row has a runner and that runner is not there (offline past the grace). Never written:
-   * a reconnect clears it with no write. A row with no runner waits for any and is never
-   * UNAVAILABLE.
-   */
-  private WorkspaceRuntimeStatus runnerRuntime(Workspace row) {
-    return row.runnerId != null && !runnerPresent(row.runnerId)
-        ? WorkspaceRuntimeStatus.UNAVAILABLE
-        : row.runtimeStatus;
-  }
-
-  /** Whether the runner is connected or within its grace; false with no {@link RunnerPlacement}. */
-  private boolean runnerPresent(UUID runnerId) {
-    return runnerPlacement.isResolvable() && runnerPlacement.get().presence(runnerId);
   }
 
   /**
@@ -1320,12 +1292,12 @@ public class WorkspaceService {
 
   /**
    * Whether a row's container exists on the platform host, asked of qits-containers only behind the
-   * router's refusal (qits-780). A RUNNER row's container is on its runner's node, never there, so it
+   * router's refusal (qits-780). A TARGET row's container is in a slot of a target, never there, so it
    * answers false with no call — what the by-name lookup on the platform host always answered for it
    * — and the absent-means-nothing-to-lose readings above carry on as they did.
    */
   private boolean directContainerExists(Workspace wt) {
-    if (wt.placement == WorkspacePlacement.RUNNER) {
+    if (wt.placement == WorkspacePlacement.TARGET) {
       return false;
     }
     WorkspacePlacements.requireDirectAllowed(wt);
@@ -1530,8 +1502,8 @@ public class WorkspaceService {
     }
 
     // Where the container runs, decided once and here (qits-837, qits-774): a regular workspace
-    // always runs on a runner and admin stays DIRECT; whether any runner is eligible is not asked —
-    // with none, the RUNNER row simply waits QUEUED. A stated placement that contradicts the rule is
+    // always runs in a workspace slot of a target and admin stays DIRECT; whether a slot is free is
+    // not asked — with none, the TARGET row's lease simply waits QUEUED. A stated placement that contradicts the rule is
     // refused before the branch is pushed, so it costs nothing. The editor is written by its own door.
     refuseUnplaceable(placement, admin);
     WorkspacePlacement placed = WorkspacePlacements.forNewRow(admin);
@@ -1592,19 +1564,18 @@ public class WorkspaceService {
     workspace.parent = parentBranch;
     workspace.branch = newBranch;
     workspace.status = WorkspaceStatus.ACTIVE;
-    // Every row is written STOPPED. A RUNNER row is still queued by its create — creating it IS the
-    // request a runner takes (the qits-ci runner model) — but by the RUNNER start, once this
-    // transaction committed (queuedOnRunner): that start is the one path to QUEUED, and it builds
-    // the edge plane and mints the workspace token first (qits-625), so no row is ever claimable
-    // without a token. A DIRECT row is started by whoever created it; see createAndStartWorkspace.
+    // Every row is written STOPPED. A TARGET row is still started by its create, by the TARGET start
+    // once this transaction committed (queuedOnTarget): that start is the one path to a lease, and it
+    // builds the edge plane and mints the lease's token first (qits-625), so no lease is ever asked
+    // for without one. A DIRECT row is started by whoever created it; see createAndStartWorkspace.
     workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
     workspace.preamble = preamble;
     // The posture, written once and never again: no verb promotes a workspace to admin later, so
     // the socket a container gets is the one the request that created it asked for. See
     // Workspace.admin.
     workspace.admin = admin;
-    // Written once and never changed, like the posture above (Workspace.placement). A RUNNER row is
-    // placed on no runner yet: a runner takes it from the queue at its first start.
+    // Written once and never changed, like the posture above (Workspace.placement). A TARGET row has
+    // no lease yet: its first start asks for one.
     workspace.placement = placed;
     // What this workspace is for, where a dispatch said so. Blanks normalise to null: an empty id
     // is not a subject, and a row claiming one would render a link to nothing.
@@ -1625,20 +1596,20 @@ public class WorkspaceService {
 
   /**
    * Refuses a stated placement that contradicts {@link WorkspacePlacements#forNewRow}: 400 for an
-   * admin workspace asked onto a runner (it holds the host's docker socket and always runs DIRECT,
+   * admin workspace asked onto a target (it holds the host's docker socket and always runs DIRECT,
    * {@code ck_workspace_runner_posture}), and 400 {@code DIRECT_PLACEMENT_REFUSED} for a regular
-   * workspace asked onto the direct path (qits-774: a regular workspace runs on a runner). The
-   * agreeing statements — DIRECT for admin, RUNNER for a regular workspace — and a null placement
+   * workspace asked onto the direct path (qits-774: a regular workspace runs on a target). The
+   * agreeing statements — DIRECT for admin, TARGET for a regular workspace — and a null placement
    * (nothing stated) pass. The editor is written by its own door, never through here.
    */
   private void refuseUnplaceable(WorkspacePlacement placement, boolean admin) {
-    if (placement == WorkspacePlacement.RUNNER && admin) {
+    if (placement == WorkspacePlacement.TARGET && admin) {
       throw new BadRequestException(
           "An admin workspace holds the host's docker socket and always runs DIRECT; it cannot be"
-              + " placed on a runner");
+              + " placed on a target");
     }
     if (placement == WorkspacePlacement.DIRECT && !admin) {
-      throw RunnerRefusals.directPlacementRefused();
+      throw TargetRefusals.directPlacementRefused();
     }
   }
 
@@ -1756,17 +1727,18 @@ public class WorkspaceService {
 
   /**
    * The widest form, and the only one taking a stated {@code placement}: where the container runs,
-   * {@code DIRECT} or {@code RUNNER} (epic qits-624). It is never a choice — admin is DIRECT and a
-   * regular workspace RUNNER ({@link WorkspacePlacements#forNewRow}), null meaning "the rule" — so a
-   * statement can only agree or be refused: RUNNER with {@code admin} is a 400, and DIRECT without it
-   * a 400 {@code DIRECT_PLACEMENT_REFUSED}, both before any ref is pushed. No eligible runner is not
-   * a refusal: the RUNNER row is written and waits QUEUED. Every other overload delegates here with
-   * null.
+   * {@code DIRECT} or {@code TARGET} (epic qits-624, qits-1481). It is never a choice — admin is
+   * DIRECT and a regular workspace TARGET ({@link WorkspacePlacements#forNewRow}), null meaning "the
+   * rule" — so a statement can only agree or be refused: TARGET with {@code admin} is a 400, and
+   * DIRECT without it a 400 {@code DIRECT_PLACEMENT_REFUSED}, both before any ref is pushed. No free
+   * slot is not a refusal: the TARGET row's lease waits QUEUED. Every other overload delegates here
+   * with null.
    *
-   * <p>A RUNNER row is queued by its create once the row committed, through the RUNNER start: the
-   * edge plane is built and the workspace token minted first (qits-625), the row goes QUEUED with
-   * {@code queued_at}, and the runners are told. A start that cannot do that leaves the row FAILED
-   * saying why, and the create still stands. A DIRECT row is written STOPPED.
+   * <p>A TARGET row is started by its create once the row committed, through the TARGET start: the
+   * edge plane is built and the lease's token minted first (qits-625), then the lease is asked for
+   * and the row goes QUEUED with {@code queued_at}. A start that cannot do that leaves the row FAILED
+   * saying why (or STOPPED when qits-system did not answer), and the create still stands. A DIRECT
+   * row is written STOPPED.
    */
   public Workspace createWorkspace(
       String repoId,
@@ -1779,7 +1751,7 @@ public class WorkspaceService {
       boolean admin,
       WorkspaceSubject subject,
       WorkspacePlacement placement) {
-    return queuedOnRunner(
+    return queuedOnTarget(
         recordPlaced(
             repoId,
             workspaceId,
@@ -1794,24 +1766,24 @@ public class WorkspaceService {
   }
 
   /**
-   * Queues a RUNNER row its create just committed, through the RUNNER start and nothing beside it
-   * ({@link #beginRunnerStart}, unnarrated: the row's status is its progress), so the create path
+   * Starts a TARGET row its create just committed, through the TARGET start and nothing beside it
+   * ({@link #beginTargetStart}, unnarrated: the row's status is its progress), so the create path
    * gets the same edge-plane check and the same token mint every start gets (qits-625). Answers the
    * row as the start left it: QUEUED, or FAILED with the reason.
    *
    * <p><b>A start refused after the row exists does not undo the create</b>, for the reason {@link
    * #createAndStartWorkspace} gives; it is logged here, and the row says what happened.
    */
-  private Workspace queuedOnRunner(Workspace created) {
-    if (created.placement != WorkspacePlacement.RUNNER) {
+  private Workspace queuedOnTarget(Workspace created) {
+    if (created.placement != WorkspacePlacement.TARGET) {
       return created;
     }
     try {
-      beginRunnerStart(created, false);
+      beginTargetStart(created, false);
     } catch (RuntimeException refused) {
       LOG.warnf(
           refused,
-          "Workspace %s/%s was created but could not be queued for a runner",
+          "Workspace %s/%s was created but no lease could be asked for it",
           created.repositoryId,
           created.workspaceId);
     }
@@ -1854,14 +1826,14 @@ public class WorkspaceService {
   }
 
   /**
-   * <b>A workspace slot</b> (qits-1152, D2): one container on a runner — or, for an admin, on the
+   * <b>A workspace slot</b> (qits-1152, D2): one container on an execution target — or, for an admin, on the
    * platform host — scoped to a project's wrapper, created when an agent needs a slot and removed
    * when its last agent is. It names no branch, parent or work item: those are its agents'. It
    * pushes nothing either ({@code gitRefs []}); every push is an agent's, with the agent's own
    * credential.
    *
-   * <p>Started at once: a RUNNER row is queued for a runner through the RUNNER start (edge plane,
-   * workspace token), a DIRECT admin row through the ensure ladder.
+   * <p>Started at once: a TARGET row asks for its lease through the TARGET start (edge plane, the
+   * lease's token), a DIRECT admin row through the ensure ladder.
    */
   public Workspace createSlot(String repoId, boolean admin) {
     RepositoryLookup.RepositoryView repo = repositories.require(repoId);
@@ -1885,8 +1857,8 @@ public class WorkspaceService {
                   return workspace;
                 });
     LOG.infof("Workspace %s/%s created as a slot (placement=%s)", repoId, created.workspaceId, placed);
-    if (created.placement == WorkspacePlacement.RUNNER) {
-      return queuedOnRunner(created);
+    if (created.placement == WorkspacePlacement.TARGET) {
+      return queuedOnTarget(created);
     }
     try {
       beginEnsureContainer(created.id);
@@ -1963,15 +1935,15 @@ public class WorkspaceService {
     // executor) where no session is open, and the rest of ensureContainer already brackets each of
     // its own reads the same way.
     Workspace row = QuarkusTransaction.requiringNew().call(() -> requireActive(id));
-    // A runner-placed row's container is the runner's, never the direct ladder's (qits-780): the
+    // A target-placed row's container is its lease's, never the direct ladder's (qits-780): the
     // bootstrap's manual run needs it up, so a RUNNING one goes ahead and anything else is asked to
     // start first rather than provisioned on the platform host.
-    if (row.placement == WorkspacePlacement.RUNNER) {
+    if (row.placement == WorkspacePlacement.TARGET) {
       if (row.runtimeStatus != WorkspaceRuntimeStatus.RUNNING) {
         throw new BadRequestException(
             "Workspace '"
                 + row.workspaceId
-                + "' runs on a workspace runner and is not running: start it, then run again.");
+                + "' runs on an execution target and is not running: start it, then run again.");
       }
       return;
     }
@@ -1993,8 +1965,8 @@ public class WorkspaceService {
    */
   public String beginEnsureContainer(Long id) {
     Workspace resolved = QuarkusTransaction.requiringNew().call(() -> requireActive(id));
-    if (resolved.placement == WorkspacePlacement.RUNNER) {
-      return beginRunnerStart(resolved);
+    if (resolved.placement == WorkspacePlacement.TARGET) {
+      return beginTargetStart(resolved);
     }
     WorkspacePlacements.requireDirectAllowed(resolved);
     Optional<String> joined = joinableStart(resolved);
@@ -2113,8 +2085,8 @@ public class WorkspaceService {
    */
   public String beginRecreateContainer(Long id) {
     Workspace resolved = QuarkusTransaction.requiringNew().call(() -> requireActive(id));
-    if (resolved.placement == WorkspacePlacement.RUNNER) {
-      return beginRunnerRecreate(resolved);
+    if (resolved.placement == WorkspacePlacement.TARGET) {
+      return beginTargetRecreate(resolved);
     }
     WorkspacePlacements.requireDirectAllowed(resolved);
     String repoId = resolved.repositoryId;
@@ -2162,7 +2134,7 @@ public class WorkspaceService {
   /**
    * Recreate's gate, on both placements (qits-1263): every live agent on the slot must answer its
    * cleanup check clean, or be unknown to its daemon ({@link AgentWorktreeGuard}). Unlike {@link
-   * #requireCleanWorkingTree} it does not ask whether a container exists — a RUNNER row's container
+   * #requireCleanWorkingTree} it does not ask whether a container exists — a TARGET row's container
    * is not on this host, and its volume goes with the recreate too — so a slot whose agents cannot
    * be checked is refused whatever its placement. A refusal is a 400 — the status recreate has
    * always refused with, and the one qits-landing-app's pact pins — carrying {@code
@@ -2220,7 +2192,7 @@ public class WorkspaceService {
                               () -> new NotFoundException("Workspace not found: " + workspaceId));
                   // The ladder's one gate (qits-780): every qits-containers call below — isRunning,
                   // exists/start, the provision's run and its rm, the branch-gone volume reap — is
-                  // behind it. It is also what refuses a RUNNER row that reached this ladder through
+                  // behind it. It is also what refuses a TARGET row that reached this ladder through
                   // ensureContainer(Long), which does not branch on placement.
                   WorkspacePlacements.requireDirectAllowed(wt);
                   if (containers.isRunning(container)) {
@@ -2462,11 +2434,11 @@ public class WorkspaceService {
    * then starts the paused container again instead of joining a start that never would.
    */
   public void stopContainer(Long id) {
-    // Not @Transactional any more, and only so the RUNNER branch can wait for its runner outside a
+    // Not @Transactional any more, and only so the TARGET branch can call qits-system outside a
     // transaction: the DIRECT body below runs in the transaction it always ran in, joined or begun.
     Workspace placed = QuarkusTransaction.joiningExisting().call(() -> requireActive(id));
-    if (placed.placement == WorkspacePlacement.RUNNER) {
-      stopOnRunner(placed);
+    if (placed.placement == WorkspacePlacement.TARGET) {
+      stopOnTarget(placed);
       return;
     }
     WorkspacePlacements.requireDirectAllowed(placed);
@@ -2528,8 +2500,8 @@ public class WorkspaceService {
   public void deleteContainer(Long id) {
     // Not @Transactional any more, for stopContainer's reason; the DIRECT body is unchanged.
     Workspace placed = QuarkusTransaction.joiningExisting().call(() -> requireActive(id));
-    if (placed.placement == WorkspacePlacement.RUNNER) {
-      deleteOnRunner(placed);
+    if (placed.placement == WorkspacePlacement.TARGET) {
+      deleteOnTarget(placed);
       return;
     }
     WorkspacePlacements.requireDirectAllowed(placed);
@@ -2569,7 +2541,7 @@ public class WorkspaceService {
     workspace.commissionedClientId = null;
     decommission(commissioned);
     // An admin or editor row on an edge plane holds a workspace token instead (qits-1084), and it
-    // goes with the container too — discardOnRunner's line, for the same reason.
+    // goes with the container too — discardOnTarget's line, for the same reason.
     deleteToken(clearToken(workspace));
     workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
     workspace.runtimeError = null;
@@ -3050,8 +3022,8 @@ public class WorkspaceService {
       String commit,
       boolean deleteBranch) {
     boolean deletesBranch = deleteBranch && !keepsBranch(repoId, workspace);
-    if (workspace.placement == WorkspacePlacement.RUNNER) {
-      discardOnRunner(repoId, workspace, resolution, result, target, commit, deletesBranch);
+    if (workspace.placement == WorkspacePlacement.TARGET) {
+      discardOnTarget(repoId, workspace, resolution, result, target, commit, deletesBranch);
       return;
     }
     WorkspacePlacements.requireDirectAllowed(workspace);
@@ -3171,137 +3143,201 @@ public class WorkspaceService {
     return false;
   }
 
-  // --- RUNNER placement (epic qits-624, qits-853) ----------------------------------------------
+  // --- TARGET placement (epic qits-1481, qits-1532) ---------------------------------------------
   //
-  // Each container verb above branches ONCE, at its top, on Workspace.placement, and a RUNNER row
-  // comes here. Nothing below calls qits-containers: a RUNNER row's container is on a runner's node,
-  // reached through RunnerPlacement, and its persisted runtime status is the runner's word. Its
-  // start builds the edge address plane (qits-799) and mints the workspace token (qits-802) before
-  // queueing, and fails the row when it can have neither; RunnerClaims waits for its daemon after
-  // the runner launched it. No bootstrap chain is run.
+  // Each container verb above branches ONCE, at its top, on Workspace.placement, and a TARGET row
+  // comes here. Nothing below calls qits-containers: a TARGET row's container runs in a WORKSPACE
+  // slot of an execution target, under a lease qits-system grants (TargetPlacement), and its
+  // persisted runtime status is its lease's word (TargetLeaseStates). Its start builds the edge
+  // address plane (qits-799), mints the lease's workspace token (qits-802) and composes the spec
+  // before it asks for the lease, and fails the row when it can have none of them.
 
   /**
-   * Start, for a RUNNER row: <b>start is pull</b>. The row is marked QUEUED and waits for a runner's
-   * reserve to take it ({@link RunnerClaims#reserveFor}); nothing is pushed to any runner.
+   * Start, for a TARGET row: ask qits-system for a WORKSPACE lease.
    *
    * <ul>
-   *   <li>a row whose runner is offline past the grace (UNAVAILABLE) → 409 {@code
-   *       RUNNER_UNAVAILABLE}: it is sticky to that runner and nothing else can start it;
-   *   <li>already RUNNING, PROVISIONING or QUEUED → nothing to do. The start process still open
-   *       for it is answered, so a second press joins the first;
+   *   <li>already RUNNING, PROVISIONING or QUEUED → nothing to do. The start process still open for
+   *       it is answered, so a second press joins the first; a QUEUED row's process says why it
+   *       waits (the lease's {@code detail});
    *   <li>the durable branch is gone → abandoned and 404, as rung 3 of the DIRECT ladder does;
    *   <li>no edge address plane ({@link EdgePlaneUnconfigured}: no public {@code QITS_DOMAIN}) →
-   *       FAILED with {@code EDGE_PLANE_UNCONFIGURED} as its runtime error, and nothing queued;
-   *   <li>no workspace token and none could be minted → FAILED with {@code
-   *       WORKSPACE_TOKEN_UNAVAILABLE} and the reason, and nothing queued ({@link
-   *       #ensureRunnerToken}): a RUNNER container reaches every hop with that token, so a row
-   *       never becomes claimable without one;
-   *   <li>STOPPED or FAILED → the compare-and-swap to QUEUED, {@code queuedAt} now, the runner
-   *       kept, and the backlog told.
+   *       FAILED with {@code EDGE_PLANE_UNCONFIGURED} as its runtime error, and no lease;
+   *   <li>a previous lease still names the row (EXITED, FAILED or ENDING) → it is ended and waited
+   *       for, up to {@link TargetPlacement#ENDING_DEADLINE}, else 504 {@code TARGET_TIMEOUT}:
+   *       qits-system holds one live lease per owner ref;
+   *   <li>no workspace token could be minted → FAILED with {@code WORKSPACE_TOKEN_UNAVAILABLE} and
+   *       the reason, and no lease ({@link #mintLeaseToken}): the container reaches every hop with
+   *       that token;
+   *   <li>qits-system refused the request itself (a 4xx: the image is not a workspace image, this
+   *       service is not a WORKSPACE tenant) → FAILED with {@code TARGET_REFUSED} and its answer;
+   *       did not answer, or answered 5xx or 409 → 409 {@code TARGET_UNAVAILABLE} and the row as it
+   *       was. Either way the token minted for it is deleted;
+   *   <li>otherwise the lease is recorded on the row, QUEUED with {@code queuedAt} now and the
+   *       lease's {@code detail} as its runtime error, and {@link TargetLeaseStates} takes it from
+   *       there.
    * </ul>
    *
-   * <p>The process it answers opens segment {@code queued} ("waiting for a slot on &lt;runner&gt;",
-   * "waiting for a runner" for a row on none, or "no enabled workspace runner" when no runner could
-   * take it at all — the same line a re-press on such a queued row answers); the claim settles it
-   * and opens {@code container}, and the runner's {@code launched} or {@code launchFailed} settles
-   * that.
+   * <p><b>A row a retired runner held</b> ({@code legacy_placement}, {@code V30}) asks with {@code
+   * adopt{container, volume}} = {@code qits-workspaces-runner-ws-<rowId>-<oldRunnerId8>} and {@code
+   * pinTargetId} the target on the same docker engine ({@link #legacyPin}); the adopted name stays
+   * on the row ({@code adopted_volume}) and every later lease carries it.
    */
-  private String beginRunnerStart(Workspace row) {
-    return beginRunnerStart(row, true);
+  private String beginTargetStart(Workspace row) {
+    return beginTargetStart(row, true);
   }
 
   /**
-   * {@link #beginRunnerStart(Workspace)}, with or without its technical process. A create queues
-   * its row through here unnarrated ({@code narrate} false): no process is opened and none is
-   * answered, and the row's runtime status is the whole of its progress (qits-853).
+   * {@link #beginTargetStart(Workspace)}, with or without its technical process. A create starts its
+   * row through here unnarrated ({@code narrate} false): no process is opened and none is answered,
+   * and the row's runtime status is the whole of its progress (qits-853).
    */
-  private String beginRunnerStart(Workspace row, boolean narrate) {
-    if (row.runnerId != null && !runnerPresent(row.runnerId)) {
-      throw RunnerRefusals.unavailable(row.id, "start");
-    }
+  private String beginTargetStart(Workspace row, boolean narrate) {
     if (row.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
         || row.runtimeStatus == WorkspaceRuntimeStatus.PROVISIONING
         || row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
-      // A runner that missed this row's backlog signal (a ledger race fixed elsewhere, qits-1275)
-      // can sit idle on a QUEUED row it could take. A start here answers the caller's press either
-      // way, but it is also a nudge: re-push the backlog so an idle runner gets another look.
-      if (row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED && runnerPlacement.isResolvable()) {
-        runnerPlacement.get().backlogChanged(row);
-      }
-      Optional<WorkspaceProcessTracker.Handle> open = runnerClaims.trackedStart(row.id);
+      Optional<WorkspaceProcessTracker.Handle> open = leaseStates.trackedStart(row.id);
       if (open.isPresent()) {
         return narrate ? open.get().id() : null;
       }
       WorkspaceProcessTracker.Handle process =
           narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null;
       if (process != null) {
-        // A queued row nothing could take says why it waits (qits-774): it is not an error, the
-        // row is simply parked until a runner is enabled.
         process.completeNoOp(
-            RunnerClaims.QUEUED_SEGMENT,
-            row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED && noRunnerCanTake(row.runnerId)
-                ? NO_ENABLED_RUNNER
+            TargetLeaseStates.QUEUED_SEGMENT,
+            row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED
+                    && row.runtimeError != null
+                    && !row.runtimeError.isBlank()
+                ? "Waiting for a workspace slot: " + row.runtimeError
                 : "Already " + row.runtimeStatus.name().toLowerCase() + " — nothing to do.");
       }
       return process == null ? null : process.id();
     }
     // A slot (qits-1152) names no branch, so only an old-model row can have lost its own.
     if (row.branch != null && !row.branch.isBlank() && !branchExists(row.repositoryId, row.branch)) {
-      abandonRunnerRow(row);
+      abandonTargetRow(row);
     }
-    // The edge plane, BEFORE the row is queued: a deployment with no public domain has no address a
-    // runner's container could reach home by, so the row goes FAILED saying so and no runner is
-    // ever sent it. Nothing else is read off the plane here; the claim composes the spec from it.
+    // The edge plane, BEFORE anything is minted or leased: a deployment with no public domain has
+    // no address a slot's container could reach home by, so the row goes FAILED saying so.
+    WorkspaceAddressPlane plane;
     try {
-      addressPlanes.plane();
+      plane = addressPlanes.plane();
     } catch (EdgePlaneUnconfigured refused) {
       return failUnplaceable(row, refused.getMessage(), narrate);
     }
-    // The workspace token, after the plane and BEFORE the queue, outside every transaction: the
-    // mint is an HTTP call to qits-idp. A row that already holds one keeps it — a STOPPED row's
-    // container carries it in its spec, and the start re-presents that spec unchanged.
-    String unminted = ensureRunnerToken(row);
+    if (!targetPlacement.isResolvable()) {
+      throw TargetRefusals.unavailable(row.id, "start", "no lease client is configured");
+    }
+    TargetPlacement leases = targetPlacement.get();
+    // qits-system holds one live lease per owner ref: a previous one has to be over first.
+    retirePreviousLease(row, leases, "start");
+    // The lease's token, minted immediately before the lease is asked for and outside every
+    // transaction (an HTTP call to qits-idp). A token a previous container held is given back first.
+    String unminted = mintLeaseToken(row);
     if (unminted != null) {
       return failUnplaceable(row, unminted, narrate);
+    }
+    Workspace current = QuarkusTransaction.requiringNew().call(() -> requireActive(row.id));
+    TargetPlacement.LeaseRequest request;
+    String adopted;
+    try {
+      adopted = adoptedVolume(current);
+      request =
+          new TargetPlacement.LeaseRequest(
+              current.id,
+              projectUuid(repositoryOf(current.repositoryId)),
+              leaseSpecs.compose(current, plane),
+              adopted == null ? null : new TargetPlacement.Adopt(adopted, adopted),
+              legacyPin(current.id, leases));
+    } catch (RuntimeException uncomposable) {
+      decommissionFor(row.id);
+      return failUnplaceable(
+          row, "the lease spec could not be composed: " + uncomposable.getMessage(), narrate);
     }
 
     WorkspaceProcessTracker.Handle process =
         narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null;
     if (process != null) {
-      process.openSegment(RunnerClaims.QUEUED_SEGMENT);
-      process.appendLine(RunnerClaims.QUEUED_SEGMENT, waitingFor(row.runnerId));
-      // Carried BEFORE the swap, so a runner that takes the row the instant it is queued finds the
-      // process to settle.
-      runnerClaims.track(row.id, process);
+      process.openSegment(TargetLeaseStates.QUEUED_SEGMENT);
+      process.appendLine(TargetLeaseStates.QUEUED_SEGMENT, "Asking for a workspace slot.");
+      // Carried BEFORE the lease is asked for, so a grant that arrives the instant it is made finds
+      // the process to settle.
+      leaseStates.track(row.id, process);
     }
-    int queued =
+    TargetPlacement.Lease lease;
+    try {
+      lease = leases.create(request);
+    } catch (TargetPlacement.LeaseRefused refused) {
+      leaseStates.forget(row.id, process);
+      decommissionFor(row.id);
+      if (refused.permanent()) {
+        return failUnplaceableWith(
+            row, TARGET_REFUSED + ": " + refused.getMessage(), process, narrate);
+      }
+      if (process != null) {
+        process.completeNoOp(TargetLeaseStates.QUEUED_SEGMENT, refused.getMessage());
+      }
+      throw TargetRefusals.unavailable(row.id, "start", refused.getMessage());
+    }
+    leaseStates.expectStart(lease.id());
+    int recorded =
         QuarkusTransaction.requiringNew()
-            .call(() -> workspaceRepository.queueForRunner(row.id, Instant.now()));
-    if (queued == 0) {
-      // Something else moved the row between the read and the swap: a second start, or a stop.
-      runnerClaims.forget(row.id, process);
+            .call(
+                () ->
+                    workspaceRepository.recordLease(
+                        row.id,
+                        lease.id(),
+                        lease.targetId(),
+                        truncate(lease.detail()),
+                        adopted,
+                        Instant.now()));
+    if (recorded == 0) {
+      // Something else moved the row between the read and the write: a stop, a second start, a
+      // resolution. This lease is nobody's.
+      LOG.infof(
+          "Workspace %s/%s moved while its lease %s was asked for; the lease is ended",
+          row.repositoryId, row.workspaceId, lease.id());
+      leaseStates.forget(row.id, process);
+      endQuietly(leases, lease.id(), row.id);
       if (process != null) {
         process.completeNoOp(
-            RunnerClaims.QUEUED_SEGMENT, "The workspace is not stopped any more — nothing to queue.");
+            TargetLeaseStates.QUEUED_SEGMENT,
+            "The workspace is not stopped any more — nothing to start.");
       }
       return process == null ? null : process.id();
     }
+    if (process != null && lease.detail() != null && !lease.detail().isBlank()) {
+      process.appendLine(TargetLeaseStates.QUEUED_SEGMENT, "Waiting: " + lease.detail());
+    }
+    LOG.infof(
+        "Workspace %s/%s asked for lease %s (%s)",
+        row.repositoryId, row.workspaceId, lease.id(), lease.state());
     changePublisher.runtimeChanged(row.repositoryId, row.id);
-    if (runnerPlacement.isResolvable()) {
-      runnerPlacement.get().backlogChanged(row);
+    // The lease may have moved before the row named it: apply what it says now, and once more from
+    // a fresh read, so a grant that raced the write is not left for the reconcile.
+    leaseStates.observe(lease);
+    try {
+      leases.get(lease.id()).ifPresent(leaseStates::observe);
+    } catch (RuntimeException unread) {
+      LOG.debugf("Could not re-read lease %s; its event or the reconcile will", lease.id());
     }
     return process == null ? null : process.id();
   }
 
   /**
-   * A RUNNER start refused before the queue: the row FAILED with the refusal as its runtime error
-   * ({@code EDGE_PLANE_UNCONFIGURED: QITS_DOMAIN '<v>' is not a public domain}, or {@code
-   * WORKSPACE_TOKEN_UNAVAILABLE: …}), the start's process — when it is narrated — failed with one
-   * {@code container} segment saying the same, and nothing queued.
+   * A TARGET start refused before a lease: the row FAILED with the refusal as its runtime error
+   * ({@code EDGE_PLANE_UNCONFIGURED: QITS_DOMAIN '<v>' is not a public domain}, {@code
+   * WORKSPACE_TOKEN_UNAVAILABLE: …} or {@code TARGET_REFUSED: …}), the start's process — when it is
+   * narrated — failed with one {@code container} segment saying the same, and no lease.
    */
   private String failUnplaceable(Workspace row, String reason, boolean narrate) {
+    return failUnplaceableWith(
+        row, reason, narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null, narrate);
+  }
+
+  private String failUnplaceableWith(
+      Workspace row, String reason, WorkspaceProcessTracker.Handle open, boolean narrate) {
     LOG.errorf(
-        "Workspace %s/%s cannot be placed on a runner: %s",
+        "Workspace %s/%s cannot be placed on a target: %s",
         row.repositoryId, row.workspaceId, reason);
     boolean failed =
         QuarkusTransaction.requiringNew()
@@ -3322,61 +3358,49 @@ public class WorkspaceService {
     if (failed) {
       announceRuntime(row.id, row.repositoryId, WorkspaceRuntimeStatus.FAILED, truncate(reason));
     }
-    WorkspaceProcessTracker.Handle process =
-        narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null;
+    WorkspaceProcessTracker.Handle process = narrate ? open : null;
     if (process == null) {
       return null;
     }
-    process.openSegment(RunnerClaims.CONTAINER_SEGMENT);
-    process.appendLine(RunnerClaims.CONTAINER_SEGMENT, reason);
-    process.settleSegment(RunnerClaims.CONTAINER_SEGMENT, false);
+    process.openSegment(TargetLeaseStates.CONTAINER_SEGMENT);
+    process.appendLine(TargetLeaseStates.CONTAINER_SEGMENT, reason);
+    process.settleSegment(TargetLeaseStates.CONTAINER_SEGMENT, false);
     process.failProvision(reason);
     return process.id();
   }
 
-  /** The code a RUNNER row's runtime error starts with when no workspace token could be had. */
+  /** The code a TARGET row's runtime error starts with when no workspace token could be had. */
   static final String TOKEN_UNAVAILABLE = "WORKSPACE_TOKEN_UNAVAILABLE";
 
+  /** The code a TARGET row's runtime error starts with when qits-system refused its lease. */
+  static final String TARGET_REFUSED = "TARGET_REFUSED";
+
   /**
-   * Makes sure {@code row} holds its workspace token (qits-625, qits-802), minting one when it holds
-   * none; answers null when it does, else the reason it does not, as a runtime error.
+   * Mints the workspace token the next lease of {@code row} carries (qits-625, qits-802, epic
+   * qits-1481), answering null when the row holds it, else the reason it does not, as a runtime
+   * error.
    *
-   * <p>The RUNNER counterpart of {@link #commissionFor}: the same context ({@code workspace}, the
-   * row id), the same {@code project} claim and the same Git refs, read and stored the same way —
-   * but a {@code qits_tok_} rather than a client pair, and never both. Called outside every
-   * transaction; each row read and write is its own.
+   * <p><b>One token per lease.</b> The dossier's rule for every slot type: the owner mints the
+   * lease's token immediately before {@code POST /system/api/leases} and deletes it as soon as the
+   * lease reports ENDED, EXITED or FAILED ({@link TargetLeaseStates}). A token the row still holds
+   * here belongs to no live lease — a stopped legacy container's, or one a crash left — and is given
+   * back before the new one is minted.
    *
-   * <p><b>Reused, not replaced.</b> A row that holds a token keeps it: the token lives as long as
-   * the container (delete-container, recreate and resolution delete it), and a stop does not
-   * revoke it, because the start re-presents the spec that carries it.
-   *
-   * <p><b>Refused, not degraded.</b> A RUNNER container has no other credential, so no issuer, an
-   * issuer that stayed unreachable through the commissioner's patience, or an empty answer all fail
-   * the start — unlike a DIRECT row, which launches with no credential when no issuer is wired.
-   *
-   * <p>Two starts racing both mint; the second to store finds the first's token and deletes its own.
+   * <p><b>Refused, not degraded.</b> The container has no other credential, so no issuer, an issuer
+   * that stayed unreachable through the commissioner's patience, or an empty answer all fail the
+   * start. The kind is {@code workspace} (a TARGET row is never admin), the context the row id, the
+   * claims the row's project, and {@code gitRefs: []}: every push is an agent's, on the agent's
+   * token.
    */
-  private String ensureRunnerToken(Workspace row) {
+  private String mintLeaseToken(Workspace row) {
     Long rowId = row.id;
-    boolean held =
-        QuarkusTransaction.requiringNew()
-            .call(
-                () ->
-                    workspaceRepository
-                        .findActiveById(rowId)
-                        .map(wt -> wt.commissionedTokenId != null)
-                        .orElse(false));
-    if (held) {
-      return null;
-    }
+    decommissionFor(rowId);
     if (!commissioner.isResolvable()) {
       return TOKEN_UNAVAILABLE + ": no issuer is wired to mint the workspace token";
     }
     RepositoryLookup.RepositoryView repository = repositoryOf(row.repositoryId);
     Optional<WorkspaceToken> issued;
     try {
-      // A RUNNER row is never admin (ck_workspace_runner_posture), so its token is `workspace`.
-      // It pushes nothing (`gitRefs: []`): every push is an agent's, on the agent's token.
       issued = mintToken(rowId, repository, List.of(), false);
     } catch (RuntimeException failed) {
       return TOKEN_UNAVAILABLE + ": " + failed.getMessage();
@@ -3388,15 +3412,7 @@ public class WorkspaceService {
     if (!storeToken(rowId, token)) {
       // Another start stored a token first, or the row resolved meanwhile: this one is nobody's.
       deleteToken(token.tokenId());
-      boolean nowHeld =
-          QuarkusTransaction.requiringNew()
-              .call(
-                  () ->
-                      workspaceRepository
-                          .findActiveById(rowId)
-                          .map(wt -> wt.holdsToken())
-                          .orElse(false));
-      return nowHeld ? null : TOKEN_UNAVAILABLE + ": the workspace is no longer active";
+      return TOKEN_UNAVAILABLE + ": the workspace is no longer active, or is starting already";
     }
     LOG.debugf(
         "Minted workspace token %s for workspace %s/%s",
@@ -3405,38 +3421,119 @@ public class WorkspaceService {
   }
 
   /**
-   * Why a QUEUED RUNNER row on no runner is waiting, when it is because no runner could take it at
-   * all (qits-774): none registered, in service and with slots. A regular workspace is written
-   * RUNNER whatever the estate holds, so this is a waiting state, never a refusal.
+   * Ends the lease {@code row} still names, if any, and waits until qits-system reports it ENDED,
+   * then clears it off the row with its token. 504 {@code TARGET_TIMEOUT} when it is still ending
+   * after {@link TargetPlacement#ENDING_DEADLINE}; 409 {@code TARGET_UNAVAILABLE} when qits-system
+   * cannot be asked.
    */
-  static final String NO_ENABLED_RUNNER = "no enabled workspace runner";
-
-  /** Whether {@code runnerId} is none and no runner is eligible to take the row at all. */
-  private boolean noRunnerCanTake(UUID runnerId) {
-    return runnerId == null
-        && !QuarkusTransaction.requiringNew().call(() -> runnerRepository.existsEligible());
-  }
-
-  /**
-   * The {@code queued} segment's line: which runner the row waits for, that it waits for any, or
-   * {@link #NO_ENABLED_RUNNER} when there is none it could wait for.
-   */
-  private String waitingFor(UUID runnerId) {
-    if (runnerId == null) {
-      return noRunnerCanTake(null) ? NO_ENABLED_RUNNER : "waiting for a runner";
-    }
-    String name =
+  private void retirePreviousLease(Workspace row, TargetPlacement leases, String verb) {
+    UUID leaseId =
         QuarkusTransaction.requiringNew()
-            .call(() -> runnerRepository.namesById(Set.of(runnerId)).get(runnerId));
-    return "waiting for a slot on " + (name == null ? runnerId.toString() : name);
+            .call(() -> workspaceRepository.findByIdOptional(row.id).map(w -> w.leaseId).orElse(null));
+    if (leaseId == null) {
+      return;
+    }
+    Instant deadline = Instant.now().plus(TargetPlacement.ENDING_DEADLINE);
+    try {
+      Optional<TargetPlacement.Lease> now = leases.end(leaseId);
+      while (now.isPresent() && now.get().state().live()) {
+        if (Instant.now().isAfter(deadline)) {
+          throw TargetRefusals.timeout(row.id, verb);
+        }
+        sleepQuietly(Duration.ofMillis(500));
+        now = leases.get(leaseId);
+      }
+    } catch (TargetPlacement.LeaseRefused refused) {
+      throw TargetRefusals.unavailable(row.id, verb, refused.getMessage());
+    }
+    leaseStates.observe(TargetLeaseStates.ended(leaseId));
   }
 
   /**
-   * Rung 3 of the ladder for a RUNNER row: its durable branch is gone, so it is abandoned and 404s,
-   * as a DIRECT row is. What differs is the teardown: the volume is on the runner's node, so a
-   * runner holding the row is told it is released instead of a volume being removed here.
+   * The adopted name every lease of {@code row} carries: the one on the row, or — for its first
+   * lease — the one its {@code legacy_placement} entry names. Null for a row no retired runner held.
    */
-  private void abandonRunnerRow(Workspace row) {
+  private String adoptedVolume(Workspace row) {
+    if (row.adoptedVolume != null && !row.adoptedVolume.isBlank()) {
+      return row.adoptedVolume;
+    }
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                legacyPlacements
+                    .findByIdOptional(row.id)
+                    .map(eu.wohlben.qits.workspaces.entity.LegacyPlacement::legacyName)
+                    .orElse(null));
+  }
+
+  /**
+   * The target on the docker engine a retired runner ran {@code rowId} on, for its adopting lease's
+   * {@code pinTargetId}: the target whose engine id is the one the runner recorded, else whose host
+   * name is, else whose name is the runner's name. Null — unpinned — for a row with no {@code
+   * legacy_placement} entry, and, with a WARN naming the row and the volume, when no target matches:
+   * the lease may then be granted elsewhere, and the old volume is left on its node.
+   */
+  private UUID legacyPin(Long rowId, TargetPlacement leases) {
+    eu.wohlben.qits.workspaces.entity.LegacyPlacement entry =
+        QuarkusTransaction.requiringNew()
+            .call(() -> legacyPlacements.findByIdOptional(rowId).orElse(null));
+    if (entry == null) {
+      return null;
+    }
+    List<TargetPlacement.Target> targets;
+    try {
+      targets = leases.targets();
+    } catch (RuntimeException unread) {
+      LOG.warnf(
+          "Workspace %s adopts %s, and the targets could not be read to pin it (%s); it is asked"
+              + " for unpinned",
+          rowId, entry.legacyName(), unread.getMessage());
+      return null;
+    }
+    Optional<UUID> pinned =
+        match(targets, entry.engineId, TargetPlacement.Target::engineId)
+            .or(() -> match(targets, entry.hostname, TargetPlacement.Target::hostname))
+            .or(() -> match(targets, entry.runnerName, TargetPlacement.Target::name));
+    if (pinned.isEmpty()) {
+      LOG.warnf(
+          "Workspace %s adopts volume %s, and no target is on runner %s's docker engine (engine id"
+              + " %s, host name %s): its lease is unpinned and the old volume is left on its node",
+          rowId, entry.legacyName(), entry.runnerName, entry.engineId, entry.hostname);
+    }
+    return pinned.orElse(null);
+  }
+
+  private static Optional<UUID> match(
+      List<TargetPlacement.Target> targets,
+      String wanted,
+      java.util.function.Function<TargetPlacement.Target, String> fact) {
+    if (wanted == null || wanted.isBlank()) {
+      return Optional.empty();
+    }
+    return targets.stream()
+        .filter(t -> wanted.equals(fact.apply(t)))
+        .map(TargetPlacement.Target::id)
+        .findFirst();
+  }
+
+  /** A project id qits-system can take, or null: it is a UUID there. */
+  private static UUID projectUuid(RepositoryLookup.RepositoryView repository) {
+    String project = projectOf(repository);
+    if (project == null) {
+      return null;
+    }
+    try {
+      return UUID.fromString(project);
+    } catch (IllegalArgumentException notAUuid) {
+      return null;
+    }
+  }
+
+  /**
+   * Rung 3 of the ladder for a TARGET row: its durable branch is gone, so it is abandoned and 404s,
+   * as a DIRECT row is. Its lease is ended, and its work volume purged once that lease is ENDED.
+   */
+  private void abandonTargetRow(Workspace row) {
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
@@ -3450,143 +3547,178 @@ public class WorkspaceService {
                   new WorkspaceResolved(
                       wt.repositoryId, wt.workspaceId, wt.id, WorkspaceStatus.ABANDONED));
             });
-    releaseFromRunner(row);
+    releaseFromTarget(row);
     decommissionFor(row.id);
     throw new NotFoundException(
         "Workspace '" + row.workspaceId + "' has no branch to recreate from; abandoned");
   }
 
   /**
-   * Stop, for a RUNNER row. A QUEUED row just goes back to STOPPED with no frame — nothing runs
-   * anywhere yet — unless a runner took it in the meantime, when it is stopped like a placed row. A
-   * row on no runner has nothing to stop. Otherwise {@code stop} is routed to its runner and awaited
-   * ({@link RunnerPlacement#stop}: 409 {@code RUNNER_UNAVAILABLE} offline, 504 {@code
-   * RUNNER_TIMEOUT} with the row unchanged), then the row is STOPPED.
+   * Stop, for a TARGET row: its lease is ended ({@code DELETE /system/api/leases/{id}}) and the row
+   * is STOPPED. A QUEUED lease is ENDED at once; a granted one is ENDING until its target reports
+   * the container gone, and {@link TargetLeaseStates} then clears it off the row with its token. The
+   * work volume stays. A row with no lease — a stopped one, or a row a retired runner still runs —
+   * just goes STOPPED, and its token is given back.
    */
-  private void stopOnRunner(Workspace row) {
-    Workspace current = row;
-    if (current.runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
-      int unqueued =
-          QuarkusTransaction.requiringNew().call(() -> workspaceRepository.unqueueForRunner(row.id));
-      if (unqueued == 1) {
-        runnerClaims.abandonStart(row.id, "Stopped before a runner took it.");
-        changePublisher.runtimeChanged(row.repositoryId, row.id);
-        if (runnerPlacement.isResolvable()) {
-          runnerPlacement.get().backlogChanged(row);
-        }
-        return;
+  private void stopOnTarget(Workspace row) {
+    UUID leaseId = row.leaseId;
+    if (leaseId != null) {
+      if (!targetPlacement.isResolvable()) {
+        throw TargetRefusals.unavailable(row.id, "stop", "no lease client is configured");
       }
-      current = QuarkusTransaction.requiringNew().call(() -> requireActive(row.id));
+      Optional<TargetPlacement.Lease> ended;
+      try {
+        ended = targetPlacement.get().end(leaseId);
+      } catch (TargetPlacement.LeaseRefused refused) {
+        throw TargetRefusals.unavailable(row.id, "stop", refused.getMessage());
+      }
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  workspaceRepository
+                      .findActiveById(row.id)
+                      .filter(wt -> leaseId.equals(wt.leaseId))
+                      .ifPresent(
+                          wt -> {
+                            wt.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                            wt.runtimeError = null;
+                            wt.queuedAt = null;
+                          }));
+      if (ended.isEmpty() || !ended.get().state().live()) {
+        leaseStates.observe(TargetLeaseStates.ended(leaseId));
+      }
+    } else {
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  workspaceRepository
+                      .findActiveById(row.id)
+                      .filter(wt -> wt.leaseId == null)
+                      .ifPresent(
+                          wt -> {
+                            wt.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                            wt.queuedAt = null;
+                          }));
+      decommissionFor(row.id);
     }
-    if (current.runnerId == null) {
-      return;
-    }
-    UUID runnerId = current.runnerId;
-    placement(current.id, "stop").stop(current);
-    QuarkusTransaction.requiringNew()
-        .run(
-            () ->
-                workspaceRepository
-                    .findActiveById(row.id)
-                    .filter(wt -> runnerId.equals(wt.runnerId))
-                    .ifPresent(
-                        wt -> {
-                          wt.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
-                          wt.queuedAt = null;
-                        }));
-    runnerClaims.abandonStart(row.id, "Stopped.");
+    leaseStates.abandonStart(row.id, "Stopped.");
     changePublisher.runtimeChanged(row.repositoryId, row.id);
   }
 
   /**
-   * Delete-container, for a RUNNER row: {@code delete} is routed to its runner and awaited (container
-   * and {@code -ws-<rowId>} volume), then the row is STOPPED with <b>no runner</b>. Nothing of it is
-   * left on that node, so stickiness ends and the next start may be taken by any runner. The row
-   * stays ACTIVE. A row on no runner has nothing on any node, and just goes STOPPED.
-   *
-   * <p>The workspace token goes with the container (qits-625): its columns are cleared and it is
-   * deleted at qits-idp, and the next start mints a fresh one for the container it launches.
+   * Delete-container, for a TARGET row: its lease is ended and waited for (up to {@link
+   * TargetPlacement#ENDING_DEADLINE}, else 504 {@code TARGET_TIMEOUT}), then its work volume {@code
+   * ws-<rowId>} is purged on its target ({@code DELETE /system/api/work-volumes/ws-<rowId>}), and
+   * the row is STOPPED with no lease, no target and no adopted volume. The row stays ACTIVE, and its
+   * next start gets a fresh volume on any target. The workspace token goes with the container.
    */
-  private void deleteOnRunner(Workspace row) {
-    UUID runnerId = row.runnerId;
-    if (runnerId != null) {
-      placement(row.id, "delete its container").delete(row);
+  private void deleteOnTarget(Workspace row) {
+    if (row.leaseId != null || targetPlacement.isResolvable()) {
+      if (!targetPlacement.isResolvable()) {
+        throw TargetRefusals.unavailable(
+            row.id, "delete its container", "no lease client is configured");
+      }
+      TargetPlacement leases = targetPlacement.get();
+      retirePreviousLease(row, leases, "delete its container");
+      try {
+        leases.purgeWorkVolume(TargetPlacement.workKey(row.id));
+      } catch (TargetPlacement.LeaseRefused refused) {
+        if (refused.status() == 409) {
+          throw TargetRefusals.timeout(row.id, "delete its container");
+        }
+        throw TargetRefusals.unavailable(row.id, "delete its container", refused.getMessage());
+      }
     }
     QuarkusTransaction.requiringNew()
         .run(
-            () ->
-                workspaceRepository
-                    .findActiveById(row.id)
-                    .filter(wt -> Objects.equals(runnerId, wt.runnerId))
-                    .ifPresent(
-                        wt -> {
-                          wt.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
-                          wt.runtimeError = null;
-                          wt.runnerId = null;
-                          wt.queuedAt = null;
-                        }));
-    runnerClaims.abandonStart(row.id, "The container was deleted.");
+            () -> {
+              workspaceRepository
+                  .findActiveById(row.id)
+                  .ifPresent(
+                      wt -> {
+                        wt.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                        wt.runtimeError = null;
+                        wt.leaseId = null;
+                        wt.targetId = null;
+                        wt.adoptedVolume = null;
+                        wt.queuedAt = null;
+                      });
+              // The old volume is gone, or the person removes it with the retired runner's: the
+              // next lease adopts nothing.
+              legacyPlacements.deleteById(row.id);
+            });
+    leaseStates.abandonStart(row.id, "The container was deleted.");
     decommissionFor(row.id);
     changePublisher.runtimeChanged(row.repositoryId, row.id);
-    if (runnerPlacement.isResolvable()) {
-      if (row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
-        runnerPlacement.get().backlogChanged(row);
-      }
-      if (runnerId != null) {
-        runnerPlacement.get().estateChanged(runnerId);
-      }
-    }
   }
 
   /**
-   * Recreate, for a RUNNER row: the agent-worktree gate first, exactly the DIRECT one (a live agent
-   * with leftover work, busy, or uncheckable refuses with 400), then {@link #deleteOnRunner}
-   * (container and volume gone, the workspace token deleted, the runner cleared), then the start,
-   * which mints a fresh token and queues the row for any runner (qits-625).
+   * Recreate, for a TARGET row: the agent-worktree gate first, exactly the DIRECT one (a live agent
+   * with leftover work, busy, or uncheckable refuses with 400), then {@link #deleteOnTarget}
+   * (lease ended, work volume purged, token deleted), then the start, which mints a fresh token and
+   * asks for a new lease on any target.
    */
-  private String beginRunnerRecreate(Workspace row) {
+  private String beginTargetRecreate(Workspace row) {
     requireCleanForRecreate(row.workspaceId, row.id);
-    deleteOnRunner(row);
-    return beginRunnerStart(QuarkusTransaction.requiringNew().call(() -> requireActive(row.id)));
-  }
-
-  /** The port for a routed verb, or 409 {@code RUNNER_UNAVAILABLE} when there is none. */
-  private RunnerPlacement placement(Long rowId, String verb) {
-    if (!runnerPlacement.isResolvable()) {
-      throw RunnerRefusals.unavailable(rowId, verb);
-    }
-    return runnerPlacement.get();
+    deleteOnTarget(row);
+    return beginTargetStart(QuarkusTransaction.requiringNew().call(() -> requireActive(row.id)));
   }
 
   /**
-   * A RUNNER row left the estate: a connected runner holding it is told to delete it, without
-   * waiting; an offline one drops it at its next estate. Never in the way of the resolution.
+   * A TARGET row left the estate: its lease is ended once the resolution committed, without
+   * waiting, and {@link TargetLeaseStates} purges its work volume when that lease is ENDED; a row
+   * with no lease has its volume purged at once. Never in the way of the resolution.
    */
-  private void releaseFromRunner(Workspace row) {
-    runnerClaims.abandonStart(row.id, "The workspace was resolved.");
-    if (!runnerPlacement.isResolvable()) {
+  private void releaseFromTarget(Workspace row) {
+    leaseStates.abandonStart(row.id, "The workspace was resolved.");
+    if (!targetPlacement.isResolvable()) {
       return;
     }
+    UUID leaseId = row.leaseId;
+    long rowId = row.id;
+    TargetPlacement leases = targetPlacement.get();
+    afterCommit(
+        () -> {
+          try {
+            if (leaseId != null) {
+              leases.end(leaseId).filter(l -> !l.state().live()).ifPresent(leaseStates::observe);
+            } else {
+              leases.purgeWorkVolume(TargetPlacement.workKey(rowId));
+            }
+          } catch (RuntimeException e) {
+            LOG.debugf(
+                e, "Could not release resolved workspace %s's lease; the reconcile will", rowId);
+          }
+        });
+  }
+
+  private static void endQuietly(TargetPlacement leases, UUID leaseId, Long rowId) {
     try {
-      if (row.runnerId != null) {
-        runnerPlacement.get().released(row);
-        runnerPlacement.get().estateChanged(row.runnerId);
-      } else if (row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
-        runnerPlacement.get().backlogChanged(row);
-      }
+      leases.end(leaseId);
     } catch (RuntimeException e) {
-      LOG.debugf(e, "Could not tell a runner workspace %s resolved; its estate will", row.id);
+      LOG.warnf(
+          "Could not end lease %s nobody holds (workspace %s); the reconcile will: %s",
+          leaseId, rowId, e.getMessage());
+    }
+  }
+
+  private static void sleepQuietly(Duration pause) {
+    try {
+      Thread.sleep(pause.toMillis());
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new DomainException(503, "Interrupted while waiting for a lease to end");
     }
   }
 
   /**
-   * {@link #doDiscard}'s teardown for a RUNNER row. The row resolves exactly as a DIRECT one does
+   * {@link #doDiscard}'s teardown for a TARGET row. The row resolves exactly as a DIRECT one does
    * (the branch deletion, the status, the history event, the resolved event, the metadata) — the
    * tail below is that method's, kept in step with it — and what differs is the container half:
-   * nothing here calls qits-containers, and resolution never waits on a runner ({@link
-   * #releaseFromRunner}).
+   * nothing here calls qits-containers, and resolution never waits on a lease ({@link
+   * #releaseFromTarget}).
    */
-  private void discardOnRunner(
+  private void discardOnTarget(
       String repoId,
       Workspace workspace,
       WorkspaceStatus resolution,
@@ -3596,7 +3728,7 @@ public class WorkspaceService {
       boolean deleteBranch) {
     try {
       String branch = workspace.branch;
-      releaseFromRunner(workspace);
+      releaseFromTarget(workspace);
       workspace.commissionedClientSecret = null;
       String commissioned = workspace.commissionedClientId;
       workspace.commissionedClientId = null;
@@ -3615,8 +3747,8 @@ public class WorkspaceService {
 
       workspace.status = resolution;
       workspace.resolvedAt = Instant.now();
-      // STOPPED here and not from the runner's reply: RunnerClaims.write ignores a row that is no
-      // longer ACTIVE, so the Deleted that follows the release never reaches this column (qits-1064).
+      // STOPPED here and not from the lease: the row keeps naming its lease until it is ENDED, so the
+      // volume is purged then, and nothing writes a resolved row's runtime status (qits-1064).
       workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
       workspace.queuedAt = null;
       if (result != null && !result.isBlank()) {

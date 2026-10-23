@@ -157,7 +157,7 @@ public class WorkspaceTunnels {
 
     /**
      * Who may dial back for this tunnel's streams, read when it was opened. A tunnel lives as long as
-     * one daemon connection, and a RUNNER row's token only changes with its container — which
+     * one daemon connection, and a TARGET row's token only changes with its container — which
      * replaces the connection, and with it the tunnel.
      */
     private final DialBack dialBack;
@@ -201,7 +201,7 @@ public class WorkspaceTunnels {
    * qits-1084).
    *
    * <p>A row holding the client pair (or nothing) dials back over {@code qits-net} and the nonce is
-   * its whole authentication, as it always was. A row holding a workspace token — every RUNNER row,
+   * its whole authentication, as it always was. A row holding a workspace token — every TARGET row,
    * and a DIRECT admin or editor row on an edge plane — dials back through the edge with that token,
    * so it must also carry a bearer this service validated whose {@code sub} is the row's token
    * subject ({@code boundSubject}); a token-bound row with no subject admits nothing.
@@ -312,7 +312,7 @@ public class WorkspaceTunnels {
 
   /**
    * Who may dial back for {@code workspaceRowId}'s streams: whether the row holds a workspace token
-   * and, when it does, the token's subject. A row holding a token — every RUNNER row, and a DIRECT
+   * and, when it does, the token's subject. A row holding a token — every TARGET row, and a DIRECT
    * admin or editor row on an edge plane (qits-1084) — has a daemon that dials back through the edge
    * with that token, so its subject is required beside the nonce; a row holding the pair, or
    * nothing, dials back over {@code qits-net} on the nonce alone. Decided by what the row holds, not

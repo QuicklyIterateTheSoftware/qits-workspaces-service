@@ -118,7 +118,7 @@ public class OneActiveWorkspacePerWorkItemTest {
               workspace.status = status;
               workspace.workId = workId;
               // A regular row is RUNNER: an ACTIVE regular DIRECT one is refused (V15, qits-780).
-              workspace.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
+              workspace.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
               workspaceRepository.persist(workspace);
               return workspace.id;
             });

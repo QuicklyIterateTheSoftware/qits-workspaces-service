@@ -168,7 +168,7 @@ public class BranchResolutionControllerTest {
               main.repositoryId = repoId;
               main.parent = null;
               main.branch = "master";
-              main.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
+              main.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
               workspaceRows.persist(main);
             });
     repositories.setMainBranch(repoId, "trunk");

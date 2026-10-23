@@ -70,7 +70,7 @@ keys:
 
   env.QITS_CONTAINERS_URL:
     type: string
-    description: "Where qits-containers answers. Admin workspace containers and volumes are started and removed there; regular workspaces run on workspace runners."
+    description: "Where qits-containers answers. Admin workspace containers and volumes are started and removed there; regular workspaces run in workspace slots of execution targets."
 
   env.QITS_EVENTS_URL:
     type: string
@@ -79,6 +79,10 @@ keys:
   env.QITS_OBSERVABILITY_URL:
     type: string
     description: "Where this service's own OTLP telemetry goes."
+
+  env.QITS_SYSTEM_URL:
+    type: string
+    description: "Where qits-system answers: scheme, host and port, no path. Every regular workspace's container runs under a WORKSPACE lease asked for there."
 
   # --- what each workspace container is handed ---------------------------------------------------
 

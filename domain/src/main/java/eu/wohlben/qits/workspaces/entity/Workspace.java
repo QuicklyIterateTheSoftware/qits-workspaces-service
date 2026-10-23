@@ -158,7 +158,7 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
 
   /**
    * The workspace token minted for this row's <em>current container</em> (qits-625, {@code V13}):
-   * qits-idp's id for it, the {@code sub} the edge stamps on its JWT, and the value. A RUNNER row's
+   * qits-idp's id for it, the {@code sub} the edge stamps on its JWT, and the value. A TARGET row's
    * container always holds one; a DIRECT (admin) row's holds one in place of the pair
    * above whenever the deployment has an edge plane (qits-1084). All three null on a row whose
    * container holds no token, and never set beside the pair: every commission clears both first.
@@ -216,28 +216,47 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public boolean admin = false;
 
   /**
-   * Where this workspace's container runs ({@code V12}): {@link WorkspacePlacement#DIRECT} on the
-   * platform host through qits-containers, or {@link WorkspacePlacement#RUNNER} on a workspace
-   * runner's node. Decided at create and never changed, like {@link #admin}. Admin rows are always
-   * DIRECT; {@code ck_workspace_runner_posture} keeps that. (The {@code editor} column of {@code V7}
-   * is unread since the editor was removed, qits-1152.)
+   * Where this workspace's container runs ({@code V12}, {@code V30}): {@link
+   * WorkspacePlacement#DIRECT} on the platform host through qits-containers, or {@link
+   * WorkspacePlacement#TARGET} in a WORKSPACE slot of an execution target, leased from qits-system.
+   * Decided at create and never changed, like {@link #admin}. Admin rows are always DIRECT; {@code
+   * ck_workspace_runner_posture} keeps that. (The {@code editor} column of {@code V7} is unread
+   * since the editor was removed, qits-1152.)
    */
   @Enumerated(EnumType.STRING)
   @Column(name = "placement", nullable = false, length = 16)
   public WorkspacePlacement placement = WorkspacePlacement.DIRECT;
 
   /**
-   * The {@link WorkspaceRunner} that holds this workspace, or null: always null on a DIRECT row
-   * ({@code ck_workspace_runner_placement}), and null on a RUNNER row no runner has taken yet. Sticky
-   * while it is set, because the workspace's volume lives on that runner's node. No foreign key; see
-   * {@code V12}.
+   * The qits-system lease this TARGET row's container runs under ({@code V30}, epic qits-1481), or
+   * null: always null on a DIRECT row, null on a TARGET row with no live lease. Set when the lease is
+   * created and cleared once it is ENDED; {@code commissioned_token_*} holds that lease's token. No
+   * foreign key: the lease lives in qits-system's database.
    */
-  @Column(name = "runner_id")
-  public UUID runnerId;
+  @Column(name = "lease_id")
+  public UUID leaseId;
 
   /**
-   * When this RUNNER row was last asked to start ({@link WorkspaceRuntimeStatus#QUEUED}), so runners
-   * take the oldest first. Null while the row is not waiting.
+   * The target the current lease was granted on, or null while it is QUEUED or there is none. The
+   * work volume {@code ws-<rowId>} lives on that target between leases, which is qits-system's to
+   * remember; this column is what the listing shows.
+   */
+  @Column(name = "target_id")
+  public UUID targetId;
+
+  /**
+   * The retired workspaces runner's container and volume name this row's work was adopted from
+   * ({@code qits-workspaces-runner-ws-<rowId>-<oldRunnerId8>}, {@code V30}), or null. Every lease of
+   * the row carries {@code adopt{container, volume}} with it for as long as it is set: the runner
+   * mounts the adopted volume only when the lease names it, so a lease without it would get a fresh,
+   * empty work volume. Cleared with the volume, by a delete-container.
+   */
+  @Column(name = "adopted_volume", columnDefinition = "text")
+  public String adoptedVolume;
+
+  /**
+   * When this TARGET row was last asked to start ({@link WorkspaceRuntimeStatus#QUEUED}), while its
+   * lease waits for a slot. Null while the row is not waiting.
    */
   @Column(name = "queued_at")
   public Instant queuedAt;

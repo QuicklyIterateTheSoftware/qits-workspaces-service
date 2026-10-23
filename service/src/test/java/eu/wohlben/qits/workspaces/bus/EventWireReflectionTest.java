@@ -72,10 +72,11 @@ class EventWireReflectionTest {
             WorkspaceStarted.class,
             WorkspaceFailed.class,
             WorkspaceRemoved.class,
+            eu.wohlben.qits.workspaces.targethost.TargetLeaseChanged.class,
             EventEnvelope.class,
             EventFrame.class),
         Set.of(registration.targets()),
-        "the fourteen lifecycle events out, the PUT body, the frame — a new wire type is added"
+        "the fourteen lifecycle events out, qits-system's lease event in, the PUT body, the frame — a new wire type is added"
             + " here");
   }
 

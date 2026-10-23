@@ -1,10 +1,10 @@
 package eu.wohlben.qits.workspaces.control;
 
 /**
- * There is no edge plane to compose a RUNNER workspace's addresses from (qits-625): {@code
+ * There is no edge plane to compose a TARGET workspace's addresses from (qits-625): {@code
  * QITS_DOMAIN} is blank, has no dot, or is {@code localhost} or a {@code *.localhost} name — none of
  * which a container on a runner's node could reach the platform by. Thrown by {@link
- * WorkspaceAddressPlane#of}; the RUNNER start turns it into a FAILED row whose runtime error is
+ * WorkspaceAddressPlane#of}; the TARGET start turns it into a FAILED row whose runtime error is
  * {@link #getMessage()}, and queues nothing.
  */
 public class EdgePlaneUnconfigured extends RuntimeException {

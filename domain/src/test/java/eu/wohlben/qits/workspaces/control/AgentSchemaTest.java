@@ -44,7 +44,7 @@ public class AgentSchemaTest {
               row.workspaceId = "ws-schema";
               row.status = WorkspaceStatus.ACTIVE;
               row.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
-              row.placement = WorkspacePlacement.RUNNER;
+              row.placement = WorkspacePlacement.TARGET;
               workspaces.persist(row);
               return row.id;
             });

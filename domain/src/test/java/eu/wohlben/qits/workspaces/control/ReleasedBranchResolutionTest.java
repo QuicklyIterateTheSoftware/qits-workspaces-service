@@ -172,7 +172,7 @@ public class ReleasedBranchResolutionTest {
               main.repositoryId = repoId;
               main.parent = null;
               main.branch = "master";
-              main.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.RUNNER;
+              main.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
               workspaceRepository.persist(main);
             });
     repositories.setMainBranch(repoId, "trunk");

@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenFiles;
-import eu.wohlben.qits.workspacesrunner.protocol.WorkspacesRunnerProtocol;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
 import jakarta.inject.Inject;
@@ -39,11 +38,8 @@ import org.junit.jupiter.api.Test;
  * describing them. One addition: {@code frozen.numbers} lists the paths of frozen row ids. An answer
  * with no body (a 204, a bare 202) records {@code file: null} and no file, as qits-githost's does.
  *
- * <p><b>The frames it sends a workspace runner are recorded beside the calls</b> (qits-950): one
- * operation {@code frame:<type>} per ({@link RunnerFrames#FRAMES state, frame}), whose file is the
- * frame's JSON as it went on the wire, frozen like an answer ({@link Freezer#frames}). Such an
- * operation has no method, query or status; it says {@code kind: frame}, the wire type as {@code
- * frame}, the socket's {@code path} and the {@code trigger} that sent it.
+ * <p>The frames it sent a workspace runner (qits-950) went with the runner (epic qits-1481): a
+ * workspace runs under a qits-system lease now, and no socket of this service's is left to record.
  *
  * <p>It compares by default and fails with a diff per differing file, including a committed file
  * no interaction records any more. {@code -Dgolden.update=true} (or {@code QITS_GOLDEN_UPDATE=true})
@@ -169,14 +165,6 @@ class GoldenMasterRecordingTest {
   static final String FIXED_VERSION = "2026.101.120000";
 
   private static final String WORKSPACES = "/workspaces/api";
-
-  /**
-   * What the runner toolkit's {@code Registration} sends the register door: always the four keys,
-   * however little the runner knows (qits-runner-toolkit-contracts' fixture recording).
-   */
-  private static final String TOOLKIT_REGISTRATION =
-      "{\"capabilities\":{\"docker\":true,\"arch\":\"amd64\",\"os\":\"linux\","
-          + "\"labels\":{\"site\":\"home\"}}}";
 
   static final List<Interaction> INTERACTIONS =
       List.of(
@@ -327,49 +315,6 @@ class GoldenMasterRecordingTest {
               null,
               Map.of("$.pins[*].version", FIXED_VERSION),
               null),
-          Interaction.write(
-              ProviderStates.NO_RUNNERS,
-              "createRunner",
-              WORKSPACES + "/runners",
-              201,
-              "{\"name\":\"{runnerName}\",\"slots\":1}")
-              .fixing("$.runner.pinnedVersion"),
-          Interaction.read(
-                  ProviderStates.AN_UNREGISTERED_RUNNER, "listRunners", WORKSPACES + "/runners", "$")
-              .fixing("$[*].pinnedVersion"),
-          Interaction.write(
-              ProviderStates.AN_UNREGISTERED_RUNNER,
-              "rotateRunnerRegistrationToken",
-              WORKSPACES + "/runners/{runnerId}/registration-token",
-              200,
-              null)
-              .fixing("$.runner.pinnedVersion"),
-          // The runner toolkit's register door (qits-1163): the registration token as its bearer.
-          Interaction.write(
-                  ProviderStates.AN_UNREGISTERED_RUNNER,
-                  "registerRunner",
-                  WORKSPACES + "/runners/{runnerId}/register",
-                  200,
-                  TOOLKIT_REGISTRATION)
-              .sending("Authorization", "authorization"),
-          Interaction.write(
-                  ProviderStates.A_REGISTERED_RUNNER,
-                  "registerRunner",
-                  WORKSPACES + "/runners/{runnerId}/register",
-                  409,
-                  TOOLKIT_REGISTRATION)
-              .sending("Authorization", "authorization"),
-          Interaction.read(
-                  ProviderStates.A_CONNECTED_RUNNER, "listRunners", WORKSPACES + "/runners", "$")
-              .fixing("$[*].pinnedVersion"),
-          Interaction.write(
-              ProviderStates.A_QUARANTINED_RUNNER,
-              "greenlightRunner",
-              WORKSPACES + "/runners/{runnerId}/greenlight",
-              200,
-              null)
-              .fixing("$.pinnedVersion")
-              .as("qits:system"),
           // The landing app's workspace pages (epic qits-1230). The project's page: the wrapper's
           // slots, and every agent (it keeps the wrapper's). Other tests share the store, so both
           // lists keep only this state's rows.
@@ -508,13 +453,13 @@ class GoldenMasterRecordingTest {
               "{\"force\":false}"),
           // The slot's container buttons.
           Interaction.write(
-              ProviderStates.A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE,
+              ProviderStates.A_STOPPED_SLOT,
               "ensureWorkspaceContainer",
               WORKSPACES + "/workspaces/{workspaceId}/ensure-container",
               200,
               null),
           Interaction.write(
-              ProviderStates.A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE,
+              ProviderStates.A_SLOT_RUNNING_ON_A_TARGET,
               "stopWorkspaceContainer",
               WORKSPACES + "/workspaces/{workspaceId}/stop-container",
               200,
@@ -528,25 +473,25 @@ class GoldenMasterRecordingTest {
               null),
           // The messages name the row id, which a fixed text records as the frozen one.
           Interaction.write(
-                  ProviderStates.A_SLOT_ON_A_DISCONNECTED_RUNNER,
+                  ProviderStates.A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT,
                   "ensureWorkspaceContainer",
                   WORKSPACES + "/workspaces/{workspaceId}/ensure-container",
                   409,
                   null)
               .fixing(
                   "$.message",
-                  "Workspace 1 is on a runner that is offline; it cannot start until the runner is"
-                      + " back"),
+                  "Workspace 1 cannot start: qits-system did not take the lease call (qits-system"
+                      + " could not be asked: Connection refused)"),
           Interaction.write(
-                  ProviderStates.A_SLOT_ON_A_DISCONNECTED_RUNNER,
+                  ProviderStates.A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT,
                   "stopWorkspaceContainer",
                   WORKSPACES + "/workspaces/{workspaceId}/stop-container",
                   409,
                   null)
               .fixing(
                   "$.message",
-                  "Workspace 1 is on a runner that is offline; it cannot stop until the runner is"
-                      + " back"),
+                  "Workspace 1 cannot stop: qits-system did not take the lease call (qits-system"
+                      + " could not be asked: Connection refused)"),
           // A resolved slot's record: what is left once its container and volume are gone.
           Interaction.read(
               ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION,
@@ -562,129 +507,6 @@ class GoldenMasterRecordingTest {
               ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION,
               "getWorkspaceAgentTranscript",
               WORKSPACES + "/history/{workspaceId}/agent-sessions/{sessionId}/transcript",
-              null),
-          // The runners page (qits-1244).
-          Interaction.read(ProviderStates.A_RUNNER_IN_SERVICE, "listRunners", WORKSPACES + "/runners", "$")
-              .fixing("$[*].pinnedVersion")
-              .fixing("$[*].version")
-              .fixing("$[*].loginCommand", ProviderStates.CLAUDE_LOGIN_COMMAND)
-              .fixing("$[*].kimiLoginCommand", ProviderStates.KIMI_LOGIN_COMMAND),
-          Interaction.read(
-              ProviderStates.A_RUNNER_IN_SERVICE,
-              "getRunnerHealth",
-              WORKSPACES + "/runners/{runnerId}/health",
-              null),
-          Interaction.write(
-              ProviderStates.A_RUNNER_IN_SERVICE,
-              "requestRunnerHealthcheck",
-              WORKSPACES + "/runners/{runnerId}/healthcheck",
-              202,
-              null),
-          Interaction.write(
-              ProviderStates.A_RUNNER_IN_SERVICE,
-              "requestRunnerLoginCheck",
-              WORKSPACES + "/runners/{runnerId}/login-check",
-              202,
-              null),
-          Interaction.call(
-                  ProviderStates.A_RUNNER_IN_SERVICE,
-                  "patchRunner",
-                  "PATCH",
-                  WORKSPACES + "/runners/{runnerId}",
-                  200,
-                  "{\"slots\":2,\"description\":\"The build machine under the desk\","
-                      + "\"workspaceMemoryLimit\":\"8g\",\"workspaceMemorySwapLimit\":\"8g\"}")
-              .fixing("$.pinnedVersion")
-              .fixing("$.version")
-              .fixing("$.loginCommand", ProviderStates.CLAUDE_LOGIN_COMMAND)
-              .fixing("$.kimiLoginCommand", ProviderStates.KIMI_LOGIN_COMMAND),
-          Interaction.read(
-                  ProviderStates.AN_UNREGISTERED_RUNNER,
-                  "getRunnerHealth",
-                  WORKSPACES + "/runners/{runnerId}/health",
-                  null)
-              .answering(204),
-          Interaction.write(
-              ProviderStates.AN_UNREGISTERED_RUNNER,
-              "requestRunnerHealthcheck",
-              WORKSPACES + "/runners/{runnerId}/healthcheck",
-              409,
-              null),
-          Interaction.write(
-              ProviderStates.AN_UNREGISTERED_RUNNER,
-              "requestRunnerLoginCheck",
-              WORKSPACES + "/runners/{runnerId}/login-check",
-              409,
-              null),
-          Interaction.call(
-              ProviderStates.AN_UNREGISTERED_RUNNER,
-              "deleteRunner",
-              "DELETE",
-              WORKSPACES + "/runners/{runnerId}",
-              204,
-              null),
-          // A runner a workspace is placed on is not deleted from under it.
-          Interaction.call(
-                  ProviderStates.A_WORKSPACE_SLOT_HOSTING_AGENTS,
-                  "deleteRunner",
-                  "DELETE",
-                  WORKSPACES + "/runners/{runnerId}",
-                  409,
-                  null)
-              .fixing(
-                  "$.message",
-                  "RUNNER_OWNS_WORKSPACES: runner localhost owns 1 active workspace(s) [1]; resolve"
-                      + " them before deleting it"),
-          // The runner doors' other answers (qits-1149), for qits-bootstrap-cli's runner phases and
-          // qits-platform-access-cli's `qits workspaces runners`: a taken name, a rotation for a
-          // runner that already registered, a greenlight of a runner in service (answered as it
-          // is), and the doors on a runner id nobody declared.
-          Interaction.write(
-              ProviderStates.AN_UNREGISTERED_RUNNER,
-              "createRunner",
-              WORKSPACES + "/runners",
-              409,
-              "{\"name\":\"{runnerName}\",\"slots\":1}"),
-          Interaction.write(
-              ProviderStates.A_CONNECTED_RUNNER,
-              "rotateRunnerRegistrationToken",
-              WORKSPACES + "/runners/{runnerId}/registration-token",
-              409,
-              null),
-          Interaction.write(
-                  ProviderStates.A_RUNNER_IN_SERVICE,
-                  "greenlightRunner",
-                  WORKSPACES + "/runners/{runnerId}/greenlight",
-                  200,
-                  null)
-              .fixing("$.pinnedVersion")
-              .fixing("$.version")
-              .fixing("$.loginCommand", ProviderStates.CLAUDE_LOGIN_COMMAND)
-              .fixing("$.kimiLoginCommand", ProviderStates.KIMI_LOGIN_COMMAND),
-          Interaction.read(
-                  ProviderStates.NO_RUNNERS,
-                  "getRunnerHealth",
-                  WORKSPACES + "/runners/{runnerId}/health",
-                  null)
-              .answering(404),
-          Interaction.write(
-              ProviderStates.NO_RUNNERS,
-              "rotateRunnerRegistrationToken",
-              WORKSPACES + "/runners/{runnerId}/registration-token",
-              404,
-              null),
-          Interaction.write(
-              ProviderStates.NO_RUNNERS,
-              "greenlightRunner",
-              WORKSPACES + "/runners/{runnerId}/greenlight",
-              404,
-              null),
-          Interaction.call(
-              ProviderStates.NO_RUNNERS,
-              "deleteRunner",
-              "DELETE",
-              WORKSPACES + "/runners/{runnerId}",
-              404,
               null));
 
   /**
@@ -697,8 +519,6 @@ class GoldenMasterRecordingTest {
   private static final Pattern TEMPLATE_PARAM = Pattern.compile("\\{([^}]+)}");
 
   @Inject ProviderStates states;
-
-  @Inject RunnerFrames frames;
 
   /** The state's name as a directory: lower case, runs of anything else as one dash. */
   static String slug(String state) {
@@ -781,36 +601,6 @@ class GoldenMasterRecordingTest {
         written.add(file);
         check(dir.resolve(file), GoldenJson.render(recorded.body()), update, failures);
       }
-    }
-
-    for (RunnerFrames.Frame frame : RunnerFrames.FRAMES) {
-      Recorded recorded = record(frame);
-      String slug = slug(frame.state());
-      String file = slug + "/" + frame.fileName();
-      indexState(indexStates, frame.state(), recorded.params(), failures);
-
-      ObjectNode operation = JsonNodeFactory.instance.objectNode();
-      operation.put("operationId", frame.operationId());
-      operation.put("kind", "frame");
-      operation.put("frame", frame.type());
-      operation.put("path", WorkspacesRunnerProtocol.SOCKET_PATH);
-      ObjectNode trigger = operation.putObject("trigger");
-      frame.cause().trigger().reference().forEach(trigger::put);
-      operation.put("file", file);
-      ObjectNode frozen = operation.putObject("frozen");
-      frozen.set("ids", strings(recorded.freezer().idPaths()));
-      frozen.set("instants", strings(recorded.freezer().instantPaths()));
-      frozen.set("strings", strings(recorded.freezer().stringPaths()));
-      frozen.set("numbers", strings(recorded.freezer().numberPaths()));
-      frozen.putNull("listFilteredTo");
-      if (indexOperations
-              .computeIfAbsent(slug, k -> new TreeMap<>())
-              .put(frame.operationId(), operation)
-          != null) {
-        failures.add("Duplicate frame " + file);
-      }
-      written.add(file);
-      check(dir.resolve(file), GoldenJson.render(recorded.body()), update, failures);
     }
 
     ObjectNode index = JsonNodeFactory.instance.objectNode();
@@ -933,41 +723,6 @@ class GoldenMasterRecordingTest {
                 k,
                 ROW_ID_PARAMS.contains(k) ? freezer.freezeRowIdParam(v) : freezer.freezeParam(v)));
     return new Recorded(body == null ? null : freezer.freeze(body), frozenParams, freezer);
-  }
-
-  /**
-   * The frame {@code frame} names, sent in its state by the real code path ({@link
-   * RunnerFrames#send}) and frozen as an answer is, with the runner's own row id fields.
-   */
-  private Recorded record(RunnerFrames.Frame frame) throws IOException {
-    ProviderStates.Setup setup = states.setUp(frame.state());
-    String text;
-    try {
-      text = frames.send(frame, setup.params());
-    } finally {
-      states.cleanUp();
-    }
-    JsonNode body = JSON.readTree(text);
-    Freezer freezer = new Freezer().rowIds(setup.rowIds()).frames();
-    for (Map.Entry<String, String> fixed : frame.fixedStrings().entrySet()) {
-      fix(body, fixed.getKey().substring(1), fixed.getValue());
-      freezer.markString(fixed.getKey());
-    }
-    for (String path : frame.rowIdsIn()) {
-      edit(body, path.substring(1), freezer::freezeRowIdSegments);
-      freezer.markString(path);
-    }
-    ObjectNode frozenParams = JsonNodeFactory.instance.objectNode();
-    setup
-        .params()
-        .forEach(
-            (k, v) ->
-                frozenParams.put(
-                    k,
-                    ROW_ID_PARAMS.contains(k)
-                        ? freezer.freezeRowIdParam(v)
-                        : freezer.freezeParam(v)));
-    return new Recorded(freezer.freeze(body), frozenParams, freezer);
   }
 
   /** Sets every string at {@code rest} (a {@code .a[*].b} path below {@code node}) to {@code value}. */

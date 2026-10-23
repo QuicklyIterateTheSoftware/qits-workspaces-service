@@ -34,7 +34,6 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
  * <b>What qits-workspaces asks qits-idp, and why</b> (qits-1149) — the table {@code
@@ -51,9 +50,8 @@ import java.util.UUID;
  *       CommissionReconciler.reconcile}, and a token handed back with its container ({@code
  *       deleteWorkspaceContainer}, {@code discardWorkspace}, {@code recreateWorkspaceContainer}, and
  *       the scheduler's removal of a slot or an agent).
- *   <li>{@link IdpRunnerCommissioner} — a runner's registration token ({@code createRunner}, {@code
- *       rotateRunnerRegistrationToken}) and its own client, with the spent token deleted ({@code
- *       registerRunner}).
+ *   <li>{@code targethost/LegacyRunnerClients} — the retired workspaces runners' clients and tokens
+ *       (epic qits-1481), listed and given back once at boot through the same commissioner.
  *   <li>quarkus-oidc-client's {@code qits} client — the platform-audience bearer this service sends
  *       qits-containers, qits-githost and qits-projects, minted with {@code client_secret_basic}
  *       ({@code POST /idp/token}).
@@ -94,14 +92,10 @@ public final class IdpContract {
   static final String AGENT_TOKEN_REFUSED = "an agent's token whose stated Git refs are refused";
   static final String AGENT_TOKEN_PUSHING_NOTHING =
       "an agent's token being commissioned to push nothing";
-  static final String RUNNER_CLIENT = "a workspace runner being commissioned";
-  static final String RUNNER_REGISTRATION = "a workspace runner's registration token being commissioned";
 
   static final Trigger RECONCILE = Trigger.schedule("AgentService.reconcile");
   static final Trigger COMMISSIONS = Trigger.schedule("CommissionReconciler.reconcile");
-  static final Trigger CREATE_RUNNER = Trigger.operation("createRunner");
-  static final Trigger ROTATE = Trigger.operation("rotateRunnerRegistrationToken");
-  static final Trigger REGISTER = Trigger.operation("registerRunner");
+  static final Trigger LEGACY_RUNNERS = Trigger.schedule("LegacyRunnerClients.giveBack");
 
   private static final String BASIC = "{authorization}";
 
@@ -216,56 +210,34 @@ public final class IdpContract {
               tokenHandback(Trigger.operation("discardWorkspace")),
               tokenHandback(Trigger.operation("recreateWorkspaceContainer")),
               tokenHandback(RECONCILE),
-              // --- a runner's credentials ------------------------------------------------------
+              // --- the retired runners' credentials (epic qits-1481) -------------------------
+              // LegacyRunnerClients lists both and gives back every one of the retired kinds: the
+              // reconcile's requests, told apart by their trigger.
               ContractRow.of(
-                  CREATE_RUNNER,
-                  RUNNER_REGISTRATION,
-                  "commissionToken",
-                  basic(registrationCommission()),
-                  List.of("$.tokenId", "$.token", "$.subject"),
-                  (url, params) -> {
-                    IdpRunnerCommissioner.IssuedToken issued =
-                        runnerCommissionerAgainst(url, params).registrationToken(runnerId(params));
-                    assertRecordedToken(RUNNER_REGISTRATION, issued.tokenId(), issued.subject());
-                  }),
+                  LEGACY_RUNNERS,
+                  A_CLIENT,
+                  "listClients",
+                  basic(null),
+                  List.of("$[*].clientId", "$[*].contextKind", "$[*].contextId"),
+                  (url, params) ->
+                      assertFalse(commissionerAgainst(url, params).list().isEmpty())),
               ContractRow.of(
-                  ROTATE,
-                  RUNNER_REGISTRATION,
-                  "commissionToken",
-                  basic(registrationCommission()),
-                  List.of("$.tokenId", "$.token", "$.subject"),
-                  (url, params) -> {
-                    IdpRunnerCommissioner.IssuedToken issued =
-                        runnerCommissionerAgainst(url, params).registrationToken(runnerId(params));
-                    assertRecordedToken(RUNNER_REGISTRATION, issued.tokenId(), issued.subject());
-                  }),
-              ContractRow.of(
-                  REGISTER,
-                  RUNNER_CLIENT,
-                  "commissionClient",
-                  basic(
-                      new PactDslJsonBody()
-                          .stringValue("contextKind", IdpRunnerCommissioner.RUNNER_KIND)
-                          .valueFromProviderState(
-                              "contextId", "${runnerId}", param(RUNNER_CLIENT, "runnerId"))
-                          .nullValue("claims")),
-                  List.of("$.clientId", "$.secret"),
-                  (url, params) -> {
-                    IdpRunnerCommissioner.RunnerClient client =
-                        runnerCommissionerAgainst(url, params).runnerClient(runnerId(params));
-                    JsonNode recorded =
-                        GoldenMasters.json(GoldenMasters.IDP, RUNNER_CLIENT, "commissionClient");
-                    assertEquals(recorded.path("clientId").asText(), client.clientId());
-                  }),
-              ContractRow.of(
-                  REGISTER,
-                  A_TOKEN,
-                  "deleteToken",
+                  LEGACY_RUNNERS,
+                  A_CLIENT,
+                  "decommissionClient",
                   basic(null),
                   List.of(),
                   (url, params) ->
-                      assertTrue(
-                          runnerCommissionerAgainst(url, params).deleteToken(params.get("tokenId")))),
+                      commissionerAgainst(url, params).decommission(params.get("clientId"))),
+              ContractRow.of(
+                  LEGACY_RUNNERS,
+                  A_TOKEN,
+                  "listTokens",
+                  basic(null),
+                  List.of("$[*].tokenId", "$[*].contextKind", "$[*].contextId", "$[*].createdAt"),
+                  (url, params) ->
+                      assertFalse(commissionerAgainst(url, params).listTokens().isEmpty())),
+              tokenHandback(LEGACY_RUNNERS),
               // --- the tenant's signing keys ---------------------------------------------------
               ContractRow.of(
                   Trigger.event("StartupEvent"),
@@ -488,21 +460,9 @@ public final class IdpContract {
     return array.closeArray();
   }
 
-  /** A runner's registration token: its kind and the runner id, nothing else. */
-  private static DslPart registrationCommission() {
-    return new PactDslJsonBody()
-        .stringValue("contextKind", IdpRunnerCommissioner.REGISTRATION_KIND)
-        .valueFromProviderState(
-            "contextId", "${runnerId}", param(RUNNER_REGISTRATION, "runnerId"));
-  }
-
   /** The workspace row a state names: its {@code workspaceId} param. */
   private static Long workspaceId(Map<String, String> params) {
     return Long.valueOf(params.get("workspaceId"));
-  }
-
-  private static UUID runnerId(Map<String, String> params) {
-    return UUID.fromString(params.get("runnerId"));
   }
 
   /** The request {@code commission} builds for a workspace row, stating {@code gitRefs}. */
@@ -569,18 +529,6 @@ public final class IdpContract {
   static IdpCredentialCommissioner commissionerAgainst(String mockUrl, Map<String, String> params) {
     String[] pair = pair(params);
     IdpCredentialCommissioner commissioner = new IdpCredentialCommissioner();
-    commissioner.enabled = true;
-    commissioner.clientId = Optional.of(pair[0]);
-    commissioner.clientSecret = Optional.of(pair[1]);
-    commissioner.patience = Duration.ofSeconds(1);
-    commissioner.clients = restClient(mockUrl, IdpClients.class);
-    commissioner.tokens = restClient(mockUrl, IdpTokens.class);
-    return commissioner;
-  }
-
-  static IdpRunnerCommissioner runnerCommissionerAgainst(String mockUrl, Map<String, String> params) {
-    String[] pair = pair(params);
-    IdpRunnerCommissioner commissioner = new IdpRunnerCommissioner();
     commissioner.enabled = true;
     commissioner.clientId = Optional.of(pair[0]);
     commissioner.clientSecret = Optional.of(pair[1]);
