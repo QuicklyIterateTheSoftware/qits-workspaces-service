@@ -567,9 +567,14 @@
                         <argLine>${test-jvm-memory.argLine}</argLine>
                         <!-- The platform injects QITS_DOMAIN into CI steps and agent containers; a
                              test JVM that inherits it picks up the live domain instead of the
-                             suite's domain-less default. Keep it out. -->
+                             suite's domain-less default. Keep it out. QITS_WORKSPACE_DAEMON_API_TOKEN
+                             too: the workspace daemon blanks it to "" in every agent harness
+                             (qits-1152), and it is the env spelling of qits.workspace.daemon-api-token,
+                             so an inherited empty value outranks the shipped default and no
+                             @QuarkusTest starts (SRCFG00040, qits-1512). -->
                         <excludedEnvironmentVariables>
                             <excludedEnvironmentVariable>QITS_DOMAIN</excludedEnvironmentVariable>
+                            <excludedEnvironmentVariable>QITS_WORKSPACE_DAEMON_API_TOKEN</excludedEnvironmentVariable>
                         </excludedEnvironmentVariables>
                     </configuration>
                 </plugin>
@@ -578,9 +583,11 @@
                     <version>${failsafe-plugin.version}</version>
                     <configuration>
                         <!-- Same reasoning as the surefire plugin above: don't let the platform's
-                             QITS_DOMAIN leak into the forked test JVM. -->
+                             QITS_DOMAIN or QITS_WORKSPACE_DAEMON_API_TOKEN leak into the forked test
+                             JVM. -->
                         <excludedEnvironmentVariables>
                             <excludedEnvironmentVariable>QITS_DOMAIN</excludedEnvironmentVariable>
+                            <excludedEnvironmentVariable>QITS_WORKSPACE_DAEMON_API_TOKEN</excludedEnvironmentVariable>
                         </excludedEnvironmentVariables>
                     </configuration>
                 </plugin>
