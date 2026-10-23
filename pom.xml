@@ -66,7 +66,7 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1023.85443</qits.workspace-daemon-protocol.version>
+        <qits.workspace-daemon-protocol.version>2026.1023.152517</qits.workspace-daemon-protocol.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -79,11 +79,11 @@
              the qits/qits-workspaces-runner image every runner is told to upgrade to, so the frames
              this service speaks and the binary it hands out are one release. Moved by
              qits-maintenance on maintenance/dependencies, gated here; never by hand. -->
-        <qits.workspaces-runner-protocol.version>2026.1023.103626</qits.workspaces-runner-protocol.version>
+        <qits.workspaces-runner-protocol.version>2026.1023.152704</qits.workspaces-runner-protocol.version>
         <!-- qits-runner-javalib (qits-771): the lifecycle frames and their codec
              (qits-runner-protocol), and the install script template plus RunnerIdentity
              (qits-runner-toolkit). One release carries both, so one property pins both. -->
-        <qits.runner.version>2026.1023.110903</qits.runner.version>
+        <qits.runner.version>2026.1023.154319</qits.runner.version>
         <qits.coding-agents.version>2026.1021.153257</qits.coding-agents.version>
         <qits.eventstream.version>2026.1019.123026</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
@@ -114,7 +114,7 @@
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1023.110335</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1023.130225</qits.projects-golden-masters.version>
         <!-- The other providers' golden masters (qits-1149), the same rule: qits-idp's for the
              commission doors, the peer token mint and the tenant's discovery and keys
              (wiring/IdpContract); qits-containers' for the place and volume doors
@@ -138,7 +138,7 @@
              ConsumerPactVerificationTest loads every such resource off the test classpath. Test
              scope at the declaration site; a pin in <properties> like every other qits jar, so
              qits-maintenance bumps it when the consumer releases a changed pact. -->
-        <qits.landing-app-pacts-qits-workspaces-service.version>2026.1019.192834</qits.landing-app-pacts-qits-workspaces-service.version>
+        <qits.landing-app-pacts-qits-workspaces-service.version>2026.1023.114204</qits.landing-app-pacts-qits-workspaces-service.version>
         <!-- qits-projects' consumer pact against this service (qits-1152). -->
         <qits.projects-service-pacts-qits-workspaces-service.version>2026.1019.190811</qits.projects-service-pacts-qits-workspaces-service.version>
         <!-- qits-artifacts', qits-bootstrap's, qits-orchestrator's and the qits CLI's consumer
@@ -146,7 +146,7 @@
         <qits.artifacts-service-pacts-qits-workspaces-service.version>2026.1018.153037</qits.artifacts-service-pacts-qits-workspaces-service.version>
         <qits.bootstrap-cli-pacts-qits-workspaces-service.version>2026.1019.84610</qits.bootstrap-cli-pacts-qits-workspaces-service.version>
         <qits.orchestrator-service-pacts-qits-workspaces-service.version>2026.1023.105608</qits.orchestrator-service-pacts-qits-workspaces-service.version>
-        <qits.platform-access-cli-pacts-qits-workspaces-service.version>2026.1019.195617</qits.platform-access-cli-pacts-qits-workspaces-service.version>
+        <qits.platform-access-cli-pacts-qits-workspaces-service.version>2026.1023.112231</qits.platform-access-cli-pacts-qits-workspaces-service.version>
         <!-- qits-workspaces-runner-daemon's consumer pact against this service (qits-1163):
              registerRunner, under "an unregistered runner" and "a registered runner". -->
         <qits.workspaces-runner-daemon-pacts-qits-workspaces-service.version>2026.1022.101507</qits.workspaces-runner-daemon-pacts-qits-workspaces-service.version>
