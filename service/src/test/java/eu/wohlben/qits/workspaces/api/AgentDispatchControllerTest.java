@@ -78,11 +78,14 @@ public class AgentDispatchControllerTest {
 
   @Inject eu.wohlben.qits.workspaces.persistence.WorkspaceRepository workspaceRows;
 
+  @Inject eu.wohlben.qits.workspaces.control.FakeTargetPlacement targets;
+
   /**
    * A TARGET row of {@code repoId}, QUEUED: a lease of this service waits already, so a dispatch
    * queues its agent rather than asking for another workspace (AgentService.targetCapacity).
    */
   private void aLeaseWaits(String repoId) {
+    UUID leaseId = UUID.randomUUID();
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
@@ -94,8 +97,19 @@ public class AgentDispatchControllerTest {
               row.status = eu.wohlben.qits.workspaces.entity.WorkspaceStatus.ACTIVE;
               row.runtimeStatus = eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus.QUEUED;
               row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
-              row.leaseId = UUID.randomUUID();
+              row.leaseId = leaseId;
               workspaceRows.persist(row);
+              workspaceRows.flush();
+              // qits-system holds it QUEUED too, so nothing that asks reads it as gone.
+              targets.seed(
+                  new eu.wohlben.qits.workspaces.control.TargetPlacement.Lease(
+                      leaseId,
+                      String.valueOf(row.id),
+                      eu.wohlben.qits.workspaces.control.TargetPlacement.LeaseState.QUEUED,
+                      null,
+                      null,
+                      "no target has a free WORKSPACE slot",
+                      java.time.Instant.now()));
             });
   }
 
