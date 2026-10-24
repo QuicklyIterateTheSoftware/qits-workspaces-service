@@ -88,8 +88,9 @@ import java.util.Map;
  *
  * <p><b>The scheduler is left ON</b> and that is deliberate rather than an oversight. This service's
  * {@code @Scheduled} methods are the agent-activity sweep (in-memory, no network), the commission
- * reconcile, whose interval is an hour, and the lease reconcile, switched off here (below) — Quarkus schedules the first execution one
- * interval out, so neither <i>tick</i> fires inside a run. The reconcile also runs from a {@code
+ * reconcile, whose interval is an hour, and the lease reconcile, switched off here (below): an
+ * interval job's first run is at boot, measured on the lease reconcile, so whatever an interval job
+ * asks of a peer is boot traffic in the boot story. The commission reconcile also runs from a {@code
  * StartupEvent} observer, and that one does: its listing of the credentials this service holds is a
  * real arrow, on its own thread, racing whichever story is open. It is pinned to the boot story,
  * which awaits it on the peer stub's recording before returning — the standard treatment for
