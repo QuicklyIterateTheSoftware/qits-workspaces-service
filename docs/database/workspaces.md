@@ -85,10 +85,19 @@ erDiagram
     long workspace_id
     text wrapper_branch "not null"
   }
+  %% legacy_placement: eu.wohlben.qits.workspaces.entity.LegacyPlacement (domain)
+  legacy_placement {
+    long row_id PK "not null"
+    text engine_id
+    text hostname
+    uuid old_runner_id "not null"
+    text runner_name
+  }
   %% workspace: eu.wohlben.qits.workspaces.entity.Workspace (domain)
   workspace {
     long id PK "not null, generated"
     boolean admin "not null"
+    text adopted_volume
     string branch
     uuid causation_id
     text commissioned_client_id
@@ -103,6 +112,7 @@ erDiagram
     string entity_status
     text entity_title
     text epic_id
+    uuid lease_id
     string parent_id
     enum placement "not null"
     text preamble
@@ -110,10 +120,10 @@ erDiagram
     string repository_id "not null"
     instant resolved_at
     text result
-    uuid runner_id
     string runtime_error "length 2000"
     enum runtime_status "not null"
     enum status "not null"
+    uuid target_id
     text ticket_id
     text work_id
     string workspace_id "not null"
@@ -130,27 +140,6 @@ erDiagram
     string target
     enum type "not null"
     long workspace_id_fk FK "not null"
-  }
-  %% workspace_runner: eu.wohlben.qits.workspaces.entity.WorkspaceRunner (domain)
-  workspace_runner {
-    uuid id PK "not null"
-    jsonb capabilities
-    uuid causation_id
-    string client_id "length 255"
-    instant created_at "not null"
-    string description "length 1024"
-    instant last_health_check_at
-    boolean last_health_check_ok
-    instant last_seen_at
-    string name "not null, length 64"
-    text quarantine_reason
-    instant quarantined_at
-    instant registered_at
-    string registration_token_id "length 255"
-    string registration_token_subject "length 255"
-    int slots "not null"
-    string workspace_memory_limit "length 32"
-    string workspace_memory_swap_limit "length 32"
   }
   workspace_event }o--|| workspace : "workspace_id_fk"
   %% not drawn: `AgentBranch.key` (`@EmbeddedId`)
