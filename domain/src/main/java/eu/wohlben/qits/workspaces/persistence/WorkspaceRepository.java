@@ -176,14 +176,16 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
   }
 
   /**
-   * How many ACTIVE TARGET rows wait for a slot: their lease is QUEUED (epic qits-1481). The agent
+   * How many ACTIVE TARGET rows wait for a slot: their lease is QUEUED (epic qits-1481). A row that
+   * waits, with no lease, for the target holding its legacy volume is not counted: it waits for a
+   * node, not for a slot. The agent
    * scheduler creates a new regular workspace only while this is zero, so a busy estate queues
    * agents rather than leases; a slot asked for earlier in the same pass is counted before the next
    * is created.
    */
   public long countWaitingForTarget() {
     return count(
-        "status = ?1 and placement = ?2 and runtimeStatus = ?3",
+        "status = ?1 and placement = ?2 and runtimeStatus = ?3 and leaseId is not null",
         WorkspaceStatus.ACTIVE,
         WorkspacePlacement.TARGET,
         WorkspaceRuntimeStatus.QUEUED);
@@ -287,8 +289,8 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
   /**
    * A start's write, once qits-system answered the lease (epic qits-1481): the row records the lease
    * and its target and waits QUEUED, stamped {@code queuedAt}, the lease's {@code detail} as its
-   * runtime error. A compare-and-swap on a STOPPED or FAILED TARGET row that names no lease and
-   * holds a token, so a stop or a second start in between changes nothing: answers 0 or 1.
+   * runtime error. A compare-and-swap on a STOPPED or FAILED TARGET row, or a QUEUED one that waited
+   * for its legacy target, that names no lease and holds a token, so a stop or a second start in between changes nothing: answers 0 or 1.
    */
   public int recordLease(
       Long id, UUID leaseId, UUID targetId, String detail, String adoptedVolume, Instant queuedAt) {
@@ -305,6 +307,9 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
         id,
         WorkspaceStatus.ACTIVE,
         WorkspacePlacement.TARGET,
-        List.of(WorkspaceRuntimeStatus.STOPPED, WorkspaceRuntimeStatus.FAILED));
+        List.of(
+            WorkspaceRuntimeStatus.STOPPED,
+            WorkspaceRuntimeStatus.FAILED,
+            WorkspaceRuntimeStatus.QUEUED));
   }
 }

@@ -1513,7 +1513,14 @@ discard never deletes a main workspace's branch (qits-780), on both placements.
   volume}` = `qits-workspaces-runner-ws-<rowId>-<oldRunnerId8>` and `pinTargetId` the target whose
   `engineId`, else `hostname`, else name matches the runner's (`listTargets`'
   `engineId`/`hostname`; the retired runners never reported either, so for their rows the name is
-  the practical match). No match is a WARN and an unpinned lease. The
+  the practical match). **No match is a wait, never an unpinned lease** (which would start the
+  workspace fresh elsewhere and strand its volume): the row stays QUEUED with no lease and no token,
+  `runtimeError` `waiting for target <oldRunnerName> to be installed (it holds this workspace's
+  volume)`, and every lease reconcile retries it (`WorkspaceService.startWaitingLegacyRows`); an
+  unreadable target listing waits too. Only an entry that names nothing of its runner (no name,
+  engine id or host name: the runner row was gone at `V30`) counts its volume as gone, and is asked
+  for unpinned, adopting nothing, its entry deleted. A waiting row is not counted by the scheduler's
+  capacity rule, which counts only QUEUED rows holding a lease. The
   name is kept on the row (`adopted_volume`) and every later lease carries it — the runner mounts an
   adopted volume only when the lease names it. The entry goes once the lease is RUNNING. A row a
   retired runner still runs (RUNNING with no lease) is left alone until it is stopped or started.

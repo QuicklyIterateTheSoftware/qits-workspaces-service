@@ -94,6 +94,7 @@ public class AgentDispatchControllerTest {
               row.status = eu.wohlben.qits.workspaces.entity.WorkspaceStatus.ACTIVE;
               row.runtimeStatus = eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus.QUEUED;
               row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
+              row.leaseId = UUID.randomUUID();
               workspaceRows.persist(row);
             });
   }

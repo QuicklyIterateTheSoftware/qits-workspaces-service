@@ -483,6 +483,7 @@ public class ProviderStates {
               waiting.status = WorkspaceStatus.ACTIVE;
               waiting.runtimeStatus = WorkspaceRuntimeStatus.QUEUED;
               waiting.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
+              waiting.leaseId = UUID.randomUUID();
               workspaces.persist(waiting);
             });
     Map<String, String> params = new TreeMap<>();

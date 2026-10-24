@@ -1851,7 +1851,8 @@ public class AgentServiceTest {
             () ->
                 workspaces
                     .list(
-                        "status = ?1 and placement = ?2 and runtimeStatus = ?3",
+                        "status = ?1 and placement = ?2 and runtimeStatus = ?3 and leaseId is not"
+                            + " null",
                         WorkspaceStatus.ACTIVE,
                         WorkspacePlacement.TARGET,
                         WorkspaceRuntimeStatus.QUEUED)
@@ -1871,6 +1872,10 @@ public class AgentServiceTest {
     row.status = WorkspaceStatus.ACTIVE;
     row.runtimeStatus = runtimeStatus;
     row.placement = WorkspacePlacement.TARGET;
+    if (runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
+      // QUEUED for a slot: its lease waits (a QUEUED row with no lease waits for a node instead).
+      row.leaseId = UUID.randomUUID();
+    }
     workspaces.persist(row);
   }
 

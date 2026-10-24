@@ -3192,9 +3192,14 @@ public class WorkspaceService {
    * and the row's runtime status is the whole of its progress (qits-853).
    */
   private String beginTargetStart(Workspace row, boolean narrate) {
-    if (row.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
-        || row.runtimeStatus == WorkspaceRuntimeStatus.PROVISIONING
-        || row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED) {
+    // A QUEUED row with no lease waits for the target that holds its legacy volume: a start (and
+    // every reconcile, startWaitingLegacyRows) asks again whether that target is there now.
+    boolean waitingForItsTarget =
+        row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED && row.leaseId == null;
+    if (!waitingForItsTarget
+        && (row.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
+            || row.runtimeStatus == WorkspaceRuntimeStatus.PROVISIONING
+            || row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED)) {
       Optional<WorkspaceProcessTracker.Handle> open = leaseStates.trackedStart(row.id);
       if (open.isPresent()) {
         return narrate ? open.get().id() : null;
@@ -3230,6 +3235,12 @@ public class WorkspaceService {
     TargetPlacement leases = targetPlacement.get();
     // qits-system holds one live lease per owner ref: a previous one has to be over first.
     retirePreviousLease(row, leases, "start");
+    // A row a retired runner held is adopted only on the target that holds its volume: with none
+    // installed yet it waits, asking for no lease and minting no token (legacyPin).
+    LegacyPin legacy = legacyPin(row.id, leases);
+    if (legacy.waitingFor() != null) {
+      return waitForLegacyTarget(row, legacy.waitingFor(), narrate);
+    }
     // The lease's token, minted immediately before the lease is asked for and outside every
     // transaction (an HTTP call to qits-idp). A token a previous container held is given back first.
     String unminted = mintLeaseToken(row);
@@ -3240,14 +3251,14 @@ public class WorkspaceService {
     TargetPlacement.LeaseRequest request;
     String adopted;
     try {
-      adopted = adoptedVolume(current);
+      adopted = legacy.volumeGone() ? null : adoptedVolume(current);
       request =
           new TargetPlacement.LeaseRequest(
               current.id,
               projectUuid(repositoryOf(current.repositoryId)),
               leaseSpecs.compose(current, plane),
               adopted == null ? null : new TargetPlacement.Adopt(adopted, adopted),
-              legacyPin(current.id, leases));
+              legacy.targetId());
     } catch (RuntimeException uncomposable) {
       decommissionFor(row.id);
       return failUnplaceable(
@@ -3467,40 +3478,146 @@ public class WorkspaceService {
   }
 
   /**
+   * Where a row a retired runner held may be adopted ({@code legacy_placement}, {@code V30}).
+   *
+   * @param targetId the target on the old runner's docker engine, or null: no entry, or a volume
+   *     known gone
+   * @param waitingFor the old runner's name while no target on its node is installed: the row
+   *     waits rather than starting fresh elsewhere and stranding its volume
+   * @param volumeGone the entry names no runner at all (its runner row was gone when {@code V30}
+   *     copied it), so no node can hold the volume: the lease is asked for unpinned and adopts
+   *     nothing, and the entry is deleted
+   */
+  private record LegacyPin(UUID targetId, String waitingFor, boolean volumeGone) {
+    static final LegacyPin NONE = new LegacyPin(null, null, false);
+  }
+
+  /**
    * The target on the docker engine a retired runner ran {@code rowId} on, for its adopting lease's
    * {@code pinTargetId}: the target whose engine id is the one the runner recorded, else whose host
-   * name is, else whose name is the runner's name. Null — unpinned — for a row with no {@code
-   * legacy_placement} entry, and, with a WARN naming the row and the volume, when no target matches:
-   * the lease may then be granted elsewhere, and the old volume is left on its node.
+   * name is, else whose name is the runner's name. {@link LegacyPin#NONE} for a row with no {@code
+   * legacy_placement} entry.
+   *
+   * <p><b>No match is a wait, never an unpinned lease</b>: a lease granted anywhere else would
+   * start the workspace fresh and strand its volume on the old node. The row waits QUEUED until a
+   * target on that node is installed ({@link #startWaitingLegacyRows}), and so does a row whose
+   * targets could not be read. Only an entry that names no runner at all — the old runner's row was
+   * already gone, so nothing records where the volume was — is asked for unpinned, adopting
+   * nothing.
    */
-  private UUID legacyPin(Long rowId, TargetPlacement leases) {
+  private LegacyPin legacyPin(Long rowId, TargetPlacement leases) {
     eu.wohlben.qits.workspaces.entity.LegacyPlacement entry =
         QuarkusTransaction.requiringNew()
             .call(() -> legacyPlacements.findByIdOptional(rowId).orElse(null));
     if (entry == null) {
-      return null;
+      return LegacyPin.NONE;
     }
+    if (blankOrNull(entry.runnerName) && blankOrNull(entry.engineId) && blankOrNull(entry.hostname)) {
+      LOG.warnf(
+          "Workspace %s was held by runner %s, of which nothing is recorded: volume %s is taken as"
+              + " gone, and the workspace starts on a fresh volume",
+          rowId, entry.oldRunnerId, entry.legacyName());
+      QuarkusTransaction.requiringNew().run(() -> legacyPlacements.deleteById(rowId));
+      return new LegacyPin(null, null, true);
+    }
+    String waitFor = blankOrNull(entry.runnerName) ? entry.oldRunnerId.toString() : entry.runnerName;
     List<TargetPlacement.Target> targets;
     try {
       targets = leases.targets();
     } catch (RuntimeException unread) {
       LOG.warnf(
-          "Workspace %s adopts %s, and the targets could not be read to pin it (%s); it is asked"
-              + " for unpinned",
+          "Workspace %s adopts %s, and the targets could not be read to pin it (%s); it waits",
           rowId, entry.legacyName(), unread.getMessage());
-      return null;
+      return new LegacyPin(null, waitFor, false);
     }
     Optional<UUID> pinned =
         match(targets, entry.engineId, TargetPlacement.Target::engineId)
             .or(() -> match(targets, entry.hostname, TargetPlacement.Target::hostname))
             .or(() -> match(targets, entry.runnerName, TargetPlacement.Target::name));
     if (pinned.isEmpty()) {
-      LOG.warnf(
-          "Workspace %s adopts volume %s, and no target is on runner %s's docker engine (engine id"
-              + " %s, host name %s): its lease is unpinned and the old volume is left on its node",
+      LOG.infof(
+          "Workspace %s adopts volume %s, and no target is on runner %s's node yet (engine id %s,"
+              + " host name %s): it waits for one",
           rowId, entry.legacyName(), entry.runnerName, entry.engineId, entry.hostname);
+      return new LegacyPin(null, waitFor, false);
     }
-    return pinned.orElse(null);
+    return new LegacyPin(pinned.get(), null, false);
+  }
+
+  /** The runtime error of a row waiting for the target that holds its legacy volume. */
+  static String waitingForTarget(String runner) {
+    return "waiting for target " + runner + " to be installed (it holds this workspace's volume)";
+  }
+
+  /**
+   * Parks {@code row} QUEUED with no lease, saying which target it waits for, and gives back any
+   * token it still held: nothing runs with it. The start's process, when narrated, ends saying so.
+   */
+  private String waitForLegacyTarget(Workspace row, String runner, boolean narrate) {
+    String reason = waitingForTarget(runner);
+    boolean moved =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () ->
+                    workspaceRepository
+                        .findActiveById(row.id)
+                        .filter(w -> w.leaseId == null)
+                        .map(
+                            w -> {
+                              boolean changed =
+                                  w.runtimeStatus != WorkspaceRuntimeStatus.QUEUED
+                                      || !reason.equals(w.runtimeError);
+                              w.runtimeStatus = WorkspaceRuntimeStatus.QUEUED;
+                              w.runtimeError = reason;
+                              if (w.queuedAt == null) {
+                                w.queuedAt = Instant.now();
+                              }
+                              return changed;
+                            })
+                        .orElse(false));
+    decommissionFor(row.id);
+    if (moved) {
+      changePublisher.runtimeChanged(row.repositoryId, row.id);
+    }
+    WorkspaceProcessTracker.Handle process =
+        narrate ? tracker(row.repositoryId, row.workspaceId, row.id) : null;
+    if (process == null) {
+      return null;
+    }
+    process.completeNoOp(TargetLeaseStates.QUEUED_SEGMENT, reason);
+    return process.id();
+  }
+
+  /**
+   * Asks again for every ACTIVE TARGET row that waits, QUEUED with no lease, for the target that
+   * holds its legacy volume (epic qits-1481): the lease reconcile calls this on every pass, so the
+   * adopting, pinned lease is asked for as soon as that target is installed. Answers the rows it
+   * tried. A start that fails is logged and tried again on the next pass.
+   */
+  public List<Long> startWaitingLegacyRows() {
+    List<Workspace> waiting =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () ->
+                    workspaceRepository.list(
+                        "status = ?1 and placement = ?2 and runtimeStatus = ?3 and leaseId is null",
+                        WorkspaceStatus.ACTIVE,
+                        WorkspacePlacement.TARGET,
+                        WorkspaceRuntimeStatus.QUEUED));
+    List<Long> tried = new ArrayList<>();
+    for (Workspace row : waiting) {
+      tried.add(row.id);
+      try {
+        beginTargetStart(row, false);
+      } catch (RuntimeException e) {
+        LOG.debugf(e, "Workspace %s still waits for its target", row.id);
+      }
+    }
+    return tried;
+  }
+
+  private static boolean blankOrNull(String value) {
+    return value == null || value.isBlank();
   }
 
   private static Optional<UUID> match(

@@ -4,6 +4,7 @@ import eu.wohlben.qits.eventstream.QitsEventListener;
 import eu.wohlben.qits.workspaces.control.AgentService;
 import eu.wohlben.qits.workspaces.control.TargetLeaseStates;
 import eu.wohlben.qits.workspaces.control.TargetPlacement;
+import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -25,6 +26,10 @@ import org.jboss.logging.Logger;
  * leases whose owner is {@code qits-workspaces} and whose slot type is WORKSPACE are this service's;
  * every other is another owner's and is ignored.
  *
+ * <p><b>The reconcile also retries the rows a retired runner held</b> whose target is not installed
+ * yet ({@code WorkspaceService.startWaitingLegacyRows}): the adopting, pinned lease is asked for on
+ * the first pass that finds it.
+ *
  * <p><b>The reconcile also ends orphans</b>: a live lease of this service's that no row names, older
  * than {@link #ORPHAN_AFTER} — a start that asked for one and crashed before the row recorded it. And
  * it kicks the agent scheduler when a row moved, as a door would.
@@ -45,6 +50,8 @@ public class TargetLeaseEvents implements QitsEventListener<TargetLeaseChanged> 
   @Inject Instance<TargetPlacement> placement;
 
   @Inject Instance<AgentService> agents;
+
+  @Inject Instance<WorkspaceService> workspaces;
 
   @Override
   public Class<TargetLeaseChanged> eventType() {
@@ -107,7 +114,20 @@ public class TargetLeaseEvents implements QitsEventListener<TargetLeaseChanged> 
     if (!changed.isEmpty()) {
       kick();
     }
+    retryLegacyRows();
     return changed;
+  }
+
+  /** Every row waiting for the target that holds its legacy volume asks again whether it is there. */
+  private void retryLegacyRows() {
+    if (!workspaces.isResolvable()) {
+      return;
+    }
+    try {
+      workspaces.get().startWaitingLegacyRows();
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "Could not retry the workspaces waiting for their legacy target");
+    }
   }
 
   private void kick() {

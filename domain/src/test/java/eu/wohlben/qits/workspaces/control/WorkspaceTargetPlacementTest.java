@@ -382,7 +382,8 @@ public class WorkspaceTargetPlacementTest {
     assertNull(row.leaseId);
     assertNull(row.commissionedTokenId);
     assertEquals(LeaseState.ENDED, placement.lease(queued.leaseId).state());
-    assertEquals(List.of(queued.commissionedTokenId), commissioner.tokensDeleted());
+    // The commissioner is the suite's: the scheduler may hand back other tests' tokens meanwhile.
+    assertTrue(commissioner.tokensDeleted().contains(queued.commissionedTokenId));
   }
 
   @Test
@@ -400,7 +401,9 @@ public class WorkspaceTargetPlacementTest {
     assertEquals(WorkspaceRuntimeStatus.STOPPED, stopped.runtimeStatus);
     assertEquals(queued.leaseId, stopped.leaseId);
     assertEquals(LeaseState.ENDING, placement.lease(queued.leaseId).state());
-    assertEquals(List.of(), commissioner.tokensDeleted(), "the container still runs");
+    assertFalse(
+        commissioner.tokensDeleted().contains(queued.commissionedTokenId),
+        "the container still runs");
 
     states.observe(placement.move(queued.leaseId, LeaseState.ENDED, target, null, null));
 
@@ -408,7 +411,8 @@ public class WorkspaceTargetPlacementTest {
     assertNull(ended.leaseId);
     assertNull(ended.targetId);
     assertNull(ended.commissionedTokenId);
-    assertEquals(List.of(queued.commissionedTokenId), commissioner.tokensDeleted());
+    // The commissioner is the suite's: the scheduler may hand back other tests' tokens meanwhile.
+    assertTrue(commissioner.tokensDeleted().contains(queued.commissionedTokenId));
   }
 
   @Test
@@ -550,25 +554,115 @@ public class WorkspaceTargetPlacementTest {
     assertNull(next.pinTargetId(), "qits-system pins it to its work volume's target itself");
   }
 
+  /**
+   * No target on the old runner's node yet: the row waits QUEUED, saying for which target, and no
+   * lease is asked for and no token minted — an unpinned lease would start it fresh elsewhere and
+   * strand its volume. Once the target is installed, the next retry asks for the adopting, pinned
+   * lease.
+   */
   @Test
-  public void aLegacyRowWithNoMatchingTargetIsAskedForUnpinned() throws Exception {
+  public void aLegacyRowWaitsForItsTargetAndIsAdoptedOnceItIsInstalled() throws Exception {
     String repoId = repo();
-    Workspace created = stoppedTargetRow(repoId, "nomatch");
+    Workspace created = stoppedTargetRow(repoId, "waits");
+    UUID oldRunner = UUID.fromString("8d45fd1d-0000-4000-8000-000000000002");
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              LegacyPlacement entry = new LegacyPlacement();
+              entry.rowId = created.id;
+              entry.oldRunnerId = oldRunner;
+              entry.runnerName = "ws-proof";
+              legacy.persist(entry);
+            });
+    placement.targets(
+        List.of(new TargetPlacement.Target(UUID.randomUUID(), "localhost", null, null)));
+    int mintedBefore = commissioner.tokensMinted().size();
+
+    workspaceService.beginEnsureContainer(created.id);
+
+    Workspace waiting = read(created.id);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, waiting.runtimeStatus);
+    assertEquals(
+        "waiting for target ws-proof to be installed (it holds this workspace's volume)",
+        waiting.runtimeError);
+    assertNull(waiting.leaseId);
+    assertNull(waiting.commissionedTokenId);
+    assertEquals(0, creates(created.id), "no lease is asked for");
+    assertEquals(mintedBefore, commissioner.tokensMinted().size(), "and no token minted");
+
+    workspaceService.startWaitingLegacyRows();
+    assertEquals(0, creates(created.id), "a retry with still no target waits on");
+
+    UUID node = UUID.randomUUID();
+    placement.targets(
+        List.of(
+            new TargetPlacement.Target(UUID.randomUUID(), "localhost", null, null),
+            new TargetPlacement.Target(node, "ws-proof", null, null)));
+
+    assertTrue(workspaceService.startWaitingLegacyRows().contains(created.id));
+
+    Workspace adopted = read(created.id);
+    assertNotNull(adopted.leaseId);
+    TargetPlacement.LeaseRequest asked = placement.request(adopted.leaseId);
+    String name = "qits-workspaces-runner-ws-" + created.id + "-8d45fd1d";
+    assertEquals(new TargetPlacement.Adopt(name, name), asked.adopt());
+    assertEquals(node, asked.pinTargetId());
+    assertEquals(FakeTargetPlacement.WAITING, adopted.runtimeError, "now the lease's own detail");
+  }
+
+  /** The engine id wins over the host name, and the host name over the name. */
+  @Test
+  public void aLegacyRowIsPinnedByEngineIdThenHostNameThenName() throws Exception {
+    String repoId = repo();
+    Workspace created = stoppedTargetRow(repoId, "byengine");
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
               LegacyPlacement entry = new LegacyPlacement();
               entry.rowId = created.id;
               entry.oldRunnerId = UUID.randomUUID();
-              entry.runnerName = "gone";
+              entry.runnerName = "lab";
+              entry.hostname = "lab-host";
+              entry.engineId = "ENGINE-LAB";
+              legacy.persist(entry);
+            });
+    UUID byEngine = UUID.randomUUID();
+    placement.targets(
+        List.of(
+            new TargetPlacement.Target(UUID.randomUUID(), "lab", null, null),
+            new TargetPlacement.Target(UUID.randomUUID(), "other", null, "lab-host"),
+            new TargetPlacement.Target(byEngine, "third", "ENGINE-LAB", null)));
+
+    workspaceService.beginEnsureContainer(created.id);
+
+    assertEquals(byEngine, placement.request(read(created.id).leaseId).pinTargetId());
+  }
+
+  /**
+   * An entry that names nothing of its runner (its runner row was already gone when V30 copied
+   * it): no node is known to hold the volume, so the lease is asked for unpinned and adopts
+   * nothing, and the entry goes.
+   */
+  @Test
+  public void aLegacyRowWhoseRunnerRecordedNothingStartsFreshAndUnpinned() throws Exception {
+    String repoId = repo();
+    Workspace created = stoppedTargetRow(repoId, "gone");
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              LegacyPlacement entry = new LegacyPlacement();
+              entry.rowId = created.id;
+              entry.oldRunnerId = UUID.randomUUID();
               legacy.persist(entry);
             });
 
     workspaceService.beginEnsureContainer(created.id);
 
     TargetPlacement.LeaseRequest asked = placement.request(read(created.id).leaseId);
-    assertNotNull(asked.adopt());
+    assertNull(asked.adopt());
     assertNull(asked.pinTargetId());
+    assertTrue(
+        QuarkusTransaction.requiringNew().call(() -> legacy.findByIdOptional(created.id)).isEmpty());
   }
 
   // --- the reconcile ----------------------------------------------------------------------------------
