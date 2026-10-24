@@ -37,7 +37,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * <p>The pacts come off the test classpath ({@link ClasspathPactLoader}): a consumer publishes
  * {@code pacts/<consumer>_qits-workspaces-service.json} in a jar, and this repository pins that jar
  * as a test dependency (today: qits-landing-app's, qits-projects', qits-artifacts',
- * qits-bootstrap's, qits-orchestrator's and the qits CLI's). Each
+ * qits-orchestrator's and the qits CLI's; qits-bootstrap-cli calls this service no more). Each
  * interaction runs against this {@code @QuarkusTest} over real HTTP as the {@code %test} dev user.
  *
  * <p>Every {@code @State} method delegates to {@link ProviderStates}. {@link #target} fails a state

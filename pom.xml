@@ -131,10 +131,10 @@
         <qits.landing-app-pacts-qits-workspaces-service.version>2026.1019.192834</qits.landing-app-pacts-qits-workspaces-service.version>
         <!-- qits-projects' consumer pact against this service (qits-1152). -->
         <qits.projects-service-pacts-qits-workspaces-service.version>2026.1019.190811</qits.projects-service-pacts-qits-workspaces-service.version>
-        <!-- qits-artifacts', qits-bootstrap's, qits-orchestrator's and the qits CLI's consumer
-             pacts against this service (qits-1149). -->
+        <!-- qits-artifacts', qits-orchestrator's and the qits CLI's consumer pacts against this
+             service (qits-1149). qits-bootstrap-cli's is gone: it calls this service no more
+             (qits-bootstrap-cli-rr-60). -->
         <qits.artifacts-service-pacts-qits-workspaces-service.version>2026.1018.153037</qits.artifacts-service-pacts-qits-workspaces-service.version>
-        <qits.bootstrap-cli-pacts-qits-workspaces-service.version>2026.1019.84610</qits.bootstrap-cli-pacts-qits-workspaces-service.version>
         <qits.orchestrator-service-pacts-qits-workspaces-service.version>2026.1018.172917</qits.orchestrator-service-pacts-qits-workspaces-service.version>
         <qits.platform-access-cli-pacts-qits-workspaces-service.version>2026.1019.195617</qits.platform-access-cli-pacts-qits-workspaces-service.version>
         <qits.maven.repository.url>https://registry.qits.wohlben.eu/artifacts/maven/maven</qits.maven.repository.url>
@@ -417,11 +417,6 @@
                 <groupId>eu.wohlben.qits</groupId>
                 <artifactId>qits-artifacts-service-pacts-qits-workspaces-service</artifactId>
                 <version>${qits.artifacts-service-pacts-qits-workspaces-service.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>eu.wohlben.qits</groupId>
-                <artifactId>qits-bootstrap-cli-pacts-qits-workspaces-service</artifactId>
-                <version>${qits.bootstrap-cli-pacts-qits-workspaces-service.version}</version>
             </dependency>
             <dependency>
                 <groupId>eu.wohlben.qits</groupId>

@@ -320,11 +320,6 @@
         </dependency>
         <dependency>
             <groupId>eu.wohlben.qits</groupId>
-            <artifactId>qits-bootstrap-cli-pacts-qits-workspaces-service</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>eu.wohlben.qits</groupId>
             <artifactId>qits-orchestrator-service-pacts-qits-workspaces-service</artifactId>
             <scope>test</scope>
         </dependency>
