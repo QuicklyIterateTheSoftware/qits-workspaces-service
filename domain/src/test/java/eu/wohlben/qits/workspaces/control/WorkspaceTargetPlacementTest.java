@@ -672,12 +672,14 @@ public class WorkspaceTargetPlacementTest {
     String repoId = repo();
     Workspace created = createTargetRow(repoId, "recon", false);
     Workspace queued = read(created.id);
+    placement.forget(queued.leaseId);
     Lease orphan =
         new Lease(
             UUID.randomUUID(), "999999", LeaseState.QUEUED, null, null, null,
             Instant.now().minus(Duration.ofHours(1)));
+    placement.seed(orphan);
 
-    List<Long> changed = states.reconcile(List.of(orphan), Duration.ofMinutes(2), Instant.now());
+    List<Long> changed = states.reconcile(Duration.ofMinutes(2), Instant.now());
 
     assertTrue(changed.contains(created.id), changed.toString());
     Workspace row = read(created.id);
@@ -693,12 +695,61 @@ public class WorkspaceTargetPlacementTest {
     Workspace created = createTargetRow(repoId, "detail", false);
     UUID leaseId = read(created.id).leaseId;
 
-    states.reconcile(
-        List.of(placement.move(leaseId, LeaseState.QUEUED, null, null, "every target is full")),
-        Duration.ofMinutes(2),
-        Instant.now());
+    placement.move(leaseId, LeaseState.QUEUED, null, null, "every target is full");
+
+    states.reconcile(Duration.ofMinutes(2), Instant.now());
 
     assertEquals("every target is full", listed(repoId, created.id).runtimeError());
+  }
+
+  @Test
+  public void aStartRecordedWhileTheListingIsInFlightSurvivesTheReconcile() throws Exception {
+    String repoId = repo();
+    Workspace created = stoppedTargetRow(repoId, "midlist");
+    // The listing's answer was read before the start: it does not hold the new lease.
+    placement.onList(() -> workspaceService.beginEnsureContainer(created.id), false);
+
+    List<Long> changed = states.reconcile(Duration.ZERO, Instant.now());
+
+    Workspace row = read(created.id);
+    assertFalse(changed.contains(created.id), changed.toString());
+    assertNotNull(row.leaseId, "the start's lease is still recorded");
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
+    assertNotNull(row.commissionedTokenId, "the start's token is kept");
+    assertFalse(placement.calls().contains("end:" + row.leaseId), placement.calls().toString());
+    assertEquals(LeaseState.QUEUED, placement.lease(row.leaseId).state());
+  }
+
+  @Test
+  public void aLeaseListedBeforeItsRowRecordsItIsNoOrphan() throws Exception {
+    String repoId = repo();
+    Workspace created = stoppedTargetRow(repoId, "midorphan");
+    // The listing holds the new lease, but the rows were read before the start recorded it.
+    placement.onList(() -> workspaceService.beginEnsureContainer(created.id), true);
+
+    states.reconcile(Duration.ZERO, Instant.now().plusSeconds(60));
+
+    Workspace row = read(created.id);
+    assertNotNull(row.leaseId);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
+    assertFalse(placement.calls().contains("end:" + row.leaseId), placement.calls().toString());
+  }
+
+  @Test
+  public void aRowWhoseLeaseIsUnlistedButStillHeldIsNotEnded() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "unlisted", false);
+    UUID leaseId = read(created.id).leaseId;
+    // The listing misses the lease (it raced past it); a direct read still finds it.
+    Lease held = placement.lease(leaseId);
+    placement.forget(leaseId);
+    placement.onList(() -> placement.seed(held), false);
+
+    List<Long> changed = states.reconcile(Duration.ofMinutes(2), Instant.now());
+
+    assertFalse(changed.contains(created.id), changed.toString());
+    assertEquals(leaseId, read(created.id).leaseId);
+    assertTrue(placement.calls().contains("get:" + leaseId), placement.calls().toString());
   }
 
   // --- the seam -----------------------------------------------------------------------------------

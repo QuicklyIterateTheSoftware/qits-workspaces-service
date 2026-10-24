@@ -102,15 +102,8 @@ public class TargetLeaseEvents implements QitsEventListener<TargetLeaseChanged> 
     if (!placement.isResolvable()) {
       return List.of();
     }
-    List<TargetPlacement.Lease> listed;
-    try {
-      listed = placement.get().list();
-    } catch (RuntimeException e) {
-      // An unreadable listing must not read as "every lease is gone".
-      LOG.debugf("Could not list this service's leases; the next pass asks again: %s", e.getMessage());
-      return List.of();
-    }
-    List<Long> changed = states.reconcile(listed, ORPHAN_AFTER, Instant.now());
+    // The rows first, the listing after: see TargetLeaseStates.reconcile.
+    List<Long> changed = states.reconcile(ORPHAN_AFTER, Instant.now());
     if (!changed.isEmpty()) {
       kick();
     }

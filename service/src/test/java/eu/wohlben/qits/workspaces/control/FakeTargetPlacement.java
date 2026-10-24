@@ -35,6 +35,8 @@ public class FakeTargetPlacement implements TargetPlacement {
   private volatile LeaseRefused unreachable;
   private volatile boolean endsAtOnce;
   private volatile List<Target> targets = List.of();
+  private volatile Runnable onList;
+  private volatile boolean listsWhatOnListMade;
 
   /** Every create from now on throws {@code refused}. */
   public void refuse(LeaseRefused refused) {
@@ -54,6 +56,21 @@ public class FakeTargetPlacement implements TargetPlacement {
   /** Every end from now on answers ENDED at once. */
   public void endsAtOnce() {
     endsAtOnce = true;
+  }
+
+  /** qits-system no longer holds this lease: a get answers 404, a list leaves it out. */
+  public void forget(UUID leaseId) {
+    leases.remove(leaseId);
+  }
+
+  /**
+   * The next {@link #list()} runs {@code hook} while it is in flight, once — the moment a start
+   * records its lease mid-listing. {@code listsIt} false: the answer was read before the hook, so
+   * it misses what the hook made; true: after it, so it holds it.
+   */
+  public void onList(Runnable hook, boolean listsIt) {
+    listsWhatOnListMade = listsIt;
+    onList = hook;
   }
 
   /** What {@link #targets()} answers. */
@@ -116,6 +133,7 @@ public class FakeTargetPlacement implements TargetPlacement {
     unreachable = null;
     endsAtOnce = false;
     targets = List.of();
+    onList = null;
   }
 
   @Override
@@ -170,7 +188,14 @@ public class FakeTargetPlacement implements TargetPlacement {
   public List<Lease> list() {
     calls.add("list");
     failIfUnreachable();
-    return List.copyOf(leases.values());
+    Runnable hook = onList;
+    onList = null;
+    if (hook == null) {
+      return List.copyOf(leases.values());
+    }
+    List<Lease> before = List.copyOf(leases.values());
+    hook.run();
+    return listsWhatOnListMade ? List.copyOf(leases.values()) : before;
   }
 
   @Override

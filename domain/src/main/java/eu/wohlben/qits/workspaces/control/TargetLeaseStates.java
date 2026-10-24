@@ -522,49 +522,88 @@ public class TargetLeaseStates {
   // --- the reconcile's half ---------------------------------------------------------------------------
 
   /**
-   * One reconcile pass over what qits-system lists (every {@code
-   * qits.workspaces.target-leases.reconcile-interval}): each row that names a lease is told that
-   * lease's state, an ENDED one when the listing no longer holds it; a live lease of this service's
-   * that no row names, and that is older than {@code orphanAfter}, is ended. Answers the rows it
-   * changed.
+   * One reconcile pass (every {@code qits.workspaces.target-leases.reconcile-interval}): each row
+   * that names a lease is told that lease's state, and a live lease of this service's that no row
+   * names, older than {@code orphanAfter}, is ended. Answers the rows it changed; nothing when
+   * qits-system cannot be asked.
+   *
+   * <p><b>Never a verdict from a listing that predates the lease.</b> A start creates its lease and
+   * records it on its row at any moment, the listing call included (up to its read timeout). So:
+   *
+   * <ol>
+   *   <li>the rows and the leases they name are read <b>first</b>, then the leases are listed, and
+   *       only the rows of that snapshot are reconciled — a lease recorded after the snapshot is
+   *       not looked at in this pass;
+   *   <li>a snapshot lease the listing does not hold is asked for directly ({@code getLease}): only a
+   *       404 is ENDED; an answer is applied as given; a failure leaves the row for the next pass;
+   *   <li>an orphan is a listed lease that no row names <b>in a fresh read made after the
+   *       listing</b> and that is older than {@code orphanAfter}, so a start that recorded its lease
+   *       while the listing was in flight is never mistaken for one.
+   * </ol>
    */
-  public List<Long> reconcile(List<Lease> listed, Duration orphanAfter, Instant now) {
+  public List<Long> reconcile(Duration orphanAfter, Instant now) {
+    if (!placement.isResolvable()) {
+      return List.of();
+    }
+    TargetPlacement leases = placement.get();
+    Map<Long, UUID> snapshot = new java.util.LinkedHashMap<>();
+    for (Workspace row : QuarkusTransaction.requiringNew().call(workspaces::findWithLease)) {
+      snapshot.put(row.id, row.leaseId);
+    }
+    List<Lease> listed;
+    try {
+      listed = leases.list();
+    } catch (RuntimeException e) {
+      // An unreadable listing must not read as "every lease is gone".
+      LOG.debugf("Could not list this service's leases; the next pass asks again: %s", e.getMessage());
+      return List.of();
+    }
     Map<UUID, Lease> byId = new java.util.HashMap<>();
     for (Lease lease : listed) {
       if (lease != null && lease.id() != null) {
         byId.put(lease.id(), lease);
       }
     }
-    List<Workspace> rows = QuarkusTransaction.requiringNew().call(workspaces::findWithLease);
-    Set<UUID> named = new java.util.HashSet<>();
     List<Long> changed = new ArrayList<>();
-    for (Workspace row : rows) {
-      named.add(row.leaseId);
-      Lease lease = byId.getOrDefault(row.leaseId, ended(row.leaseId));
-      try {
-        if (observe(lease) == Outcome.CHANGED) {
-          changed.add(row.id);
-        }
-      } catch (RuntimeException e) {
-        LOG.warnf(e, "Could not reconcile workspace %s with lease %s", row.id, row.leaseId);
-      }
-    }
-    if (placement.isResolvable()) {
-      for (Lease lease : byId.values()) {
-        if (named.contains(lease.id())
-            || !lease.state().live()
-            || lease.state() == LeaseState.ENDING
-            || lease.requestedAt() == null
-            || lease.requestedAt().isAfter(now.minus(orphanAfter))) {
+    for (Map.Entry<Long, UUID> row : snapshot.entrySet()) {
+      UUID leaseId = row.getValue();
+      Lease lease = byId.get(leaseId);
+      if (lease == null) {
+        try {
+          lease = leases.get(leaseId).orElseGet(() -> ended(leaseId));
+        } catch (RuntimeException e) {
+          LOG.debugf(
+              "Could not read lease %s of workspace %s; the next pass asks again: %s",
+              leaseId, row.getKey(), e.getMessage());
           continue;
         }
-        LOG.infof(
-            "Ending lease %s (owner ref %s): no workspace row names it", lease.id(), lease.ownerRef());
-        try {
-          placement.get().end(lease.id());
-        } catch (RuntimeException e) {
-          LOG.warnf("Could not end orphaned lease %s: %s", lease.id(), e.getMessage());
+      }
+      try {
+        if (observe(lease) == Outcome.CHANGED) {
+          changed.add(row.getKey());
         }
+      } catch (RuntimeException e) {
+        LOG.warnf(e, "Could not reconcile workspace %s with lease %s", row.getKey(), leaseId);
+      }
+    }
+    Set<UUID> named = new java.util.HashSet<>();
+    for (Workspace row : QuarkusTransaction.requiringNew().call(workspaces::findWithLease)) {
+      named.add(row.leaseId);
+    }
+    for (Lease lease : byId.values()) {
+      if (named.contains(lease.id())
+          || !lease.state().live()
+          || lease.state() == LeaseState.ENDING
+          || lease.requestedAt() == null
+          || lease.requestedAt().isAfter(now.minus(orphanAfter))) {
+        continue;
+      }
+      LOG.infof(
+          "Ending lease %s (owner ref %s): no workspace row names it", lease.id(), lease.ownerRef());
+      try {
+        leases.end(lease.id());
+      } catch (RuntimeException e) {
+        LOG.warnf("Could not end orphaned lease %s: %s", lease.id(), e.getMessage());
       }
     }
     return changed;
