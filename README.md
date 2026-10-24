@@ -262,7 +262,9 @@ idp kinds, are gone (`V30` drops `workspace_runner`).
 - **A row a retired runner held** (`legacy_placement`, copied by `V30`) is adopted by its first
   lease: `adopt{container, volume}` = `qits-workspaces-runner-ws-<rowId>-<oldRunnerId8>` (kept on the
   row as `adopted_volume`, so every later lease carries it) and `pinTargetId` the target on the same
-  node. `targethost/LegacyRunnerClients` gives the retired runner kinds' idp clients and tokens back
+  node. Until that target is installed the row waits QUEUED, asking for nothing ("waiting for target
+  <runner> to be installed (it holds this workspace's volume)"), and each lease reconcile retries
+  it. `targethost/LegacyRunnerClients` gives the retired runner kinds' idp clients and tokens back
   at every boot.
 
 The agent scheduler asks for a new regular workspace only while no TARGET row of this service
