@@ -55,9 +55,12 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -521,6 +524,11 @@ public class AgentService {
                     live.state = AgentState.ACTIVE;
                     live.obsoleteAt = null;
                     live.cleanupPromptedAt = null;
+                    // Cleared in the same transaction as the revive (qits-1562): a pass between
+                    // the two would read the stale DROPPED and obsolete it straight back.
+                    if (isDropped(live.entityStatus)) {
+                      live.entityStatus = null;
+                    }
                     agents.flush();
                     return Optional.of(live.id);
                   });
@@ -558,7 +566,8 @@ public class AgentService {
                   if (isDropped(agent.entityStatus)) {
                     // Dispatched again, so no longer dropped (qits-1276). Facts without a status
                     // left the stale word, and the pass would obsolete the agent straight back;
-                    // the item's next mark says what it is now.
+                    // the item's next mark says what it is now. A revive already cleared it in its
+                    // own transaction (qits-1562, activeOrRevived); this covers an ACTIVE agent.
                     agent.entityStatus = null;
                   }
                   if (found.revived()) {
@@ -1179,6 +1188,27 @@ public class AgentService {
     } catch (RejectedExecutionException shuttingDown) {
       kicked.set(false);
     }
+  }
+
+  /**
+   * For tests: returns once no pass is pending or running (qits-1562). A kick runs its pass on the
+   * scheduler's own thread, and a test that hand-writes rows after a kicking door would otherwise
+   * race that pass. The scheduler is one thread, first in first out, so a no-op through it returns
+   * once every pass submitted before it has finished; a pass that kicked again in the meantime is
+   * waited out the same way. Takes neither lock, so a pass it waits on never waits on it.
+   */
+  void awaitSchedulerIdle() {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    do {
+      try {
+        pass.submit(() -> {}).get(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("interrupted waiting for the agent scheduler", e);
+      } catch (ExecutionException | TimeoutException e) {
+        throw new IllegalStateException("the agent scheduler did not settle", e);
+      }
+    } while (kicked.get());
   }
 
   /** One scheduler pass; see the class javadoc. Serialised: one pass at a time. */
@@ -2140,8 +2170,8 @@ public class AgentService {
    * agent, so a dropped item's agent held its slot for good. Read from the row's own {@code
    * entityStatus}, so a row that was already DROPPED before this step existed heals on the next
    * pass. Only DROPPED: a VERIFIED or DONE item's agent still has its own work to release. A
-   * dispatch that revives the agent clears the stale word ({@link #found}), so this step does not
-   * obsolete it again.
+   * dispatch that revives the agent clears the stale word in the same transaction as the revive
+   * ({@link #activeOrRevived}), so this step does not obsolete it again.
    */
   void obsoleteDropped() {
     synchronized (passLock) {
