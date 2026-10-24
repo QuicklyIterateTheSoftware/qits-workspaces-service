@@ -115,9 +115,10 @@ public class TokenValidationBootstrapIT {
       gives back every one no active workspace claims. That is the whole of the reconcile's
       outbound half, and it happens before anybody has asked this service for anything.
 
-      A third question rides the same boot: a workspace runner's registration token is one more
-      credential a crash can orphan, so the reconcile also lists every commissioned token this
-      service holds and gives back the ones no runner row still names.
+      A third question rides the same boot: a workspace token is one more credential a crash can
+      orphan, so the reconcile also lists every commissioned token this service holds and gives
+      back the ones no live workspace still holds. The same two listings are where the retired
+      workspace runners' clients and tokens are given back, once, at boot.
 
       And it starts to listen. An agent may declare that it waits for a platform event, so at boot
       this service dials qits-events' stream and reads the event log forward from where it last
@@ -182,8 +183,8 @@ public class TokenValidationBootstrapIT {
                 + " container whose teardown crashed does not leave an identity behind forever")
         .as("commissions-reconciled");
 
-    // The same pass's second listing: a workspace runner's registration token is a credential
-    // too, and the reconcile asks what it still holds of those as well (qits-847).
+    // The same pass's second listing: a workspace token is a credential too, and the reconcile asks
+    // what it still holds of those as well (qits-625; the retired runners' tokens, epic qits-1481).
     assertTrue(
         StoryPeers.awaitCall(
             "GET " + StoryPeers.TOKENS_PATH,
@@ -191,8 +192,8 @@ public class TokenValidationBootstrapIT {
         "the commission reconcile never asked qits-platform-idp which tokens this service holds");
     story
         .note(
-            "and it also asks which runner-registration tokens it still holds, so a crashed"
-                + " registration does not leave one behind forever")
+            "and it also asks which tokens it still holds, so a crashed start does not leave one"
+                + " behind forever")
         .as("tokens-reconciled");
 
     // The bus's two boot calls (qits-1153: AgentWaitListener is a durable listener). Both run off
@@ -275,8 +276,7 @@ public class TokenValidationBootstrapIT {
         MockIdp.SERVICE_NAME,
         StoryPeers.read(
             StoryPeers.CLIENTS_PATH));
-    // …and the reconcile's second listing, the runner registration tokens this service holds
-    // (qits-847).
+    // …and the reconcile's second listing, the tokens this service holds.
     ReportAssertions.assertEdge(
         CATEGORY,
         ACCEPTED_SLUG,

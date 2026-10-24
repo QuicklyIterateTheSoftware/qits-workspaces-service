@@ -87,8 +87,8 @@ import java.util.Map;
  * Daemon*IT}, where a real daemon really runs it.
  *
  * <p><b>The scheduler is left ON</b> and that is deliberate rather than an oversight. This service's
- * two {@code @Scheduled} methods are the agent-activity sweep (in-memory, no network) and the
- * commission reconcile, whose interval is an hour — Quarkus schedules the first execution one
+ * {@code @Scheduled} methods are the agent-activity sweep (in-memory, no network), the commission
+ * reconcile, whose interval is an hour, and the lease reconcile, switched off here (below) — Quarkus schedules the first execution one
  * interval out, so neither <i>tick</i> fires inside a run. The reconcile also runs from a {@code
  * StartupEvent} observer, and that one does: its listing of the credentials this service holds is a
  * real arrow, on its own thread, racing whichever story is open. It is pinned to the boot story,
@@ -177,6 +177,12 @@ public class StoryProfile implements QuarkusTestProfile, NecessaryTestProfileDup
     config.put("qits.eventstream.redial-initial-backoff", "PT1H");
     config.put("qits.eventstream.redial-max-backoff", "PT1H");
     config.put("qits.eventstream.catchup-interval", "PT1H");
+    // The lease reconcile (epic qits-1481) is OFF: an interval job's first run is at boot, not one
+    // interval out (measured: at PT1H it still ran during the boot story), and each run mints this
+    // service's bearer (POST /idp/token) to ask qits-system, which no stand-in here serves, for its
+    // leases — an arrow in whichever story is open, and half of one. No story covers leases; the
+    // @QuarkusTest suites drive TargetLeaseEvents.reconcile() against a stub.
+    config.put("qits.workspaces.target-leases.reconcile-interval", "off");
 
     // --- this service's own tree, under target/ -------------------------------------------------------
     // Never the shipped ${user.home}/.qits: the CI step container's home is not this service's to
