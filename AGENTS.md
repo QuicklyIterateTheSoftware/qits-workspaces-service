@@ -1627,11 +1627,10 @@ minimal ensure body) are not used: they pact requests this service never sends.
 
 **qits-system (epic qits-1481)** is `targethost/SystemContract`, bound to
 `qits.system-golden-masters.version`, its file `pacts/qits-workspaces-service_qits-system-service.json`
-(`release.yml`: `qits-system-service`). **Every row waits**: the pinned golden masters predate the
-targets module. They are written against the states qits-system records for this tenant (`a
+(`release.yml`: `qits-system-service`). Every row is live since the golden masters
+2026.1023.213531. They are written against the states qits-system records for this tenant (`a
 queued workspace lease`, `a running workspace lease`, `an unused workspace work volume`, `a declared
-target`). `SystemConsumerPactTest` skips while none is live; `OutboundCallsGuardTest` reads
-the routes of the waiting rows off its `PENDING_ROUTES` until the recordings exist. The runner's
+target`). `OutboundCallsGuardTest`'s `PENDING_ROUTES` is the fallback for a row that waits. The runner's
 frame golden masters and message pacts (qits-950) went with the runner.
 
 ## Tests

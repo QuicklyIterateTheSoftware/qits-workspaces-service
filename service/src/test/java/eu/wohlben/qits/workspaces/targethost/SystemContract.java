@@ -42,13 +42,9 @@ import java.util.UUID;
  *   <li>{@code listLeases} — {@code TargetLeaseEvents}' reconcile.
  * </ul>
  *
- * <p><b>Every row waits</b> ({@link ContractRow#waiting}): the pinned {@code
- * qits-system-golden-masters} predates the targets module and records none of these states. The
- * rows are written against the states qits-system-service records for this tenant on its epic
- * branch ({@code a queued workspace lease}, {@code a running workspace lease}, {@code an unused
- * workspace work volume}, {@code a declared target}); the
- * pin's bump that brings them makes {@code ConsumerPactFilesTest.noPendingRowIsRecordedAlready} fail,
- * and they are switched on then.
+ * <p>Every row is live since {@code qits-system-golden-masters} 2026.1023.213531, the first to
+ * record the states qits-system keeps for this tenant: {@code a queued workspace lease}, {@code a
+ * running workspace lease}, {@code an unused workspace work volume} and {@code a declared target}.
  */
 public final class SystemContract {
 
@@ -86,8 +82,7 @@ public final class SystemContract {
                         TargetPlacement.Lease lease = placementAgainst(url, params).create(request());
                         assertNotNull(lease.id());
                         assertNotNull(lease.state());
-                      })
-                  .waiting(),
+                      }),
               ContractRow.of(
                       START,
                       A_QUEUED_LEASE,
@@ -99,8 +94,7 @@ public final class SystemContract {
                             placementAgainst(url, params).get(leaseId(params));
                         assertTrue(lease.isPresent());
                         assertEquals(TargetPlacement.LeaseState.QUEUED, lease.get().state());
-                      })
-                  .waiting(),
+                      }),
               ContractRow.of(
                       RECONCILE,
                       A_QUEUED_LEASE,
@@ -115,8 +109,7 @@ public final class SystemContract {
                           "$[*].detail",
                           "$[*].requestedAt"),
                       (url, params) ->
-                          assertFalse(placementAgainst(url, params).list().isEmpty()))
-                  .waiting(),
+                          assertFalse(placementAgainst(url, params).list().isEmpty())),
               ContractRow.of(
                       STOP,
                       A_QUEUED_LEASE,
@@ -129,8 +122,7 @@ public final class SystemContract {
                               placementAgainst(url, params)
                                   .end(leaseId(params))
                                   .orElseThrow()
-                                  .state()))
-                  .waiting(),
+                                  .state())),
               ContractRow.of(
                       RECONCILE,
                       A_RUNNING_LEASE,
@@ -142,8 +134,7 @@ public final class SystemContract {
                             placementAgainst(url, params).get(leaseId(params)).orElseThrow();
                         assertEquals(TargetPlacement.LeaseState.RUNNING, lease.state());
                         assertNotNull(lease.targetId());
-                      })
-                  .waiting(),
+                      }),
               ContractRow.of(
                       RECONCILE,
                       A_RUNNING_LEASE,
@@ -158,8 +149,7 @@ public final class SystemContract {
                           "$[*].detail",
                           "$[*].requestedAt"),
                       (url, params) ->
-                          assertFalse(placementAgainst(url, params).list().isEmpty()))
-                  .waiting(),
+                          assertFalse(placementAgainst(url, params).list().isEmpty())),
               ContractRow.of(
                       STOP,
                       A_RUNNING_LEASE,
@@ -172,8 +162,7 @@ public final class SystemContract {
                               placementAgainst(url, params)
                                   .end(leaseId(params))
                                   .orElseThrow()
-                                  .state()))
-                  .waiting(),
+                                  .state())),
               ContractRow.of(
                       DELETE,
                       AN_UNUSED_WORK_VOLUME,
@@ -183,8 +172,7 @@ public final class SystemContract {
                       (url, params) ->
                           assertTrue(
                               placementAgainst(url, params)
-                                  .purgeWorkVolume(params.get("workKey"))))
-                  .waiting(),
+                                  .purgeWorkVolume(params.get("workKey")))),
               ContractRow.of(
                       START,
                       A_DECLARED_TARGET,
@@ -196,8 +184,7 @@ public final class SystemContract {
                             placementAgainst(url, params).targets();
                         assertFalse(targets.isEmpty());
                         assertNotNull(targets.get(0).name());
-                      })
-                  .waiting()));
+                      })));
 
   private SystemContract() {}
 

@@ -115,8 +115,7 @@
         <qits.workspace-daemon-golden-masters.version>2026.1018.152111</qits.workspace-daemon-golden-masters.version>
         <!-- qits-system's golden masters (epic qits-1481): the lease, work-volume and target doors
              targethost/TargetLeasePlacement calls (targethost/SystemContract). The same rule: a
-             qits-maintenance bump moves it. The pinned release predates the targets module, so
-             every row of that table waits (.waiting()) until a bump brings its states. -->
+             qits-maintenance bump moves it. -->
         <qits.system-golden-masters.version>2026.1023.213531</qits.system-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
