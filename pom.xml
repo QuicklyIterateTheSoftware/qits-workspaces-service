@@ -133,7 +133,7 @@
         <!-- qits-artifacts', qits-orchestrator's and the qits CLI's consumer pacts against this
              service (qits-1149). qits-bootstrap-cli's is gone: it calls this service no more
              (qits-bootstrap-cli-rr-60). -->
-        <qits.artifacts-service-pacts-qits-workspaces-service.version>2026.1018.153037</qits.artifacts-service-pacts-qits-workspaces-service.version>
+        <qits.artifacts-service-pacts-qits-workspaces-service.version>2026.1024.160449</qits.artifacts-service-pacts-qits-workspaces-service.version>
         <qits.orchestrator-service-pacts-qits-workspaces-service.version>2026.1023.105608</qits.orchestrator-service-pacts-qits-workspaces-service.version>
         <qits.platform-access-cli-pacts-qits-workspaces-service.version>2026.1023.112231</qits.platform-access-cli-pacts-qits-workspaces-service.version>
         <qits.maven.repository.url>https://registry.qits.wohlben.eu/artifacts/maven/maven</qits.maven.repository.url>
