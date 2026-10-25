@@ -116,7 +116,7 @@
         <!-- qits-system's golden masters (epic qits-1481): the lease, work-volume and target doors
              targethost/TargetLeasePlacement calls (targethost/SystemContract). The same rule: a
              qits-maintenance bump moves it. -->
-        <qits.system-golden-masters.version>2026.1024.135850</qits.system-golden-masters.version>
+        <qits.system-golden-masters.version>2026.1025.174719</qits.system-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
              and ConsumerPactVerificationTest verifies consumers' pacts against this service.
