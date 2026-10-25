@@ -15,7 +15,10 @@ import java.util.List;
  * @param workspaceRowId the workspace (slot) it runs in; null while it waits for one
  * @param repositoryId the wrapper repository
  * @param branches every (repository, branch) it pushed, oldest first
- * @param activity the harness's last reported state; null when nothing is known
+ * @param activity the harness's reported state; null when nothing is known. {@code BUSY} also
+ *     while the harness has ended its turn but background work it started (a subagent, a monitor, a
+ *     background shell) is still in flight, until the daemon gives up waiting on it (qits-1601) — so
+ *     an agent waiting on its own subagent does not read as idle or stalled
  * @param waitingOn the labels of its OPEN declared waits (qits-1153), joined with {@code "; "};
  *     null when it waits on nothing
  * @param waitingOnSince when the oldest of those OPEN waits was declared (qits-1229), so a reader

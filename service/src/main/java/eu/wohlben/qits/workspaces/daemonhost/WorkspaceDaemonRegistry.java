@@ -117,8 +117,11 @@ public class WorkspaceDaemonRegistry
    */
   @Inject AgentService agentService;
 
-  /** The last activity state per agent id, while its daemon's socket is up ({@link AgentActivityView}). */
-  private final ConcurrentHashMap<String, ActivityEntry> agentActivityById = new ConcurrentHashMap<>();
+  /**
+   * The last activity frame per agent id, while its daemon's socket is up ({@link AgentActivityView}):
+   * its state, and since qits-1601 whether background work it started was still in flight.
+   */
+  private final ConcurrentHashMap<String, AgentEntry> agentActivityById = new ConcurrentHashMap<>();
 
   /**
    * The reverse tunnel's host end. An {@code Instance<>} to break the cycle — {@link
@@ -166,6 +169,16 @@ public class WorkspaceDaemonRegistry
    * check needs no second map).
    */
   private record ActivityEntry(Long workspaceId, AgentActivityState state, long recordedAtMillis) {}
+
+  /**
+   * One agent's last frame, for {@link #activityOf} and {@link #reportedActivityOf} (qits-1601): the
+   * {@link ActivityEntry} the rollup also keeps, plus the two flags that decide whether an idle
+   * harness is still working. {@code backgroundWork} is the frame's own (capability 12; an older
+   * daemon's null is taken as false, so its agents read exactly as before); {@code awaitingInput}
+   * is kept as sent, because only an explicit {@code true} — the daemon's background-work grace has
+   * run out — overrides it.
+   */
+  private record AgentEntry(ActivityEntry activity, boolean backgroundWork, Boolean awaitingInput) {}
 
   /**
    * How long an {@code ENDED} session stays in the rollup. Thirty minutes: long enough to survive a
@@ -243,7 +256,9 @@ public class WorkspaceDaemonRegistry
     // The daemon is gone: drop every tracked agent activity for this workspace (re-reported on
     // reconnect).
     agentActivity.values().removeIf(entry -> entry.workspaceId().equals(workspaceId));
-    agentActivityById.values().removeIf(entry -> entry.workspaceId().equals(workspaceId));
+    agentActivityById
+        .values()
+        .removeIf(entry -> entry.activity().workspaceId().equals(workspaceId));
     sinkDispatch.execute(() -> agentService.onDaemonConnection(workspaceId));
     // Pending tunnel nonces are waiting on a daemon that is no longer there; live tunnels are NOT
     // torn down, deliberately — each stream is its own TCP connection, so an open terminal survives
@@ -440,9 +455,13 @@ public class WorkspaceDaemonRegistry
     // An agent that is working is the workspace being used. Debounced on the keepalive's side, and
     // a no-op entirely while nothing is idle-stopped.
     AgentActivityState before = rollup(workspaceId, now);
-    agentActivity.put(activity.commandId(), new ActivityEntry(workspaceId, state, now));
+    ActivityEntry entry = new ActivityEntry(workspaceId, state, now);
+    agentActivity.put(activity.commandId(), entry);
     if (activity.agentId() != null) {
-      agentActivityById.put(activity.agentId(), new ActivityEntry(workspaceId, state, now));
+      agentActivityById.put(
+          activity.agentId(),
+          new AgentEntry(
+              entry, Boolean.TRUE.equals(activity.backgroundWork()), activity.awaitingInput()));
     }
     if (before != rollup(workspaceId, now)) {
       fireActivityFlip(repoId, workspaceId);
@@ -536,11 +555,39 @@ public class WorkspaceDaemonRegistry
 
   @Override
   public Optional<AgentActivityState> activityOf(String agentId) {
-    ActivityEntry entry = agentId == null ? null : agentActivityById.get(agentId);
-    if (entry == null || hasExpired(entry, System.currentTimeMillis())) {
+    return liveEntry(agentId).map(entry -> entry.activity().state());
+  }
+
+  /**
+   * The state to show for an agent (qits-1601): the raw one, except that an {@code IDLE} or {@code
+   * WAITING} harness whose last frame said background work it started is still in flight reads
+   * {@code BUSY}. While an agent waits on its own subagent, the daemon reports {@code Stop} (IDLE)
+   * and a minute later an {@code idle_prompt} (WAITING), and a reader that took either at face
+   * value — the delivery desk — prompted a busy agent as stalled. An explicit {@code awaitingInput
+   * = true} wins over the flag: the daemon sends it once its background-work grace runs out, so an
+   * agent that really did abandon its work still reads as waiting.
+   */
+  @Override
+  public Optional<AgentActivityState> reportedActivityOf(String agentId) {
+    return liveEntry(agentId)
+        .map(
+            entry -> {
+              AgentActivityState state = entry.activity().state();
+              boolean idle =
+                  state == AgentActivityState.IDLE || state == AgentActivityState.WAITING;
+              return idle && entry.backgroundWork() && !Boolean.TRUE.equals(entry.awaitingInput())
+                  ? AgentActivityState.BUSY
+                  : state;
+            });
+  }
+
+  /** The agent's last frame, unless there is none or it has aged out ({@link #hasExpired}). */
+  private Optional<AgentEntry> liveEntry(String agentId) {
+    AgentEntry entry = agentId == null ? null : agentActivityById.get(agentId);
+    if (entry == null || hasExpired(entry.activity(), System.currentTimeMillis())) {
       return Optional.empty();
     }
-    return Optional.of(entry.state());
+    return Optional.of(entry);
   }
 
   private void onAgentKill(Long workspaceId, AgentActivity activity, AgentActivityState state) {
