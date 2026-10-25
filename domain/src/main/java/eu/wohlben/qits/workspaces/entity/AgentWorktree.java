@@ -12,6 +12,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
+import org.hibernate.annotations.DynamicUpdate;
 
 /**
  * An agent: one work item's coding agent and its worktree inside a workspace (qits-1152, D15). The
@@ -22,8 +23,16 @@ import java.util.UUID;
  * it on the request thread, so the {@code CausationStamp} reads the REST filter's scope. Later
  * updates (placement, session, activity) do not move the stamp, which is insert-only by design: the
  * row says why the agent exists.
+ *
+ * <p><b>{@code @DynamicUpdate}</b> (qits-1603): an UPDATE writes only the columns the transaction
+ * changed. Without it every UPDATE wrote every column as it was loaded, so a scheduler transaction
+ * that only places, requeues or records a refusal, and read the row before a delivery committed its
+ * turn, wrote the stale {@code pending_text} back and the turn was gone. The writers that change
+ * {@code pending_text} itself — appends and compare-and-clears — lock the row instead ({@code
+ * PESSIMISTIC_WRITE}), because they read it to decide what to write.
  */
 @Entity
+@DynamicUpdate
 @Table(name = "agent_worktree")
 @EntityListeners(CausationStamp.class)
 public class AgentWorktree extends PanacheEntityBase implements CausedRow {

@@ -588,7 +588,11 @@ public class AgentService {
         QuarkusTransaction.requiringNew()
             .call(
                 () -> {
-                  AgentWorktree agent = agents.findById(id);
+                  // Locked: it appends to, or sets, pending_text from what it read (qits-1603).
+                  AgentWorktree agent =
+                      agents
+                          .findByIdOptional(id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                          .orElseThrow();
                   applyFacts(agent, request.facts(), null, null);
                   if (trimmed(request.wrapperBranch()) != null
                       && trimmed(request.wrapperBranch()).equals(agent.wrapperBranch)) {
@@ -651,7 +655,12 @@ public class AgentService {
         QuarkusTransaction.requiringNew()
             .call(
                 () -> {
-                  AgentWorktree row = agents.findById(id);
+                  // Locked (qits-1603), as drive's and start's compare-and-clear are: an append
+                  // between their read and their write would be cleared with the text it extended.
+                  AgentWorktree row =
+                      agents
+                          .findByIdOptional(id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                          .orElseThrow();
                   appendTurn(row, said, compactFirst);
                   return row;
                 });
@@ -2008,7 +2017,12 @@ public class AgentService {
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
-              AgentWorktree row = agents.findById(agent.id);
+              // Locked (qits-1603): an append that commits between this read and its write would
+              // otherwise be cleared with the text it was appended to.
+              AgentWorktree row =
+                  agents
+                      .findByIdOptional(agent.id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                      .orElseThrow();
               if (Objects.equals(row.pendingText, text)) {
                 row.pendingText = null;
               }
@@ -2143,7 +2157,11 @@ public class AgentService {
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
-              AgentWorktree row = agents.findById(agent.id);
+              // Locked, as drive's clear is (qits-1603): the compare against the instruction below.
+              AgentWorktree row =
+                  agents
+                      .findByIdOptional(agent.id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                      .orElseThrow();
               row.commandId = answer.commandId() == null ? row.commandId : answer.commandId();
               row.sessionId = answer.sessionId() == null ? row.sessionId : answer.sessionId();
               row.startedWorkspaceId = workspace.id;
@@ -2496,7 +2514,11 @@ public class AgentService {
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
-              AgentWorktree row = agents.findById(agent.id);
+              // Locked, as every pending_text writer is (qits-1603).
+              AgentWorktree row =
+                  agents
+                      .findByIdOptional(agent.id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                      .orElseThrow();
               row.pendingText = prompt;
               row.cleanupPromptedAt = Instant.now();
             });

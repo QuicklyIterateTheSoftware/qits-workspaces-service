@@ -29,14 +29,21 @@ import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import jakarta.persistence.LockModeType;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.logging.Handler;
 import java.util.logging.LogRecord;
@@ -480,6 +487,119 @@ public class AgentServiceTest {
     AgentService.Delivery delivery = service.deliver("w-nobody", "hello", false);
     assertNull(delivery.agentId());
     assertFalse(delivery.delivered() || delivery.launched() || delivery.resumed());
+  }
+
+  /**
+   * qits-1603, shape A: a scheduler transaction that changes other columns only — here the start
+   * refusal, as {@code recordRefusal} writes it — read the row before a delivery committed its turn
+   * and flushes after. With every column in every UPDATE it wrote the pending text back as it read
+   * it (null) and the turn was gone; {@code @DynamicUpdate} writes only what it changed.
+   */
+  @Test
+  void aDeliveryIsNotUndoneByASchedulerWriteThatReadTheRowFirst() throws Exception {
+    AgentService.Dispatch queued = dispatch("w-lost-turn", false, null);
+    service.awaitSchedulerIdle();
+    UUID id = UUID.fromString(queued.agent().agentId());
+    assertEquals(AgentRunState.QUEUED, row(id.toString()).runState);
+    assertNull(row(id.toString()).pendingText);
+
+    CountDownLatch read = new CountDownLatch(1);
+    CountDownLatch delivered = new CountDownLatch(1);
+    ExecutorService scheduler = Executors.newSingleThreadExecutor();
+    try {
+      Future<?> refusal =
+          scheduler.submit(
+              () ->
+                  QuarkusTransaction.requiringNew()
+                      .run(
+                          () -> {
+                            // recordRefusal's read: plain, no lock.
+                            AgentWorktree row = agents.findById(id);
+                            read.countDown();
+                            await(delivered);
+                            row.startRefusal = "refused";
+                            row.startRefusedAt = Instant.now();
+                          }));
+      await(read);
+      // Commits at once: the scheduler's transaction read the row but holds no lock on it.
+      service.deliver("w-lost-turn", "carry on", false);
+      delivered.countDown();
+      refusal.get(30, TimeUnit.SECONDS);
+    } finally {
+      delivered.countDown();
+      scheduler.shutdownNow();
+    }
+    service.awaitSchedulerIdle();
+
+    AgentWorktree after = row(id.toString());
+    assertEquals("carry on", after.pendingText, "the delivered turn survives the scheduler's write");
+    assertEquals("refused", after.startRefusal, "and the scheduler's own write landed");
+  }
+
+  /**
+   * qits-1603, shape B: an append beside a compare-and-clear. The clear is {@code drive}'s after a
+   * typed turn — emulated here, transaction body for transaction body, because {@code drive} is
+   * private and only reaches it after a started daemon took the turn. It holds the row's lock from
+   * its read to its commit, so the delivery waits for it and then appends to what the clear left:
+   * without the delivery's lock it read "first" beside the clear and wrote "first" back with its
+   * own text, the already-said turn to be said twice.
+   */
+  @Test
+  void aClearThatReadTheRowBeforeAnAppendLeavesTheAppendedText() throws Exception {
+    AgentService.Dispatch queued = dispatch("w-cleared-turn", false, "first");
+    service.awaitSchedulerIdle();
+    UUID id = UUID.fromString(queued.agent().agentId());
+    assertEquals("first", row(id.toString()).pendingText);
+
+    CountDownLatch locked = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    ExecutorService threads = Executors.newFixedThreadPool(2);
+    try {
+      Future<?> clear =
+          threads.submit(
+              () ->
+                  QuarkusTransaction.requiringNew()
+                      .run(
+                          () -> {
+                            AgentWorktree row =
+                                agents
+                                    .findByIdOptional(id, LockModeType.PESSIMISTIC_WRITE)
+                                    .orElseThrow();
+                            locked.countDown();
+                            await(release);
+                            if (Objects.equals(row.pendingText, "first")) {
+                              row.pendingText = null;
+                            }
+                            row.pendingCompact = false;
+                            row.lastActivityAt = Instant.now();
+                          }));
+      await(locked);
+      Future<AgentService.Delivery> delivery =
+          threads.submit(() -> service.deliver("w-cleared-turn", "second", false));
+      Thread.sleep(500);
+      assertFalse(delivery.isDone(), "the delivery waits for the clear's lock");
+      release.countDown();
+      clear.get(30, TimeUnit.SECONDS);
+      assertNotNull(delivery.get(30, TimeUnit.SECONDS).agentId());
+    } finally {
+      release.countDown();
+      threads.shutdownNow();
+    }
+    service.awaitSchedulerIdle();
+
+    assertEquals("second", row(id.toString()).pendingText, "said once, and the new turn kept");
+  }
+
+  /** A latch the other thread counts down, bounded: a deadlock fails the test, never hangs it. */
+  private static void await(CountDownLatch latch) {
+    try {
+      if (!latch.await(30, TimeUnit.SECONDS)) {
+        throw new IllegalStateException("timed out waiting for the other transaction");
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(e);
+    }
   }
 
   /** A TARGET slot of this test's wrapper, made by hand: no lease runs it, so nothing starts. */
