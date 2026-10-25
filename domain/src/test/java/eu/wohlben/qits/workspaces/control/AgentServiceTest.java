@@ -47,6 +47,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.logging.Handler;
 import java.util.logging.LogRecord;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -76,6 +77,9 @@ public class AgentServiceTest {
   @Inject RecordingLifecycleAnnouncer announced;
   @Inject AgentWaits waits;
   @Inject FakeAgentActivityView activityView;
+
+  @ConfigProperty(name = "qits.test.origins-dir")
+  String originsDir;
 
   private String repoId;
 
@@ -1250,7 +1254,7 @@ public class AgentServiceTest {
         .run(() -> agents.findById(id).lastActivityAt = Instant.now());
     service.markEntity("w-release", new EntityFacts("A title", "VERIFIED", false), null, null);
     service.awaitSchedulerIdle();
-    service.obsoleteConsumedClosed();
+    service.obsoleteReleasedClosed();
     AgentWorktree obsolete = row(agentId);
     assertEquals(AgentState.OBSOLETE, obsolete.state, "released and closed");
     assertNotNull(obsolete.obsoleteAt);
@@ -1347,7 +1351,7 @@ public class AgentServiceTest {
     service.markEntity(
         "w-release-again", new EntityFacts("A title", "VERIFIED", false), null, null);
     service.awaitSchedulerIdle();
-    service.obsoleteConsumedClosed();
+    service.obsoleteReleasedClosed();
     assertEquals(AgentState.ACTIVE, row(agentId).state, "closed, but its new work is unreleased");
     assertEquals(List.of(), obsoleteEventsOf(agentId));
 
@@ -1355,6 +1359,121 @@ public class AgentServiceTest {
         service.resolveReleasedBranch(repoId, "ticket/w-release-again", "2026.3.3", "fed", null);
     assertEquals(List.of(agentId), resolution.agentIds(), "the next release ends it");
     assertEquals("2026.3.3", obsoleteEventsOf(agentId).get(0).version());
+  }
+
+  /**
+   * An ACTIVE agent of a VERIFIED item on {@code branch} of a real origin, no release consumed: what
+   * the step asks git about (qits-1605). YIELDED in a slot no lease runs and active just now, so no
+   * pass drives it or sweeps it from under the test once it is OBSOLETE.
+   */
+  private UUID verifiedOnOrigin(String originRepo, String branch) {
+    UUID id = UUID.randomUUID();
+    Long slot = runnerSlot();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = new AgentWorktree();
+              row.id = id;
+              row.repositoryId = originRepo;
+              row.workId = "w-merged-" + id;
+              row.wrapperBranch = branch;
+              row.workspaceId = slot;
+              row.runState = AgentRunState.YIELDED;
+              row.entityStatus = "VERIFIED";
+              row.createdAt = Instant.now();
+              row.lastActivityAt = Instant.now();
+              row.gitRefs = "[]";
+              agents.persist(row);
+            });
+    createdAgents.add(id);
+    return id;
+  }
+
+  /** A real origin: {@code master} with two commits, registered with {@code master} as main. */
+  private String origin() throws Exception {
+    String originRepo = TestOrigin.create(originsDir, false);
+    repositories.register(originRepo, "master");
+    return originRepo;
+  }
+
+  @Test
+  void aVerifiedAgentWhoseWrapperBranchSitsAtMainIsObsoleteWithNoRelease() throws Exception {
+    // qits-1596: VERIFIED, its wrapper branch re-created at main for a release request that had
+    // already folded, so no release ever called the resolution door; it sat ACTIVE for 2.5 h.
+    String originRepo = origin();
+    TestOrigin.branchAt(originsDir, originRepo, "ticket/at-main", "master");
+    UUID id = verifiedOnOrigin(originRepo, "ticket/at-main");
+
+    service.obsoleteReleasedClosed(Duration.ZERO);
+
+    AgentWorktree obsolete = row(id.toString());
+    assertEquals(AgentState.OBSOLETE, obsolete.state);
+    assertNotNull(obsolete.obsoleteAt);
+    List<AgentObsolete> events = obsoleteEventsOf(id.toString());
+    assertEquals(1, events.size(), events.toString());
+    assertEquals("ticket/at-main", events.get(0).branch());
+    assertNull(events.get(0).version(), "nothing consumed the branch");
+    assertNull(events.get(0).commitSha());
+  }
+
+  @Test
+  void aVerifiedAgentWhoseWrapperBranchIsGoneIsObsolete() throws Exception {
+    String originRepo = origin();
+    UUID id = verifiedOnOrigin(originRepo, "ticket/gone");
+
+    service.obsoleteReleasedClosed(Duration.ZERO);
+
+    assertEquals(AgentState.OBSOLETE, row(id.toString()).state);
+    assertEquals(1, obsoleteEventsOf(id.toString()).size());
+  }
+
+  @Test
+  void aVerifiedAgentWhoseWrapperBranchIsAheadOfMainStaysActive() throws Exception {
+    // Its pending release consumes the branch, and the door ends it then.
+    String originRepo = origin();
+    TestOrigin.branchAt(originsDir, originRepo, "ticket/ahead", "master");
+    TestOrigin.commitOnBranch(
+        originsDir, originRepo, "ticket/ahead", "work.txt", "unreleased\n", "unreleased work");
+    UUID id = verifiedOnOrigin(originRepo, "ticket/ahead");
+
+    service.obsoleteReleasedClosed(Duration.ZERO);
+
+    assertEquals(AgentState.ACTIVE, row(id.toString()).state);
+    assertEquals(List.of(), obsoleteEventsOf(id.toString()));
+
+    AgentService.Resolution resolution =
+        service.resolveReleasedBranch(originRepo, "ticket/ahead", "2026.4.4", "aaa", null);
+    assertEquals(List.of(id.toString()), resolution.agentIds(), "its release ends it at once");
+  }
+
+  @Test
+  void anUnreachableGitHostLeavesAVerifiedAgentActive() {
+    // Fail closed: this repository has no origin at all, so the git host cannot be asked.
+    UUID id = verifiedOnOrigin(repoId, "ticket/no-origin");
+
+    service.obsoleteReleasedClosed(Duration.ZERO);
+
+    assertEquals(AgentState.ACTIVE, row(id.toString()).state);
+  }
+
+  @Test
+  void theGitQuestionIsAskedAtMostOncePerInterval() throws Exception {
+    String originRepo = origin();
+    TestOrigin.branchAt(originsDir, originRepo, "ticket/throttled", "master");
+    TestOrigin.commitOnBranch(
+        originsDir, originRepo, "ticket/throttled", "work.txt", "unreleased\n", "unreleased work");
+    UUID id = verifiedOnOrigin(originRepo, "ticket/throttled");
+    Duration hour = Duration.ofHours(1);
+
+    service.obsoleteReleasedClosed(hour); // asked (here, or by a pass just before): ahead
+    assertEquals(AgentState.ACTIVE, row(id.toString()).state);
+
+    TestOrigin.deleteBranch(originsDir, originRepo, "ticket/throttled");
+    service.obsoleteReleasedClosed(hour);
+    assertEquals(AgentState.ACTIVE, row(id.toString()).state, "not asked again within the hour");
+
+    service.obsoleteReleasedClosed(Duration.ZERO);
+    assertEquals(AgentState.OBSOLETE, row(id.toString()).state, "asked again: the branch is gone");
   }
 
   @Test

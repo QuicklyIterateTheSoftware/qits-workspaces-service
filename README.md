@@ -140,7 +140,9 @@ released branch is deleted on the git host by a primitive that fires no event, s
 so here: every ACTIVE agent whose wrapper branch it is records the release (a branch an agent merely
 pushed marks nobody). It becomes OBSOLETE once its work item is closed too (VERIFIED, DONE or
 DROPPED), in whichever order the two happen — at once when the item is already closed, else when it
-closes (qits-1605) — and the cleanup sweep removes it once it has been idle (leftover work is handed
+closes (qits-1605); a closed item's agent whose wrapper branch no release consumed is OBSOLETE too
+once that branch is gone from the git host or merged into the default branch — and the cleanup
+sweep removes it once it has been idle (leftover work is handed
 back to the agent, never deleted). A branch nothing owns answers `resolved:false` — the ordinary case.
 
 **The machine doors qits-projects presses** (`{qits:admin, qits:system}`), every one keyed by the

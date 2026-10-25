@@ -127,14 +127,7 @@ public class AgentWorktreeRepository implements PanacheRepositoryBase<AgentWorkt
    * statuses}, any case, oldest first (qits-1605): the ones a closed item makes OBSOLETE.
    */
   public List<AgentWorktree> findActiveConsumedByEntityStatuses(Collection<String> statuses) {
-    if (statuses == null || statuses.isEmpty()) {
-      return List.of();
-    }
-    List<String> upper =
-        statuses.stream()
-            .filter(s -> s != null && !s.isBlank())
-            .map(s -> s.trim().toUpperCase(java.util.Locale.ROOT))
-            .toList();
+    List<String> upper = upperCased(statuses);
     if (upper.isEmpty()) {
       return List.of();
     }
@@ -143,6 +136,32 @@ public class AgentWorktreeRepository implements PanacheRepositoryBase<AgentWorkt
             + " order by createdAt",
         AgentState.ACTIVE,
         upper);
+  }
+
+  /**
+   * ACTIVE agents whose wrapper branch no release consumed and whose item's status is one of {@code
+   * statuses}, any case, oldest first (qits-1605): the ones whose branch git is asked about.
+   */
+  public List<AgentWorktree> findActiveUnconsumedByEntityStatuses(Collection<String> statuses) {
+    List<String> upper = upperCased(statuses);
+    if (upper.isEmpty()) {
+      return List.of();
+    }
+    return list(
+        "state = ?1 and branchConsumedAt is null and upper(entityStatus) in ?2"
+            + " order by createdAt",
+        AgentState.ACTIVE,
+        upper);
+  }
+
+  private static List<String> upperCased(Collection<String> statuses) {
+    if (statuses == null) {
+      return List.of();
+    }
+    return statuses.stream()
+        .filter(s -> s != null && !s.isBlank())
+        .map(s -> s.trim().toUpperCase(java.util.Locale.ROOT))
+        .toList();
   }
 
   /** Every query of the listing door, each filter optional. */

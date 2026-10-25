@@ -1102,14 +1102,24 @@ makes every daemon call, one pass at a time, kicked after each door and every
    that workspace, the reason stored once. A row from before `V26` (null) with a command id counts
    as started where it is placed. A second failure in a row holds the agent
    back from placement 1 min, doubling to 30 min, until an accepted start (qits-1233).
-6. **Obsolete** (qits-1276, qits-1605) — an ACTIVE agent becomes OBSOLETE once its item is closed:
-   DROPPED at once (`obsoleteDropped`; a dropped item's branch is never released), VERIFIED or DONE
-   only once a release also consumed its wrapper branch (`obsoleteConsumedClosed`, reading
-   `branch_consumed_at`, `V31`), in whichever order the two happen. A release alone never ends an
+6. **Obsolete** (qits-1276, qits-1605) — an ACTIVE agent becomes OBSOLETE once its item is closed
+   and its wrapper branch's work has been released: DROPPED at once (`obsoleteDropped`; a dropped
+   item's branch is never released), VERIFIED or DONE once a release consumed its wrapper branch
+   (`branch_consumed_at`, `V31`) or the branch is gone from the git host or merged into the
+   repository's default branch (`obsoleteReleasedClosed`), in whichever order the two happen. The
+   git question (`ls-remote` for the tip, then a forced mirror fetch and `merge-base --is-ancestor`
+   against the default branch, `WorkspaceService.branchHoldsNothingBeyond`) is asked of VERIFIED or
+   DONE agents with no consumed mark only, at most once per agent per
+   `qits.workspace.agent.closed-branch-check-every` (5 min), outside any transaction, and fails
+   closed: any error leaves the agent ACTIVE. It exists because a closed item's branch can miss its
+   release: qits-1596's wrapper branch was re-created at main for a release request that had
+   already folded, no release ever called the resolution door for it, and its agent sat ACTIVE for
+   2.5 h. A VERIFIED item whose branch is still ahead of main keeps its agent until its release. A release alone never ends an
    agent: the wrapper can release before the item's other repositories and before VERIFIED, and an
    agent made OBSOLETE then had its waits cancelled with no wake, new ones refused
    `AGENT_NOT_ACTIVE`, and no nudge, wake or stale-idle repair. The `AgentObsolete` of a release
-   that came first carries that release's version and commit, stored when it consumed the branch.
+   that came first carries that release's version and commit, stored when it consumed the branch;
+   one for a branch gone or merged carries neither.
    A dispatch on the same wrapper branch clears the mark: the agent may have work that release
    does not hold, and the next release records it again.
 
@@ -1237,7 +1247,7 @@ payload's top-level fields:
 | `AgentYielded` | the four | |
 | `AgentNudged` | the four, `nudgeCount` (this nudge included), `reason` | `IDLE`, `SELF_BLOCKED` |
 | `AgentResumed` | the four, `reason` | `TURN_PENDING`, `WORKS_AGAIN` |
-| `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs, as stored when it consumed the branch if the item closed later; both absent for a dropped item) — one per agent | |
+| `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs, as stored when it consumed the branch if the item closed later; both absent for a dropped item, and for a closed item whose branch was gone or merged with no release) — one per agent | |
 | `AgentCleanupDeferred` | the four, `reason`, `detail` | `ITEM_NOT_CLOSED`, `RECENTLY_ACTIVE`, `TURN_PENDING`, `HARNESS_BUSY`, `DAEMON_NOT_CONNECTED`, `NO_DAEMON_CLIENT`, `CHECK_UNANSWERED`, `BUSY_IN_BACKGROUND`, `REMOVAL_UNANSWERED`, `LEFTOVER_WORK_PROMPTED` |
 | `AgentRemoved` | the four, `reason`, `harnessStopped`, `detail` | `OBSOLETE_NEVER_PLACED`, `OBSOLETE_WORKSPACE_GONE`, `UNKNOWN_TO_DAEMON`, `RELEASED_IDLE_CLEAN`, `DROPPED_IDLE_CLEAN`, `DISCARDED` |
 | `AgentHarnessExited` | the four, `commandId`, `status`, `exitCode`, `stoppedBy` | `stoppedBy`: `DAEMON_REMOVE`, `DAEMON_YIELD`, `KILLED`, `SELF` |
