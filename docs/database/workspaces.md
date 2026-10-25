@@ -51,12 +51,15 @@ erDiagram
     boolean admin "not null"
     text block_author
     text block_source
+    instant branch_consumed_at
     uuid causation_id
     instant cleanup_prompted_at
     text command_id
     text commissioned_token
     string commissioned_token_id "length 64"
     string commissioned_token_subject "length 255"
+    text consumed_commit
+    text consumed_version
     instant created_at "not null"
     boolean entity_blocked
     text entity_id
