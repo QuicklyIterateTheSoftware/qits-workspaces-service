@@ -972,10 +972,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            repository's project. Nothing was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Dispatch
       tags:
       - Agent Dispatch Controller
@@ -984,6 +989,7 @@ paths:
         - qits:admin
         - qits:admin-agent
         - qits:system
+        - qits:desk
   /workspaces/api/agent-dispatches/blocked:
     post:
       operationId: markAgentDispatchBlocked
@@ -1008,10 +1014,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            item's ACTIVE agent's project. Nothing was marked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Blocked
       tags:
       - Agent Dispatch Controller
@@ -1020,6 +1031,7 @@ paths:
         - qits:admin
         - qits:admin-agent
         - qits:system
+        - qits:desk
   /workspaces/api/agent-dispatches/delivery:
     post:
       operationId: deliverAgentTurn
@@ -1089,10 +1101,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            item's ACTIVE agent's project. Nothing was stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Entity
       tags:
       - Agent Dispatch Controller
@@ -1101,6 +1118,7 @@ paths:
         - qits:admin
         - qits:admin-agent
         - qits:system
+        - qits:desk
   /workspaces/api/agent-dispatches/references:
     get:
       operationId: listAgentDispatchReferences
@@ -1208,10 +1226,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "403":
+          description: "A `qits:desk` caller asking for an ADMIN agent, or whose token's\
+            \ `project` claim is not the repository's project. Nothing was created."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Create
       tags:
       - Agent Controller
@@ -1219,6 +1242,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
   /workspaces/api/agents/{agentId}/waits:
     get:
       summary: "The agent's waits, optionally of one state"
@@ -1429,10 +1453,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            agent's project. Nothing was removed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
         "400":
           description: Bad Request
       summary: Discard
@@ -1442,6 +1471,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
   /workspaces/api/agents/{id}/prompt-attachments:
     get:
       parameters:
@@ -1513,10 +1543,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            agent's project. Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Add
       tags:
       - Workspace Prompt Attachment Controller
@@ -1524,6 +1559,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
   /workspaces/api/agents/{id}/prompt-attachments/{attachmentId}:
     put:
       parameters:
@@ -1564,10 +1600,15 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "413":
           description: The image exceeds the configured limit.
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            agent's project. Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Update
       tags:
       - Workspace Prompt Attachment Controller
@@ -1575,6 +1616,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
     delete:
       parameters:
       - name: attachmentId
@@ -1596,10 +1638,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            agent's project. Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Delete
       tags:
       - Workspace Prompt Attachment Controller
@@ -1607,6 +1654,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
   /workspaces/api/agents/{id}/prompt-attachments/{attachmentId}/content:
     get:
       parameters:
@@ -1687,10 +1735,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            agent's project. Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Save
       tags:
       - Workspace Prompt Draft Controller
@@ -1698,6 +1751,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
     get:
       operationId: getAgentPromptDraft
       parameters:
@@ -1748,10 +1802,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            agent's project. Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Delete
       tags:
       - Workspace Prompt Draft Controller
@@ -1759,6 +1818,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
   /workspaces/api/branches/cleanup:
     post:
       parameters:
@@ -1890,10 +1950,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            repository's project. Nothing was resolved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Resolve Released Branch
       tags:
       - Branch Resolution Controller
@@ -1902,6 +1967,7 @@ paths:
         - qits:admin
         - qits:admin-agent
         - qits:system
+        - qits:desk
   /workspaces/api/gc/branches:
     post:
       operationId: sweepBranches
@@ -1913,15 +1979,20 @@ paths:
         required: true
       responses:
         "200":
-          description: OK
+          description: The sweep's report; a dry run deleted nothing.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/BranchSweepReport"
+        "403":
+          description: "A `qits:desk` caller asking for a real sweep: deleting a branch\
+            \ is a push, and the delivery desk may only dry-run. Nothing was deleted."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
         "400":
           description: Bad Request
       summary: Sweep Branches
@@ -1932,6 +2003,7 @@ paths:
         - qits:admin
         - qits:admin-agent
         - qits:system
+        - qits:desk
   /workspaces/api/history:
     get:
       parameters:
@@ -1975,15 +2047,21 @@ paths:
         required: true
       responses:
         "200":
-          description: OK
+          description: The updated record.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Response10"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            workspace's project (a workspace of no resolvable project counts as another's).
+            Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Update
       tags:
       - Workspace History Controller
@@ -1991,6 +2069,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
     get:
       operationId: getWorkspaceHistory
       parameters:
@@ -2260,15 +2339,21 @@ paths:
           format: int64
       responses:
         "200":
-          description: OK
+          description: Deleted; the refreshed workspace.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkspaceDto"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            workspace's project (a workspace of no resolvable project counts as another's).
+            Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Delete Container
       tags:
       - Workspace Controller
@@ -2276,6 +2361,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
   /workspaces/api/workspaces/{id}/discard:
     post:
       operationId: discardWorkspace
@@ -2299,15 +2385,22 @@ paths:
         required: true
       responses:
         "200":
-          description: OK
+          description: Discarded.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Response8"
+        "403":
+          description: "A `qits:desk` caller whose token's `project` claim is not\
+            \ the workspace's project, or a workspace that stands on a branch: discarding\
+            \ it deletes that branch on the git host, a push the delivery desk may\
+            \ not make. Nothing was changed."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
         "400":
           description: Bad Request
       summary: Discard
@@ -2317,6 +2410,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
   /workspaces/api/workspaces/{id}/ensure-container:
     post:
       operationId: ensureWorkspaceContainer
@@ -2342,10 +2436,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            workspace's project (a workspace of no resolvable project counts as another's).
+            Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Ensure Container
       tags:
       - Workspace Controller
@@ -2353,6 +2453,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
   /workspaces/api/workspaces/{id}/recreate-container:
     post:
       operationId: recreateWorkspaceContainer
@@ -2365,15 +2466,21 @@ paths:
           format: int64
       responses:
         "200":
-          description: OK
+          description: The recreate this call started.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Response4"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            workspace's project (a workspace of no resolvable project counts as another's).
+            Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Recreate Container
       tags:
       - Workspace Controller
@@ -2381,6 +2488,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
   /workspaces/api/workspaces/{id}/stop-container:
     post:
       operationId: stopWorkspaceContainer
@@ -2393,15 +2501,21 @@ paths:
           format: int64
       responses:
         "200":
-          description: OK
+          description: Stopped; the refreshed workspace.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkspaceDto"
+        "403":
+          description: A `qits:desk` caller whose token's `project` claim is not the
+            workspace's project (a workspace of no resolvable project counts as another's).
+            Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Not Authorized
-        "403":
-          description: Not Allowed
       summary: Stop Container
       tags:
       - Workspace Controller
@@ -2409,6 +2523,7 @@ paths:
       - SecurityScheme:
         - qits:admin
         - qits:admin-agent
+        - qits:desk
 info:
   title: qits-workspaces API
   version: "0"

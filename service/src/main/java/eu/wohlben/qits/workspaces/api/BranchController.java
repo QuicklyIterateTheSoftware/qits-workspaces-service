@@ -56,7 +56,9 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 // class's roles must call only private members. With every door here person-only, the class list
 // and the method bodies agree by construction; the body-level refusal stays as the belt that
 // survives any future widening. `qits:admin-agent` is admitted too (qits-628 follow-up); remove it
-// here if this door must stay human-only.
+// here if this door must stay human-only. `qits:desk` is deliberately NOT admitted (qits-1596):
+// merge pushes a merge commit and cleanup deletes a branch on the git host — both are pushes, and
+// the delivery desk holds no push right and no way to commit code.
 @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
 public class BranchController {
 

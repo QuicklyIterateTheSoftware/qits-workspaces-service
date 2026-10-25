@@ -893,16 +893,26 @@ agent whose token subject it is; anything else is 403. `ContainerProxyAuthorizat
 create, list and cancel waits on `/workspaces/api/agents/{agentId}/waits`, but only for the agent
 their token belongs to: the principal must equal the agent row's `commissioned_token_subject`.
 `qits:admin` and `qits:system` act on any agent. `AgentWaitAccessTest` pins it.
-**`qits:desk` is admitted on one door, bound to its project** (qits-1493). `POST
-/workspaces/api/agent-dispatches/delivery` alone admits it, beside the usual machine set. A
-`qits:desk` caller holding none of `qits:admin`/`qits:admin-agent`/`qits:system` may deliver only to
-the item's ACTIVE agent's own project: the door resolves that agent through
-`AgentService.projectOfActiveAgent` and compares it against the token's `project` claim
-(`MachineIdentity.claimMatches`, `QitsClaims.PROJECT` — the structured claim's enforcement-side
-vocabulary, next to `CredentialCommissioner.PROJECT_CLAIM` on the minting side); a mismatch is 403
-"The delivery desk may prompt only the agents of its own project" and nothing is said. An item with
-no ACTIVE agent is not a binding violation — the door still answers `agentId: null`, as it does for
-every other role. `qits:admin`, `qits:admin-agent` and `qits:system` stay unbound.
+**`qits:desk` holds the coordinator's writes, bound to its project** (qits-1493 for `POST
+/workspaces/api/agent-dispatches/delivery`, qits-1596 for the rest). The delivery desk's token
+(`qits:agent` + `qits:desk`, a `project` claim, no Git refs) is admitted beside `qits:admin-agent` on
+every write of `WorkspaceController`, `AgentController`, `AgentDispatchController`,
+`BranchResolutionController`, the prompt draft and attachment controllers, the history `PATCH` and
+the capture. `api/DeskBinding` binds it: a caller holding `qits:desk` and none of
+`qits:admin`/`qits:admin-agent`/`qits:system` acts only where the resource's project — a
+repository's, a workspace row's repository's, an agent's repository's, a work item's ACTIVE agent's
+(`AgentService.projectOfActiveAgent`) — is its token's `project` claim (`MachineIdentity.claimMatches`,
+`QitsClaims.PROJECT`, next to `CredentialCommissioner.PROJECT_CLAIM` on the minting side); otherwise
+403 and nothing happens. An unresolvable project (the editor row, a registry blink) is 403 for the
+desk; a resource that does not exist is left to the door's own 404, and a work item with no ACTIVE
+agent still answers `agentId: null`. `qits:desk` is never an unbound role. Refused outright, whatever
+the project: an ADMIN agent (it would mint a `workspace-admin` credential, the coordinator's rights
+with pushes), `BranchController` (merge and cleanup are pushes), a real `/gc/branches` sweep (branch
+deletion is a push; a dry run is admitted), a workspace discard on a row that stands on a branch
+(the discard deletes it), and `ContainerProxyRoute` (a shell beside the agents' push tokens; the desk
+is judged as the plain `qits:agent` it also is). Its reads come with `qits:agent`. The actor of a
+desk write is its token subject, the principal this service already uses. `DeskWriteAccessTest`
+pins it.
 **`qits:admin-agent` is admitted wherever `qits:admin` is** (qits-628 follow-up, owner's request
 2026-10-07). It is the role qits-idp issues, beside `qits:agent`, to an ADMIN workspace's container
 credential (context kind `workspace-admin`), whose agent holds the host's docker socket. It is named

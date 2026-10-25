@@ -15,6 +15,9 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import java.util.List;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 /**
  * The workspace history for a repository: every workspace (active + resolved) as a browsable record
@@ -24,10 +27,12 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 @Path("/history")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk"})
 public class WorkspaceHistoryController {
 
   @Inject WorkspaceHistoryService workspaceHistoryService;
+
+  @Inject DeskBinding desk;
 
   public static record ListHistoryRequest() {
     public record Response(List<Entry> entries) {
@@ -113,8 +118,14 @@ public class WorkspaceHistoryController {
 
   @PATCH
   @Path("/{id}")
+  @APIResponse(responseCode = "200", description = "The updated record.")
+  @APIResponse(
+      responseCode = "403",
+      description = DeskBinding.WORKSPACE_403,
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public UpdateHistoryRequest.Response update(
       @PathParam("id") Long id, UpdateHistoryRequest request) {
+    desk.requireWorkspace(id);
     return new UpdateHistoryRequest.Response(
         workspaceHistoryService.updateNarrative(id, request.preamble(), request.result()));
   }

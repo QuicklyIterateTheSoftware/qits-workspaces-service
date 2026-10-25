@@ -29,15 +29,19 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  *
  * <p>Roles per method, as everywhere here: the reads take {@code qits:agent} beside the person's
  * roles; the writes are {@code qits:admin} and {@code qits:admin-agent}, the standing rule for a
- * person's door.
+ * person's door, and {@code qits:desk} beside them (qits-1596), bound to its project by {@link
+ * DeskBinding}. The desk never creates an ADMIN agent: that would mint a {@code workspace-admin}
+ * credential, the coordinator's own rights, pushes included.
  */
 @Path("/agents")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk"})
 public class AgentController {
 
   @Inject AgentService agents;
+
+  @Inject DeskBinding desk;
 
   public static record ListAgentsRequest() {
     public record Response(List<AgentDto> agents) {}
@@ -105,9 +109,21 @@ public class AgentController {
       responseCode = "404",
       description = "No such repository.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @APIResponse(
+      responseCode = "403",
+      description =
+          "A `qits:desk` caller asking for an ADMIN agent, or whose token's `project` claim is not"
+              + " the repository's project. Nothing was created.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   // The trigger name of this door's call to qits-projects in the consumer pact.
   @Operation(operationId = "createAgent")
   public AgentService.Dispatch create(@Valid CreateAgentRequest request) {
+    if (request.admin()) {
+      desk.refuse(
+          "The delivery desk may not create an admin agent: it would hold a workspace-admin"
+              + " credential, pushes included.");
+    }
+    desk.requireRepository(request.repositoryId());
     String prefix = "EPIC".equalsIgnoreCase(request.kind()) ? "epic/" : "ticket/";
     String branch =
         request.wrapperBranch() != null && !request.wrapperBranch().isBlank()
@@ -143,8 +159,15 @@ public class AgentController {
               + " (uncommitted or unpushed work, named) or AGENT_DAEMON_UNREACHABLE; nothing was"
               + " removed. Send `force: true` to remove anyway.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @APIResponse(
+      responseCode = "403",
+      description =
+          "A `qits:desk` caller whose token's `project` claim is not the agent's project. Nothing"
+              + " was removed.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   @Operation(operationId = "discardAgent")
   public AgentDto discard(@PathParam("id") String id, DiscardAgentRequest request) {
+    desk.requireAgent(id);
     return agents.discard(agentId(id), request != null && request.force());
   }
 

@@ -41,10 +41,12 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 @Path("/agents/{id}/prompt-draft")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk"})
 public class WorkspacePromptDraftController {
 
   @Inject WorkspacePromptDraftService promptDrafts;
+
+  @Inject DeskBinding desk;
 
   @Inject WorkspacePromptDraftMapper promptDraftMapper;
 
@@ -111,8 +113,13 @@ public class WorkspacePromptDraftController {
       description = "The draft exceeds the configured byte cap.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @Operation(operationId = "saveAgentPromptDraft")
+  @APIResponse(
+      responseCode = "403",
+      description = DeskBinding.AGENT_403,
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public SavePromptDraftRequest.Response save(
       @PathParam("id") String id, @Valid SavePromptDraftRequest request) {
+    desk.requireAgent(id);
     return new SavePromptDraftRequest.Response(
         promptDraftMapper.toDto(
             promptDrafts.saveDraft(AgentController.agentId(id), request.content(), request.serializedPrompt())));
@@ -130,7 +137,12 @@ public class WorkspacePromptDraftController {
       description = "No such ACTIVE workspace.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @Operation(operationId = "deleteAgentPromptDraft")
+  @APIResponse(
+      responseCode = "403",
+      description = DeskBinding.AGENT_403,
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public Response delete(@PathParam("id") String id) {
+    desk.requireAgent(id);
     promptDrafts.deleteDraft(AgentController.agentId(id));
     return Response.noContent().build();
   }
