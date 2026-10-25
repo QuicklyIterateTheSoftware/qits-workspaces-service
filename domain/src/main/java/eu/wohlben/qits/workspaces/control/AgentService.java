@@ -2779,7 +2779,10 @@ public class AgentService {
                     a.entityBlocked,
                     a.state == AgentState.REMOVED || !activity.isResolvable()
                         ? null
-                        : activity.get().activityOf(a.id.toString()).orElse(null),
+                        // The reported state, not the raw one (qits-1601): an agent whose turn
+                        // ended while its own subagent still runs is working, not stalled. The
+                        // gates in drive and cleanup keep the raw activityOf.
+                        : activity.get().reportedActivityOf(a.id.toString()).orElse(null),
                     a.waitingSince,
                     waitingOn.containsKey(a.id) ? waitingOn.get(a.id).labels() : null,
                     waitingOn.containsKey(a.id) ? waitingOn.get(a.id).since() : null,

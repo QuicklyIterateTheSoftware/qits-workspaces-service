@@ -255,6 +255,59 @@ public class AgentServiceTest {
   }
 
   @Test
+  void anIdleAgentWhoseBackgroundWorkIsInFlightIsShownBusy() {
+    // qits-1601: the turn ended (Stop, then idle_prompt) while the agent's own subagent still ran;
+    // the door said IDLE/WAITING and the delivery desk prompted a working agent as stalled.
+    AgentService.Dispatch dispatched = dispatch("w-background-shown", true, null);
+    String agentId = dispatched.agent().agentId();
+    try {
+      activityView.reportWithBackgroundWork(agentId, AgentActivityState.IDLE);
+      assertEquals(AgentActivityState.BUSY, service.get(UUID.fromString(agentId)).activity());
+
+      activityView.reportWithBackgroundWork(agentId, AgentActivityState.WAITING);
+      assertEquals(AgentActivityState.BUSY, service.get(UUID.fromString(agentId)).activity());
+
+      activityView.report(agentId, AgentActivityState.WAITING);
+      assertEquals(
+          AgentActivityState.WAITING,
+          service.get(UUID.fromString(agentId)).activity(),
+          "with nothing in flight, the raw state");
+    } finally {
+      activityView.forget(agentId);
+    }
+  }
+
+  @Test
+  void aTurnIsTypedAtOnceIntoAnIdleAgentShownBusyByItsBackgroundWork() {
+    // qits-1601: the shown BUSY is for readers only. The drive gate reads the raw state, so a turn
+    // boundary is still one and a pending turn is said at once — not held for the turn window.
+    AgentService.Dispatch dispatched = dispatch("w-background-drive", true, null);
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      String said = "turn " + slot + " " + agentId + " the answer";
+
+      // The control: a raw BUSY holds the turn back for the window.
+      activityView.report(agentId, AgentActivityState.BUSY);
+      service.deliver("w-background-drive", "the answer", false);
+      service.reconcile();
+      assertFalse(daemon.callsFor(agentId).contains(said), "held while the harness is mid turn");
+
+      activityView.reportWithBackgroundWork(agentId, AgentActivityState.IDLE);
+      assertEquals(AgentActivityState.BUSY, service.get(UUID.fromString(agentId)).activity());
+      service.reconcile();
+
+      assertTrue(daemon.callsFor(agentId).contains(said), daemon.callsFor(agentId).toString());
+      assertNull(row(agentId).pendingText);
+    } finally {
+      activityView.forget(agentId);
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
   void aDeliveryReachesAnAgentAReleaseMadeObsolete() {
     // qits-248: a release took the agent's wrapper branch mid-item, and the next phase's turn was
     // answered "nobody works on it" while the agent still ran.
