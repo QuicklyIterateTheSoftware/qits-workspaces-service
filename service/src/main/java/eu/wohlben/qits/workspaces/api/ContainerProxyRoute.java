@@ -110,7 +110,13 @@ public class ContainerProxyRoute {
 
   @Inject AgentWorktreeRepository agents;
 
-  /** Roles that reach any workspace's daemon, even beside {@code qits:agent}. */
+  /**
+   * Roles that reach any workspace's daemon, even beside {@code qits:agent}. Never {@code
+   * qits:desk} (qits-1596): this route is a shell and a file writer inside the container, where the
+   * agents' push-scoped tokens (and on an admin row the docker socket) live, so it would hand the
+   * delivery desk a way to commit and push. A desk token holds {@code qits:agent} too and is judged
+   * as one: its subject is bound to no workspace, so it is 403.
+   */
   private static final List<String> ANY_WORKSPACE_ROLES =
       List.of("qits:system", "qits:admin", "qits:admin-agent");
 

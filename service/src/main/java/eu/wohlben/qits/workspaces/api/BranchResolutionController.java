@@ -29,14 +29,25 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * <p>A class of its own at {@code {qits:admin, qits:system}}, for the reason {@code
  * AgentDispatchController} gives: {@code BranchController}'s class role is a person's, and a
  * class-level {@code @RolesAllowed} binds ArC's internal calls too.
+ *
+ * <p>{@code qits:desk} is admitted too (qits-1596), bound to repositories of its own project by
+ * {@link DeskBinding}. Nothing here writes a ref: the release already deleted the branch, and the
+ * old-model discard runs with its branch deletion off.
  */
 @Path("/branches/resolution")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system"})
+@jakarta.annotation.security.RolesAllowed({
+  "qits:admin",
+  "qits:admin-agent",
+  "qits:system",
+  "qits:desk"
+})
 public class BranchResolutionController {
 
   @Inject AgentService agents;
+
+  @Inject DeskBinding desk;
 
   /**
    * @param target the release version that consumed the branch, logged
@@ -62,9 +73,16 @@ public class BranchResolutionController {
       description = "No such repository.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @Operation(operationId = "resolveReleasedBranch")
+  @APIResponse(
+      responseCode = "403",
+      description =
+          "A `qits:desk` caller whose token's `project` claim is not the repository's project."
+              + " Nothing was resolved.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public AgentService.Resolution resolveReleasedBranch(
       @QueryParam("repositoryId") String repositoryId,
       @Valid ResolveReleasedBranchRequest request) {
+    desk.requireRepository(repositoryId);
     return agents.resolveReleasedBranch(
         repositoryId, request.branch(), request.target(), request.commit(), request.result());
   }

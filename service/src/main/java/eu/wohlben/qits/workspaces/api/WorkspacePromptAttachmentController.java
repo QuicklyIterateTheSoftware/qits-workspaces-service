@@ -42,10 +42,12 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 @Path("/agents/{id}/prompt-attachments")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk"})
 public class WorkspacePromptAttachmentController {
 
   @Inject WorkspacePromptAttachmentService promptAttachments;
+
+  @Inject DeskBinding desk;
 
   public static record ListAttachmentsRequest() {
     public record Response(List<WorkspacePromptAttachmentDataDto> attachments) {}
@@ -119,7 +121,12 @@ public class WorkspacePromptAttachmentController {
       responseCode = "413",
       description = "The image exceeds the configured per-image byte cap.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @APIResponse(
+      responseCode = "403",
+      description = DeskBinding.AGENT_403,
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public Response add(@PathParam("id") String id, @Valid AddAttachmentRequest request) {
+    desk.requireAgent(id);
     WorkspacePromptAttachment attachment =
         promptAttachments.addAttachment(
             AgentController.agentId(id), request.mimeType(), request.label(), request.source(), request.dataBase64());
@@ -147,10 +154,15 @@ public class WorkspacePromptAttachmentController {
       description = "No such ACTIVE workspace, or no such attachment on it.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @APIResponse(responseCode = "413", description = "The image exceeds the configured limit.")
+  @APIResponse(
+      responseCode = "403",
+      description = DeskBinding.AGENT_403,
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public AddAttachmentRequest.Response update(
       @PathParam("id") String id,
       @PathParam("attachmentId") String attachmentId,
       @Valid AddAttachmentRequest request) {
+    desk.requireAgent(id);
     WorkspacePromptAttachment attachment =
         promptAttachments.updateAttachment(
             AgentController.agentId(id),
@@ -195,8 +207,13 @@ public class WorkspacePromptAttachmentController {
       responseCode = "404",
       description = "No such ACTIVE workspace, or no such attachment on it.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @APIResponse(
+      responseCode = "403",
+      description = DeskBinding.AGENT_403,
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public Response delete(
       @PathParam("id") String id, @PathParam("attachmentId") String attachmentId) {
+    desk.requireAgent(id);
     promptAttachments.deleteAttachment(AgentController.agentId(id), attachmentId);
     return Response.noContent().build();
   }

@@ -57,7 +57,9 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
       CaptureResource.CaptureResponse.WorkRef.class
     })
 @Path("capture")
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
+// qits:desk beside the coordinator's role (qits-1596), bound by DeskBinding to a repository of its
+// own project: the ticket is filed in that repository's project.
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk"})
 public class CaptureResource {
 
   /**
@@ -70,6 +72,7 @@ public class CaptureResource {
 
   @Inject ObjectMapper objectMapper;
   @Inject CaptureService captureService;
+  @Inject DeskBinding desk;
 
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
@@ -82,6 +85,7 @@ public class CaptureResource {
     byte[] json = gunzipBounded(body == null ? new byte[0] : body);
     CaptureRequest request = parse(json);
     String repoId = request.identity() == null ? null : request.identity().repositoryId();
+    desk.requireRepository(repoId);
     WorkFiler.Filed filed = captureService.capture(repoId, toContent(request), Instant.now());
     return Response.status(Response.Status.CREATED)
         .entity(new CaptureResponse(new CaptureResponse.WorkRef(filed.id(), filed.qualifiedId())))

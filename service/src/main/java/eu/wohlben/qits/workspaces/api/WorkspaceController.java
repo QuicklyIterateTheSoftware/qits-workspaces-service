@@ -36,16 +36,31 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * <p>Not the string {@code workspaceId}: that is a branch-derived label, unique only per repository
  * and reusable once a workspace resolves, which is why it needed a {@code repoId} beside it to
  * identify anything. A unique id is already unique.
+ *
+ * <p>The writes admit {@code qits:desk} beside {@code qits:admin-agent} (qits-1596), bound by {@link
+ * DeskBinding} to workspaces of its own project: the workspace row's repository's project must be
+ * its token's {@code project} claim.
  */
 @Path("/workspaces")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk"})
 public class WorkspaceController {
+
+  /**
+   * Why the desk may not discard a workspace that stands on a branch (an old-model row; a slot has
+   * none): the discard deletes that branch on the git host, which is a push, and the delivery desk
+   * holds no push right (qits-1596).
+   */
+  static final String DESK_DISCARD_DELETES_BRANCH =
+      "The delivery desk may not discard a workspace that stands on a branch: the discard deletes"
+          + " that branch on the git host, which is a push.";
 
   @Inject WorkspaceService workspaceService;
 
   @Inject WorkspaceMapper workspaceMapper;
+
+  @Inject DeskBinding desk;
 
   /**
    * Optional, like everywhere else this context touches the technical-process framework: with no
@@ -156,8 +171,13 @@ public class WorkspaceController {
               + " retry once it has ended.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @Operation(operationId = "ensureWorkspaceContainer")
+  @APIResponse(
+      responseCode = "403",
+      description = DeskBinding.WORKSPACE_403,
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public EnsureContainerRequest.Response ensureContainer(
       @PathParam("id") Long id) {
+    desk.requireWorkspace(id);
     String technicalProcessId = workspaceService.beginEnsureContainer(id);
     return new EnsureContainerRequest.Response(
         workspaceService.getWorkspace(id), technicalProcessId);
@@ -194,8 +214,14 @@ public class WorkspaceController {
   @POST
   @Path("/{id}/stop-container")
   @Operation(operationId = "stopWorkspaceContainer")
+  @APIResponse(responseCode = "200", description = "Stopped; the refreshed workspace.")
+  @APIResponse(
+      responseCode = "403",
+      description = DeskBinding.WORKSPACE_403,
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public WorkspaceDto stopContainer(
       @PathParam("id") Long id) {
+    desk.requireWorkspace(id);
     workspaceService.stopContainer(id);
     return workspaceService.getWorkspace(id);
   }
@@ -211,8 +237,14 @@ public class WorkspaceController {
   @POST
   @Path("/{id}/delete-container")
   @Operation(operationId = "deleteWorkspaceContainer")
+  @APIResponse(responseCode = "200", description = "Deleted; the refreshed workspace.")
+  @APIResponse(
+      responseCode = "403",
+      description = DeskBinding.WORKSPACE_403,
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public WorkspaceDto deleteContainer(
       @PathParam("id") Long id) {
+    desk.requireWorkspace(id);
     workspaceService.deleteContainer(id);
     return workspaceService.getWorkspace(id);
   }
@@ -239,8 +271,14 @@ public class WorkspaceController {
   @POST
   @Path("/{id}/recreate-container")
   @Operation(operationId = "recreateWorkspaceContainer")
+  @APIResponse(responseCode = "200", description = "The recreate this call started.")
+  @APIResponse(
+      responseCode = "403",
+      description = DeskBinding.WORKSPACE_403,
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public RecreateContainerRequest.Response recreateContainer(
       @PathParam("id") Long id) {
+    desk.requireWorkspace(id);
     String technicalProcessId = workspaceService.beginRecreateContainer(id);
     return new RecreateContainerRequest.Response(
         workspaceService.getWorkspace(id), technicalProcessId);
@@ -268,10 +306,19 @@ public class WorkspaceController {
   @POST
   @Path("/{id}/discard")
   @Operation(operationId = "discardWorkspace")
+  @APIResponse(responseCode = "200", description = "Discarded.")
+  @APIResponse(
+      responseCode = "403",
+      description =
+          "A `qits:desk` caller whose token's `project` claim is not the workspace's project, or a"
+              + " workspace that stands on a branch: discarding it deletes that branch on the git host,"
+              + " a push the delivery desk may not make. Nothing was changed.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   public DiscardWorkspaceRequest.Response discard(
       @PathParam("id") Long id,
       @QueryParam("ignore-changes") @DefaultValue("false") boolean ignoreChanges,
       @Valid DiscardWorkspaceRequest request) {
+    desk.requireWorkspace(id, DESK_DISCARD_DELETES_BRANCH);
     workspaceService.discardWorkspace(
         id, request == null ? null : request.result(), ignoreChanges);
     return new DiscardWorkspaceRequest.Response(true);

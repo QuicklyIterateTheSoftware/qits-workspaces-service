@@ -1,14 +1,10 @@
 package eu.wohlben.qits.workspaces.api;
 
-import eu.wohlben.qits.auth.MachineIdentity;
-import eu.wohlben.qits.auth.QitsClaims;
 import eu.wohlben.qits.workspaces.control.AgentService;
 import eu.wohlben.qits.workspaces.control.EntityFacts;
 import eu.wohlben.qits.workspaces.dto.AgentDto;
 import eu.wohlben.qits.workspaces.entity.AgentHarness;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
-import eu.wohlben.qits.workspaces.error.ForbiddenException;
-import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -22,7 +18,6 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
@@ -38,27 +33,30 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * too, so a machine verb on a person's class is a 403 — the 2026-09-03 lesson. The references read
  * also admits {@code qits:agent}: every read does.
  *
- * <p><b>{@code deliver} also admits {@code qits:desk}</b> (qits-1493), and binds it: a desk token
- * may prompt only the agents of its own project, the project its token's {@code project} claim
- * names. {@code qits:admin}, {@code qits:admin-agent} and {@code qits:system} stay unbound.
+ * <p><b>{@code qits:desk} is admitted beside {@code qits:admin-agent}</b> (qits-1493 for {@code
+ * deliver}, qits-1596 for the rest), and bound by {@link DeskBinding}: a desk token may dispatch
+ * only onto a repository of its own project, and prompt or mark only the agents of its own project,
+ * the project its token's {@code project} claim names. {@code qits:admin}, {@code qits:admin-agent}
+ * and {@code qits:system} stay unbound. Every door here already refuses {@code admin: true}, so the
+ * desk can never have an admin agent (and its {@code workspace-admin} credential) made.
  */
 @Path("/agent-dispatches")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system"})
+@jakarta.annotation.security.RolesAllowed({
+  "qits:admin",
+  "qits:admin-agent",
+  "qits:system",
+  "qits:desk"
+})
 public class AgentDispatchController {
 
-  /**
-   * The roles bound to their own project on {@link #deliver}: {@code qits:desk} alone, never {@code
-   * qits:admin}/{@code qits:admin-agent}/{@code qits:system}, which this door admits unbound
-   * (qits-1493).
-   */
-  private static final List<String> UNBOUND_DELIVERY_ROLES =
-      List.of("qits:admin", "qits:admin-agent", "qits:system");
+  static final String DESK_PROMPTS_OWN_PROJECT =
+      "The delivery desk may prompt only the agents of its own project.";
 
   @Inject AgentService agents;
 
-  @Inject SecurityIdentity identity;
+  @Inject DeskBinding desk;
 
   /**
    * @param repositoryId the project's wrapper repository
@@ -106,6 +104,12 @@ public class AgentDispatchController {
       responseCode = "404",
       description = "No such repository. Nothing was created.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @APIResponse(
+      responseCode = "403",
+      description =
+          "A `qits:desk` caller whose token's `project` claim is not the repository's project."
+              + " Nothing was created.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   // The operationId is the name a consumer pact uses for this door as the TRIGGER of the calls it
   // makes downstream (pacts/qits-workspaces-service_qits-projects-service.json).
   @Operation(operationId = "dispatchAgent")
@@ -115,6 +119,7 @@ public class AgentDispatchController {
           "This door never creates an admin agent: an admin agent holds the host's docker socket"
               + " and comes only from a person's door, POST /workspaces/api/agents.");
     }
+    desk.requireRepository(request.repositoryId());
     return agents.dispatch(
         new AgentService.AgentRequest(
             request.repositoryId(),
@@ -168,29 +173,11 @@ public class AgentDispatchController {
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @Operation(operationId = "deliverAgentTurn")
   public AgentService.Delivery deliver(@Valid DeliverTurnRequest request) {
-    if (UNBOUND_DELIVERY_ROLES.stream().noneMatch(identity::hasRole)) {
-      requireOwnProject(request.workId());
-    }
+    // qits:desk's binding (qits-1493): an item with no ACTIVE agent is not a violation — it is
+    // answered `agentId: null`, as for every other role, and the desk never learns which project
+    // (if any) would have covered it.
+    desk.requireWorkItem(request.workId(), DESK_PROMPTS_OWN_PROJECT);
     return agents.deliver(request.workId(), request.text(), request.compactFirst());
-  }
-
-  /**
-   * qits:desk's binding (qits-1493): a desk token may prompt only the agents of its own project.
-   * An item with no ACTIVE agent is not a binding violation — {@link #deliver} answers it with
-   * {@code agentId: null}, the same as every other role's call, and a desk never learns which
-   * project (if any) would have covered it.
-   *
-   * @throws ForbiddenException the item's ACTIVE agent belongs to another project
-   */
-  private void requireOwnProject(String workId) {
-    Optional<String> agentProject = agents.projectOfActiveAgent(workId);
-    if (agentProject.isEmpty()) {
-      return;
-    }
-    if (!MachineIdentity.claimMatches(identity, QitsClaims.PROJECT, agentProject.get())) {
-      throw new ForbiddenException(
-          "The delivery desk may prompt only the agents of its own project.");
-    }
   }
 
   /**
@@ -212,8 +199,15 @@ public class AgentDispatchController {
       responseCode = "400",
       description = "A blank work item.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @APIResponse(
+      responseCode = "403",
+      description =
+          "A `qits:desk` caller whose token's `project` claim is not the item's ACTIVE agent's"
+              + " project. Nothing was marked.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   @Operation(operationId = "markAgentDispatchBlocked")
   public AgentService.EntityMark blocked(@Valid MarkBlockedRequest request) {
+    desk.requireWorkItem(request.workId(), DESK_PROMPTS_OWN_PROJECT);
     return agents.markBlocked(
         request.workId(), request.blocked(), request.blockSource(), request.blockedBy());
   }
@@ -239,8 +233,15 @@ public class AgentDispatchController {
       responseCode = "400",
       description = "A blank work item, or a missing or non-boolean `blocked`.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @APIResponse(
+      responseCode = "403",
+      description =
+          "A `qits:desk` caller whose token's `project` claim is not the item's ACTIVE agent's"
+              + " project. Nothing was stored.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
   @Operation(operationId = "markAgentDispatchEntity")
   public AgentService.EntityMark entity(@Valid MarkEntityRequest request) {
+    desk.requireWorkItem(request.workId(), DESK_PROMPTS_OWN_PROJECT);
     return agents.markEntity(
         request.workId(),
         new EntityFacts(request.title(), request.status(), request.blocked().booleanValue()),
