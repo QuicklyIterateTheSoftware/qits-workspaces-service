@@ -205,7 +205,10 @@ public class WorkspaceDaemonRegistry
    * a {@link DaemonConnection}</b>, because a provision (a real clone) outlives a socket bounce:
    * the daemon keeps cloning across a reconnect and reports {@code Provisioned} on whichever
    * connection is up when it finishes. A connection-scoped slot would be orphaned by {@link
-   * #unregister}.
+   * #unregister}. A slot is registered by {@link #awaitProvision} (a DIRECT start, right after the
+   * container runs) or, earlier, by {@link #expectProvision} (a TARGET start, when it asks for its
+   * lease — qits-1600); either way the await removes it when it returns, and a TARGET start that ends
+   * without awaiting forgets the slot it registered.
    */
   private final ConcurrentHashMap<Long, PendingProvision> provisions = new ConcurrentHashMap<>();
 
@@ -825,13 +828,17 @@ public class WorkspaceDaemonRegistry
   }
 
   /**
-   * Complete the workspace's provision with {@code result}, if an awaiter is registered. The
-   * awaiter always registers first — {@code provisionContainer} calls {@link #awaitProvision}
-   * synchronously right after {@code docker run}, long before the daemon can finish cloning — so a
-   * terminal with no pending slot is a late straggler (a connect that beat the timeout, or a
-   * duplicate on restart) and is dropped rather than retained: {@code computeIfAbsent} here would
-   * create an entry no awaiter ever removes, leaking the map. A duplicate on an already-completed
-   * future is a harmless no-op.
+   * Complete the workspace's provision with {@code result}, if a slot is registered. Two starts
+   * register one before the daemon can report: a DIRECT start's {@code provisionContainer} calls
+   * {@link #awaitProvision} synchronously right after {@code docker run}, and a TARGET start calls
+   * {@link #expectProvision} when it asks for its lease — not at its await, which waits for this
+   * service to observe the lease RUNNING, and which a daemon restarted over an existing {@code
+   * /workspace} routinely beats (qits-1600: its {@code Provisioned} was dropped here and the row
+   * FAILED at the provision timeout). An expected slot keeps the outcome until its await takes it.
+   * So a terminal with no slot is a late straggler (a connect that beat the timeout, a duplicate on
+   * restart, a start that already ended) and is dropped rather than retained: {@code
+   * computeIfAbsent} here would create an entry no awaiter ever removes, leaking the map, and hand
+   * the next start a stale outcome. A duplicate on an already-completed future is a harmless no-op.
    */
   private void completeProvision(Long workspaceId, ProvisionResult result) {
     PendingProvision pending = provisions.get(workspaceId);
@@ -936,7 +943,8 @@ public class WorkspaceDaemonRegistry
       BooleanSupplier abandoned) {
     // Register the pending slot BEFORE waiting, so streamed chunks and the terminal event that
     // arrive during the wait land on it (and survive a socket reconnect — the slot lives on the
-    // registry, not the connection).
+    // registry, not the connection). A TARGET start registered it already (expectProvision), and
+    // its terminal may be on it by now: reused here, and taken below without a liveness wait.
     PendingProvision pending =
         provisions.computeIfAbsent(workspaceId, id -> new PendingProvision());
     pending.onLine = onLine;
@@ -993,6 +1001,36 @@ public class WorkspaceDaemonRegistry
     return pending != null
         && pending.future.complete(
             ProvisionResult.failed(reason == null ? STOPPED_WHILE_PROVISIONING : reason));
+  }
+
+  /**
+   * Registers the TARGET start's slot ahead of its await (qits-1600) — see {@link
+   * WorkspaceDaemonProvisioner#expectProvision}. Always a fresh slot: one a previous start left (an
+   * outcome it never took, or an await it abandoned) is replaced, and an await still parked on it is
+   * woken with a failed outcome rather than left to its timeout. That await's own write is guarded
+   * by its lease and its row's PROVISIONING, so it lands on nothing; and its {@code finally} removes
+   * only its own slot, never this one.
+   */
+  @Override
+  public ExpectedProvision expectProvision(Long workspaceId) {
+    PendingProvision pending = new PendingProvision();
+    PendingProvision previous = provisions.put(workspaceId, pending);
+    if (previous != null) {
+      previous.future.complete(ProvisionResult.failed(SUPERSEDED_BY_A_NEWER_START));
+    }
+    return () -> provisions.remove(workspaceId, pending);
+  }
+
+  /** What an await whose slot a newer start replaced answers. */
+  private static final String SUPERSEDED_BY_A_NEWER_START =
+      "a newer start of the workspace replaced this provision";
+
+  /**
+   * Test hook: whether any provision slot — awaited or only {@link #expectProvision expected} — is
+   * registered for {@code workspaceId}.
+   */
+  boolean hasProvisionSlot(Long workspaceId) {
+    return provisions.containsKey(workspaceId);
   }
 
   /**

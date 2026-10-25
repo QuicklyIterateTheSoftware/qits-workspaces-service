@@ -69,6 +69,14 @@ import org.jboss.logging.Logger;
  * process knows nothing about whose row is still PROVISIONING is a restart that lost the wait, and
  * the row reads RUNNING — the old runner inventory's reading of the same case.
  *
+ * <p><b>The daemon's report is expected from the lease request on</b> (qits-1600). The wait itself
+ * starts only once this process has seen the lease RUNNING, and a daemon restarted over an existing
+ * {@code /workspace} reports {@code Provisioned} within seconds of its container starting, often
+ * before that observation. So the start registers the provision slot when it asks for its lease
+ * ({@link #expectProvision}), the wait takes it over, and every way the start ends without a wait —
+ * the lease refused, EXITED, FAILED or ENDED, the row stopped, deleted or resolved — forgets it
+ * ({@link #abandonStart}), so it neither leaks nor hands its outcome to the row's next start.
+ *
  * <p><b>The technical process a start opened</b> is carried here, by row id ({@link #track}), as it
  * was for the runners: segment {@code queued} until a target is granted, {@code container} until it
  * runs, {@code clone} until the daemon reported.
@@ -131,6 +139,13 @@ public class TargetLeaseStates {
   private final Set<Long> awaitingDaemon = ConcurrentHashMap.newKeySet();
 
   /**
+   * The provision slot each start registered when it asked for its lease, until its daemon wait
+   * takes it over ({@link #awaitDaemon}) or the start ends without one ({@link #abandonStart}).
+   */
+  private final Map<Long, WorkspaceDaemonProvisioner.ExpectedProvision> expectedProvisions =
+      new ConcurrentHashMap<>();
+
+  /**
    * Since when each lease-less live row has been seen with no daemon connected ({@link
    * #stopLeaseless}). In memory: a restart starts every row's grace again, which only delays it.
    */
@@ -169,6 +184,18 @@ public class TargetLeaseStates {
    * comes through here.
    */
   public void abandonStart(Long rowId, String message) {
+    abandonStart(rowId, message, true);
+  }
+
+  /**
+   * {@link #abandonStart(Long, String)}, sparing the provision slot when {@code forgetProvision} is
+   * false: the daemon wait's own failure, whose slot its await already removed — a slot there now is
+   * a newer start's, registered in the moment between the FAILED write and this call.
+   */
+  private void abandonStart(Long rowId, String message, boolean forgetProvision) {
+    if (forgetProvision) {
+      forgetProvision(rowId);
+    }
     WorkspaceProcessTracker.Handle process = rowId == null ? null : starts.remove(rowId);
     if (process != null) {
       process.failProvision(message);
@@ -182,6 +209,44 @@ public class TargetLeaseStates {
   void forget(Long rowId, WorkspaceProcessTracker.Handle process) {
     if (rowId != null && process != null) {
       starts.remove(rowId, process);
+    }
+  }
+
+  /**
+   * Registers {@code rowId}'s provision slot (qits-1600), BEFORE its start asks for the lease: from
+   * then on a daemon's {@code Provisioned} is kept for the wait that RUNNING starts, however early it
+   * arrives. A slot an earlier start of the row left is forgotten first.
+   *
+   * @return the slot, for the start to {@link #forgetProvision(Long,
+   *     WorkspaceDaemonProvisioner.ExpectedProvision) forget} when its lease request comes to
+   *     nothing; {@link WorkspaceDaemonProvisioner.ExpectedProvision#NONE} with no provisioner
+   */
+  WorkspaceDaemonProvisioner.ExpectedProvision expectProvision(Long rowId) {
+    if (rowId == null || !daemonProvisioner.isResolvable()) {
+      return WorkspaceDaemonProvisioner.ExpectedProvision.NONE;
+    }
+    WorkspaceDaemonProvisioner.ExpectedProvision slot =
+        daemonProvisioner.get().expectProvision(rowId);
+    WorkspaceDaemonProvisioner.ExpectedProvision previous = expectedProvisions.put(rowId, slot);
+    if (previous != null) {
+      previous.forget();
+    }
+    return slot;
+  }
+
+  /** Forgets {@code slot} for {@code rowId} when it is still the one carried: a start that ended. */
+  void forgetProvision(Long rowId, WorkspaceDaemonProvisioner.ExpectedProvision slot) {
+    if (rowId != null && slot != null && expectedProvisions.remove(rowId, slot)) {
+      slot.forget();
+    }
+  }
+
+  /** Forgets whatever slot {@code rowId}'s start registered, if any. */
+  private void forgetProvision(Long rowId) {
+    WorkspaceDaemonProvisioner.ExpectedProvision slot =
+        rowId == null ? null : expectedProvisions.remove(rowId);
+    if (slot != null) {
+      slot.forget();
     }
   }
 
@@ -430,9 +495,12 @@ public class TargetLeaseStates {
           daemonWaits.submit(() -> awaitDaemon(lease.id(), row.id));
         } catch (RejectedExecutionException shuttingDown) {
           awaitingDaemon.remove(row.id);
+          forgetProvision(row.id);
         }
       }
       case STARTED -> {
+        // No wait follows, so nothing will take a slot a start registered.
+        forgetProvision(row.id);
         announceStarted(row);
         WorkspaceProcessTracker.Handle done = starts.remove(row.id);
         if (done != null) {
@@ -467,6 +535,9 @@ public class TargetLeaseStates {
    * that came first stands.
    */
   void awaitDaemon(UUID leaseId, Long rowId) {
+    // The slot the start registered is the await's now: awaitProvision reuses it, takes an outcome
+    // already on it, and removes it when it returns.
+    expectedProvisions.remove(rowId);
     try {
       WorkspaceProcessTracker.Handle process = starts.get(rowId);
       Consumer<String> onLine =
@@ -525,7 +596,7 @@ public class TargetLeaseStates {
         }
       } else {
         announceFailed(row);
-        abandonStart(rowId, error);
+        abandonStart(rowId, error, false);
       }
     } catch (RuntimeException e) {
       LOG.warnf(e, "Waiting for the daemon of target workspace %s failed", rowId);

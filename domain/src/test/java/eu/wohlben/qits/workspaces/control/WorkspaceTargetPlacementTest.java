@@ -301,6 +301,91 @@ public class WorkspaceTargetPlacementTest {
     assertTrue(read(created.id).runtimeError.startsWith("no workspace-daemon dialed home"));
   }
 
+  /**
+   * qits-1600: a container restarted over an existing {@code /workspace} reports {@code Provisioned}
+   * before this service has observed its lease RUNNING. The start registered the slot when it asked
+   * for the lease, so the report is kept, and the wait RUNNING starts takes it at once — the fake
+   * drops a report that finds no slot and fails an await after two seconds, so RUNNING here is the
+   * early report kept, not a timeout waited out.
+   */
+  @Test
+  public void aProvisionedThatBeatsTheObservedRunningIsKeptAndTheRowReadsRunning()
+      throws Exception {
+    provisioner.reportTargetRowsThroughSlots();
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "early", false);
+    UUID leaseId = read(created.id).leaseId;
+    UUID target = UUID.randomUUID();
+    states.observe(placement.move(leaseId, LeaseState.GRANTED, target, null, null));
+    assertTrue(provisioner.hasSlot(created.id), "the start registered the slot at its lease");
+
+    assertTrue(
+        provisioner.reportTarget(created.id, ProvisionResult.ok("cafebabe")),
+        "the early report is kept on the slot");
+    assertEquals(WorkspaceRuntimeStatus.PROVISIONING, read(created.id).runtimeStatus);
+
+    states.observe(placement.move(leaseId, LeaseState.RUNNING, target, null, null));
+    awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
+
+    assertNull(read(created.id).runtimeError);
+    awaitNoSlot(created.id);
+  }
+
+  /** The ordinary order still holds: RUNNING observed first, the report after it. */
+  @Test
+  public void aProvisionedAfterTheObservedRunningReadsRunning() throws Exception {
+    provisioner.reportTargetRowsThroughSlots();
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "late", false);
+    UUID leaseId = read(created.id).leaseId;
+
+    states.observe(placement.move(leaseId, LeaseState.RUNNING, UUID.randomUUID(), null, null));
+    assertEquals(WorkspaceRuntimeStatus.PROVISIONING, read(created.id).runtimeStatus);
+    assertTrue(provisioner.reportTarget(created.id, ProvisionResult.ok("cafebabe")));
+    awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
+    awaitNoSlot(created.id);
+  }
+
+  /**
+   * A start that ends before its lease runs leaves no slot behind (qits-1600): not after an ENDED
+   * lease, not after a stop, not after a refused lease — and the next start of the row never reads
+   * an outcome a previous start's daemon left on its slot.
+   */
+  @Test
+  public void anAbandonedStartLeavesNoSlotAndTheNextStartInheritsNoOutcome() throws Exception {
+    provisioner.reportTargetRowsThroughSlots();
+    String repoId = repo();
+
+    Workspace ended = createTargetRow(repoId, "ended", false);
+    states.observe(placement.move(read(ended.id).leaseId, LeaseState.ENDED, null, null, null));
+    assertFalse(provisioner.hasSlot(ended.id), "an ENDED lease forgets the slot");
+
+    Workspace exited = createTargetRow(repoId, "exited", false);
+    states.observe(
+        placement.move(read(exited.id).leaseId, LeaseState.EXITED, UUID.randomUUID(), 1, null));
+    assertFalse(provisioner.hasSlot(exited.id), "an EXITED lease forgets the slot");
+
+    Workspace stopped = createTargetRow(repoId, "stopped", false);
+    assertTrue(
+        provisioner.reportTarget(stopped.id, ProvisionResult.failed("a stale outcome")),
+        "the first start's daemon reported");
+    workspaceService.stopContainer(stopped.id);
+    assertFalse(provisioner.hasSlot(stopped.id), "a stop forgets the slot");
+
+    workspaceService.beginEnsureContainer(stopped.id);
+    UUID second = read(stopped.id).leaseId;
+    assertNotNull(second);
+    states.observe(placement.move(second, LeaseState.RUNNING, UUID.randomUUID(), null, null));
+    assertTrue(provisioner.reportTarget(stopped.id, ProvisionResult.ok("cafebabe")));
+    awaitStatus(stopped.id, WorkspaceRuntimeStatus.RUNNING);
+
+    // Last: the fake refuses every create from here on.
+    Workspace refused = stoppedTargetRow(repoId, "refusedslot");
+    placement.refuse(new TargetPlacement.LeaseRefused(-1, null, "connection refused", null));
+    assertThrows(ConflictException.class, () -> workspaceService.beginEnsureContainer(refused.id));
+    assertFalse(provisioner.hasSlot(refused.id), "a lease never had forgets the slot");
+  }
+
   /** A RUNNING lease this process never asked for, on a PROVISIONING row, is a restart: RUNNING. */
   @Test
   public void aRunningLeaseAfterARestartReadsRunningWithoutAWait() throws Exception {
@@ -967,6 +1052,15 @@ public class WorkspaceTargetPlacementTest {
         .filter(w -> rowId.equals(w.id()))
         .findFirst()
         .orElseThrow();
+  }
+
+  /** The await removes its slot as it returns, a moment after its write. */
+  private void awaitNoSlot(Long rowId) throws InterruptedException {
+    long deadline = System.currentTimeMillis() + AWAIT_MILLIS;
+    while (provisioner.hasSlot(rowId) && System.currentTimeMillis() < deadline) {
+      Thread.sleep(20);
+    }
+    assertFalse(provisioner.hasSlot(rowId), "the await removed its slot");
   }
 
   private void awaitStatus(Long rowId, WorkspaceRuntimeStatus wanted) throws InterruptedException {

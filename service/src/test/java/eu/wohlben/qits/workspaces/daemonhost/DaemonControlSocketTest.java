@@ -359,6 +359,85 @@ class DaemonControlSocketTest {
     assertTrue(result.isEmpty());
   }
 
+  /**
+   * qits-1600: a TARGET start registers its slot when it asks for its lease, and a {@code
+   * Provisioned} that arrives before the await — here even from a daemon that has hung up since —
+   * is kept for it, and the await takes it without waiting for a live daemon.
+   */
+  @Test
+  void anExpectedSlotKeepsAProvisionedThatArrivesBeforeTheAwait() throws Exception {
+    var slot = registry.expectProvision(WORKSPACE_ROW_ID);
+    try {
+      try (FakePeer peer = connect()) {
+        await(() -> registry.isDaemonLive(WORKSPACE_ROW_ID));
+        hints.clear();
+        peer.ws()
+            .writeTextMessage(
+                codec.encode(
+                    new eu.wohlben.qits.workspacedaemon.protocol.Provisioned(
+                        WORKSPACE_ID, "cafebabe")));
+        // Frames are read in order: once the one after it is seen, the Provisioned was handled.
+        peer.ws()
+            .writeTextMessage(
+                codec.encode(new WorkspaceChanged(WORKSPACE_ID, Topic.COMMANDS.name())));
+        await(() -> hints.has(Topic.COMMANDS, "repo-1", WORKSPACE_ROW_ID));
+      }
+      await(() -> !registry.isDaemonLive(WORKSPACE_ROW_ID));
+      assertTrue(registry.hasProvisionSlot(WORKSPACE_ROW_ID), "the report is kept on the slot");
+
+      var result =
+          registry.awaitProvision(
+              WORKSPACE_ROW_ID, Duration.ofMillis(200), Duration.ofMillis(200), null);
+
+      assertTrue(result.isPresent(), "taken without waiting for a live daemon");
+      assertTrue(result.get().ok(), result.get().message());
+      assertEquals("cafebabe", result.get().head());
+      assertFalse(registry.hasProvisionSlot(WORKSPACE_ROW_ID), "the await removed the slot");
+    } finally {
+      slot.forget();
+    }
+  }
+
+  /**
+   * A start that ends without awaiting forgets its slot, and only its own: a newer start's slot
+   * replaces an older one (waking an await still parked on it), survives the older handle's forget,
+   * and never carries the older start's outcome.
+   */
+  @Test
+  void aForgottenSlotIsGoneAndANewerStartsSlotIsFresh() throws Exception {
+    long rowId = 4711L;
+    var first = registry.expectProvision(rowId);
+    assertTrue(registry.hasProvisionSlot(rowId));
+    first.forget();
+    assertFalse(registry.hasProvisionSlot(rowId), "forgotten");
+    first.forget(); // already gone: harmless
+
+    var older = registry.expectProvision(rowId);
+    var parked =
+        java.util.concurrent.CompletableFuture.supplyAsync(
+            () ->
+                registry.awaitProvision(
+                    rowId, Duration.ofSeconds(5), Duration.ofSeconds(5), null, () -> false));
+    // The parked await polls for a daemon that never comes, on the older slot.
+    TimeUnit.MILLISECONDS.sleep(200);
+    var newer = registry.expectProvision(rowId);
+    try {
+      var woken = parked.get(5, TimeUnit.SECONDS);
+      assertTrue(woken.isPresent(), "the superseded await is woken, not left to its timeout");
+      assertFalse(woken.get().ok());
+      older.forget();
+      assertTrue(registry.hasProvisionSlot(rowId), "the older handle leaves the newer slot");
+      assertTrue(
+          registry
+              .awaitProvision(rowId, Duration.ofMillis(200), Duration.ofMillis(200), null)
+              .isEmpty(),
+          "the newer slot holds no outcome of the older start's");
+    } finally {
+      newer.forget();
+    }
+    assertFalse(registry.hasProvisionSlot(rowId));
+  }
+
   @Test
   void closingTheSocketPrunesTheRegistry() throws Exception {
     FakePeer peer = connect();
