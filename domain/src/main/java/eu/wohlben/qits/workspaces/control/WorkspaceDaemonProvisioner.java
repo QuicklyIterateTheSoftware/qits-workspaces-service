@@ -79,9 +79,51 @@ public interface WorkspaceDaemonProvisioner {
    * "failed"; this only wakes it.
    *
    * <p>Never creates a slot: with no await registered there is nothing to release, and a retained
-   * outcome would be read by the <em>next</em> start as its own.
+   * outcome would be read by the <em>next</em> start as its own. A slot {@link #expectProvision}
+   * registered counts as pending and is released like an awaited one.
    *
    * @return whether an await was pending and has now been released
    */
   boolean abandonProvision(Long workspaceId, String reason);
+
+  /**
+   * Register the workspace's provision slot now, without waiting, so a terminal {@code
+   * Provisioned}/{@code ProvisionFailed} that arrives before {@link #awaitProvision} is kept on it
+   * and taken by that await, instead of being dropped (qits-1600).
+   *
+   * <p>The caller is a TARGET start, at the moment it asks for its lease. Its await is only
+   * registered once this service has <em>observed</em> the lease RUNNING ({@code
+   * TargetLeaseStates.awaitDaemon}), through an event or the reconcile — and a container restarted
+   * over an existing {@code /workspace} self-provisions in seconds, so its daemon's report regularly
+   * beat that observation, was dropped, and the row went FAILED at the provision timeout though the
+   * daemon had said it was done. Registering at the lease request is early enough by construction:
+   * no daemon can dial home before the lease it runs under exists.
+   *
+   * <p>A slot a previous start left behind is replaced, never inherited: its outcome is that
+   * start's, and the next one would read it as its own. The {@link #awaitProvision} that follows
+   * reuses the slot registered here and removes it when it returns.
+   *
+   * @return the slot, to {@link ExpectedProvision#forget forget} when the start ends without ever
+   *     awaiting it; the default, for an implementation with nothing to register, forgets nothing
+   */
+  default ExpectedProvision expectProvision(Long workspaceId) {
+    return ExpectedProvision.NONE;
+  }
+
+  /**
+   * A provision slot {@link #expectProvision} registered. Identity matters: {@link #forget} removes
+   * this slot only, never one a later start of the same workspace registered in its place.
+   */
+  interface ExpectedProvision {
+
+    /** Nothing was registered, so there is nothing to forget. */
+    ExpectedProvision NONE = () -> {};
+
+    /**
+     * Drop the slot, if it is still the workspace's: the start it was registered for ended (its
+     * lease was refused, ENDED, EXITED or FAILED, the row was stopped, deleted or resolved) without
+     * awaiting it. Harmless when the slot is already gone — an await that took it removes it itself.
+     */
+    void forget();
+  }
 }

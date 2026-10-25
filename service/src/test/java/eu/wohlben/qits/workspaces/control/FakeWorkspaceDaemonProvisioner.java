@@ -80,6 +80,53 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
 
   private final Map<Long, CompletableFuture<ProvisionResult>> held = new ConcurrentHashMap<>();
 
+  /**
+   * The slots TARGET starts registered when they asked for their leases (qits-1600), as the real
+   * registry keeps them: a report lands only on one of these, and the await takes it from here.
+   */
+  private final Map<Long, CompletableFuture<ProvisionResult>> expected = new ConcurrentHashMap<>();
+
+  /**
+   * Whether TARGET rows report through {@link #expected} slots (qits-1600) instead of {@link
+   * #runnerAnswer}: the await then answers what {@link #reportTarget} left on the row's slot, and
+   * waits at most {@link #SLOT_WAIT} for one — a report that found no slot was dropped, as the
+   * registry drops it, so such an await fails rather than sitting out the provision timeout.
+   */
+  private volatile boolean targetSlots;
+
+  private static final Duration SLOT_WAIT = Duration.ofSeconds(2);
+
+  /** Answer every following TARGET row from what {@link #reportTarget} left on its slot. */
+  public void reportTargetRowsThroughSlots() {
+    targetSlots = true;
+  }
+
+  /**
+   * Plays the daemon's {@code Provisioned}/{@code ProvisionFailed} for a TARGET row, arriving
+   * whenever the test says: kept when a slot is registered for it, dropped otherwise.
+   *
+   * @return whether a slot took it
+   */
+  public boolean reportTarget(Long rowId, ProvisionResult outcome) {
+    CompletableFuture<ProvisionResult> slot = expected.get(rowId);
+    return slot != null && slot.complete(outcome);
+  }
+
+  /** Whether a provision slot is registered for {@code rowId} — expected, or being awaited. */
+  public boolean hasSlot(Long rowId) {
+    return expected.containsKey(rowId);
+  }
+
+  @Override
+  public ExpectedProvision expectProvision(Long workspaceId) {
+    CompletableFuture<ProvisionResult> slot = new CompletableFuture<>();
+    CompletableFuture<ProvisionResult> previous = expected.put(workspaceId, slot);
+    if (previous != null) {
+      previous.complete(ProvisionResult.failed("fake: superseded by a newer start"));
+    }
+    return () -> expected.remove(workspaceId, slot);
+  }
+
   /** Hold every following DIRECT row's clone until it is completed or abandoned. */
   public void holdDirectRows() {
     holdDirect = true;
@@ -106,6 +153,8 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
   /** Back to answering TARGET rows at once, and to cloning DIRECT rows without a hold. */
   public void reset() {
     runnerAnswer = DAEMON_REPORTS;
+    targetSlots = false;
+    expected.clear();
     holdDirect = false;
     deafToAbandon = false;
     held.values().forEach(slot -> slot.complete(ProvisionResult.failed("fake provisioner reset")));
@@ -155,7 +204,25 @@ public class FakeWorkspaceDaemonProvisioner implements WorkspaceDaemonProvisione
                 });
 
     if (target == RUNNER) {
-      return runnerAnswer.apply(workspaceId);
+      // The registry's order: reuse the slot the start registered (or register one now), take an
+      // outcome already on it, remove it on the way out.
+      CompletableFuture<ProvisionResult> slot =
+          expected.computeIfAbsent(workspaceId, id -> new CompletableFuture<>());
+      try {
+        if (!targetSlots) {
+          return runnerAnswer.apply(workspaceId);
+        }
+        return Optional.of(slot.get(SLOT_WAIT.toMillis(), TimeUnit.MILLISECONDS));
+      } catch (TimeoutException e) {
+        return Optional.of(ProvisionResult.failed("fake: no report reached the slot"));
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return Optional.of(ProvisionResult.failed("interrupted while awaiting the slot"));
+      } catch (ExecutionException e) {
+        return Optional.of(ProvisionResult.failed(String.valueOf(e.getCause())));
+      } finally {
+        expected.remove(workspaceId, slot);
+      }
     }
     if (target == null) {
       return Optional.of(ProvisionResult.ok("")); // a slot: nothing to clone, nothing to report

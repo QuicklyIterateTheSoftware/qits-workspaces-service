@@ -3274,11 +3274,17 @@ public class WorkspaceService {
       // the process to settle.
       leaseStates.track(row.id, process);
     }
+    // The daemon's report is expected from here on, not from the RUNNING this service observes
+    // later (qits-1600): a container restarted over an existing /workspace reports Provisioned
+    // within seconds, and an await registered only at RUNNING missed it and failed the row at the
+    // provision timeout. Before the lease is asked for, since no daemon can dial home without one.
+    WorkspaceDaemonProvisioner.ExpectedProvision provision = leaseStates.expectProvision(row.id);
     TargetPlacement.Lease lease;
     try {
       lease = leases.create(request);
     } catch (TargetPlacement.LeaseRefused refused) {
       leaseStates.forget(row.id, process);
+      leaseStates.forgetProvision(row.id, provision);
       decommissionFor(row.id);
       if (refused.permanent()) {
         return failUnplaceableWith(
@@ -3288,6 +3294,9 @@ public class WorkspaceService {
         process.completeNoOp(TargetLeaseStates.QUEUED_SEGMENT, refused.getMessage());
       }
       throw TargetRefusals.unavailable(row.id, "start", refused.getMessage());
+    } catch (RuntimeException unasked) {
+      leaseStates.forgetProvision(row.id, provision);
+      throw unasked;
     }
     leaseStates.expectStart(lease.id());
     int recorded =
@@ -3308,6 +3317,7 @@ public class WorkspaceService {
           "Workspace %s/%s moved while its lease %s was asked for; the lease is ended",
           row.repositoryId, row.workspaceId, lease.id());
       leaseStates.forget(row.id, process);
+      leaseStates.forgetProvision(row.id, provision);
       endQuietly(leases, lease.id(), row.id);
       if (process != null) {
         process.completeNoOp(
