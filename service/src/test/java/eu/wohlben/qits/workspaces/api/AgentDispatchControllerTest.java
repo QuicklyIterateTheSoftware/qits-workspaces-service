@@ -312,7 +312,7 @@ public class AgentDispatchControllerTest {
   }
 
   @Test
-  void aReleasedWrapperBranchMakesTheAgentObsolete() {
+  void aReleasedWrapperBranchMakesTheAgentOfAClosedItemObsolete() {
     String repoId = repository();
     String workId = "w-" + UUID.randomUUID();
     String agentId =
@@ -323,6 +323,13 @@ public class AgentDispatchControllerTest {
             .then()
             .extract()
             .path("agent.agentId");
+    // Closed first: a release of an open item's branch leaves its agent ACTIVE (qits-1605).
+    given()
+        .contentType(ContentType.JSON)
+        .body(Map.of("workId", workId, "title", "Fix it", "status", "VERIFIED", "blocked", false))
+        .post(API + "/entity")
+        .then()
+        .statusCode(200);
 
     given()
         .contentType(ContentType.JSON)
@@ -342,5 +349,30 @@ public class AgentDispatchControllerTest {
         .then()
         .statusCode(200)
         .body("resolved", equalTo(false));
+  }
+
+  @Test
+  void aReleasedWrapperBranchOfAnOpenItemLeavesItsAgentActive() {
+    // qits-1605: the wrapper released before the item was VERIFIED; the agent still works.
+    String repoId = repository();
+    String workId = "w-" + UUID.randomUUID();
+    String agentId =
+        given()
+            .contentType(ContentType.JSON)
+            .body(dispatch(repoId, workId))
+            .post(API)
+            .then()
+            .extract()
+            .path("agent.agentId");
+
+    given()
+        .contentType(ContentType.JSON)
+        .body(Map.of("branch", "ticket/" + workId, "target", "2026.1.1", "commit", "abc"))
+        .post("/workspaces/api/branches/resolution?repositoryId=" + repoId)
+        .then()
+        .statusCode(200)
+        .body("resolved", equalTo(true))
+        .body("agentIds", hasSize(0));
+    given().get("/workspaces/api/agents/" + agentId).then().body("state", equalTo("ACTIVE"));
   }
 }

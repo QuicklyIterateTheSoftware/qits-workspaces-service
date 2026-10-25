@@ -1931,8 +1931,10 @@ paths:
       responses:
         "200":
           description: "Resolved, or `resolved:false` when nothing owned the branch\
-            \ — the ordinary case, and what a repeated call answers. `agentIds` are\
-            \ the agents marked OBSOLETE."
+            \ — the ordinary case, and what a repeated call answers. `resolved` is\
+            \ true whenever an ACTIVE agent owned the branch; `agentIds` are the agents\
+            \ marked OBSOLETE by this call, the ones whose item is already closed.\
+            \ An open item's agent stays ACTIVE until the item closes."
           content:
             application/json:
               schema:

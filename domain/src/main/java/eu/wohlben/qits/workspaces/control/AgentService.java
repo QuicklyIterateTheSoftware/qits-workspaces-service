@@ -117,9 +117,14 @@ import org.jboss.logging.Logger;
  *       the reason stored as its start refusal, unless it started there: then its worktree is in
  *       that volume and it waits for the workspace (qits-1233).
  *   <li><b>Obsolete the dropped</b> (qits-1276): an ACTIVE agent whose work item is DROPPED is
- *       made OBSOLETE, as a release makes it. A dropped item's branch is never released, so
- *       without this its agent would hold its worktree and slot for good. Only DROPPED: a VERIFIED
- *       or DONE item's agent still has its own work to release.
+ *       made OBSOLETE, released or not. A dropped item's branch is never released, so without this
+ *       its agent would hold its worktree and slot for good.
+ *   <li><b>Obsolete the released and closed</b> (qits-1605): an ACTIVE agent whose wrapper branch a
+ *       release consumed while its item was open is made OBSOLETE once the item is VERIFIED or
+ *       DONE. A release alone never ends an agent: the wrapper can release before the item's other
+ *       repositories do and before it is verified, and the agent still works. Release and close
+ *       end it in whichever order they come; a release of a closed item's branch ends it at once
+ *       ({@link #resolveReleasedBranch}).
  *   <li><b>Clean up</b> (D4, D5, D7): an OBSOLETE agent whose work item is closed (VERIFIED,
  *       DONE or DROPPED) and that has been idle for {@code qits.workspace.agent.cleanup-idle} is
  *       removed if its worktrees are clean and pushed; otherwise it is handed the cleanup prompt
@@ -155,6 +160,12 @@ public class AgentService {
 
   /** The statuses that end an item (D4): the cleanup sweep removes a closed item's OBSOLETE agents. */
   private static final Set<String> CLOSING_STATUSES = Set.of("VERIFIED", "DONE", "DROPPED");
+
+  /**
+   * The closing statuses that still need a release of the agent's branch before it is OBSOLETE
+   * (qits-1605): DROPPED needs none ({@link #obsoleteDropped}).
+   */
+  private static final Set<String> RELEASED_CLOSING_STATUSES = Set.of("VERIFIED", "DONE");
 
   /**
    * The statuses between two phases (qits-1460): the agent's phase is finished, and its next turn
@@ -211,7 +222,11 @@ public class AgentService {
   /** The entity and blocked doors' answer: the agent the facts are stored on, and whether it heard them live. */
   public record EntityMark(String agentId, boolean applied) {}
 
-  /** The released-branch door's answer: the agents marked OBSOLETE. */
+  /**
+   * The released-branch door's answer: whether an ACTIVE agent (or an old-model workspace) owned the
+   * branch, and the agents marked OBSOLETE by it — only those whose item was already closed
+   * (qits-1605).
+   */
   public record Resolution(boolean resolved, List<String> agentIds) {}
 
   @Inject AgentWorktreeRepository agents;
@@ -417,8 +432,10 @@ public class AgentService {
    * <b>There should be an agent working on this work item</b> — the dispatch door, said
    * idempotently. An ACTIVE agent of the item is the answer ({@code fresh:false}); so is its newest
    * OBSOLETE agent on the same wrapper branch, made ACTIVE again and told the instruction
-   * (qits-1217); otherwise one is created and placed. Never a 409 for an existing agent: the caller
-   * presses this to reach a state. A freshly created agent is relayed to qits-projects as not
+   * (qits-1217); otherwise one is created and placed. Found or revived on the same wrapper branch,
+   * the agent forgets that a release consumed its branch (qits-1605): it may make new work that
+   * release does not hold, so closing the item alone no longer ends it — the next release does.
+   * Never a 409 for an existing agent: the caller presses this to reach a state. A freshly created agent is relayed to qits-projects as not
    * waiting ({@link #CAUSE_DISPATCHED}, qits-1274), so the item does not keep a former agent's wait.
    *
    * @throws NotFoundException no such repository; nothing is created
@@ -493,12 +510,14 @@ public class AgentService {
 
   /**
    * The item's ACTIVE agent; else its newest OBSOLETE one when that stands on the same wrapper
-   * branch, made ACTIVE again (qits-1217). A release of an agent's wrapper branch makes it OBSOLETE
-   * while its item goes on — so does a drop of an item that is later reopened (qits-1276) — and
-   * the agent keeps its worktree, session and slot until the item is closed (VERIFIED, DONE or
-   * DROPPED) and the sweep removes it: a second agent on the same wrapper branch would be refused
-   * by its daemon ("already checked out") for as long as the first stands. An OBSOLETE agent on
-   * another wrapper branch is left alone, and the caller creates a new agent.
+   * branch, made ACTIVE again (qits-1217). An agent is OBSOLETE once its item is closed — after a
+   * release of its wrapper branch for VERIFIED or DONE (qits-1605), without one for DROPPED
+   * (qits-1276) — and an item can be reopened and dispatched again; the agent keeps its worktree,
+   * session and slot until the sweep removes it: a second agent on the same wrapper branch would be
+   * refused by its daemon ("already checked out") for as long as the first stands. A revive clears
+   * the obsolete and cleanup marks and the release's consumed marker (qits-1605): the revived agent
+   * waits for a release of its new work. An OBSOLETE agent on another wrapper branch is left alone,
+   * and the caller creates a new agent.
    *
    * <p>Two dispatches that revive at once are settled by {@code uq_agent_worktree_active_work}: the
    * loser answers the winner.
@@ -524,6 +543,7 @@ public class AgentService {
                     live.state = AgentState.ACTIVE;
                     live.obsoleteAt = null;
                     live.cleanupPromptedAt = null;
+                    clearConsumed(live);
                     // Cleared in the same transaction as the revive (qits-1562): a pass between
                     // the two would read the stale DROPPED and obsolete it straight back.
                     if (isDropped(live.entityStatus)) {
@@ -543,10 +563,17 @@ public class AgentService {
     revived.ifPresent(
         id ->
             LOG.infof(
-                "Agent %s of work item %s is ACTIVE again: dispatched again on %s after a release"
-                    + " or a drop made it obsolete",
+                "Agent %s of work item %s is ACTIVE again: dispatched again on %s after its item"
+                    + " closed and made it obsolete",
                 id, workId, wrapperBranch));
     return revived.map(id -> new Found(id, true));
+  }
+
+  /** Forgets that a release consumed the agent's wrapper branch (qits-1605). */
+  private static void clearConsumed(AgentWorktree agent) {
+    agent.branchConsumedAt = null;
+    agent.consumedVersion = null;
+    agent.consumedCommit = null;
   }
 
   /**
@@ -567,6 +594,13 @@ public class AgentService {
                           .findByIdOptional(id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
                           .orElseThrow();
                   applyFacts(agent, request.facts(), null, null);
+                  if (trimmed(request.wrapperBranch()) != null
+                      && trimmed(request.wrapperBranch()).equals(agent.wrapperBranch)) {
+                    // Dispatched again on the branch a release consumed (qits-1605): the agent may
+                    // make work that release does not hold, so its item's close alone must not
+                    // end it. The next release of the branch records it again.
+                    clearConsumed(agent);
+                  }
                   if (isDropped(agent.entityStatus)) {
                     // Dispatched again, so no longer dropped (qits-1276). Facts without a status
                     // left the stale word, and the pass would obsolete the agent straight back;
@@ -601,9 +635,9 @@ public class AgentService {
    * dispatched has nobody to tell, and that is answered, not refused. A yielded agent is RUNNING
    * again at once to hear it (D16); a queued one hears it as part of its first turn.
    *
-   * <p>An OBSOLETE agent is told too. A release of its wrapper branch marks it OBSOLETE, but the
-   * item can go on — the next phase, another repository — and that agent is still the one working
-   * on it, with its session.
+   * <p>An OBSOLETE agent is told too. A release of its wrapper branch no longer marks an open item's
+   * agent OBSOLETE (qits-1605) — only a closed item's — but a closed item can be reopened and go on,
+   * and that agent is still the one working on it, with its session.
    */
   public Delivery deliver(String workId, String text, boolean compactFirst) {
     String said = trimmed(text);
@@ -763,25 +797,44 @@ public class AgentService {
 
   /**
    * A release deleted {@code branch} of {@code repositoryId}: every ACTIVE agent whose wrapper
-   * branch it is is marked OBSOLETE (D4). A branch an agent merely pushed, in a submodule, marks
-   * nobody: only the wrapper branch's release ends an agent's work. Nothing is removed here; the
-   * cleanup sweep does that once the item is closed (VERIFIED, DONE or DROPPED) and the agent idle.
-   * A release is not the only way to OBSOLETE: a DROPPED item's agent is made so by the pass
-   * ({@link #obsoleteDropped}). A workspace of the old model standing on the branch is resolved as
-   * before (the drain, D20).
+   * branch it is records that the branch was consumed, and by which release ({@code
+   * branchConsumedAt}, {@code consumedVersion}, {@code consumedCommit}). A branch an agent merely
+   * pushed, in a submodule, marks nobody. The release alone does not end the agent (qits-1605): the
+   * wrapper repository can release before the item's other repositories do, and before the item is
+   * VERIFIED, and an agent made OBSOLETE then lost its waits, its wakes and its nudges while it still
+   * worked. So only an agent whose item is already closed (VERIFIED, DONE or DROPPED) is marked
+   * OBSOLETE here (D4); the others stay ACTIVE, and the pass makes them OBSOLETE once their item
+   * closes ({@link #obsoleteConsumedClosed}). Nothing is removed here; the cleanup sweep does that
+   * once the agent is idle. A DROPPED item's agent is made OBSOLETE without any release ({@link
+   * #obsoleteDropped}).
+   *
+   * <p>{@code resolved} is true whenever an ACTIVE agent owned the branch, made OBSOLETE or not;
+   * {@code agentIds} names only those made OBSOLETE by this call. A workspace of the old model
+   * standing on the branch is resolved as before (the drain, D20) when no agent owned it.
    */
   public Resolution resolveReleasedBranch(
       String repositoryId, String branch, String target, String commit, String result) {
     if (branch == null || branch.isBlank()) {
       throw new BadRequestException("A branch is required to resolve a released branch.");
     }
-    List<AgentObsolete> obsolete =
+    String version = trimmed(target);
+    String sha = trimmed(commit);
+    record Consumed(List<AgentObsolete> obsolete, List<String> open) {}
+    Consumed consumed =
         QuarkusTransaction.requiringNew()
             .call(
                 () -> {
                   Instant now = Instant.now();
                   List<AgentObsolete> out = new ArrayList<>();
+                  List<String> open = new ArrayList<>();
                   for (AgentWorktree agent : agents.findActiveByWrapperBranch(repositoryId, branch)) {
+                    agent.branchConsumedAt = now;
+                    agent.consumedVersion = version;
+                    agent.consumedCommit = sha;
+                    if (!isClosed(agent.entityStatus)) {
+                      open.add(agent.id.toString());
+                      continue;
+                    }
                     agent.state = AgentState.OBSOLETE;
                     agent.obsoleteAt = now;
                     // The release's own words (`result`) are not on the wire: only its refs.
@@ -792,18 +845,25 @@ public class AgentService {
                             idOf(agent.workspaceId),
                             agent.repositoryId,
                             branch,
-                            trimmed(target),
-                            trimmed(commit),
+                            version,
+                            sha,
                             now));
                   }
-                  return out;
+                  return new Consumed(out, open);
                 });
-    List<String> marked = obsolete.stream().map(AgentObsolete::agentId).toList();
+    List<String> marked = consumed.obsolete().stream().map(AgentObsolete::agentId).toList();
+    if (!consumed.open().isEmpty()) {
+      LOG.infof(
+          "Release %s consumed branch '%s' of %s: agents %s stay active, their items are open",
+          target, branch, repositoryId, consumed.open());
+    }
     if (!marked.isEmpty()) {
       LOG.infof(
           "Release %s consumed branch '%s' of %s: agents %s are obsolete",
           target, branch, repositoryId, marked);
-      obsolete.forEach(this::announce);
+      consumed.obsolete().forEach(this::announce);
+    }
+    if (!marked.isEmpty() || !consumed.open().isEmpty()) {
       kick();
       return new Resolution(true, marked);
     }
@@ -1236,6 +1296,7 @@ public class AgentService {
       nudgeIdle();
       driveRunning();
       obsoleteDropped();
+      obsoleteConsumedClosed();
       cleanUp();
       removeEmptyWorkspaces();
     }
@@ -2183,11 +2244,12 @@ public class AgentService {
   }
 
   /**
-   * Step 5a (qits-1276): every ACTIVE agent whose item is DROPPED is OBSOLETE, as a release would
-   * make it — a dropped item's branch is never released, and only a release used to obsolete an
-   * agent, so a dropped item's agent held its slot for good. Read from the row's own {@code
-   * entityStatus}, so a row that was already DROPPED before this step existed heals on the next
-   * pass. Only DROPPED: a VERIFIED or DONE item's agent still has its own work to release. A
+   * Step 5a (qits-1276): every ACTIVE agent whose item is DROPPED is OBSOLETE, released or not — a
+   * dropped item's branch is never released, and only a release used to obsolete an agent, so a
+   * dropped item's agent held its slot for good. Read from the row's own {@code entityStatus}, so a
+   * row that was already DROPPED before this step existed heals on the next pass. Without a release
+   * only DROPPED: a VERIFIED or DONE item's agent still has its own work to release, and is made
+   * OBSOLETE once a release consumed its branch ({@link #obsoleteConsumedClosed}, qits-1605). A
    * dispatch that revives the agent clears the stale word in the same transaction as the revive
    * ({@link #activeOrRevived}), so this step does not obsolete it again.
    */
@@ -2224,12 +2286,55 @@ public class AgentService {
   }
 
   /**
+   * Step 5b (qits-1605): every ACTIVE agent whose wrapper branch a release consumed ({@code
+   * branchConsumedAt}) and whose item is VERIFIED or DONE is OBSOLETE now — the release came first,
+   * while the item was open ({@link #resolveReleasedBranch}), and the close completes the pair.
+   * {@link AgentObsolete} carries the release's stored version and commit, and the agent's wrapper
+   * branch. DROPPED is {@link #obsoleteDropped}'s, which needs no release. A dispatch on the same
+   * wrapper branch clears the consumed marker ({@link #found}), so an agent with work newer than the
+   * release waits for the next one.
+   */
+  void obsoleteConsumedClosed() {
+    synchronized (passLock) {
+      List<AgentObsolete> obsolete =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () -> {
+                    Instant now = Instant.now();
+                    List<AgentObsolete> out = new ArrayList<>();
+                    for (AgentWorktree agent :
+                        agents.findActiveConsumedByEntityStatuses(RELEASED_CLOSING_STATUSES)) {
+                      agent.state = AgentState.OBSOLETE;
+                      agent.obsoleteAt = now;
+                      out.add(
+                          new AgentObsolete(
+                              agent.id.toString(),
+                              agent.workId,
+                              idOf(agent.workspaceId),
+                              agent.repositoryId,
+                              agent.wrapperBranch,
+                              agent.consumedVersion,
+                              agent.consumedCommit,
+                              now));
+                    }
+                    return out;
+                  });
+      for (AgentObsolete event : obsolete) {
+        LOG.infof(
+            "Work item %s is closed and release %s consumed its branch '%s': agent %s is obsolete",
+            event.workId(), event.version(), event.branch(), event.agentId());
+        announce(event);
+      }
+    }
+  }
+
+  /**
    * Step 5: OBSOLETE agents of closed items (VERIFIED, DONE or DROPPED), idle long enough, are
    * removed or prompted (D4–D7). One whose daemon reports background work in its harness ({@code
    * busy}) is neither (qits-1233); one its daemon no longer knows is REMOVED. Judged by the item's CURRENT status — the row {@code
    * findLiveByWorkId} returns, which the relay has always kept current — so a stale OBSOLETE row
-   * whose own {@code entityStatus} never caught up still heals. OBSOLETE by a release, or by a drop
-   * of the item (step 5a); a dropped item's agent hears {@link #DROPPED_CLEANUP_PROMPT} and goes
+   * whose own {@code entityStatus} never caught up still heals. OBSOLETE by a release and a close of
+   * the item (step 5b, or the release itself, qits-1605), or by a drop of the item (step 5a); a dropped item's agent hears {@link #DROPPED_CLEANUP_PROMPT} and goes
    * as {@link AgentRemoved#DROPPED_IDLE_CLEAN}.
    */
   void cleanUp() {

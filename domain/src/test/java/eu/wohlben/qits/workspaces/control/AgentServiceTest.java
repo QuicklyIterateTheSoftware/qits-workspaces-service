@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -315,15 +316,16 @@ public class AgentServiceTest {
   }
 
   @Test
-  void aDeliveryReachesAnAgentAReleaseMadeObsolete() {
+  void aDeliveryReachesAnAgentWhoseBranchAReleaseConsumedMidItem() {
     // qits-248: a release took the agent's wrapper branch mid-item, and the next phase's turn was
-    // answered "nobody works on it" while the agent still ran.
+    // answered "nobody works on it" while the agent still ran. Since qits-1605 the agent of an open
+    // item is not even OBSOLETE.
     AgentService.Dispatch dispatched = dispatch("w-obsolete", true, null);
     String agentId = dispatched.agent().agentId();
     Long slot = dispatched.agent().workspaceRowId();
     liveness.markLive(slot);
     service.reconcile();
-    releaseWrapperOf(agentId);
+    releaseWrapperMidItem(agentId);
 
     AgentService.Delivery delivery = service.deliver("w-obsolete", "verify it", false);
     assertEquals(agentId, delivery.agentId());
@@ -334,11 +336,50 @@ public class AgentServiceTest {
     liveness.markDead(slot);
   }
 
-  /** A release takes the agent's wrapper branch: the agent is OBSOLETE (D4). */
+  /**
+   * The agent's item is VERIFIED and a release takes its wrapper branch: the agent is OBSOLETE at
+   * once (D4, qits-1605). Its last activity is set to now first, so the pass the release kicks
+   * cannot sweep it from under the test (its item is closed now); a test that wants it idle
+   * backdates it after. The status is written on the row alone, as the entity door would: a test
+   * that reopens the item says so itself.
+   */
   private void releaseWrapperOf(String agentId) {
+    service.awaitSchedulerIdle();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree agent = agents.findById(UUID.fromString(agentId));
+              agent.entityStatus = "VERIFIED";
+              agent.lastActivityAt = Instant.now();
+            });
     AgentWorktree agent = row(agentId);
-    service.resolveReleasedBranch(agent.repositoryId, agent.wrapperBranch, "2026.1.1", "abc", null);
+    AgentService.Resolution resolution =
+        service.resolveReleasedBranch(
+            agent.repositoryId, agent.wrapperBranch, "2026.1.1", "abc", null);
+    assertTrue(resolution.agentIds().contains(agentId), resolution.toString());
     assertEquals(AgentState.OBSOLETE, row(agentId).state);
+  }
+
+  /**
+   * A release takes the wrapper branch of the agent's open item: it stays ACTIVE, the release
+   * recorded on it (qits-1605).
+   */
+  private AgentService.Resolution releaseWrapperMidItem(String agentId) {
+    AgentWorktree agent = row(agentId);
+    assertFalse(
+        Set.of("VERIFIED", "DONE", "DROPPED").contains(String.valueOf(agent.entityStatus)),
+        "the item is open: " + agent.entityStatus);
+    AgentService.Resolution resolution =
+        service.resolveReleasedBranch(
+            agent.repositoryId, agent.wrapperBranch, "2026.1.1", "abc", null);
+    assertTrue(resolution.resolved(), "an ACTIVE agent owned the branch");
+    assertEquals(List.of(), resolution.agentIds(), "nobody is made OBSOLETE");
+    AgentWorktree after = row(agentId);
+    assertEquals(AgentState.ACTIVE, after.state);
+    assertNotNull(after.branchConsumedAt);
+    assertEquals("2026.1.1", after.consumedVersion);
+    assertEquals("abc", after.consumedCommit);
+    return resolution;
   }
 
   private long liveRowsOf(String workId) {
@@ -354,6 +395,8 @@ public class AgentServiceTest {
   void aDispatchRevivesTheAgentAReleaseMadeObsoleteInsteadOfMakingASecond() {
     // qits-1199: a release took the agent's wrapper branch mid-item, the next dispatch made a
     // second agent on the same wrapper branch, and its daemon refused it "already checked out".
+    // Since qits-1605 a release mid-item leaves the agent ACTIVE; an OBSOLETE agent on the branch
+    // is one whose item closed and was reopened, and the same rule holds for it.
     AgentService.Dispatch first = dispatch("w-revive", true, "first phase");
     String agentId = first.agent().agentId();
     Long slot = first.agent().workspaceRowId();
@@ -362,8 +405,8 @@ public class AgentServiceTest {
     releaseWrapperOf(agentId);
     QuarkusTransaction.requiringNew()
         .run(() -> agents.findById(UUID.fromString(agentId)).cleanupPromptedAt = Instant.now());
-    assertNotEquals("VERIFIED", row(agentId).entityStatus, "the item goes on");
 
+    // The item is reopened and dispatched again.
     AgentService.Dispatch again = dispatch("w-revive", true, "next phase");
 
     assertEquals(agentId, again.agent().agentId(), "the item's agent is the answer");
@@ -373,6 +416,9 @@ public class AgentServiceTest {
     assertEquals(AgentState.ACTIVE, revived.state);
     assertNull(revived.obsoleteAt);
     assertNull(revived.cleanupPromptedAt);
+    assertNull(revived.branchConsumedAt, "the release's mark goes with the revive (qits-1605)");
+    assertNull(revived.consumedVersion);
+    assertNull(revived.consumedCommit);
     assertEquals(slot, revived.workspaceId, "it keeps its slot, worktree and session");
     assertEquals(1, liveRowsOf("w-revive"), "no second agent for the item");
     liveness.markDead(slot);
@@ -1179,27 +1225,41 @@ public class AgentServiceTest {
   }
 
   @Test
-  void aReleasedBranchMakesItsAgentsObsoleteAndTheSweepRemovesThemOnceVerifiedAndIdle() {
+  void aReleasedBranchMakesItsAgentsObsoleteOnceVerifiedAndTheSweepRemovesThemOnceIdle() {
+    // qits-1605: the release comes first, while the item is open; the agent stays ACTIVE until the
+    // item is VERIFIED, and the pass then makes it OBSOLETE with the release's refs.
     AgentService.Dispatch dispatched = dispatch("w-release", true, null);
     String agentId = dispatched.agent().agentId();
     Long slot = dispatched.agent().workspaceRowId();
     UUID id = UUID.fromString(agentId);
 
-    AgentService.Resolution resolution =
-        service.resolveReleasedBranch(repoId, "ticket/w-release", "2026.1.1", "abc", null);
+    AgentService.Resolution resolution = releaseWrapperMidItem(agentId);
     assertTrue(resolution.resolved());
-    assertEquals(List.of(agentId), resolution.agentIds());
-    assertEquals(AgentState.OBSOLETE, row(agentId).state);
 
-    // Not VERIFIED yet: nothing is removed.
+    // Not VERIFIED yet: nothing is obsolete, nothing is removed.
     liveness.markLive(slot);
     service.reconcile(); // deterministically past the agent's start, so it stops touching lastActivityAt
     QuarkusTransaction.requiringNew()
         .run(() -> agents.findById(id).lastActivityAt = Instant.now().minusSeconds(3600));
-    service.cleanUp();
-    assertEquals(AgentState.OBSOLETE, row(agentId).state);
+    service.reconcile();
+    assertEquals(AgentState.ACTIVE, row(agentId).state);
+    assertEquals(List.of(), obsoleteEventsOf(agentId));
 
+    // Active just now, so the pass the mark kicks obsoletes it but does not sweep it yet.
+    QuarkusTransaction.requiringNew()
+        .run(() -> agents.findById(id).lastActivityAt = Instant.now());
     service.markEntity("w-release", new EntityFacts("A title", "VERIFIED", false), null, null);
+    service.awaitSchedulerIdle();
+    service.obsoleteConsumedClosed();
+    AgentWorktree obsolete = row(agentId);
+    assertEquals(AgentState.OBSOLETE, obsolete.state, "released and closed");
+    assertNotNull(obsolete.obsoleteAt);
+    List<AgentObsolete> events = obsoleteEventsOf(agentId);
+    assertEquals(1, events.size(), events.toString());
+    assertEquals("ticket/w-release", events.get(0).branch());
+    assertEquals("2026.1.1", events.get(0).version(), "the release that consumed the branch");
+    assertEquals("abc", events.get(0).commitSha());
+
     QuarkusTransaction.requiringNew()
         .run(() -> agents.findById(id).lastActivityAt = Instant.now().minusSeconds(3600));
     service.cleanUp();
@@ -1212,6 +1272,89 @@ public class AgentServiceTest {
     service.removeEmptyWorkspaces();
     assertEquals(WorkspaceStatus.ABANDONED, workspace(slot).status, "the empty slot goes too (D2)");
     liveness.markDead(slot);
+  }
+
+  @Test
+  void aReleaseOfAVerifiedItemsBranchMakesItsAgentObsoleteAtOnce() {
+    // qits-1605: the item closed first; the release completes the pair and ends the agent itself.
+    AgentService.Dispatch dispatched = dispatch("w-release-verified", true, null);
+    String agentId = dispatched.agent().agentId();
+    service.markEntity(
+        "w-release-verified", new EntityFacts("A title", "VERIFIED", false), null, null);
+    service.awaitSchedulerIdle();
+    assertEquals(AgentState.ACTIVE, row(agentId).state, "closed but unreleased: still ACTIVE");
+
+    AgentService.Resolution resolution =
+        service.resolveReleasedBranch(repoId, "ticket/w-release-verified", "2026.2.2", "def", null);
+
+    assertTrue(resolution.resolved());
+    assertEquals(List.of(agentId), resolution.agentIds());
+    AgentWorktree obsolete = row(agentId);
+    assertEquals(AgentState.OBSOLETE, obsolete.state);
+    assertNotNull(obsolete.obsoleteAt);
+    List<AgentObsolete> events = obsoleteEventsOf(agentId);
+    assertEquals(1, events.size(), events.toString());
+    assertEquals("2026.2.2", events.get(0).version());
+    assertEquals("def", events.get(0).commitSha());
+  }
+
+  @Test
+  void anOpenItemsAgentStaysActiveAcrossAReleaseOfItsBranch() {
+    // qits-1605: the wrapper released before the item's other repositories and before VERIFIED;
+    // the agent still works, so it is not OBSOLETE, and nothing the pass does takes it away.
+    AgentService.Dispatch dispatched = dispatch("w-release-open", true, null);
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    service.markEntity(
+        "w-release-open", new EntityFacts("A title", "IMPLEMENTING", false), null, null);
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      releaseWrapperMidItem(agentId);
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  agents.findById(UUID.fromString(agentId)).lastActivityAt =
+                      Instant.now().minusSeconds(3600));
+      service.reconcile();
+
+      AgentWorktree left = row(agentId);
+      assertEquals(AgentState.ACTIVE, left.state);
+      assertNull(left.obsoleteAt);
+      assertEquals(List.of(), obsoleteEventsOf(agentId));
+      assertFalse(daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("remove ")));
+      assertEquals(agentId, service.deliver("w-release-open", "go on", false).agentId());
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aDispatchAfterTheReleaseClearsItsMarkSoAnUnreleasedCloseKeepsTheAgent() {
+    // qits-1605: dispatched again on the consumed branch, the agent may make work that release
+    // does not hold; closing the item alone must not end it. The next release records it again.
+    AgentService.Dispatch dispatched = dispatch("w-release-again", true, null);
+    String agentId = dispatched.agent().agentId();
+    releaseWrapperMidItem(agentId);
+
+    AgentService.Dispatch again = dispatch("w-release-again", true, "verify it");
+    assertEquals(agentId, again.agent().agentId());
+    AgentWorktree cleared = row(agentId);
+    assertNull(cleared.branchConsumedAt);
+    assertNull(cleared.consumedVersion);
+    assertNull(cleared.consumedCommit);
+
+    service.markEntity(
+        "w-release-again", new EntityFacts("A title", "VERIFIED", false), null, null);
+    service.awaitSchedulerIdle();
+    service.obsoleteConsumedClosed();
+    assertEquals(AgentState.ACTIVE, row(agentId).state, "closed, but its new work is unreleased");
+    assertEquals(List.of(), obsoleteEventsOf(agentId));
+
+    AgentService.Resolution resolution =
+        service.resolveReleasedBranch(repoId, "ticket/w-release-again", "2026.3.3", "fed", null);
+    assertEquals(List.of(agentId), resolution.agentIds(), "the next release ends it");
+    assertEquals("2026.3.3", obsoleteEventsOf(agentId).get(0).version());
   }
 
   @Test
@@ -1628,8 +1771,8 @@ public class AgentServiceTest {
             false,
             List.of("qits-ci-service"),
             List.of(new AgentDaemon.CleanupCheck.Unpushed("qits-ci-service", null, 2))));
-    service.resolveReleasedBranch(repoId, "ticket/w-dirty", "2026.1.1", "abc", null);
     service.markEntity("w-dirty", new EntityFacts(null, "VERIFIED", false), null, null);
+    service.resolveReleasedBranch(repoId, "ticket/w-dirty", "2026.1.1", "abc", null);
     QuarkusTransaction.requiringNew()
         .run(() -> agents.findById(id).lastActivityAt = Instant.now().minusSeconds(3600));
 
@@ -2588,6 +2731,9 @@ public class AgentServiceTest {
     String agentId = quietAgent("w-nudge-obsolete", NUDGE_AFTER.plusMinutes(1));
     liveness.markDead(row(agentId).workspaceId);
     releaseWrapperOf(agentId);
+    // Reopened, so its status alone would not exempt it: OBSOLETE does.
+    QuarkusTransaction.requiringNew()
+        .run(() -> agents.findById(UUID.fromString(agentId)).entityStatus = "IMPLEMENTING");
     endedItsTurn(agentId, NUDGE_AFTER.plusMinutes(1));
     assertNotNudged(agentId);
   }

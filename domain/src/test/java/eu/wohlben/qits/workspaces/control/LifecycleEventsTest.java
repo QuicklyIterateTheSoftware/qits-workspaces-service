@@ -223,6 +223,8 @@ public class LifecycleEventsTest {
   void aReleaseAnnouncesEachObsoleteAgentWithItsRefsAndNotTheResultText() {
     AgentService.Dispatch dispatched = dispatch("w-release", null);
     String agentId = dispatched.agent().agentId();
+    // Closed first, so the release itself ends the agent (qits-1605).
+    service.markEntity("w-release", new EntityFacts(null, "VERIFIED", false), null, null);
 
     service.resolveReleasedBranch(
         repoId, "ticket/w-release", "2026.1014.1", "abc123", "a sentence a person wrote");
@@ -493,15 +495,16 @@ public class LifecycleEventsTest {
     row.lastActivityAt = Instant.now().minusSeconds(3600);
   }
 
-  /** {@link AgentServiceTest}'s: started in its slot, released, VERIFIED and idle. */
+  /** {@link AgentServiceTest}'s: started in its slot, VERIFIED, released and idle. */
   private String sweepable(String workId, Consumer<String> script) {
     AgentService.Dispatch dispatched = dispatch(workId, null);
     String agentId = dispatched.agent().agentId();
     liveness.markLive(dispatched.agent().workspaceRowId());
     service.reconcile();
     script.accept(agentId);
-    service.resolveReleasedBranch(repoId, "ticket/" + workId, "2026.1.1", "abc", null);
+    // VERIFIED first: a release of an open item's branch leaves its agent ACTIVE (qits-1605).
     service.markEntity(workId, new EntityFacts(null, "VERIFIED", false), null, null);
+    service.resolveReleasedBranch(repoId, "ticket/" + workId, "2026.1.1", "abc", null);
     QuarkusTransaction.requiringNew()
         .run(
             () ->
