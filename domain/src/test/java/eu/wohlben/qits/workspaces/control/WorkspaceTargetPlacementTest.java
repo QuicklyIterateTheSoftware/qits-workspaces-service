@@ -60,6 +60,7 @@ public class WorkspaceTargetPlacementTest {
   @Inject FakeWorkspaceDaemonProvisioner provisioner;
   @Inject FakeAgentDaemon agentDaemon;
   @Inject TestAgents agents;
+  @Inject FakeWorkspaceDaemonLiveness liveness;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -93,6 +94,7 @@ public class WorkspaceTargetPlacementTest {
                           .ifPresent(w -> w.status = WorkspaceStatus.ABANDONED);
                       legacy.deleteById(id);
                     }));
+    rows.forEach(liveness::markDead);
     agents.retireAll();
     agentDaemon.reset();
     rows.clear();
@@ -752,6 +754,94 @@ public class WorkspaceTargetPlacementTest {
     assertTrue(placement.calls().contains("get:" + leaseId), placement.calls().toString());
   }
 
+  // --- a live row with no lease (qits-1592) -----------------------------------------------------------
+
+  private static final Duration GRACE = Duration.ofMinutes(5);
+
+  /**
+   * What {@code V30} left of a row a retired runner held RUNNING: still RUNNING (or PROVISIONING),
+   * naming no lease, its container purged since. Past the grace with no daemon it reads STOPPED,
+   * saying its container is gone; inside the grace it is left as it is.
+   */
+  @Test
+  public void aLeaselessLiveRowWithNoDaemonStopsOnceItsGraceIsPast() throws Exception {
+    String repoId = repo();
+    Long running = leaselessRow(repoId, "gone-run", WorkspaceRuntimeStatus.RUNNING);
+    Long provisioning = leaselessRow(repoId, "gone-prov", WorkspaceRuntimeStatus.PROVISIONING);
+    Instant first = Instant.now();
+
+    assertFalse(states.stopLeaseless(GRACE, first).contains(running), "the first sighting");
+    List<Long> inside = states.stopLeaseless(GRACE, first.plus(GRACE).minusSeconds(1));
+    assertFalse(inside.contains(running), inside.toString());
+    assertFalse(inside.contains(provisioning), inside.toString());
+    assertEquals(WorkspaceRuntimeStatus.RUNNING, read(running).runtimeStatus);
+    assertEquals(WorkspaceRuntimeStatus.PROVISIONING, read(provisioning).runtimeStatus);
+
+    List<Long> past = states.stopLeaseless(GRACE, first.plus(GRACE));
+
+    assertTrue(past.containsAll(List.of(running, provisioning)), past.toString());
+    for (Long rowId : List.of(running, provisioning)) {
+      Workspace row = read(rowId);
+      assertEquals(WorkspaceRuntimeStatus.STOPPED, row.runtimeStatus);
+      assertTrue(row.runtimeError.startsWith("the container is gone"), row.runtimeError);
+      assertEquals(WorkspaceRuntimeStatus.STOPPED, listed(repoId, rowId).runtimeStatus());
+    }
+  }
+
+  /** A connected daemon says the container runs somewhere: the row stays, and its grace restarts. */
+  @Test
+  public void aLeaselessRunningRowWithAConnectedDaemonIsLeftAlone() throws Exception {
+    String repoId = repo();
+    Long rowId = leaselessRow(repoId, "still-up", WorkspaceRuntimeStatus.RUNNING);
+    liveness.markLive(rowId);
+    Instant first = Instant.now();
+
+    states.stopLeaseless(GRACE, first);
+    assertFalse(states.stopLeaseless(GRACE, first.plus(GRACE.multipliedBy(2))).contains(rowId));
+    assertEquals(WorkspaceRuntimeStatus.RUNNING, read(rowId).runtimeStatus);
+
+    liveness.markDead(rowId);
+    Instant gone = first.plus(GRACE.multipliedBy(3));
+    assertFalse(states.stopLeaseless(GRACE, gone).contains(rowId), "the grace starts over");
+    assertEquals(WorkspaceRuntimeStatus.RUNNING, read(rowId).runtimeStatus);
+    assertTrue(states.stopLeaseless(GRACE, gone.plus(GRACE)).contains(rowId));
+    assertEquals(WorkspaceRuntimeStatus.STOPPED, read(rowId).runtimeStatus);
+  }
+
+  /** A row that holds a lease is the lease reconcile's, never this sweep's. */
+  @Test
+  public void aRunningRowHoldingALeaseIsUntouchedByTheLeaselessSweep() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "leased", false);
+    update(created.id, w -> w.runtimeStatus = WorkspaceRuntimeStatus.RUNNING);
+    UUID leaseId = read(created.id).leaseId;
+    assertNotNull(leaseId);
+    Instant first = Instant.now();
+
+    states.stopLeaseless(GRACE, first);
+    assertFalse(states.stopLeaseless(GRACE, first.plus(GRACE.multipliedBy(2))).contains(created.id));
+
+    Workspace row = read(created.id);
+    assertEquals(WorkspaceRuntimeStatus.RUNNING, row.runtimeStatus);
+    assertEquals(leaseId, row.leaseId);
+  }
+
+  /** A lease-less RUNNING row is not started: a start asks for its lease, as from STOPPED. */
+  @Test
+  public void startOnALeaselessRunningRowAsksForALease() throws Exception {
+    String repoId = repo();
+    Long rowId = leaselessRow(repoId, "restart", WorkspaceRuntimeStatus.RUNNING);
+    placement.clearCalls();
+
+    workspaceService.beginEnsureContainer(rowId);
+
+    assertEquals(1, creates(rowId), placement.calls().toString());
+    Workspace row = read(rowId);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
+    assertNotNull(row.leaseId);
+    assertEquals(rowId.longValue(), placement.request(row.leaseId).rowId());
+  }
+
   // --- the seam -----------------------------------------------------------------------------------
 
   @Test
@@ -842,6 +932,21 @@ public class WorkspaceTargetPlacementTest {
     workspaceService.stopContainer(created.id);
     placement.clearCalls();
     return read(created.id);
+  }
+
+  /** A TARGET row reading {@code status} with no lease and no target: {@code V30}'s leftover. */
+  private Long leaselessRow(String repoId, String label, WorkspaceRuntimeStatus status) {
+    Workspace created = createTargetRow(repoId, label, false);
+    update(
+        created.id,
+        w -> {
+          w.leaseId = null;
+          w.targetId = null;
+          w.runtimeStatus = status;
+          w.runtimeError = null;
+          w.queuedAt = null;
+        });
+    return created.id;
   }
 
   private long creates(Long rowId) {

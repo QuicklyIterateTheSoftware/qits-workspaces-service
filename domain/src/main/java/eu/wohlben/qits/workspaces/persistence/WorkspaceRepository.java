@@ -286,11 +286,46 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
     return list("leaseId is not null order by id");
   }
 
+  /** The runtime statuses a lease-less TARGET row may not keep for long (qits-1592). */
+  private static final List<WorkspaceRuntimeStatus> LIVE_WITHOUT_A_LEASE =
+      List.of(WorkspaceRuntimeStatus.RUNNING, WorkspaceRuntimeStatus.PROVISIONING);
+
+  /**
+   * Every ACTIVE TARGET row that reads RUNNING or PROVISIONING and names no lease (qits-1592): a row
+   * a retired runner held RUNNING across {@code V30}, whose container that runner purged since. No
+   * lease is ever reported for it, so the lease reconcile never revises it.
+   */
+  public List<Workspace> findLeaselessLive() {
+    return list(
+        "status = ?1 and placement = ?2 and leaseId is null and runtimeStatus in ?3 order by id",
+        WorkspaceStatus.ACTIVE,
+        WorkspacePlacement.TARGET,
+        LIVE_WITHOUT_A_LEASE);
+  }
+
+  /**
+   * {@link #findLeaselessLive}'s row written STOPPED with {@code detail}: a compare-and-swap on the
+   * same condition, so a start that recorded a lease in between changes nothing. Answers 0 or 1.
+   */
+  public int stopLeaseless(Long id, String detail) {
+    return update(
+        "runtimeStatus = ?1, runtimeError = ?2, queuedAt = null where id = ?3 and status = ?4 and"
+            + " placement = ?5 and leaseId is null and runtimeStatus in ?6",
+        WorkspaceRuntimeStatus.STOPPED,
+        detail,
+        id,
+        WorkspaceStatus.ACTIVE,
+        WorkspacePlacement.TARGET,
+        LIVE_WITHOUT_A_LEASE);
+  }
+
   /**
    * A start's write, once qits-system answered the lease (epic qits-1481): the row records the lease
    * and its target and waits QUEUED, stamped {@code queuedAt}, the lease's {@code detail} as its
-   * runtime error. A compare-and-swap on a STOPPED or FAILED TARGET row, or a QUEUED one that waited
-   * for its legacy target, that names no lease and holds a token, so a stop or a second start in between changes nothing: answers 0 or 1.
+   * runtime error. A compare-and-swap on a TARGET row that names no lease and holds a token — STOPPED
+   * or FAILED, QUEUED waiting for its legacy target, or RUNNING/PROVISIONING with no lease, whose
+   * container is gone (qits-1592) — so a stop or a second start in between changes nothing: answers 0
+   * or 1.
    */
   public int recordLease(
       Long id, UUID leaseId, UUID targetId, String detail, String adoptedVolume, Instant queuedAt) {
@@ -310,6 +345,8 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
         List.of(
             WorkspaceRuntimeStatus.STOPPED,
             WorkspaceRuntimeStatus.FAILED,
-            WorkspaceRuntimeStatus.QUEUED));
+            WorkspaceRuntimeStatus.QUEUED,
+            WorkspaceRuntimeStatus.RUNNING,
+            WorkspaceRuntimeStatus.PROVISIONING));
   }
 }

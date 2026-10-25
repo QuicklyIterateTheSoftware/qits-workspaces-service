@@ -3192,11 +3192,11 @@ public class WorkspaceService {
    * and the row's runtime status is the whole of its progress (qits-853).
    */
   private String beginTargetStart(Workspace row, boolean narrate) {
-    // A QUEUED row with no lease waits for the target that holds its legacy volume: a start (and
-    // every reconcile, startWaitingLegacyRows) asks again whether that target is there now.
-    boolean waitingForItsTarget =
-        row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED && row.leaseId == null;
-    if (!waitingForItsTarget
+    // Only a row that holds a lease is already started. A QUEUED row with no lease waits for the
+    // target that holds its legacy volume: a start (and every reconcile, startWaitingLegacyRows)
+    // asks again whether that target is there now. A RUNNING or PROVISIONING row with no lease is
+    // one a retired runner held, whose container is gone (qits-1592): it asks for its lease.
+    if (row.leaseId != null
         && (row.runtimeStatus == WorkspaceRuntimeStatus.RUNNING
             || row.runtimeStatus == WorkspaceRuntimeStatus.PROVISIONING
             || row.runtimeStatus == WorkspaceRuntimeStatus.QUEUED)) {

@@ -1532,8 +1532,17 @@ discard never deletes a main workspace's branch (qits-780), on both placements.
   for unpinned, adopting nothing, its entry deleted. A waiting row is not counted by the scheduler's
   capacity rule, which counts only QUEUED rows holding a lease. The
   name is kept on the row (`adopted_volume`) and every later lease carries it — the runner mounts an
-  adopted volume only when the lease names it. The entry goes once the lease is RUNNING. A row a
-  retired runner still runs (RUNNING with no lease) is left alone until it is stopped or started.
+  adopted volume only when the lease names it. The entry goes once the lease is RUNNING.
+- **A live row with no lease** (qits-1592): `V30` reset only QUEUED and PROVISIONING rows, so a row a
+  retired runner held RUNNING kept that status with no lease, and no lease event or listing ever
+  names it. The lease reconcile (`TargetLeaseStates.stopLeaseless`) writes such a row (ACTIVE,
+  TARGET, RUNNING or PROVISIONING, `lease_id` null) STOPPED with `runtimeError` `the container is
+  gone: …` once no workspace-daemon has been connected for it for
+  `qits.workspaces.target-leases.leaseless-grace` (PT5M), counted in memory from the first pass that
+  sees it so (a restart starts the grace again). A connected daemon leaves it alone; a row holding a
+  lease is never looked at there. A start no-ops only for a live row that holds a lease, so a
+  lease-less RUNNING row starts again and asks for its lease (`recordLease`'s compare-and-swap
+  admits it).
 - **`targethost/LegacyRunnerClients`** gives back, at every boot, the idp clients and tokens of
   kinds `workspaces-runner` and `workspaces-runner-registration`; idempotent, a failure is a WARN.
 - **The agent scheduler** asks for a new regular workspace only while no TARGET row waits QUEUED

@@ -61,6 +61,9 @@ import org.jboss.logging.Logger;
  * name (an earlier one, or one a crash orphaned) moves nothing. A resolved row still names its lease
  * until that lease is ENDED, so the ending is seen and the volume purged.
  *
+ * <p><b>A live row with no lease</b> has no lease to be revised by: {@link #stopLeaseless} stops it
+ * once no daemon has been connected for a grace period (qits-1592).
+ *
  * <p><b>RUNNING after a restart.</b> The daemon wait runs in memory. A lease this process asked for,
  * or saw waiting, is {@link #expectStart expected}: its RUNNING starts the wait. A RUNNING lease this
  * process knows nothing about whose row is still PROVISIONING is a restart that lost the wait, and
@@ -107,6 +110,12 @@ public class TargetLeaseStates {
   @ConfigProperty(name = "qits.workspace.provision.timeout-ms", defaultValue = "600000")
   long provisionTimeoutMs;
 
+  /**
+   * Whether a row's workspace-daemon has a control socket open now: the one sign a lease-less live
+   * row's container still runs (qits-1592). Absent: that cannot be told, and no such row is stopped.
+   */
+  @Inject Instance<WorkspaceDaemonLiveness> daemonLiveness;
+
   /** A row's start ended other than by its container coming up (qits-626). */
   @Inject Event<WorkspaceUnqueued> unqueued;
 
@@ -120,6 +129,12 @@ public class TargetLeaseStates {
 
   /** The rows whose daemon is being waited for. */
   private final Set<Long> awaitingDaemon = ConcurrentHashMap.newKeySet();
+
+  /**
+   * Since when each lease-less live row has been seen with no daemon connected ({@link
+   * #stopLeaseless}). In memory: a restart starts every row's grace again, which only delays it.
+   */
+  private final Map<Long, Instant> leaselessSince = new ConcurrentHashMap<>();
 
   private final ExecutorService daemonWaits =
       Executors.newCachedThreadPool(
@@ -607,6 +622,62 @@ public class TargetLeaseStates {
       }
     }
     return changed;
+  }
+
+  /**
+   * The rows no lease will ever revise (qits-1592): ACTIVE TARGET rows that read RUNNING or
+   * PROVISIONING and name no lease — what {@code V30} left of a row a retired runner held RUNNING,
+   * after that runner purged its container. Such a row whose workspace-daemon has not been connected
+   * for {@code grace} — counted from the first pass that found it so, in this process — is written
+   * STOPPED with a detail saying its container is gone, so it reads as what it is and a start asks
+   * for its lease. A row whose daemon is connected (a container still running somewhere) is left
+   * alone and its grace starts over; a row that holds a lease is never looked at here, the lease
+   * reconcile has it. Answers the rows it stopped; nothing when daemon liveness cannot be told.
+   */
+  public List<Long> stopLeaseless(Duration grace, Instant now) {
+    if (!daemonLiveness.isResolvable()) {
+      return List.of();
+    }
+    WorkspaceDaemonLiveness liveness = daemonLiveness.get();
+    List<Workspace> candidates =
+        QuarkusTransaction.requiringNew().call(workspaces::findLeaselessLive);
+    Set<Long> seen = new java.util.HashSet<>();
+    List<Long> stopped = new ArrayList<>();
+    for (Workspace row : candidates) {
+      seen.add(row.id);
+      if (liveness.isDaemonLive(row.id)) {
+        leaselessSince.remove(row.id);
+        continue;
+      }
+      Instant since = leaselessSince.computeIfAbsent(row.id, id -> now);
+      if (now.isBefore(since.plus(grace))) {
+        continue;
+      }
+      String detail =
+          truncate(
+              "the container is gone: the workspace holds no lease and no workspace-daemon has"
+                  + " connected for "
+                  + grace.toString().substring(2).toLowerCase());
+      int written;
+      try {
+        written =
+            QuarkusTransaction.requiringNew().call(() -> workspaces.stopLeaseless(row.id, detail));
+      } catch (RuntimeException e) {
+        LOG.warnf(e, "Could not stop lease-less workspace %s; the next pass tries again", row.id);
+        continue;
+      }
+      leaselessSince.remove(row.id);
+      if (written == 1) {
+        LOG.infof(
+            "Workspace %s/%s read %s with no lease and no daemon for %s: STOPPED",
+            row.repositoryId, row.workspaceId, row.runtimeStatus, grace);
+        changePublisher.runtimeChanged(row.repositoryId, row.id);
+        stopped.add(row.id);
+      }
+    }
+    // A row that started, stopped or resolved since is no longer counted.
+    leaselessSince.keySet().retainAll(seen);
+    return stopped;
   }
 
   // --- internals --------------------------------------------------------------------------------------

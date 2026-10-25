@@ -11,8 +11,10 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 /**
@@ -29,6 +31,11 @@ import org.jboss.logging.Logger;
  * <p><b>The reconcile also retries the rows a retired runner held</b> whose target is not installed
  * yet ({@code WorkspaceService.startWaitingLegacyRows}): the adopting, pinned lease is asked for on
  * the first pass that finds it.
+ *
+ * <p><b>The reconcile also stops the live rows no lease names</b> ({@link
+ * TargetLeaseStates#stopLeaseless}): RUNNING or PROVISIONING with no lease and no daemon connected
+ * for {@code qits.workspaces.target-leases.leaseless-grace} (PT5M) — a retired runner's row whose
+ * container is gone (qits-1592).
  *
  * <p><b>The reconcile also ends orphans</b>: a live lease of this service's that no row names, older
  * than {@link #ORPHAN_AFTER} — a start that asked for one and crashed before the row recorded it. And
@@ -52,6 +59,10 @@ public class TargetLeaseEvents implements QitsEventListener<TargetLeaseChanged> 
   @Inject Instance<AgentService> agents;
 
   @Inject Instance<WorkspaceService> workspaces;
+
+  /** How long a live row with no lease may go without a daemon before it is stopped (qits-1592). */
+  @ConfigProperty(name = "qits.workspaces.target-leases.leaseless-grace", defaultValue = "PT5M")
+  Duration leaselessGrace;
 
   @Override
   public Class<TargetLeaseChanged> eventType() {
@@ -103,12 +114,23 @@ public class TargetLeaseEvents implements QitsEventListener<TargetLeaseChanged> 
       return List.of();
     }
     // The rows first, the listing after: see TargetLeaseStates.reconcile.
-    List<Long> changed = states.reconcile(ORPHAN_AFTER, Instant.now());
+    List<Long> changed = new ArrayList<>(states.reconcile(ORPHAN_AFTER, Instant.now()));
+    changed.addAll(stopLeaselessRows());
     if (!changed.isEmpty()) {
       kick();
     }
     retryLegacyRows();
     return changed;
+  }
+
+  /** Every live row no lease names, and no daemon has dialled home for, stops reading live. */
+  private List<Long> stopLeaselessRows() {
+    try {
+      return states.stopLeaseless(leaselessGrace, Instant.now());
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "Could not stop the lease-less workspaces; the next pass tries again");
+      return List.of();
+    }
   }
 
   /** Every row waiting for the target that holds its legacy volume asks again whether it is there. */
