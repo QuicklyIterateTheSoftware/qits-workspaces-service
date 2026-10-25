@@ -21,10 +21,13 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * released branch through a githost primitive that fires no event, and says so here.
  *
  * <p>Since qits-1152 what it resolves are <b>agents</b>: every ACTIVE agent whose wrapper branch it
- * is is marked OBSOLETE, and the cleanup sweep removes it once its item is closed (VERIFIED, DONE
- * or DROPPED) and it has been idle (D4). A branch an agent merely pushed, in a submodule, marks
- * nobody. A workspace of the old model standing on the branch is still resolved as it was (the
- * drain, D20), answering {@code agentIds: []}.
+ * is records that a release consumed it. Since qits-1605 that alone does not end the agent: one
+ * whose item is already closed (VERIFIED, DONE or DROPPED) is marked OBSOLETE at once, and one
+ * whose item is still open stays ACTIVE until the item closes, when the scheduler marks it. The
+ * cleanup sweep removes an OBSOLETE agent once it has been idle (D4). A branch an agent merely
+ * pushed, in a submodule, marks nobody. A workspace of the old model standing on the branch is
+ * still resolved as it was (the drain, D20), answering {@code agentIds: []}, when no agent owned
+ * it.
  *
  * <p>A class of its own at {@code {qits:admin, qits:system}}, for the reason {@code
  * AgentDispatchController} gives: {@code BranchController}'s class role is a person's, and a
@@ -61,7 +64,9 @@ public class BranchResolutionController {
       responseCode = "200",
       description =
           "Resolved, or `resolved:false` when nothing owned the branch — the ordinary case, and"
-              + " what a repeated call answers. `agentIds` are the agents marked OBSOLETE.")
+              + " what a repeated call answers. `resolved` is true whenever an ACTIVE agent owned the"
+              + " branch; `agentIds` are the agents marked OBSOLETE by this call, the ones whose item"
+              + " is already closed. An open item's agent stays ACTIVE until the item closes.")
   @APIResponse(
       responseCode = "400",
       description =

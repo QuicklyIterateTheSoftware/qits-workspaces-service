@@ -122,6 +122,29 @@ public class AgentWorktreeRepository implements PanacheRepositoryBase<AgentWorkt
         status.trim().toUpperCase(java.util.Locale.ROOT));
   }
 
+  /**
+   * ACTIVE agents whose wrapper branch a release consumed and whose item's status is one of {@code
+   * statuses}, any case, oldest first (qits-1605): the ones a closed item makes OBSOLETE.
+   */
+  public List<AgentWorktree> findActiveConsumedByEntityStatuses(Collection<String> statuses) {
+    if (statuses == null || statuses.isEmpty()) {
+      return List.of();
+    }
+    List<String> upper =
+        statuses.stream()
+            .filter(s -> s != null && !s.isBlank())
+            .map(s -> s.trim().toUpperCase(java.util.Locale.ROOT))
+            .toList();
+    if (upper.isEmpty()) {
+      return List.of();
+    }
+    return list(
+        "state = ?1 and branchConsumedAt is not null and upper(entityStatus) in ?2"
+            + " order by createdAt",
+        AgentState.ACTIVE,
+        upper);
+  }
+
   /** Every query of the listing door, each filter optional. */
   public List<AgentWorktree> search(String workId, Long workspaceId, AgentState state) {
     StringBuilder q = new StringBuilder("1 = 1");

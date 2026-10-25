@@ -216,6 +216,12 @@ workspaces they run in", Nudge.
 `agent_worktree`: the subject qits-projects names as having set the item's explicit block. An agent
 whose own subject set an `EXPLICIT` or `BOTH` block is still nudged. A column on a `CausedRow`, so no
 `ArchRulesTest` decision; see "Agents and the workspaces they run in", Nudge.
+**`V31__agent_branch_consumed.sql`** (qits-1605) adds `branch_consumed_at`, `consumed_version` and
+`consumed_commit` (all nullable) to `agent_worktree`: that a release consumed the agent's wrapper
+branch while it was ACTIVE, and that release's refs. A release no longer ends an open item's agent;
+it is OBSOLETE once its item is closed too. A dispatch on the same wrapper branch, or a revive,
+clears the three. Columns on a `CausedRow`, so no `ArchRulesTest` decision; see "Agents and the
+workspaces they run in", Clean up.
 **`V30__workspace_leases.sql`** (epic qits-1481, qits-1532) retires the workspace runners: it first
 copies every row with a `runner_id` into `legacy_placement(row_id, old_runner_id, engine_id,
 hostname, runner_name)` — `engine_id` and `hostname` from the runner's `capabilities ->> 'engineId'`
@@ -1096,7 +1102,18 @@ makes every daemon call, one pass at a time, kicked after each door and every
    that workspace, the reason stored once. A row from before `V26` (null) with a command id counts
    as started where it is placed. A second failure in a row holds the agent
    back from placement 1 min, doubling to 30 min, until an accepted start (qits-1233).
-6. **Clean up** (D4, D5, D7) — an OBSOLETE agent whose item is VERIFIED (the status the entity door
+6. **Obsolete** (qits-1276, qits-1605) — an ACTIVE agent becomes OBSOLETE once its item is closed:
+   DROPPED at once (`obsoleteDropped`; a dropped item's branch is never released), VERIFIED or DONE
+   only once a release also consumed its wrapper branch (`obsoleteConsumedClosed`, reading
+   `branch_consumed_at`, `V31`), in whichever order the two happen. A release alone never ends an
+   agent: the wrapper can release before the item's other repositories and before VERIFIED, and an
+   agent made OBSOLETE then had its waits cancelled with no wake, new ones refused
+   `AGENT_NOT_ACTIVE`, and no nudge, wake or stale-idle repair. The `AgentObsolete` of a release
+   that came first carries that release's version and commit, stored when it consumed the branch.
+   A dispatch on the same wrapper branch clears the mark: the agent may have work that release
+   does not hold, and the next release records it again.
+
+   **Clean up** (D4, D5, D7) — an OBSOLETE agent whose item is VERIFIED (the status the entity door
    stores) and that has been idle for `qits.workspace.agent.cleanup-idle` (30 s) is checked
    (`cleanup-check`): clean → `DELETE agent-worktrees/{id}`, token deleted, REMOVED; leftover work →
    the D7 prompt is its next turn, never a deletion. It is prompted again only after it has worked.
@@ -1117,10 +1134,10 @@ pass and the next frames: every placed agent, RUNNING or YIELDED, is started aga
   entityTitle, entityStatus, entityBlocked, ticketId?, epicId?, harness?, instruction}` →
   `{agent, fresh, agentLaunch: SCHEDULED|SKIPPED_RUNNING|QUEUED, agentIdentity}`. Idempotent per
   `workId`: the ACTIVE agent is the answer (`fresh:false`). With none, the item's newest OBSOLETE
-  agent on the same wrapper branch is made ACTIVE again (its obsolete and cleanup marks cleared) and
-  is the answer, told the instruction whatever its run state (qits-1217): a release of its wrapper
-  branch does not end the item, and a second agent on that branch would collide with the
-  first's worktree. An OBSOLETE agent on another wrapper branch gets a new agent beside it. `admin: true` is refused (400): an admin
+  agent on the same wrapper branch is made ACTIVE again (its obsolete, cleanup and consumed marks
+  cleared) and is the answer, told the instruction whatever its run state (qits-1217): a closed
+  item can be reopened, and a second agent on that branch would collide with the first's worktree.
+  An ACTIVE agent found on the same wrapper branch has its consumed mark cleared (qits-1605). An OBSOLETE agent on another wrapper branch gets a new agent beside it. `admin: true` is refused (400): an admin
   agent holds the host's docker socket, so only the person door below makes one, never a door
   `qits:system` may press.
 - `GET …/agent-dispatches/references?workId=…` (repeating; `ticketId`/`epicId` read as work ids) →
@@ -1132,8 +1149,11 @@ pass and the next frames: every placed agent, RUNNING or YIELDED, is started aga
   the subject that set an `EXPLICIT` or `BOTH` block, as qits-projects names it; stored as
   `block_author`, rewritten on every mark.
 - `POST /workspaces/api/branches/resolution?repositoryId=` → `{resolved, agentIds}`: every ACTIVE
-  agent whose wrapper branch it is becomes OBSOLETE; a branch an agent merely pushed marks nobody.
-  An old-model workspace on the branch resolves as before.
+  agent whose wrapper branch it is records the release (`V31`); one whose item is already closed
+  becomes OBSOLETE and is named in `agentIds`, one whose item is open stays ACTIVE until it closes
+  (qits-1605). `resolved` is true whenever an ACTIVE agent owned the branch. A branch an agent
+  merely pushed marks nobody. An old-model workspace on the branch resolves as before when no agent
+  owned it.
 - `GET /workspaces/api/agents?workId=&workspaceId=&state=`, `GET /workspaces/api/agents/{id}`;
   person doors `{qits:admin, qits:admin-agent}`: `POST /workspaces/api/agents` (an agent for an
   existing work item, D24; `wrapperBranch` defaults to `ticket|epic/<entityId>`) and `POST
@@ -1217,7 +1237,7 @@ payload's top-level fields:
 | `AgentYielded` | the four | |
 | `AgentNudged` | the four, `nudgeCount` (this nudge included), `reason` | `IDLE`, `SELF_BLOCKED` |
 | `AgentResumed` | the four, `reason` | `TURN_PENDING`, `WORKS_AGAIN` |
-| `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs; both absent for a dropped item) — one per agent | |
+| `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs, as stored when it consumed the branch if the item closed later; both absent for a dropped item) — one per agent | |
 | `AgentCleanupDeferred` | the four, `reason`, `detail` | `ITEM_NOT_CLOSED`, `RECENTLY_ACTIVE`, `TURN_PENDING`, `HARNESS_BUSY`, `DAEMON_NOT_CONNECTED`, `NO_DAEMON_CLIENT`, `CHECK_UNANSWERED`, `BUSY_IN_BACKGROUND`, `REMOVAL_UNANSWERED`, `LEFTOVER_WORK_PROMPTED` |
 | `AgentRemoved` | the four, `reason`, `harnessStopped`, `detail` | `OBSOLETE_NEVER_PLACED`, `OBSOLETE_WORKSPACE_GONE`, `UNKNOWN_TO_DAEMON`, `RELEASED_IDLE_CLEAN`, `DROPPED_IDLE_CLEAN`, `DISCARDED` |
 | `AgentHarnessExited` | the four, `commandId`, `status`, `exitCode`, `stoppedBy` | `stoppedBy`: `DAEMON_REMOVE`, `DAEMON_YIELD`, `KILLED`, `SELF` |

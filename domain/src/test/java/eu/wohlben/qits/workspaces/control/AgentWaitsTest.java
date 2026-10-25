@@ -165,6 +165,33 @@ public class AgentWaitsTest {
     assertNull(row(obsolete).pendingText, "a cancelled wait gives no turn");
   }
 
+  @Test
+  void aReleaseOfAnOpenItemsBranchLeavesItsAgentsWaitsStandingAndItsNewWaitsAccepted() {
+    // qits-1605: the wrapper released before the item was VERIFIED, the agent went OBSOLETE, and
+    // its waits were cancelled with no wake and every new one refused AGENT_NOT_ACTIVE.
+    UUID id = agent("w-released-open");
+    QuarkusTransaction.requiringNew()
+        .run(() -> agents.findById(id).entityStatus = "IMPLEMENTING");
+    AgentWaitDto open =
+        waits.create(id, "release request 9", EventSelection.of("ReleaseRequestFinalized"), null);
+    AgentWorktree before = row(id);
+
+    AgentService.Resolution resolution =
+        service.resolveReleasedBranch(
+            before.repositoryId, before.wrapperBranch, "2026.1.1", "abc", null);
+    waits.sweep();
+
+    assertTrue(resolution.resolved());
+    assertEquals(List.of(), resolution.agentIds());
+    assertEquals(eu.wohlben.qits.workspaces.entity.AgentState.ACTIVE, row(id).state);
+    assertEquals(AgentWaitState.OPEN, waitRow(open.id()).state, "the wait survives the release");
+    AgentWaitDto another =
+        assertDoesNotThrow(
+            () -> waits.create(id, "ci run 9", EventSelection.of("BuildStatusChanged"), null));
+    assertEquals(AgentWaitState.OPEN, another.state());
+    assertEquals(2, waits.list(id, AgentWaitState.OPEN).size());
+  }
+
   /** The agent put YIELDED into a RUNNER slot of its own wrapper that no runner holds. */
   private Long yieldedInASlot(UUID id) {
     return inASlot(id, "waits-yielded-", AgentRunState.YIELDED, Instant.now().minusSeconds(3600));

@@ -148,6 +148,24 @@ public class AgentWorktree extends PanacheEntityBase implements CausedRow {
   public Instant obsoleteAt;
 
   /**
+   * When a release consumed this agent's wrapper branch while it was ACTIVE (qits-1605, {@code
+   * V31}); null while none did since it was last dispatched on that branch. A release of an open
+   * item's branch leaves the agent ACTIVE: it becomes OBSOLETE once its item is closed too. A
+   * dispatch on the same wrapper branch, or a revive, clears it with {@link #consumedVersion} and
+   * {@link #consumedCommit}.
+   */
+  @Column(name = "branch_consumed_at")
+  public Instant branchConsumedAt;
+
+  /** The version of the release that consumed the branch, as it reported it; null with it. */
+  @Column(name = "consumed_version", columnDefinition = "text")
+  public String consumedVersion;
+
+  /** The commit the release that consumed the branch reported; null with it. */
+  @Column(name = "consumed_commit", columnDefinition = "text")
+  public String consumedCommit;
+
+  /**
    * Why its workspace's daemon refused to start it, as the daemon said (qits-1217, {@code V25});
    * null while no start is refused. Cleared by the next start the daemon accepts.
    */

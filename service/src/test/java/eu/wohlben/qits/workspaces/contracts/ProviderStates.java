@@ -702,6 +702,9 @@ public class ProviderStates {
               Long slot = slot(WorkspaceRuntimeStatus.QUEUED);
               ids.add(slot);
               agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
+              // Its item is VERIFIED: a release of an open item's branch leaves its agent ACTIVE
+              // and names nobody (qits-1605), and this state is the one that names the agent.
+              agentRows.findById(UUID.fromString(AGENT_ACTIVE_ID)).entityStatus = "VERIFIED";
             });
     Map<String, String> params = new TreeMap<>();
     params.put("branch", WRAPPER_BRANCH);
