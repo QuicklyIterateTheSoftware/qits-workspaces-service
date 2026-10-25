@@ -286,9 +286,9 @@ public class AgentWaits {
                       continue;
                     }
                     close(wait, AgentWaitState.MATCHED, eventId);
-                    closedFor.add(placedOf(wait.agentId));
                     String turn = matchedTurn(wait.label, selection, eventId, occurredAt, tree);
                     AgentWorktree agent = wake(wait.agentId, turn);
+                    closedFor.add(placedOf(wait.agentId));
                     if (agent != null) {
                       out.add(new Woken(agent.id, agent.workId, agent.sessionId));
                     }
@@ -331,7 +331,6 @@ public class AgentWaits {
                   }
                   for (AgentWait wait : waits.findExpiredForUpdate(now)) {
                     close(wait, AgentWaitState.TIMED_OUT, null);
-                    closedFor.add(placedOf(wait.agentId));
                     Duration after = Duration.between(wait.createdAt, wait.expiresAt);
                     AgentWorktree agent =
                         wake(
@@ -344,6 +343,7 @@ public class AgentWaits {
                                 + wait.eventName
                                 + " event matched it. It is closed; declare a new one if you still"
                                 + " need to wait.");
+                    closedFor.add(placedOf(wait.agentId));
                     if (agent != null) {
                       out.add(new Woken(agent.id, agent.workId, agent.sessionId));
                     }
@@ -475,9 +475,17 @@ public class AgentWaits {
     }
   }
 
-  /** The wake: the turn is appended to what the agent has still to hear. Called in a transaction. */
+  /**
+   * The wake: the turn is appended to what the agent has still to hear. Called in a transaction.
+   * The row is locked (qits-1603), as every append and compare-and-clear of {@code pending_text}
+   * locks it, so a clear that read the text before this append cannot clear it. A lock on a row the
+   * transaction already read does not read it again, so callers wake before {@link #placedOf}.
+   */
   private AgentWorktree wake(UUID agentId, String turn) {
-    AgentWorktree agent = agents.findById(agentId);
+    AgentWorktree agent =
+        agents
+            .findByIdOptional(agentId, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+            .orElse(null);
     if (agent == null || agent.state != AgentState.ACTIVE) {
       return null;
     }
