@@ -9,7 +9,9 @@ import java.util.UUID;
  * the agent is OBSOLETE: its work item's work is released. The two happen in either order
  * (qits-1605): a release of an open item's branch leaves its agent ACTIVE and this event comes when
  * the item closes, carrying that release's refs; a release of a closed item's branch announces it
- * at once. A drop of the work item marks it OBSOLETE too (qits-1276): a dropped item's branch is
+ * at once. A closed item whose wrapper branch is gone from the git host or merged into the default
+ * branch, with no release consuming it, marks it OBSOLETE with neither ref. A drop of the work item
+ * marks it OBSOLETE too (qits-1276): a dropped item's branch is
  * never released, and its agent would otherwise hold its slot for good. Nothing is removed yet —
  * the cleanup sweep does that once the agent is idle ({@link AgentRemoved}, or {@link
  * AgentCleanupDeferred} saying why not).

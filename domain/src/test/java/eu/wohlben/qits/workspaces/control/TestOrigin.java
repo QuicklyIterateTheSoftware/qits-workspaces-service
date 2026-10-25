@@ -174,6 +174,25 @@ public final class TestOrigin {
     return null;
   }
 
+  /** Create {@code branch} in the bare origin at {@code startPoint}, as a push of it would. */
+  public static void branchAt(String dataDir, String repoId, String branch, String startPoint)
+      throws Exception {
+    Path origin = Path.of(dataDir, repoId, "origin").toAbsolutePath();
+    Captured made = git(origin, "branch", branch, startPoint);
+    if (made.exitCode() != 0) {
+      throw new IllegalStateException("Could not create " + branch + ": " + made.output());
+    }
+  }
+
+  /** Delete {@code branch} from the bare origin, as a release's branch deletion would. */
+  public static void deleteBranch(String dataDir, String repoId, String branch) throws Exception {
+    Path origin = Path.of(dataDir, repoId, "origin").toAbsolutePath();
+    Captured deleted = git(origin, "branch", "-D", branch);
+    if (deleted.exitCode() != 0) {
+      throw new IllegalStateException("Could not delete " + branch + ": " + deleted.output());
+    }
+  }
+
   /** Whether the origin holds {@code branch} — read from the bare, not through a mirror. */
   public static boolean hasBranch(String dataDir, String repoId, String branch) throws Exception {
     Path origin = Path.of(dataDir, repoId, "origin").toAbsolutePath();

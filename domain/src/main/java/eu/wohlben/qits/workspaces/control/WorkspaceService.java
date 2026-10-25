@@ -1196,6 +1196,44 @@ public class WorkspaceService {
     return !hasChildren(repoId, branch);
   }
 
+  /**
+   * Whether {@code branch} holds nothing {@code mainBranch} lacks (qits-1605): the closed item's
+   * agent is OBSOLETE once this is true, though no release consumed its wrapper branch. True when
+   * the git host has no such branch, or when the tip the git host holds (asked with {@code
+   * ls-remote}, never the mirror) is reachable from the mirror's {@code mainBranch} after a forced
+   * refresh — the {@code ahead == 0} that {@link #canCleanupBranch} judges by, read against the
+   * repository of record. That method itself cannot answer this: it refuses every ACTIVE agent's
+   * wrapper branch, which is exactly the branch asked about here.
+   *
+   * <p>Empty whenever it cannot tell: a git host or mirror that does not answer, a tip the mirror
+   * has not fetched, a default branch it cannot resolve. The caller leaves the agent alone then,
+   * and a stale mirror can only make this answer false or empty, never wrongly true.
+   */
+  public Optional<Boolean> branchHoldsNothingBeyond(
+      String repoId, String branch, String mainBranch) {
+    if (branch == null
+        || branch.isBlank()
+        || branch.startsWith("-")
+        || mainBranch == null
+        || mainBranch.isBlank()
+        || mainBranch.startsWith("-")
+        || mainBranch.equals(branch)) {
+      return Optional.empty();
+    }
+    try {
+      RepoMirror mirror = mirrors.of(repoId);
+      Optional<String> tip = mirror.remoteBranchSha(branch);
+      if (tip.isEmpty()) {
+        return Optional.of(true);
+      }
+      refreshNowQuietly(mirror);
+      return Optional.of(mirror.isAncestor(tip.get(), "refs/heads/" + mainBranch));
+    } catch (RuntimeException e) {
+      LOG.debugf(e, "could not tell whether '%s' of %s holds anything beyond '%s'", branch, repoId, mainBranch);
+      return Optional.empty();
+    }
+  }
+
   /** The parent a branch is compared against and how far it is ahead/behind it. */
   public record BranchSummary(String parent, Integer ahead, Integer behind) {}
 
