@@ -66,7 +66,7 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1025.155834</qits.workspace-daemon-protocol.version>
+        <qits.workspace-daemon-protocol.version>2026.1025.192307</qits.workspace-daemon-protocol.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -116,7 +116,7 @@
         <!-- qits-system's golden masters (epic qits-1481): the lease, work-volume and target doors
              targethost/TargetLeasePlacement calls (targethost/SystemContract). The same rule: a
              qits-maintenance bump moves it. -->
-        <qits.system-golden-masters.version>2026.1025.174719</qits.system-golden-masters.version>
+        <qits.system-golden-masters.version>2026.1025.191214</qits.system-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
              and ConsumerPactVerificationTest verifies consumers' pacts against this service.
