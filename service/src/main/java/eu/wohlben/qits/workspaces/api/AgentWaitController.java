@@ -48,13 +48,18 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * {@code qits:admin-agent} is not admitted wherever {@code qits:admin} is: it is an agent, and bound
  * like one. {@code AgentWaitAccessTest} pins it.
  *
+ * <p>{@code qits:desk-admin} (the project front desk's role, qits-1622) is admitted too, and bound
+ * exactly as an agent is: it is not in {@link #UNBOUND_ROLES}, so it acts only on an agent whose
+ * token subject is its own — which no desk's is. It is listed so that every door admitting {@code
+ * qits:admin-agent} admits it; the desk's own waits are {@link DeskWaitController}'s.
+ *
  * <p>The selection is bound from JSON by qits-eventstream's own reader, so its three types are
  * registered for reflection here for the native image.
  */
 @Path("/agents/{agentId}/waits")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system", "qits:agent"})
+@RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:system", "qits:agent"})
 @RegisterForReflection(
     targets = {EventSelection.class, EventSelection.Condition.class, EventSelection.Op.class})
 public class AgentWaitController {
@@ -138,26 +143,34 @@ public class AgentWaitController {
   @Operation(operationId = "createAgentWait", summary = "Declare what the agent waits on")
   public Response create(@PathParam("agentId") String agentId, CreateWaitRequest request) {
     UUID id = authorized(agentId);
+    AgentWaitDto created =
+        waits.create(id, request == null ? null : request.label(), selectionOf(request), timeoutOf(request));
+    return Response.status(Response.Status.CREATED).entity(view(created)).build();
+  }
+
+  /** The request's selection, bound by qits-eventstream's reader; a 400 with its reason otherwise. */
+  static EventSelection selectionOf(CreateWaitRequest request) {
     if (request == null || request.selection() == null || request.selection().isNull()) {
       throw new BadRequestException("A wait needs a selection: {\"event\": …, \"when\": […]}.");
     }
-    EventSelection selection;
     try {
-      selection = EventSelection.fromJson(request.selection().toString());
+      return EventSelection.fromJson(request.selection().toString());
     } catch (EventSelectionException invalid) {
       throw new BadRequestException("Invalid selection: " + invalid.getMessage());
     }
-    Duration timeout = null;
-    if (request.timeout() != null && !request.timeout().isBlank()) {
-      try {
-        timeout = Duration.parse(request.timeout().trim());
-      } catch (DateTimeParseException notIso) {
-        throw new BadRequestException(
-            "'" + request.timeout() + "' is not an ISO-8601 duration such as PT2H or P1D.");
-      }
+  }
+
+  /** The request's timeout; null = none. A 400 for one that is not an ISO-8601 duration. */
+  static Duration timeoutOf(CreateWaitRequest request) {
+    if (request == null || request.timeout() == null || request.timeout().isBlank()) {
+      return null;
     }
-    AgentWaitDto created = waits.create(id, request.label(), selection, timeout);
-    return Response.status(Response.Status.CREATED).entity(view(created)).build();
+    try {
+      return Duration.parse(request.timeout().trim());
+    } catch (DateTimeParseException notIso) {
+      throw new BadRequestException(
+          "'" + request.timeout() + "' is not an ISO-8601 duration such as PT2H or P1D.");
+    }
   }
 
   @GET
@@ -210,7 +223,7 @@ public class AgentWaitController {
     return id;
   }
 
-  private static AgentWaitState stateOf(String state) {
+  static AgentWaitState stateOf(String state) {
     if (state == null || state.isBlank()) {
       return null;
     }
@@ -223,6 +236,11 @@ public class AgentWaitController {
   }
 
   private WaitView view(AgentWaitDto wait) {
+    return view(json, wait);
+  }
+
+  /** A wait as both doors answer it; {@code agentId} is null for a desk's. */
+  static WaitView view(ObjectMapper json, AgentWaitDto wait) {
     JsonNode selection;
     try {
       selection = json.readTree(wait.selection());
