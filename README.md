@@ -172,13 +172,20 @@ gets a turn when it happens:
   8 OPEN waits per agent (`409 TOO_MANY_WAITS`); timeout at most 30 days.
 - `GET …/waits?state=` → `{waits: [...]}`; `DELETE …/waits/{waitId}` → 200 with the wait
   (CANCELLED, or as it was if already closed).
-- `qits:agent` and `qits:admin-agent` act only on the agent their token belongs to; `qits:admin` and
-  `qits:system` on any.
+- `qits:agent`, `qits:admin-agent` and `qits:desk-admin` act only on the agent their token belongs
+  to; `qits:admin` and `qits:system` on any.
 - A durable bus listener (`qits-workspaces.agent-waits`, subscribed to `*`) matches arriving events.
   A match or a timeout closes the wait and gives the agent a turn naming the label, the event, its
   time and the matched values (never the raw payload); a yielded agent resumes for it. `GET /agents/{id}` shows `waitingOn`,
   and the waiting relay to qits-projects says `cause: "Wait"` with `waitingOn` instead of a plain
   wait for input.
+- **A project's front desk waits too** (qits-1618): `POST`/`GET …` and `DELETE …/{waitId}` on
+  `/workspaces/api/desks/{projectId}/waits`, the same bodies with `agentId: null`, the same limits
+  (8 OPEN per project). `qits:admin` and `qits:system` act on any project, `qits:desk-admin` only on
+  its token's `project` claim; nobody else. A match or timeout is announced as **`DeskWaitClosed`**
+  `{waitId, projectId, label, state: MATCHED|TIMED_OUT, eventName, matchedEventId?, turn, closedAt}`
+  (`turn` the agent's wake sentence, verbatim) for qits-projects to hand to the desk; a cancel
+  announces nothing.
 
 One behaviour worth knowing before you debug it: **a missing repository and an unreachable
 qits-projects are different answers.** Only a 404 becomes "no such repository" (and then a 404 from

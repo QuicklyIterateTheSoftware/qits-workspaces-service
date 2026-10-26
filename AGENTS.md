@@ -222,6 +222,11 @@ branch while it was ACTIVE, and that release's refs. A release no longer ends an
 it is OBSOLETE once its item is closed too. A dispatch on the same wrapper branch, or a revive,
 clears the three. Columns on a `CausedRow`, so no `ArchRulesTest` decision; see "Agents and the
 workspaces they run in", Clean up.
+**`V32__desk_waits.sql`** (qits-1618) gives `agent_wait` a second holder: `agent_id` becomes
+nullable beside a new `desk_project_id` (the qits-projects project uuid, no foreign key), and
+`ck_agent_wait_holder` holds exactly one of them. `closed_event_id`, `closed_turn` and `announced_at`
+carry a closed desk wait's `DeskWaitClosed` until the bus has taken it. Columns on a `CausedRow`, so
+no `ArchRulesTest` decision; see "Declared waits".
 **`V30__workspace_leases.sql`** (epic qits-1481, qits-1532) retires the workspace runners: it first
 copies every row with a `runner_id` into `legacy_placement(row_id, old_runner_id, engine_id,
 hostname, runner_name)` — `engine_id` and `hostname` from the runner's `capabilities ->> 'engineId'`
@@ -253,9 +258,10 @@ on postgres `@Lob` means a LARGE OBJECT, so Hibernate binds an oid and the inser
 column the migration declares. Spell it `@Column(columnDefinition = "text")` — or `"bytea"` for
 bytes — as `Workspace.preamble`, `WorkspacePromptDraft.content` and `WorkspacePromptAttachment.bytes` do.
 
-**Native SQL is postgres SQL.** `WorkspacePromptDraftRepository.upsert` is the only place this repo
-writes any, and it is `insert … on conflict (…) do update` — H2's `merge into … key (…)` until the
-move.
+**Native SQL is postgres SQL.** `WorkspacePromptDraftRepository.upsert` is `insert … on conflict (…)
+do update` — H2's `merge into … key (…)` until the move — and `AgentWaitRepository.lockDesk` takes a
+`pg_advisory_xact_lock` keyed on the project, because a desk has no row of its own to lock while its
+cap is counted (qits-1618). Those two are the only native statements here.
 
 Remember that workspace rows are **soft-deleted**. A child table in another context gets no cascade;
 publish through `WorkspaceResolved` instead, and fire it synchronously inside the resolving
@@ -898,7 +904,15 @@ agent whose token subject it is; anything else is 403. `ContainerProxyAuthorizat
 **The one agent write door: declared waits** (qits-1153, W4). `qits:agent` and `qits:admin-agent` may
 create, list and cancel waits on `/workspaces/api/agents/{agentId}/waits`, but only for the agent
 their token belongs to: the principal must equal the agent row's `commissioned_token_subject`.
-`qits:admin` and `qits:system` act on any agent. `AgentWaitAccessTest` pins it.
+`qits:admin` and `qits:system` act on any agent. `qits:desk-admin` is admitted there too and bound
+the same way (it is not unbound, so it changes nothing; qits-1622 has every door that admits
+`qits:admin-agent` admit it). `AgentWaitAccessTest` pins it.
+**The front desk's own waits** (qits-1618) are `/workspaces/api/desks/{projectId}/waits`
+(`DeskWaitController`): `qits:admin` and `qits:system` act on any project; `qits:desk-admin` (the
+desk's role, qits-1622) only where its token's `project` claim is the path's project
+(`MachineIdentity.claimMatches`, `QitsClaims.PROJECT`, as `DeskBinding` reads it), else 403. Nothing
+else is admitted — not `qits:agent`, `qits:admin-agent` or the delivery desk's plain `qits:desk` —
+and no `context_kind` is read: the role is the whole test. `DeskWaitAccessTest` pins it.
 **`qits:desk` holds the coordinator's writes, bound to its project** (qits-1493 for `POST
 /workspaces/api/agent-dispatches/delivery`, qits-1596 for the rest). The delivery desk's token
 (`qits:agent` + `qits:desk`, a `project` claim, no Git refs) is admitted beside `qits:admin-agent` on
@@ -1231,6 +1245,23 @@ event name, optional expiry) and gets a turn when it happens:
 - **Limits.** 8 OPEN waits per agent, timeout at most 30 days, label at most 200 characters (default:
   the selection in one line). The native image registers `EventSelection`, its `Condition` and `Op`
   on `AgentWaitController`.
+- **The desk's waits** (qits-1618, `V32`, `DeskWaitController`). A project's front desk — a Claude
+  session qits-projects runs, with no agent row — declares waits on its project id, with the agent
+  door's bodies (`agentId: null`), selection rules and limits (8 OPEN per project, counted under a
+  per-project advisory lock). The listener's name set holds them like any other. A match or timeout
+  closes one with the agent's own turn text, but there is no agent to wake, relay to, hint or kick:
+  the close writes a fresh `closed_event_id` and the rendered `closed_turn` on the row **in the
+  closing transaction**, and after the commit `DeskWaitClosed` is announced through
+  `LifecycleAnnouncer.announce(event, taken)`. `taken` runs on the publishing thread once
+  `QitsEventBus.publish` returned (delivered, or held by the bus's outbox) and stamps
+  `announced_at`; every sweep publishes again each closed desk wait with no `announced_at`, rebuilt
+  from the row under the same id, which qits-events takes as the same event. That is why the outbox
+  is not written in the closing transaction: it is the eventstream jar's, on its own datasource and
+  database, written in a transaction of its own and only when the inline PUT fails, so the row is
+  the record that survives a crash. One gap remains, and it is the bus's: `publish` logs and returns
+  when the inline PUT and the outbox write both fail, and the row is then marked all the same. A
+  desk wait is never cancelled by the sweep — only a match, its timeout or the door's cancel closes
+  it — and a cancel announces nothing.
 
 **The lifecycle events** (qits-1236; the records in `workspaces-events/`, the port
 `control/LifecycleAnnouncer`, the publisher `bus/EventstreamLifecycleAnnouncer`). What the scheduler
@@ -1254,6 +1285,7 @@ payload's top-level fields:
 | `WorkspaceStarted` | `workspaceId`, `repositoryId` | |
 | `WorkspaceFailed` | `workspaceId`, `repositoryId`, `runtimeError` | |
 | `WorkspaceRemoved` | `workspaceId`, `repositoryId`, `reason` | `NO_AGENT_LEFT` |
+| `DeskWaitClosed` | `waitId`, `projectId`, `label`, `state`, `eventName`, `matchedEventId` (absent on a timeout), `turn`, `closedAt` — not a lifecycle fact but a project desk's wake (qits-1618, "Declared waits") | `state`: `MATCHED`, `TIMED_OUT` |
 
 The rules they keep:
 
@@ -1262,6 +1294,9 @@ The rules they keep:
   value (a never-placed agent's workspace) is an absent key.
 - **No text a person or an agent wrote.** No instruction, pending turn, prompt draft, work item title
   or a release's `result`; a `detail` is a sentence this service wrote, or a daemon's refusal.
+  `DeskWaitClosed` is the one exception, by contract with its consumer: its `label` is the desk's own
+  and its `turn` is the wake, fenced matched values included — what the desk asked to be told.
+  Its id is fixed when the wait closes and kept across re-publishes, unlike every other event's.
 - **Published after the write committed**, from the site that wrote it: the
   `QuarkusTransaction.requiringNew()` block has returned (or, for `WorkspaceRemoved`, the
   `@Transactional` `discardWorkspace`). Where the write happens inside a lambda (`resumeYielded`,
