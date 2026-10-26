@@ -34,10 +34,14 @@ erDiagram
   %% agent_wait: eu.wohlben.qits.workspaces.entity.AgentWait (domain)
   agent_wait {
     uuid id PK "not null"
-    uuid agent_id "not null"
+    uuid agent_id
+    instant announced_at
     uuid causation_id
     instant closed_at
+    uuid closed_event_id
+    text closed_turn
     instant created_at "not null"
+    uuid desk_project_id
     string event_name "not null, length 128"
     instant expires_at
     text label "not null"
