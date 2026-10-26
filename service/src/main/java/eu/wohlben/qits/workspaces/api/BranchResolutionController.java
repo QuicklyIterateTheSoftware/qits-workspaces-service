@@ -43,6 +43,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 @jakarta.annotation.security.RolesAllowed({
   "qits:admin",
   "qits:admin-agent",
+  "qits:desk-admin",
   "qits:system",
   "qits:desk"
 })

@@ -52,7 +52,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  */
 @Path("/pins")
 @Produces(MediaType.APPLICATION_JSON)
-@RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system"})
+@RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:system"})
 public class PinsController {
 
   @Inject WorkspaceContainerFactory containerFactory;
@@ -70,7 +70,7 @@ public class PinsController {
   public record LaunchPins(Instant generatedAt, List<LaunchPin> pins) {}
 
   // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
-  @RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system", "qits:agent"})
+  @RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:system", "qits:agent"})
   @GET
   @Operation(
       operationId = "listLaunchPins",

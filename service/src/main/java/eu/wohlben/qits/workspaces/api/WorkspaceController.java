@@ -44,7 +44,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 @Path("/workspaces")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:desk"})
 public class WorkspaceController {
 
   /**
@@ -78,7 +78,7 @@ public class WorkspaceController {
   /** The repository is a filter on the collection, not a parent segment. */
   // The three reads here also take qits:agent (phase 4: agents keep every read, lose writes). A
   // method-level list replaces the class's, so each read states the admin role again.
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:agent"})
   @GET
   @Operation(operationId = "listWorkspaces", summary = "A repository's ACTIVE workspaces")
   public ListWorkspacesRequest.Response list(@QueryParam("repositoryId") String repositoryId) {
@@ -119,7 +119,7 @@ public class WorkspaceController {
    * because there is nothing for an editor to be ahead OF, and a client reads them the way it reads
    * every other unknown on this shape.
    */
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:agent"})
   @GET
   @Path("/{id}")
   @APIResponse(responseCode = "200", description = "The workspace.")
@@ -194,7 +194,7 @@ public class WorkspaceController {
    * workspace's payload-free SSE channel as a {@code process} hint, so clients re-fetch this
    * instead of polling.
    */
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:agent"})
   @GET
   @Path("/{id}/active-process")
   @Operation(operationId = "getWorkspaceActiveProcess")

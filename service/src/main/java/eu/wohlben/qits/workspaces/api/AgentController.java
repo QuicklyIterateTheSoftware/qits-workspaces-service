@@ -36,7 +36,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 @Path("/agents")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:desk"})
 public class AgentController {
 
   @Inject AgentService agents;
@@ -50,6 +50,7 @@ public class AgentController {
   @jakarta.annotation.security.RolesAllowed({
     "qits:admin",
     "qits:admin-agent",
+    "qits:desk-admin",
     "qits:system",
     "qits:agent"
   })
@@ -65,6 +66,7 @@ public class AgentController {
   @jakarta.annotation.security.RolesAllowed({
     "qits:admin",
     "qits:admin-agent",
+    "qits:desk-admin",
     "qits:system",
     "qits:agent"
   })

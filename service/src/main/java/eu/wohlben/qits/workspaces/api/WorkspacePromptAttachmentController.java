@@ -42,7 +42,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 @Path("/agents/{id}/prompt-attachments")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:desk"})
 public class WorkspacePromptAttachmentController {
 
   @Inject WorkspacePromptAttachmentService promptAttachments;
@@ -62,7 +62,7 @@ public class WorkspacePromptAttachmentController {
    * state rather than a missing resource.
    */
   // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:agent"})
   @GET
   @APIResponse(responseCode = "200", description = "The attachments, oldest first.")
   @APIResponse(
@@ -180,7 +180,7 @@ public class WorkspacePromptAttachmentController {
   }
 
   /** Raw image bytes for normal browser and markdown image URLs. */
-  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:agent"})
+  @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:agent"})
   @GET
   @Path("/{attachmentId}/content")
   @Produces({"image/png", "image/jpeg"})

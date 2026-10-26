@@ -59,7 +59,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 @Path("capture")
 // qits:desk beside the coordinator's role (qits-1596), bound by DeskBinding to a repository of its
 // own project: the ticket is filed in that repository's project.
-@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk"})
+@jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:desk"})
 public class CaptureResource {
 
   /**

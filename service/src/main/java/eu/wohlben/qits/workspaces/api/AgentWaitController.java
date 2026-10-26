@@ -48,13 +48,22 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * {@code qits:admin-agent} is not admitted wherever {@code qits:admin} is: it is an agent, and bound
  * like one. {@code AgentWaitAccessTest} pins it.
  *
+ * <p><b>{@code qits:desk-admin} (qits-1621) is bound to its project, not to an agent.</b> The
+ * delivery desk is no agent: its token names a project and no agent row carries its subject, so
+ * the own-agent binding would refuse it every wait. It acts instead on the waits of any agent of
+ * its own project, by the same {@link DeskBinding#requireAgent} the desk's agent writes use, and an
+ * agent of another project (or of none it can resolve) is 403. A wait writes no ref and widens no
+ * project write: the desk could already prompt those agents. A desk-admin that is not a bound desk
+ * (no {@code qits:desk}) gets no such arm and is bound to its own agent like any other.
+ * {@code DeskAdminAccessTest} pins it.
+ *
  * <p>The selection is bound from JSON by qits-eventstream's own reader, so its three types are
  * registered for reflection here for the native image.
  */
 @Path("/agents/{agentId}/waits")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed({"qits:admin", "qits:admin-agent", "qits:system", "qits:agent"})
+@RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:system", "qits:agent"})
 @RegisterForReflection(
     targets = {EventSelection.class, EventSelection.Condition.class, EventSelection.Op.class})
 public class AgentWaitController {
@@ -62,9 +71,14 @@ public class AgentWaitController {
   /** The roles that act on any agent's waits; every other admitted role is bound to its own agent. */
   static final List<String> UNBOUND_ROLES = List.of("qits:admin", "qits:system");
 
+  /** Bound to its desk's project rather than to an agent (qits-1621); never one of the above. */
+  static final String DESK_ADMIN = "qits:desk-admin";
+
   @Inject AgentWaits waits;
 
   @Inject SecurityIdentity identity;
+
+  @Inject DeskBinding desk;
 
   @Inject ObjectMapper json;
 
@@ -204,7 +218,12 @@ public class AgentWaitController {
   /** The agent id, once the caller may act on it (W4). */
   private UUID authorized(String agentId) {
     UUID id = AgentController.agentId(agentId);
-    if (UNBOUND_ROLES.stream().noneMatch(identity::hasRole)) {
+    if (UNBOUND_ROLES.stream().anyMatch(identity::hasRole)) {
+      return id;
+    }
+    if (identity.hasRole(DESK_ADMIN) && desk.isBoundDesk()) {
+      desk.requireAgent(id.toString());
+    } else {
       waits.requireOwnAgent(id, identity.getPrincipal() == null ? null : identity.getPrincipal().getName());
     }
     return id;
