@@ -14,6 +14,7 @@ import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.ForbiddenException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
+import eu.wohlben.qits.workspaces.events.DeskWaitClosed;
 import eu.wohlben.qits.workspaces.persistence.AgentWaitRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -22,6 +23,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -29,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.jboss.logging.Logger;
 
 /**
@@ -58,6 +61,13 @@ import org.jboss.logging.Logger;
  *       ({@code waitingOn}, {@code waitingOnSince}), so it fires {@code AGENTS} on the agent's
  *       workspace channel once the change has committed. An agent with no workspace (QUEUED) is in
  *       no workspace's listing, and nothing is fired for it.
+ *   <li><b>The desk's waits</b> (qits-1618): a project's front desk holds waits too, under the same
+ *       selection rules, cap and timeout limit, on its project's id instead of an agent. A match or
+ *       timeout closes one exactly as an agent's, with the same turn; but there is no agent to
+ *       wake, relay or hint, so the close stores the turn and a {@link DeskWaitClosed} id on the row
+ *       in its own transaction, and the event is announced once that committed. The bus taking it
+ *       marks the row announced; every sweep publishes again what was never marked, under the same
+ *       id. A desk wait is never cancelled for want of an ACTIVE agent.
  * </ul>
  */
 @ApplicationScoped
@@ -91,6 +101,12 @@ public class AgentWaits {
   @Inject Instance<AgentWaitingReporter> waitingReporter;
 
   @Inject WorkspaceChangePublisher changePublisher;
+
+  /** Where a desk wait's close is announced (qits-1618). Absent: nothing is, and rows stay unmarked. */
+  @Inject Instance<LifecycleAnnouncer> lifecycle;
+
+  /** Desk waits whose announcement is handed on and not yet taken, so a sweep does not queue it twice. */
+  private final Set<UUID> announcing = ConcurrentHashMap.newKeySet();
 
   /** The event names some OPEN wait names. Replaced whole; read without a lock. */
   private volatile Set<String> openNames = Set.of();
@@ -133,18 +149,7 @@ public class AgentWaits {
    * @throws BadRequestException a timeout that is not positive or longer than {@link #MAX_TIMEOUT}
    */
   public AgentWaitDto create(UUID agentId, String label, EventSelection selection, Duration timeout) {
-    if (selection == null) {
-      throw new BadRequestException("A wait needs a selection: {\"event\": …, \"when\": […]}.");
-    }
-    if (timeout != null && (timeout.isNegative() || timeout.isZero())) {
-      throw new BadRequestException("A timeout must be positive, got " + timeout + ".");
-    }
-    if (timeout != null && timeout.compareTo(MAX_TIMEOUT) > 0) {
-      throw new BadRequestException(
-          "A timeout may be at most " + MAX_TIMEOUT + " (30 days), got " + timeout + ".");
-    }
-    String named = label == null || label.isBlank() ? EventSelectionGrammar.describe(selection) : label.trim();
-    String finalLabel = bounded(named, MAX_LABEL);
+    String finalLabel = validated(label, selection, timeout);
     UUID id = UUID.randomUUID();
     AgentWorktree agent =
         QuarkusTransaction.requiringNew()
@@ -188,6 +193,22 @@ public class AgentWaits {
     return get(agentId, id);
   }
 
+  /** The label a wait is stored under, once its selection and timeout are valid. */
+  private static String validated(String label, EventSelection selection, Duration timeout) {
+    if (selection == null) {
+      throw new BadRequestException("A wait needs a selection: {\"event\": …, \"when\": […]}.");
+    }
+    if (timeout != null && (timeout.isNegative() || timeout.isZero())) {
+      throw new BadRequestException("A timeout must be positive, got " + timeout + ".");
+    }
+    if (timeout != null && timeout.compareTo(MAX_TIMEOUT) > 0) {
+      throw new BadRequestException(
+          "A timeout may be at most " + MAX_TIMEOUT + " (30 days), got " + timeout + ".");
+    }
+    String named = label == null || label.isBlank() ? EventSelectionGrammar.describe(selection) : label.trim();
+    return bounded(named, MAX_LABEL);
+  }
+
   /** An agent's waits, newest first; {@code state} null = all. */
   public List<AgentWaitDto> list(UUID agentId, AgentWaitState state) {
     requireAgent(agentId);
@@ -201,7 +222,7 @@ public class AgentWaits {
         .call(
             () -> {
               AgentWait wait = waits.findById(waitId);
-              if (wait == null || !wait.agentId.equals(agentId)) {
+              if (wait == null || !agentId.equals(wait.agentId)) {
                 throw new NotFoundException("Wait not found: " + waitId);
               }
               return view(wait);
@@ -220,7 +241,7 @@ public class AgentWaits {
                   AgentWait wait =
                       waits
                           .findByIdOptional(waitId, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
-                          .filter(w -> w.agentId.equals(agentId))
+                          .filter(w -> agentId.equals(w.agentId))
                           .orElseThrow(() -> new NotFoundException("Wait not found: " + waitId));
                   if (wait.state != AgentWaitState.OPEN) {
                     return false;
@@ -238,6 +259,95 @@ public class AgentWaits {
       relayWaits(agent, CAUSE_CANCELLED);
     }
     return get(agentId, waitId);
+  }
+
+  // --- the desk's doors (qits-1618) --------------------------------------------------------------
+
+  /**
+   * Declare a wait for a project's front desk. Everything an agent's declaration checks except the
+   * agent: the selection, the timeout (at most {@link #MAX_TIMEOUT}), and at most {@link
+   * #MAX_OPEN_PER_AGENT} OPEN waits per project. The project is not looked up — it lives in
+   * qits-projects — so the caller's authorization is what binds the id.
+   *
+   * @throws ConflictException {@code TOO_MANY_WAITS}
+   * @throws BadRequestException a missing selection, or a bad timeout
+   */
+  public AgentWaitDto createForDesk(
+      UUID projectId, String label, EventSelection selection, Duration timeout) {
+    String finalLabel = validated(label, selection, timeout);
+    UUID id = UUID.randomUUID();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              waits.lockDesk(projectId);
+              if (waits.countOpenOfDesk(projectId) >= MAX_OPEN_PER_AGENT) {
+                throw new ConflictException(
+                    "TOO_MANY_WAITS",
+                    "The desk of project "
+                        + projectId
+                        + " already has "
+                        + MAX_OPEN_PER_AGENT
+                        + " open waits; cancel one first.");
+              }
+              AgentWait wait = new AgentWait();
+              wait.id = id;
+              wait.deskProjectId = projectId;
+              wait.label = finalLabel;
+              wait.selection = selection.toJson();
+              wait.eventName = selection.event();
+              wait.createdAt = Instant.now();
+              wait.expiresAt = timeout == null ? null : wait.createdAt.plus(timeout);
+              waits.persist(wait);
+            });
+    addName(selection.event());
+    LOG.infof("The desk of project %s waits on %s (%s)", projectId, finalLabel, id);
+    return getForDesk(projectId, id);
+  }
+
+  /** A project desk's waits, newest first; {@code state} null = all. */
+  public List<AgentWaitDto> listForDesk(UUID projectId, AgentWaitState state) {
+    return QuarkusTransaction.requiringNew()
+        .call(() -> waits.findByDesk(projectId, state).stream().map(AgentWaits::view).toList());
+  }
+
+  /** One wait of the project's desk; another holder's wait is not found here. */
+  public AgentWaitDto getForDesk(UUID projectId, UUID waitId) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              AgentWait wait = waits.findById(waitId);
+              if (wait == null || !projectId.equals(wait.deskProjectId)) {
+                throw new NotFoundException("Wait not found: " + waitId);
+              }
+              return view(wait);
+            });
+  }
+
+  /**
+   * Cancel a desk wait. An OPEN one becomes CANCELLED and announces nothing; a closed one is
+   * answered as it is (idempotent).
+   */
+  public AgentWaitDto cancelForDesk(UUID projectId, UUID waitId) {
+    boolean closed =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  AgentWait wait =
+                      waits
+                          .findByIdOptional(waitId, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                          .filter(w -> projectId.equals(w.deskProjectId))
+                          .orElseThrow(() -> new NotFoundException("Wait not found: " + waitId));
+                  if (wait.state != AgentWaitState.OPEN) {
+                    return false;
+                  }
+                  close(wait, AgentWaitState.CANCELLED, null);
+                  return true;
+                });
+    if (closed) {
+      refreshNames();
+      LOG.infof("The desk of project %s cancelled its wait %s", projectId, waitId);
+    }
+    return getForDesk(projectId, waitId);
   }
 
   // --- matching -----------------------------------------------------------------------------------
@@ -269,6 +379,7 @@ public class AgentWaits {
     }
     JsonNode tree = EventSelectionEvaluator.parsePayload(payload);
     List<Placed> closedFor = new ArrayList<>();
+    List<DeskWaitClosed> deskClosed = new ArrayList<>();
     List<Woken> woken =
         QuarkusTransaction.requiringNew()
             .call(
@@ -285,8 +396,15 @@ public class AgentWaits {
                     if (!EventSelectionEvaluator.matches(selection, name, tree)) {
                       continue;
                     }
-                    close(wait, AgentWaitState.MATCHED, eventId);
                     String turn = matchedTurn(wait.label, selection, eventId, occurredAt, tree);
+                    if (wait.isDeskWait()) {
+                      deskClosed.add(closeDesk(wait, AgentWaitState.MATCHED, eventId, turn));
+                      LOG.infof(
+                          "The desk of project %s: its wait %s matched %s %s",
+                          wait.deskProjectId, wait.label, name, eventId);
+                      continue;
+                    }
+                    close(wait, AgentWaitState.MATCHED, eventId);
                     AgentWorktree agent = wake(wait.agentId, turn);
                     closedFor.add(placedOf(wait.agentId));
                     if (agent != null) {
@@ -298,8 +416,12 @@ public class AgentWaits {
                   return out;
                 });
     hint(closedFor);
+    deskClosed.forEach(this::announceDesk);
     if (woken.isEmpty()) {
-      return 0;
+      if (!deskClosed.isEmpty()) {
+        refreshNames();
+      }
+      return deskClosed.size();
     }
     refreshNames();
     // After the commit, so the label read is what stays open once the matched waits closed
@@ -308,17 +430,19 @@ public class AgentWaits {
       relay(w.workId(), false, CAUSE_MATCHED, waitingOn(w.agentId()), w.sessionId(), Instant.now());
     }
     agentService.kick();
-    return woken.size();
+    return woken.size() + deskClosed.size();
   }
 
   /**
-   * One sweep: time out OPEN waits past their expiry (each wakes its agent), cancel the OPEN waits
-   * of agents that are no longer ACTIVE (no wake), and refresh the event names {@link #selects}
-   * reads. Run on every scheduler pass.
+   * One sweep: time out OPEN waits past their expiry (each wakes its agent, or announces a desk's
+   * close), cancel the OPEN waits of agents that are no longer ACTIVE (no wake; a desk wait is never
+   * one), refresh the event names {@link #selects} reads, and publish again every closed desk wait
+   * whose announcement the bus never took. Run on every scheduler pass.
    */
   public void sweep() {
     Instant now = Instant.now();
     List<Placed> closedFor = new ArrayList<>();
+    List<DeskWaitClosed> deskClosed = new ArrayList<>();
     List<Woken> woken =
         QuarkusTransaction.requiringNew()
             .call(
@@ -330,19 +454,15 @@ public class AgentWaits {
                     LOG.infof("Agent %s is no longer active: its wait %s is cancelled", wait.agentId, wait.label);
                   }
                   for (AgentWait wait : waits.findExpiredForUpdate(now)) {
+                    if (wait.isDeskWait()) {
+                      deskClosed.add(
+                          closeDesk(wait, AgentWaitState.TIMED_OUT, null, timedOutTurn(wait)));
+                      LOG.infof(
+                          "The desk of project %s: its wait %s timed out", wait.deskProjectId, wait.label);
+                      continue;
+                    }
                     close(wait, AgentWaitState.TIMED_OUT, null);
-                    Duration after = Duration.between(wait.createdAt, wait.expiresAt);
-                    AgentWorktree agent =
-                        wake(
-                            wait.agentId,
-                            "Your wait \""
-                                + wait.label
-                                + "\" timed out after "
-                                + human(after)
-                                + ": no "
-                                + wait.eventName
-                                + " event matched it. It is closed; declare a new one if you still"
-                                + " need to wait.");
+                    AgentWorktree agent = wake(wait.agentId, timedOutTurn(wait));
                     closedFor.add(placedOf(wait.agentId));
                     if (agent != null) {
                       out.add(new Woken(agent.id, agent.workId, agent.sessionId));
@@ -352,6 +472,7 @@ public class AgentWaits {
                   return out;
                 });
     hint(closedFor);
+    deskClosed.forEach(this::announceDesk);
     refreshNames();
     for (Woken w : woken) {
       relay(w.workId(), false, CAUSE_TIMED_OUT, waitingOn(w.agentId()), w.sessionId(), now);
@@ -359,6 +480,85 @@ public class AgentWaits {
     if (!woken.isEmpty()) {
       agentService.kick();
     }
+    announceUnannounced();
+  }
+
+  // --- the desk's announcements (qits-1618) -------------------------------------------------------
+
+  /**
+   * Close a desk wait in the caller's transaction and record what is to be announced: a fresh
+   * {@link DeskWaitClosed} id and the rendered turn. The event is built from the row, so a later
+   * re-publish from {@link #announceUnannounced} says exactly the same.
+   */
+  private static DeskWaitClosed closeDesk(
+      AgentWait wait, AgentWaitState state, String eventId, String turn) {
+    close(wait, state, eventId);
+    // As the column stores it, so the first publish and a re-publish read the same instant.
+    wait.closedAt = wait.closedAt.truncatedTo(ChronoUnit.MICROS);
+    wait.closedEventId = UUID.randomUUID();
+    wait.closedTurn = turn;
+    return closedEvent(wait);
+  }
+
+  /** The announcement a closed desk wait's row records. */
+  static DeskWaitClosed closedEvent(AgentWait wait) {
+    return new DeskWaitClosed(
+        wait.closedEventId,
+        wait.id.toString(),
+        wait.deskProjectId.toString(),
+        wait.label,
+        wait.state.name(),
+        wait.eventName,
+        wait.matchedEventId,
+        wait.closedTurn,
+        wait.closedAt);
+  }
+
+  /**
+   * Hand a committed close to the bus, and mark the row once the bus took it. Not twice at once: a
+   * sweep that finds the row still unmarked while this one is queued leaves it be.
+   */
+  private void announceDesk(DeskWaitClosed event) {
+    if (lifecycle == null || !lifecycle.isResolvable()) {
+      return;
+    }
+    UUID waitId = UUID.fromString(event.waitId());
+    if (!announcing.add(waitId)) {
+      return;
+    }
+    try {
+      lifecycle
+          .get()
+          .announce(
+              event,
+              () -> {
+                try {
+                  QuarkusTransaction.requiringNew()
+                      .run(() -> waits.markAnnounced(waitId, Instant.now()));
+                } finally {
+                  announcing.remove(waitId);
+                }
+              });
+    } catch (RuntimeException e) {
+      announcing.remove(waitId);
+      LOG.warnf(e, "DeskWaitClosed %s for wait %s not announced", event.eventId(), waitId);
+    }
+  }
+
+  /** Publish again every closed desk wait the bus never took, under the id its close recorded. */
+  private void announceUnannounced() {
+    if (lifecycle == null || !lifecycle.isResolvable()) {
+      return;
+    }
+    List<DeskWaitClosed> owed =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () ->
+                    waits.findUnannounced().stream()
+                        .filter(w -> !announcing.contains(w.id))
+                        .map(AgentWaits::closedEvent)
+                        .toList());
+    owed.forEach(this::announceDesk);
   }
 
   // --- waiting on (W5) ----------------------------------------------------------------------------
@@ -497,6 +697,19 @@ public class AgentWaits {
     // A turn that is not a nudge: a later quiet period earns a fresh nudge (qits-1460).
     agent.nudgeCount = 0;
     return agent;
+  }
+
+  /** The turn a timed-out wait gives: its agent's wake, or the text a desk's announcement carries. */
+  static String timedOutTurn(AgentWait wait) {
+    Duration after = Duration.between(wait.createdAt, wait.expiresAt);
+    return "Your wait \""
+        + wait.label
+        + "\" timed out after "
+        + human(after)
+        + ": no "
+        + wait.eventName
+        + " event matched it. It is closed; declare a new one if you still"
+        + " need to wait.";
   }
 
   private static void close(AgentWait wait, AgentWaitState state, String eventId) {
@@ -652,7 +865,7 @@ public class AgentWaits {
   static AgentWaitDto view(AgentWait wait) {
     return new AgentWaitDto(
         wait.id.toString(),
-        wait.agentId.toString(),
+        wait.agentId == null ? null : wait.agentId.toString(),
         wait.label,
         wait.selection,
         wait.state,

@@ -12,6 +12,7 @@ import eu.wohlben.qits.eventstream.QitsEventBus;
 import eu.wohlben.qits.workspaces.control.LifecycleAnnouncer;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
+import eu.wohlben.qits.workspaces.events.DeskWaitClosed;
 import io.quarkus.arc.Arc;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
@@ -87,6 +88,37 @@ class EventstreamLifecycleAnnouncerTest {
       assertNotEquals(Thread.currentThread().getName(), one.thread());
       assertTrue(one.requestContext(), "the outbox's fallback gets a request context");
     }
+  }
+
+  /**
+   * qits-1618: the callback a desk wait's close marks itself announced with runs on the publishing
+   * thread, after the bus returned, inside the request context.
+   */
+  @Test
+  void theTakenCallbackRunsOnThePublishingThreadAfterThePublish() throws Exception {
+    Instant at = Instant.parse("2026-10-26T10:00:00Z");
+    DeskWaitClosed closed =
+        new DeskWaitClosed(
+            UUID.randomUUID(), UUID.randomUUID().toString(), UUID.randomUUID().toString(), "label",
+            DeskWaitClosed.TIMED_OUT, "BuildStatusChanged", null, "turn", at);
+    java.util.concurrent.CompletableFuture<String> taken = new java.util.concurrent.CompletableFuture<>();
+
+    port.get()
+        .announce(
+            closed,
+            () ->
+                taken.complete(
+                    Thread.currentThread().getName()
+                        + "/"
+                        + published.size()
+                        + "/"
+                        + Arc.container().requestContext().isActive()));
+
+    assertEquals(
+        "workspaces-lifecycle-events/1/true",
+        taken.get(10, java.util.concurrent.TimeUnit.SECONDS),
+        "on the publishing thread, once the one publish had happened, in its request context");
+    assertEquals(closed, published.get(0).event());
   }
 
   /** The client proxy's target, so the assertion names the implementation and not the proxy. */

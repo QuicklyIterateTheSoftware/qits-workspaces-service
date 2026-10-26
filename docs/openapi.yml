@@ -1991,6 +1991,139 @@ paths:
         - qits:desk-admin
         - qits:system
         - qits:desk
+  /workspaces/api/desks/{projectId}/waits:
+    get:
+      summary: "The project desk's waits, optionally of one state"
+      operationId: listDeskWaits
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: state
+        in: query
+        schema:
+          type: string
+      responses:
+        "200":
+          description: "The desk's waits, newest first."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitList"
+        "403":
+          description: A `qits:desk-admin` caller whose token's `project` claim is
+            not this project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Desk Wait Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
+        - qits:desk-admin
+    post:
+      summary: Declare what the project's desk waits on
+      operationId: createDeskWait
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWaitRequest"
+        required: true
+      responses:
+        "201":
+          description: "The wait, OPEN."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitView"
+        "400":
+          description: "An invalid selection (the matcher's reason), a bad timeout,\
+            \ or a project id that is not a UUID."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk-admin` caller whose token's `project` claim is
+            not this project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: TOO_MANY_WAITS (8 are OPEN for this project's desk).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Desk Wait Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
+        - qits:desk-admin
+  /workspaces/api/desks/{projectId}/waits/{waitId}:
+    delete:
+      summary: Cancel one of the project desk's waits
+      operationId: cancelDeskWait
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: waitId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: "The wait: CANCELLED, or as it was when already closed. Nothing\
+            \ is announced."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitView"
+        "403":
+          description: A `qits:desk-admin` caller whose token's `project` claim is
+            not this project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No such wait of this project's desk.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Desk Wait Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:system
+        - qits:desk-admin
   /workspaces/api/gc/branches:
     post:
       operationId: sweepBranches

@@ -2,14 +2,17 @@ package eu.wohlben.qits.workspaces.bus;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.eventstream.control.EventFrame;
 import eu.wohlben.qits.eventstream.selection.EventSelection;
 import eu.wohlben.qits.workspaces.control.AgentWaits;
 import eu.wohlben.qits.workspaces.dto.AgentWaitDto;
+import eu.wohlben.qits.workspaces.entity.AgentWait;
 import eu.wohlben.qits.workspaces.entity.AgentWaitState;
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
+import eu.wohlben.qits.workspaces.persistence.AgentWaitRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
@@ -69,5 +72,43 @@ class AgentWaitListenerTest {
     AgentWaitDto matched = waits.get(agentId, UUID.fromString(wait.id()));
     assertEquals(AgentWaitState.MATCHED, matched.state());
     assertEquals("e-2", matched.matchedEventId());
+  }
+
+  /**
+   * A project desk's wait (qits-1618) is selected and matched like an agent's, and its close goes
+   * through the real announcer: the bus is dark here, so publishing is a no-op that returns, and the
+   * row is marked announced on the publishing thread.
+   */
+  @Test
+  void aDeskWaitIsSelectedMatchedAndMarkedAnnouncedThroughTheRealAnnouncer() throws Exception {
+    UUID project = UUID.randomUUID();
+    AgentWaitDto wait =
+        waits.createForDesk(
+            project,
+            "desk ci run 8",
+            EventSelection.of("DeskListenerBuildStatusChanged", EventSelection.Condition.exact("runId", "8")),
+            null);
+
+    assertTrue(listener.selects(frame("d-1", "DeskListenerBuildStatusChanged", "{}")));
+    listener.onFrame(frame("d-1", "DeskListenerBuildStatusChanged", "{\"runId\":\"8\"}"));
+
+    AgentWaitDto matched = waits.getForDesk(project, UUID.fromString(wait.id()));
+    assertEquals(AgentWaitState.MATCHED, matched.state());
+    assertEquals("d-1", matched.matchedEventId());
+    long deadline = System.currentTimeMillis() + 10_000;
+    AgentWait row = waitRow(wait.id());
+    while (row.announcedAt == null && System.currentTimeMillis() < deadline) {
+      Thread.sleep(20);
+      row = waitRow(wait.id());
+    }
+    assertNotNull(row.closedEventId);
+    assertNotNull(row.announcedAt, "the publishing thread marked it once the bus returned");
+    assertFalse(listener.selects(frame("d-2", "DeskListenerBuildStatusChanged", "{}")));
+  }
+
+  @Inject AgentWaitRepository waitRows;
+
+  private AgentWait waitRow(String id) {
+    return QuarkusTransaction.requiringNew().call(() -> waitRows.findById(UUID.fromString(id)));
   }
 }

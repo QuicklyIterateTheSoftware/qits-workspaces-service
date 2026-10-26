@@ -45,6 +45,11 @@ import org.jboss.logging.Logger;
  * reach a lambda on an executor (an interceptor binds only a call through the bean's proxy), so the
  * context is activated by hand, and only when none is active.
  *
+ * <p><b>Taken, for a caller that keeps a record of it</b> (qits-1618). {@link #announce(QitsEvent,
+ * Runnable)} runs its callback on the publishing thread once {@link QitsEventBus#publish} returned —
+ * the event delivered, or held by the outbox — still inside that request context. A desk wait's
+ * close marks itself announced there; one never taken is published again by the next sweep.
+ *
  * <p><b>What stopping costs.</b> On shutdown the queue gets a few seconds to drain; whatever is
  * still queued after that is dropped with a WARN. An event handed to the bus is the outbox's from
  * there.
@@ -70,16 +75,22 @@ public class EventstreamLifecycleAnnouncer implements LifecycleAnnouncer {
   /** Queue one event for the publishing thread, with the cause read here, on the caller's thread. */
   @Override
   public void announce(QitsEvent event) {
+    announce(event, null);
+  }
+
+  /** {@link #announce(QitsEvent)}, then {@code taken} on the publishing thread once the bus took it. */
+  @Override
+  public void announce(QitsEvent event, Runnable taken) {
     UUID parent = CausationScope.current();
     try {
-      publisher.execute(() -> publish(event, parent));
+      publisher.execute(() -> publish(event, parent, taken));
     } catch (RejectedExecutionException stopped) {
       LOG.warnf(
           "%s %s not published: this process is stopping", event.signature(), event.eventId());
     }
   }
 
-  private void publish(QitsEvent event, UUID parent) {
+  private void publish(QitsEvent event, UUID parent, Runnable taken) {
     ManagedContext requestContext = Arc.container().requestContext();
     boolean activated = !requestContext.isActive();
     if (activated) {
@@ -87,6 +98,13 @@ public class EventstreamLifecycleAnnouncer implements LifecycleAnnouncer {
     }
     try {
       bus.publish(event, parent);
+      if (taken != null) {
+        try {
+          taken.run();
+        } catch (RuntimeException e) {
+          LOG.warnf(e, "%s %s was published, but not recorded as such", event.signature(), event.eventId());
+        }
+      }
     } finally {
       if (activated) {
         requestContext.terminate();

@@ -4,6 +4,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
@@ -25,7 +26,8 @@ import org.junit.jupiter.api.Test;
  * Who may declare, list and cancel an agent's waits (qits-1153, W4) — the stated exception to
  * "agents get no write doors here": {@code qits:agent} and {@code qits:admin-agent} only for the
  * agent their token belongs to (principal = the agent's token subject), {@code qits:admin} and
- * {@code qits:system} for any. Also the door's own 400s. Under {@link NoDevUserProfile}, so the
+ * {@code qits:system} for any; {@code qits:desk-admin} (qits-1618) is admitted and bound exactly as
+ * an agent is. Also the door's own 400s. Under {@link NoDevUserProfile}, so the
  * roles are exactly the ones a request sends.
  */
 @QuarkusTest
@@ -132,6 +134,24 @@ class AgentWaitAccessTest {
         .post(waits())
         .then()
         .statusCode(403);
+  }
+
+  /**
+   * qits-1618: the front desk's role is admitted on the agent door so that every door admitting
+   * {@code qits:admin-agent} admits it, but it is not unbound: like an agent, it acts only on the
+   * agent whose token subject it is — which no desk is.
+   */
+  @Test
+  void theDeskAdminRoleIsAdmittedButBoundLikeAnAgent() {
+    String id =
+        as("qits-projects", "qits:system").body(aWait()).post(waits()).then().statusCode(201).extract().path("id");
+
+    as("desk-session-p", "qits:desk-admin,qits:agent").body(aWait()).post(waits()).then().statusCode(403);
+    as("desk-session-p", "qits:desk-admin,qits:agent").get(waits()).then().statusCode(403);
+    as("desk-session-p", "qits:desk-admin,qits:agent").delete(waits() + "/" + id).then().statusCode(403);
+    // Admitted by the role list: with the agent's own subject, the role alone opens the door.
+    as(subject, "qits:desk-admin").get(waits()).then().statusCode(200).body("waits", hasSize(1));
+    assertFalse(AgentWaitController.UNBOUND_ROLES.contains("qits:desk-admin"));
   }
 
   @Test

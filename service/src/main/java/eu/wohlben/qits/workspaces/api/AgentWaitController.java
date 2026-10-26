@@ -50,12 +50,13 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  *
  * <p><b>{@code qits:desk-admin} (qits-1621) is bound to its project, not to an agent.</b> The
  * delivery desk is no agent: its token names a project and no agent row carries its subject, so
- * the own-agent binding would refuse it every wait. It acts instead on the waits of any agent of
- * its own project, by the same {@link DeskBinding#requireAgent} the desk's agent writes use, and an
- * agent of another project (or of none it can resolve) is 403. A wait writes no ref and widens no
- * project write: the desk could already prompt those agents. A desk-admin that is not a bound desk
- * (no {@code qits:desk}) gets no such arm and is bound to its own agent like any other.
- * {@code DeskAdminAccessTest} pins it.
+ * the own-agent binding would refuse it every wait. On these doors it acts instead on the waits of
+ * any agent of its own project, by the same {@link DeskBinding#requireAgent} the desk's agent
+ * writes use, and an agent of another project (or of none it can resolve) is 403. A wait writes no
+ * ref and widens no project write: the desk could already prompt those agents. A desk-admin that is
+ * not a bound desk (no {@code qits:desk}) gets no such arm and is bound to its own agent like any
+ * other. The desk's <em>own</em> waits are {@link DeskWaitController}'s (qits-1618). {@code
+ * DeskAdminAccessTest} pins it.
  *
  * <p>The selection is bound from JSON by qits-eventstream's own reader, so its three types are
  * registered for reflection here for the native image.
@@ -152,26 +153,34 @@ public class AgentWaitController {
   @Operation(operationId = "createAgentWait", summary = "Declare what the agent waits on")
   public Response create(@PathParam("agentId") String agentId, CreateWaitRequest request) {
     UUID id = authorized(agentId);
+    AgentWaitDto created =
+        waits.create(id, request == null ? null : request.label(), selectionOf(request), timeoutOf(request));
+    return Response.status(Response.Status.CREATED).entity(view(created)).build();
+  }
+
+  /** The request's selection, bound by qits-eventstream's reader; a 400 with its reason otherwise. */
+  static EventSelection selectionOf(CreateWaitRequest request) {
     if (request == null || request.selection() == null || request.selection().isNull()) {
       throw new BadRequestException("A wait needs a selection: {\"event\": …, \"when\": […]}.");
     }
-    EventSelection selection;
     try {
-      selection = EventSelection.fromJson(request.selection().toString());
+      return EventSelection.fromJson(request.selection().toString());
     } catch (EventSelectionException invalid) {
       throw new BadRequestException("Invalid selection: " + invalid.getMessage());
     }
-    Duration timeout = null;
-    if (request.timeout() != null && !request.timeout().isBlank()) {
-      try {
-        timeout = Duration.parse(request.timeout().trim());
-      } catch (DateTimeParseException notIso) {
-        throw new BadRequestException(
-            "'" + request.timeout() + "' is not an ISO-8601 duration such as PT2H or P1D.");
-      }
+  }
+
+  /** The request's timeout; null = none. A 400 for one that is not an ISO-8601 duration. */
+  static Duration timeoutOf(CreateWaitRequest request) {
+    if (request == null || request.timeout() == null || request.timeout().isBlank()) {
+      return null;
     }
-    AgentWaitDto created = waits.create(id, request.label(), selection, timeout);
-    return Response.status(Response.Status.CREATED).entity(view(created)).build();
+    try {
+      return Duration.parse(request.timeout().trim());
+    } catch (DateTimeParseException notIso) {
+      throw new BadRequestException(
+          "'" + request.timeout() + "' is not an ISO-8601 duration such as PT2H or P1D.");
+    }
   }
 
   @GET
@@ -229,7 +238,7 @@ public class AgentWaitController {
     return id;
   }
 
-  private static AgentWaitState stateOf(String state) {
+  static AgentWaitState stateOf(String state) {
     if (state == null || state.isBlank()) {
       return null;
     }
@@ -242,6 +251,11 @@ public class AgentWaitController {
   }
 
   private WaitView view(AgentWaitDto wait) {
+    return view(json, wait);
+  }
+
+  /** A wait as both doors answer it; {@code agentId} is null for a desk's. */
+  static WaitView view(ObjectMapper json, AgentWaitDto wait) {
     JsonNode selection;
     try {
       selection = json.readTree(wait.selection());
