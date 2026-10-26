@@ -74,7 +74,7 @@
              daemon that produces those files and the service that reads them off the shared volume
              after the container is gone. Framework-free — vertx-core and qits-commands are its only
              compile dependencies, and nothing here imports either. -->
-        <qits.coding-agents.version>2026.1025.182758</qits.coding-agents.version>
+        <qits.coding-agents.version>2026.1026.133437</qits.coding-agents.version>
         <qits.eventstream.version>2026.1019.123026</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
