@@ -17,6 +17,11 @@ import java.util.UUID;
  * A declared wait (qits-1153): the agent waits for an event that matches {@link #selection}, and
  * gets a turn when one arrives or {@link #expiresAt} passes. See {@code V23}.
  *
+ * <p><b>Two holders</b> (qits-1618, {@code V32}): an agent ({@link #agentId}) or a project's front
+ * desk ({@link #deskProjectId}), exactly one of them. A desk wait's close is announced as {@code
+ * DeskWaitClosed} rather than written as a turn; {@link #closedEventId}, {@link #closedTurn} and
+ * {@link #announcedAt} carry that announcement until the bus has taken it.
+ *
  * <p><b>In, a {@link CausedRow}.</b> It is created on the request thread of the agent's own call
  * ({@code POST /agents/{id}/waits}), so the stamp records why the wait exists. Closing it does not
  * move the stamp; the event that matched is {@link #matchedEventId}.
@@ -41,8 +46,13 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
 
   @Id public UUID id;
 
-  @Column(name = "agent_id", nullable = false)
+  /** The agent that waits; null for a desk wait. */
+  @Column(name = "agent_id")
   public UUID agentId;
+
+  /** The project whose front desk waits (qits-1618); null for an agent's wait. */
+  @Column(name = "desk_project_id")
+  public UUID deskProjectId;
 
   /** What the agent calls it; the selection's one-line description when it named none. */
   @Column(nullable = false, columnDefinition = "text")
@@ -73,4 +83,21 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
 
   @Column(name = "closed_at")
   public Instant closedAt;
+
+  /** A desk wait's {@code DeskWaitClosed} id, set when it MATCHED or TIMED_OUT; re-published as is. */
+  @Column(name = "closed_event_id")
+  public UUID closedEventId;
+
+  /** The turn that event carries, rendered when the wait closed. */
+  @Column(name = "closed_turn", columnDefinition = "text")
+  public String closedTurn;
+
+  /** When the bus took the {@code DeskWaitClosed}; null while it is still to be published. */
+  @Column(name = "announced_at")
+  public Instant announcedAt;
+
+  /** Whether a project's desk holds this wait rather than an agent. */
+  public boolean isDeskWait() {
+    return deskProjectId != null;
+  }
 }

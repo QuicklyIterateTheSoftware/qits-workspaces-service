@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-/** The declared waits (qits-1153). */
+/** The declared waits (qits-1153), an agent's or a project desk's (qits-1618). */
 @ApplicationScoped
 public class AgentWaitRepository implements PanacheRepositoryBase<AgentWait, UUID> {
 
@@ -35,6 +35,44 @@ public class AgentWaitRepository implements PanacheRepositoryBase<AgentWait, UUI
 
   public long countOpen(UUID agentId) {
     return count("agentId = ?1 and state = ?2", agentId, AgentWaitState.OPEN);
+  }
+
+  /** A project desk's waits, newest first; {@code state} null = every state. */
+  public List<AgentWait> findByDesk(UUID projectId, AgentWaitState state) {
+    if (state == null) {
+      return list("deskProjectId = ?1 order by createdAt desc", projectId);
+    }
+    return list("deskProjectId = ?1 and state = ?2 order by createdAt desc", projectId, state);
+  }
+
+  public long countOpenOfDesk(UUID projectId) {
+    return count("deskProjectId = ?1 and state = ?2", projectId, AgentWaitState.OPEN);
+  }
+
+  /**
+   * Serialise the declarations of one project's desk for the rest of the caller's transaction, so
+   * two concurrent ones cannot both pass the cap. A desk has no row of its own to lock, so this is a
+   * postgres transaction-scoped advisory lock keyed on the project.
+   */
+  public void lockDesk(UUID projectId) {
+    getEntityManager()
+        .createNativeQuery("select count(*) from (select pg_advisory_xact_lock(?1)) held")
+        .setParameter(1, projectId.getMostSignificantBits() ^ projectId.getLeastSignificantBits())
+        .getSingleResult();
+  }
+
+  /**
+   * Closed desk waits whose {@code DeskWaitClosed} the bus never took, oldest first: what the sweep
+   * publishes again.
+   */
+  public List<AgentWait> findUnannounced() {
+    return list(
+        "closedEventId is not null and announcedAt is null order by closedAt");
+  }
+
+  /** The bus took the wait's announcement; a second confirmation changes nothing. */
+  public void markAnnounced(UUID waitId, Instant at) {
+    update("announcedAt = ?1 where id = ?2 and announcedAt is null", at, waitId);
   }
 
   /** The OPEN waits on one event name, oldest first, locked so two deliveries cannot both close one. */
@@ -64,10 +102,10 @@ public class AgentWaitRepository implements PanacheRepositoryBase<AgentWait, UUI
         .list();
   }
 
-  /** OPEN waits of agents that are no longer ACTIVE, locked. */
+  /** OPEN waits of agents that are no longer ACTIVE, locked. A desk wait is never one. */
   public List<AgentWait> findOpenOfInactiveAgentsForUpdate() {
     return find(
-            "state = ?1 and agentId in (select a.id from AgentWorktree a where a.state <> ?2)",
+            "state = ?1 and agentId is not null and agentId in (select a.id from AgentWorktree a where a.state <> ?2)",
             AgentWaitState.OPEN,
             AgentState.ACTIVE)
         .withLock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)

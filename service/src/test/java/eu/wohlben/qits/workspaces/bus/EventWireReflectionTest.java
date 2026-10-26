@@ -21,6 +21,7 @@ import eu.wohlben.qits.workspaces.events.AgentResumed;
 import eu.wohlben.qits.workspaces.events.AgentStartRefused;
 import eu.wohlben.qits.workspaces.events.AgentStarted;
 import eu.wohlben.qits.workspaces.events.AgentYielded;
+import eu.wohlben.qits.workspaces.events.DeskWaitClosed;
 import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
 import eu.wohlben.qits.workspaces.events.WorkspaceRemoved;
 import eu.wohlben.qits.workspaces.events.WorkspaceStarted;
@@ -72,11 +73,12 @@ class EventWireReflectionTest {
             WorkspaceStarted.class,
             WorkspaceFailed.class,
             WorkspaceRemoved.class,
+            DeskWaitClosed.class,
             eu.wohlben.qits.workspaces.targethost.TargetLeaseChanged.class,
             EventEnvelope.class,
             EventFrame.class),
         Set.of(registration.targets()),
-        "the fourteen lifecycle events out, qits-system's lease event in, the PUT body, the frame — a new wire type is added"
+        "the fourteen lifecycle events and DeskWaitClosed out, qits-system's lease event in, the PUT body, the frame — a new wire type is added"
             + " here");
   }
 

@@ -13,6 +13,7 @@ import eu.wohlben.qits.workspaces.events.AgentResumed;
 import eu.wohlben.qits.workspaces.events.AgentStartRefused;
 import eu.wohlben.qits.workspaces.events.AgentStarted;
 import eu.wohlben.qits.workspaces.events.AgentYielded;
+import eu.wohlben.qits.workspaces.events.DeskWaitClosed;
 import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
 import eu.wohlben.qits.workspaces.events.WorkspaceRemoved;
 import eu.wohlben.qits.workspaces.events.WorkspaceStarted;
@@ -32,8 +33,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
  * anything else. This suite cannot see it either; {@code EventWireReflectionTest} guards the
  * registration's completeness, and only the running binary proves it.
  *
- * <p><b>Why these types.</b> The fourteen records are what {@link EventstreamLifecycleAnnouncer}
- * publishes. {@link TargetLeaseChanged} is qits-system's, which {@code
+ * <p><b>Why these types.</b> The fourteen lifecycle records and {@link DeskWaitClosed} (qits-1618)
+ * are what {@link EventstreamLifecycleAnnouncer} publishes. {@link TargetLeaseChanged} is qits-system's, which {@code
  * targethost/TargetLeaseEvents} receives bound to that record (epic qits-1481). {@link EventEnvelope} is the PUT body. {@link EventFrame} is what arrives on {@code
  * /events/stream} for {@link AgentWaitListener}, which reads the frame's fields and hands the
  * payload on as a string — so it binds nothing else, but the frame itself is bound.
@@ -59,6 +60,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
       WorkspaceStarted.class,
       WorkspaceFailed.class,
       WorkspaceRemoved.class,
+      DeskWaitClosed.class,
       TargetLeaseChanged.class,
       EventEnvelope.class,
       EventFrame.class

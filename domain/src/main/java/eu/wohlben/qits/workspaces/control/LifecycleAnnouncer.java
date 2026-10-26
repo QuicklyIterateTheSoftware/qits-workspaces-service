@@ -22,6 +22,19 @@ public interface LifecycleAnnouncer {
   void announce(QitsEvent event);
 
   /**
+   * Announce {@code event}, and run {@code taken} once the bus has taken it — delivered, or held by
+   * its outbox — on whatever thread published it (qits-1618: a desk wait's close is marked announced
+   * there). Returns at once; never throws. {@code taken} is not run when the event was never handed
+   * on (the process is stopping), which is what leaves it to be published again.
+   *
+   * <p>The default is for an implementation that takes the event as it is announced.
+   */
+  default void announce(QitsEvent event, Runnable taken) {
+    announce(event);
+    taken.run();
+  }
+
+  /**
    * {@code event} through {@code port} when one is resolvable, and nothing otherwise. A throwing
    * implementation is logged and swallowed here too, so a call site needs no guard of its own.
    */
@@ -31,6 +44,22 @@ public interface LifecycleAnnouncer {
     }
     try {
       port.get().announce(event);
+    } catch (RuntimeException e) {
+      Logger.getLogger(LifecycleAnnouncer.class)
+          .warnf(e, "%s %s not announced", event.signature(), event.eventId());
+    }
+  }
+
+  /**
+   * As {@link #announce(Instance, QitsEvent)}, running {@code taken} once the bus has taken the
+   * event. Absent port: nothing is announced and {@code taken} is not run.
+   */
+  static void announce(Instance<LifecycleAnnouncer> port, QitsEvent event, Runnable taken) {
+    if (port == null || !port.isResolvable()) {
+      return;
+    }
+    try {
+      port.get().announce(event, taken);
     } catch (RuntimeException e) {
       Logger.getLogger(LifecycleAnnouncer.class)
           .warnf(e, "%s %s not announced", event.signature(), event.eventId());
