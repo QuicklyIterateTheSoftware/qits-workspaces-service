@@ -167,8 +167,16 @@ ARG QITS_DOMAIN=wohlben.eu
 #
 # Absent secrets leave both variables empty, so a hand build without them still starts and fails at
 # the first 401 with Maven naming the host.
+#
+# The cache mount keeps the downloaded Maven repository in the builder's own state volume across
+# builds (qits-1655: a cold build was spending ~6-8 of its ~12 minutes just downloading, holding the
+# target's single-operation builder while other CI leases queued behind it). `sharing=shared`, plus
+# the resolver's own named file locks below, make two concurrent builds on that shared cache safe. The
+# mount is not part of the image or its layer cache key's content — only `/root/.m2/repository`, not
+# the image.
 RUN --mount=type=secret,id=qits-client-id \
     --mount=type=secret,id=qits-client-secret \
+    --mount=type=cache,id=qits-maven-repository,target=/root/.m2/repository,sharing=shared \
     QITS_MAVEN_AUTH_USR="$(cat /run/secrets/qits-client-id 2>/dev/null || true)" \
     QITS_MAVEN_AUTH_PSW="$(cat /run/secrets/qits-client-secret 2>/dev/null || true)" \
     QITS_MAVEN_REPOSITORY_URL="https://registry.qits.$QITS_DOMAIN/artifacts/maven/maven" \
@@ -176,6 +184,7 @@ RUN --mount=type=secret,id=qits-client-id \
     ./mvnw -B -ntp -s .qits-maven-settings.xml -pl service -am package -Dnative -DskipTests \
       -Dqits.maven.repository.url="https://registry.qits.$QITS_DOMAIN/artifacts/maven/maven" \
       -Dquarkus.native.native-image-xmx=4g \
+      -Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav \
       org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom \
       -DoutputFormat=json -DoutputName=sbom -DschemaVersion=1.6 \
       -Dcyclonedx.skipNotDeployed=false
