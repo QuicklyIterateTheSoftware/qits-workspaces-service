@@ -138,8 +138,8 @@ class AgentWaitAccessTest {
 
   /**
    * qits-1618: the front desk's role is admitted on the agent door so that every door admitting
-   * {@code qits:admin-agent} admits it, but it is not unbound: like an agent, it acts only on the
-   * agent whose token subject it is — which no desk is.
+   * {@code qits:admin-agent} admits it, but it is not unbound: it is a bound desk (qits-1621), acting
+   * only on agents of the project its token's claim names — and a token without one on none.
    */
   @Test
   void theDeskAdminRoleIsAdmittedButBoundLikeAnAgent() {
@@ -149,8 +149,10 @@ class AgentWaitAccessTest {
     as("desk-session-p", "qits:desk-admin,qits:agent").body(aWait()).post(waits()).then().statusCode(403);
     as("desk-session-p", "qits:desk-admin,qits:agent").get(waits()).then().statusCode(403);
     as("desk-session-p", "qits:desk-admin,qits:agent").delete(waits() + "/" + id).then().statusCode(403);
-    // Admitted by the role list: with the agent's own subject, the role alone opens the door.
-    as(subject, "qits:desk-admin").get(waits()).then().statusCode(200).body("waits", hasSize(1));
+    // Bound by its project claim, never by its subject (security review, qits-1621): even the
+    // agent's own subject holding qits:desk-admin is a bound desk, and with no project claim it
+    // fails closed. DeskAdminAccessTest and DeskAdminOnlyBindingTest pin the project binding.
+    as(subject, "qits:desk-admin").get(waits()).then().statusCode(403);
     assertFalse(AgentWaitController.UNBOUND_ROLES.contains("qits:desk-admin"));
   }
 

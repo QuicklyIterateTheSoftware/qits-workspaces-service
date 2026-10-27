@@ -24,8 +24,11 @@ import java.util.UUID;
  * repository, an agent by its repository, a work item by its ACTIVE agent — that project must be
  * the one its token's {@code project} claim names, or the call is 403 and nothing happens.
  *
- * <p>The binding applies to a caller that holds {@code qits:desk} and none of {@link
- * #UNBOUND_ROLES}. {@code qits:desk} is never one of those: holding it never widens anything.
+ * <p>The binding applies to a caller that holds {@code qits:desk} or {@code qits:desk-admin} and
+ * none of {@link #UNBOUND_ROLES}. Neither desk role is ever one of those: {@code qits:desk-admin}
+ * (qits-1621) opens the coordinator's doors to the desk, but within its own project, so a token
+ * holding it is bound by its {@code project} claim whether or not it also holds {@code qits:desk}
+ * — the binding never rests on the desk's token happening to carry both.
  *
  * <p><b>It fails closed.</b> A workspace or agent whose project cannot be resolved (the editor
  * workspace belongs to no repository; a registry that does not answer) is 403 for the desk. A
@@ -41,6 +44,9 @@ public class DeskBinding {
   /** The delivery desk's role. */
   public static final String DESK = "qits:desk";
 
+  /** The desk's platform rights (qits-1621): bound to its project exactly as {@link #DESK} is. */
+  public static final String DESK_ADMIN = "qits:desk-admin";
+
   /** Roles never bound to a project, whatever else the caller holds; {@link #DESK} is not one. */
   static final List<String> UNBOUND_ROLES = List.of("qits:admin", "qits:admin-agent", "qits:system");
 
@@ -48,12 +54,12 @@ public class DeskBinding {
 
   /** The 403 every bound door documents in the OpenAPI document. */
   public static final String WORKSPACE_403 =
-      "A `qits:desk` caller whose token's `project` claim is not the workspace's project (a"
+      "A `qits:desk` or `qits:desk-admin` caller whose token's `project` claim is not the workspace's project (a"
           + " workspace of no resolvable project counts as another's). Nothing was changed.";
 
   /** As {@link #WORKSPACE_403}, for a door addressed by an agent. */
   public static final String AGENT_403 =
-      "A `qits:desk` caller whose token's `project` claim is not the agent's project. Nothing was"
+      "A `qits:desk` or `qits:desk-admin` caller whose token's `project` claim is not the agent's project. Nothing was"
           + " changed.";
 
   @Inject SecurityIdentity identity;
@@ -66,9 +72,13 @@ public class DeskBinding {
 
   @Inject AgentService agents;
 
-  /** Whether the caller is a desk bound to its project: {@code qits:desk} and no unbound role. */
+  /**
+   * Whether the caller is a desk bound to its project: {@code qits:desk} or {@code qits:desk-admin},
+   * and no unbound role.
+   */
   public boolean isBoundDesk() {
-    return identity.hasRole(DESK) && UNBOUND_ROLES.stream().noneMatch(identity::hasRole);
+    return (identity.hasRole(DESK) || identity.hasRole(DESK_ADMIN))
+        && UNBOUND_ROLES.stream().noneMatch(identity::hasRole);
   }
 
   /** A door, or a variant of one, that the desk may never use; a no-op for everyone else. */

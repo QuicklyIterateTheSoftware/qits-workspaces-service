@@ -1557,8 +1557,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "403":
-          description: A `qits:desk` caller whose token's `project` claim is not the
-            agent's project. Nothing was changed.
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the agent's project. Nothing was changed.
           content:
             application/json:
               schema:
@@ -1615,8 +1615,8 @@ paths:
         "413":
           description: The image exceeds the configured limit.
         "403":
-          description: A `qits:desk` caller whose token's `project` claim is not the
-            agent's project. Nothing was changed.
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the agent's project. Nothing was changed.
           content:
             application/json:
               schema:
@@ -1654,8 +1654,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "403":
-          description: A `qits:desk` caller whose token's `project` claim is not the
-            agent's project. Nothing was changed.
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the agent's project. Nothing was changed.
           content:
             application/json:
               schema:
@@ -1753,8 +1753,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "403":
-          description: A `qits:desk` caller whose token's `project` claim is not the
-            agent's project. Nothing was changed.
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the agent's project. Nothing was changed.
           content:
             application/json:
               schema:
@@ -1822,8 +1822,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "403":
-          description: A `qits:desk` caller whose token's `project` claim is not the
-            agent's project. Nothing was changed.
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the agent's project. Nothing was changed.
           content:
             application/json:
               schema:
@@ -2211,9 +2211,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Response10"
         "403":
-          description: A `qits:desk` caller whose token's `project` claim is not the
-            workspace's project (a workspace of no resolvable project counts as another's).
-            Nothing was changed.
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the workspace's project (a workspace of no resolvable project
+            counts as another's). Nothing was changed.
           content:
             application/json:
               schema:
@@ -2513,9 +2513,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/WorkspaceDto"
         "403":
-          description: A `qits:desk` caller whose token's `project` claim is not the
-            workspace's project (a workspace of no resolvable project counts as another's).
-            Nothing was changed.
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the workspace's project (a workspace of no resolvable project
+            counts as another's). Nothing was changed.
           content:
             application/json:
               schema:
@@ -2607,9 +2607,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "403":
-          description: A `qits:desk` caller whose token's `project` claim is not the
-            workspace's project (a workspace of no resolvable project counts as another's).
-            Nothing was changed.
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the workspace's project (a workspace of no resolvable project
+            counts as another's). Nothing was changed.
           content:
             application/json:
               schema:
@@ -2643,9 +2643,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Response4"
         "403":
-          description: A `qits:desk` caller whose token's `project` claim is not the
-            workspace's project (a workspace of no resolvable project counts as another's).
-            Nothing was changed.
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the workspace's project (a workspace of no resolvable project
+            counts as another's). Nothing was changed.
           content:
             application/json:
               schema:
@@ -2679,9 +2679,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/WorkspaceDto"
         "403":
-          description: A `qits:desk` caller whose token's `project` claim is not the
-            workspace's project (a workspace of no resolvable project counts as another's).
-            Nothing was changed.
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the workspace's project (a workspace of no resolvable project
+            counts as another's). Nothing was changed.
           content:
             application/json:
               schema:
