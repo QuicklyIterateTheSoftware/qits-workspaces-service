@@ -141,9 +141,10 @@ exists as data at such a write site, set `causationId` explicitly — qits-ci pa
 **`V3__commissioned_credential.sql` adds two nullable `text` columns to `workspace`** — the idp
 client a container was commissioned with, and its secret. **No `ArchRulesTest` decision to make**:
 they are columns on an entity that is already a `CausedRow`, not a new entity, and the rule is about
-the entity. The reasoning that *is* worth knowing is in the file's header and in
-`WorkspaceCredentials` — why the secret is stored at all, and why the columns are cleared in the same
-breath as the revocation rather than after it.
+the entity. **Legacy since qits-876: nothing writes them any more** — every container holds a
+workspace token (`V13`) or no credential — and they stay only so a rollback still reads them; the
+commission reconcile spares a client an ACTIVE row still names there. Dropping them is a follow-up
+migration.
 
 **`V5__workspace_subject.sql` adds two more**, `ticket_id` and `epic_id` — what a *dispatched*
 workspace is for, where qits-projects said so. Same shape and same non-decision: columns on an entity
@@ -167,8 +168,7 @@ inline `runtime_status` check is replaced by `ck_workspace_runtime_status`, whic
 `UNAVAILABLE` is computed on read and the column refuses it.
 
 **`V13__workspace_token.sql` adds `commissioned_token_id`, `_subject` and `commissioned_token`**
-(qits-625, qits-802): a workspace `qits_tok_`, the counterpart of `V3`'s pair and never set beside
-it. Columns on a `CausedRow` again; see "The credential a workspace container holds". **Its header
+(qits-625, qits-802): a workspace `qits_tok_`, the credential that replaced `V3`'s pair. Columns on a `CausedRow` again; see "The credential a workspace container holds". **Its header
 says "a DIRECT row is never minted a token", and since qits-1084 that sentence is wrong**: a DIRECT
 admin or editor row on an edge plane holds one too. It is a SQL comment and not a constraint — no
 check in any migration (`ck_workspace_runner_posture`, `ck_workspace_runner_placement`,
@@ -410,19 +410,17 @@ literal and must carry `/workspaces` itself. Four do, each for its own reason:
 - `DaemonControlSocket` — `/workspaces/daemon/{id}`, and a **cross-repo contract**:
   `WorkspaceContainerFactory` injects `ws://<host>:<port>/workspaces/daemon/<id>` as
   `QITS_WORKSPACE_DAEMON_URL` and qits-workspace-daemon dials exactly that. Change both together.
-  A commissioned daemon exchanges its own client pair for a platform-audience bearer and
-  presents it on every upgrade; the endpoint requires `qits:system` or `qits:agent`. A caller with
+  A daemon holding a workspace token presents it at the edge, which forwards a platform-audience
+  JWT on every upgrade; the endpoint requires `qits:system` or `qits:agent`. A caller with
   `qits:agent` and not `qits:system` may open only its own workspace's socket: `DaemonAgentBindingCheck`
   (an `HttpUpgradeCheck`, so the refusal is a real 403 before the upgrade) compares the token's `sub`
-  with the row's `commissioned_client_id` — or,
-  on a row that holds a workspace token, with its `commissioned_token_subject` instead (qits-812;
-  a client id never matches there). Which one is decided by what the row HOLDS
-  (`Workspace.holdsToken`/`boundSubject`), never by its placement: every TARGET row holds a token,
-  and so does a DIRECT admin or editor row on an edge plane (qits-1084), whose daemon then dials
+  with the row's `commissioned_token_subject` (qits-812; `Workspace.boundSubject`). A row holding no
+  token binds nobody, and the legacy `commissioned_client_id` column — no longer written (qits-876) —
+  binds nothing, so a client id never matches. Every TARGET row holds a token, and so does a DIRECT
+  admin row on an edge plane (qits-1084), whose daemon then dials
   `wss://workspaces.qits.<domain>/workspaces/daemon/<id>` through the edge rather than the
   `ws://` qits-net address. `DaemonSocketBearerLifetime` drops the bearer's expiry on this path for a
-  `tok-` subject only, so a token daemon's socket outlives the edge's 300 s JWT and a pair daemon
-  keeps its lifetime.
+  `tok-` subject only, so a token daemon's socket outlives the edge's 300 s JWT.
   `qits:system` is not bound until agents switch to their own role (phase 4 of the superproject's
   `principal-bound-git-refs-plan.md`). The local/no-IdP topology
   stays anonymous only while the machine-auth rollout gate is off. Do not make this path public to
@@ -458,7 +456,7 @@ literal and must carry `/workspaces` itself. Four do, each for its own reason:
   dial-back — every TARGET row, and a DIRECT admin or editor row on an edge plane (qits-1084) —
   comes through the edge and must also carry a validated bearer whose `sub` is the row's token
   subject (`WorkspaceTunnels.DialBack.tokenBound`, captured when the tunnel opens); otherwise the
-  same bare 404 an unknown nonce gets. A pair row's dial-back is the nonce alone, as before.
+  same bare 404 an unknown nonce gets. A row holding no token dials back on the nonce alone.
 - `CaptureCorsRoute` — derives its path from the REST prefix instead of repeating it, because a
   preflight on a different path from the POST it clears is worth nothing, and the client reads a 404
   there as "hide the button" rather than as an error. It reads **`qits.rest.path`**, not
@@ -1353,70 +1351,66 @@ on the wrapper's name.
 
 ## The credential a workspace container holds
 
-A workspace container gets a **credential of its own** — commissioned at provision, handed back at
-teardown. On a deployment with an edge plane that is a workspace token (`QITS_TOKEN`), for TARGET
-rows always and for the DIRECT admin and editor rows since qits-1084; on a DIRECT row with no edge
-plane it is an **idp client pair**, injected as `QITS_COMMISSIONED_CLIENT_ID`/`_SECRET`. Most of what
-follows was written about the pair and holds for the token by the same reasoning; the two token
-paragraphs below say where they differ. README has the operator's half; here is what the code
-decides and why.
+A workspace container gets a **credential of its own** — a workspace token (`QITS_TOKEN`, one
+opaque non-expiring `qits_tok_`), minted at provision, deleted at teardown: for TARGET rows always,
+and for the DIRECT admin rows since qits-1084. **The hourly idp client pair is gone** (qits-876):
+nothing commissions one, no spec carries `QITS_COMMISSIONED_CLIENT_*`, and a DIRECT provision with
+no edge plane is refused rather than handed a pair (below). README has the operator's half; here is
+what the code decides and why.
 
 **The lifetime is the CONTAINER's, and that is the one thing to keep straight.** Not the row's:
-`deleteContainer` leaves an ACTIVE workspace with no credential, and the next ensure commissions a
-fresh one. Not a token's either — the pair is what lives long and tokens are re-minted underneath it,
-which is what makes "no TTL, no refresh" a property rather than an omission.
+`deleteContainer` leaves an ACTIVE workspace with no credential, and the next ensure mints a fresh
+one. Nothing expires on its own, which is what makes "no TTL, no refresh" a property rather than an
+omission.
 
-**The pair lives on the workspace row, and the container factory looks it up.** It is not handed to
-`forWorkspace` as an argument, and the reason is `ContainerRuntime.start`: the orchestrator has no
-start verb, so a stopped container is started by presenting its spec **again**, under
+**The token lives on the workspace row, and the container factory looks it up.** It is not handed
+to `forWorkspace` as an argument, and the reason is `ContainerRuntime.start`: the orchestrator has
+no start verb, so a stopped container is started by presenting its spec **again**, under
 `Recreate.ifChanged`. A spec whose environment differs from the running container's is a spec change,
 and the orchestrator **replaces** the container — writable layer and all. A credential that arrived
 as a parameter on the provision path and was absent on the start path would therefore destroy a
 container on every resume. The row makes the spec reproducible at every ensure, which is also why the
-**secret** is a column and not something re-fetched: qits-idp hands it out once.
-`WorkspaceContainersTest` asserts the two specs differ, which is the same fact from the other side.
+**value** is a column and not something re-fetched: qits-idp hands it out once
+(`WorkspaceCredentials.tokenFor`, `PersistedWorkspaceCredentials`). `WorkspaceContainersTest`
+asserts the two specs differ, which is the same fact from the other side.
 
-**The commission says which project, and that is the whole of per-context scoping on this side.**
+**The mint says which project, and that is the whole of per-context scoping on this side.**
 `commissionFor` resolves `repoId` to its project through `RepositoryLookup` and passes it to
-`CredentialCommissioner.commission(rowId, projectId)`, where it becomes `claims.project` on the
-commission request. The row id and the project are deliberately different arguments carrying
-different facts: the row id is the `contextId` a reconcile compares against live workspaces, and the
-project is the scope a resource service judges the credential on. **An unresolved project is null and
-means unscoped**, matching `WorkspaceContainerFactory`'s standing reading that a project the registry
-cannot name costs a label and never a workspace — the wider credential is a worse answer than no
-workspace only if you have not had a registry blink during a launch. It is never sent as `"*"`;
-qits-idp refuses a commission that tries to widen itself, and asking would be asking for the thing
-this change exists to stop granting.
+`CredentialCommissioner.commissionToken(rowId, projectId, gitRefs, admin)`, where it becomes
+`claims.project` on the request. The row id and the project are deliberately different arguments
+carrying different facts: the row id is the `contextId` a reconcile compares against live
+workspaces, and the project is the scope a resource service judges the token on. **An unresolved
+project is null and means unscoped**, matching `WorkspaceContainerFactory`'s standing reading that a
+project the registry cannot name costs a label and never a workspace. It is never sent as `"*"`;
+qits-idp refuses a commission that tries to widen itself.
 
-**Four seams, and the reason there is no `WorkspaceResolved` observer.** Commissioning is in
+**Four seams, and the reason there is no `WorkspaceResolved` observer.** Minting is in
 `provisionContainer` alone — the fresh arm of `ensureContainer` and, through it, recreate, so nothing
-else has to remember. Decommissioning is at three: `doDiscard` (every resolution verb), the
-branch-gone abandon in `ensureContainer`, and `deleteContainer`. An observer on `WorkspaceResolved`
-would cover the first two and **not** the third, which fires no event at all — so one mechanism would
-still need a second call site, and two mechanisms for one rule drift apart. It would also put an HTTP
-call inside the resolving transaction, which is fired synchronously so observers can join it. Each
-call therefore sits beside `containers.rm`, itself an HTTP call and best-effort for the same reason.
+else has to remember. Deletion is at three: `doDiscard` (every resolution verb), the branch-gone
+abandon in `ensureContainer`, and `deleteContainer`. An observer on `WorkspaceResolved` would cover
+the first two and **not** the third, which fires no event at all — so one mechanism would still need
+a second call site, and two mechanisms for one rule drift apart. It would also put an HTTP call
+inside the resolving transaction, which is fired synchronously so observers can join it. Each call
+therefore sits beside `containers.rm`, itself an HTTP call and best-effort for the same reason.
 
-**Commissioning fails a launch; decommissioning never fails a teardown.** The first is patient
+**Minting fails a launch; deletion never fails a teardown.** The first is patient
 (`qits.workspace.commission.patience`, and 401/403 are held through for the idp-cutover reason
 `WorkspaceContainers.holdThrough` records), then throws — a workspace with no identity would pull as
 nobody and only discover it much later. The second logs and moves on, because everything after an
 accepted removal must not pretend it did not happen. **`CommissionReconciler` is what makes that
 safe**: hourly and at boot it asks qits-idp what it holds for this service and gives back every
-`workspace`-kind row no ACTIVE workspace claims **by client id** — so a recreate's replaced pair and a
-crashed teardown's leftover are both orphans the moment they stop being claimed. It only ever deletes
-what that listing just returned, and an unreadable listing comes back empty, so a blip reaps nothing
-rather than everything.
+workspace token no ACTIVE row holds for a container, and every `workspace`/`workspace-admin` idp
+client it still lists that no ACTIVE row names in the legacy `commissioned_client_id` column — which
+nothing writes, so that is every one of them. It only ever deletes what a listing just returned, and
+an unreadable listing comes back empty, so a blip reaps nothing rather than everything. The port keeps
+`list()` and `decommission(clientId)` for that and for `targethost/LegacyRunnerClients`, which gives
+back the retired runner's clients once at boot; it has no verb that commissions a client.
 
-**An ADMIN row commissions kind `workspace-admin`, every other row `workspace`** (qits-628
-follow-up). `commissionFor` reads `wt.admin` beside `wt.editor` and passes it to
-`CredentialCommissioner.commission(rowId, projectId, gitRefs, admin)`; `contextKindFor(admin)` picks
+**An ADMIN row mints kind `workspace-admin`, every other row `workspace`** (qits-628 follow-up).
+`commissionFor` reads `wt.admin` and passes it to `commissionToken`; `contextKindFor(admin)` picks
 the kind, which qits-idp issues `qits:agent` + `qits:admin-agent`. The flag changes nothing else in
 the request and never reaches the spec. The reconcile matches both kinds through
-`CredentialCommissioner.isWorkspaceKind`. A live admin container keeps its old `workspace` pair until
-it is recreated or deleted. The token takes the same flag (`commissionToken(rowId, projectId,
-gitRefs, admin)`, qits-1084): a TARGET row is never admin and passes false, a DIRECT admin row
-true.
+`CredentialCommissioner.isWorkspaceKind`. A TARGET row is never admin and passes false.
 
 **A TARGET row holds a workspace token per lease** (qits-625, qits-802, epic qits-1481): one opaque
 `qits_tok_` of the `workspace` kind (`CredentialCommissioner.commissionToken`, `POST
@@ -1428,39 +1422,42 @@ every `workspace` token no ACTIVE row holds for a container — a DIRECT row, a 
 lease, or one a retired runner still runs (sparing one younger than `TOKEN_GRACE`). **Absent is not
 supported here**: a TARGET container has no other credential, so a start that cannot mint fails the
 row with `WORKSPACE_TOKEN_UNAVAILABLE` and asks for nothing. The test double mints tokens by default for
-that reason (`unwireTokens()` is the no-issuer case); its pair half still starts unwired.
+that reason (`unwireTokens()` is the no-issuer case); its `isWired()` answers true only after
+`wire()`, so the suite's DIRECT launches — on no edge plane — are the no-issuer case and not refused.
 
-**A DIRECT admin or editor row holds a workspace token too, whenever there is an edge** (qits-1084).
-Both stay DIRECT for good, but the hourly-minting pair is no longer their credential on a deployment
-with a public domain. `commissionFor` asks `WorkspaceAddressPlanes.plane()` first: when it resolves,
-the container is minted the TARGET row's `qits_tok_` instead — `workspace-admin` for an admin row,
-`workspace` for the editor, unscoped because the editor names no repository, stating the same Git
-refs the pair would have — through the same `mintToken`/`storeToken` helpers `mintLeaseToken`
-uses, onto the same three `V13` columns. When it does not (no public `QITS_DOMAIN`), the pair is
-commissioned exactly as before and a WARN says why; the provision is never failed over a missing
-plane. A failed mint fails the provision, as a failed commission does. `decommissionFor` runs first
-either way and clears both pair and token, so a row holds one or the other and never both — and a
-row switches arm at its next container, never under a running one.
+**A DIRECT admin row holds a workspace token, and needs an edge for it** (qits-1084, qits-876).
+`commissionFor` gives back whatever token the row holds, then asks `WorkspaceAddressPlanes.plane()`:
+when it resolves, the container is minted the TARGET row's `qits_tok_` — `workspace-admin`, stating
+`gitRefs: []` — through the same `mintToken`/`storeToken` helpers `mintLeaseToken` uses, onto the
+same three `V13` columns. **When it does not (no public `QITS_DOMAIN`) and an issuer is wired
+(`CredentialCommissioner.isWired()`, a configuration question that costs no call), the provision is
+refused**: 503 `EDGE_PLANE_UNCONFIGURED`, a message naming `QITS_DOMAIN` and the public edge, thrown
+before anything is minted or run, so the row holds nothing, no container exists, and
+`ensureContainer` marks the row FAILED with the reason — the same shape a failed mint takes. With no
+issuer wired the container launches with no credential, as on every deployment with no idp.
+`DirectWorkspaceTokenTest` covers both, and `ClientPairRetiredTest` keeps the pair from coming back.
+(The editor row this used to cover is gone, qits-1152: an ACTIVE DIRECT row is admin by
+constraint.)
 
 - **The spec follows what the row holds.** `WorkspaceContainerFactory` asks
-  `WorkspaceCredentials.tokenFor` first; a token row gets `QITS_TOKEN`, `QITS_TOKEN_SUBJECT`,
+  `WorkspaceCredentials.tokenFor`; a token row gets `QITS_TOKEN`, `QITS_TOKEN_SUBJECT`,
   `GIT_CONFIG_GLOBAL` and `QITS_GIT_AUTH_HOST` on the plane's githost (`tokenEnv`), and its daemon
   URL, MCP URL and git base from the plane (`addressEnv`) — both shared with
-  `RunnerWorkspaceSpecs` — and none of the pair block: no `QITS_COMMISSIONED_CLIENT_*`, no token url,
-  no audience. A token only works through the edge (which exchanges it for a JWT), which is why the
-  addresses move with it. Everything else DIRECT stays: qits-net, the extra host, the docker socket,
-  the editor's port and projects, the host-to-daemon tunnel. A pair row's spec is byte for byte what
-  it was; `WorkspaceContainerFactoryGoldenSpecTest` pins both. A token row whose plane has since gone
-  fails its start with `EDGE_PLANE_UNCONFIGURED` rather than launch on addresses it cannot spend.
+  `RunnerWorkspaceSpecs` — and nothing to mint with: no token url, no audience. A token only works
+  through the edge (which exchanges it for a JWT), which is why the addresses move with it.
+  Everything else DIRECT stays: qits-net, the extra host, the docker socket, the host-to-daemon
+  tunnel. A row with no token gets the internal addresses and no credential env at all;
+  `WorkspaceContainerFactoryGoldenSpecTest` pins both. A token row whose plane has since gone fails
+  its start with `EDGE_PLANE_UNCONFIGURED` rather than launch on addresses it cannot spend.
 - **Every check reads what the row holds, not its placement**: the socket binding, the tunnel's
-  dial-back and a dispatch's `agentIdentity` all go through `Workspace.boundSubject`.
+  dial-back and a dispatch's `agentIdentity` all go through `Workspace.boundSubject`, which is the
+  token subject or null.
 - **Teardown** is the TARGET row's: `deleteDirectContainer` and the DIRECT arm of `doDiscard`
-  delete the token beside the pair (`deleteToken(clearToken(…))`); recreate, abandon and a failed
-  provision go through `decommissionFor`, which always did both. The reconcile already reaps both
-  token kinds by `isWorkspaceKind`.
-- **A live container keeps what it was launched with** until it is recreated or deleted — a stop and
-  start re-presents the same spec — so an admin or editor container commissioned before this change
-  keeps its pair until then.
+  delete the token (`deleteToken(clearToken(…))`); recreate, abandon and a failed provision go
+  through `decommissionFor`. The reconcile reaps both token kinds by `isWorkspaceKind`.
+- **The `V3` columns stay** (`commissioned_client_id`/`_secret`): unwritten and read only by the
+  reconcile's client claim, so a rollback to a version that wrote them still reads them. Dropping
+  them is a follow-up migration.
 
 **Absent is a supported configuration in two spellings and they behave identically**: no
 implementation of `CredentialCommissioner`, or one wired against no issuer. The switch is
@@ -1803,15 +1800,16 @@ frame golden masters and message pacts (qits-950) went with the runner.
   substrate, not leftovers of the release door.
 - The `Fake*` doubles are duplicated between `domain/src/test` and `service/src/test`. That is
   deliberate and matches the monorepo — the two modules do not share a test classpath.
-- **`FakeCredentialCommissioner` starts UNWIRED, and must stay that way for everyone else.** A bean
-  in `src/test` is a bean for every `@QuarkusTest` in its module, so a double that commissioned by
-  default would put credential environment into every container the suite launches and quietly
-  change what dozens of unrelated tests are about. `wire()` turns it on, `reset()` turns it off, and
-  a test class that wires it resets in `@AfterEach` — a class that forgets leaks its issuer into
-  whatever runs next. Its TOKEN half is wired by default instead (a TARGET start cannot ask for a lease
-  without one); that changes no DIRECT container because the suites pin `qits.workspace.domain` empty, so an
-  admin or editor row only mints a token where a test installs a `WorkspaceAddressPlanes` mock
-  (`DirectWorkspaceTokenTest`, `WorkspaceTargetPlacementTest`).
+- **`FakeCredentialCommissioner`'s `isWired()` starts FALSE, and must stay that way for everyone
+  else.** A bean in `src/test` is a bean for every `@QuarkusTest` in its module, and the suites pin
+  `qits.workspace.domain` empty — so a double that answered wired by default would have every DIRECT
+  launch in the suite refused for want of an edge plane (qits-876) and quietly change what dozens of
+  unrelated tests are about. `wire()` turns it on (and its client listing with it), `reset()` turns
+  it off, and a test class that wires it resets in `@AfterEach` — a class that forgets leaks its
+  issuer into whatever runs next. Its TOKEN mint is on by default instead (a TARGET start cannot ask
+  for a lease without one); that changes no DIRECT container, because an admin row only mints a token
+  where a test installs a `WorkspaceAddressPlanes` mock (`DirectWorkspaceTokenTest`,
+  `WorkspaceTargetPlacementTest`, `ReleasedBranchResolutionTest`).
 - Integration tests needing real docker, a built `qits/workspace` image and the daemon binary **are**
   in this repo — `Daemon*IT`, tagged `extended`, `DaemonApiGateIT` the largest of them. They
   self-skip (`assumeTrue`) when docker or the image is absent, and `skipITs=true` is the default
@@ -1943,11 +1941,11 @@ one edge in and none out, and no presence check can say that.
   `@QuarkusTest` suites and by the docker-backed `Daemon*IT`, where a real daemon really runs it.
 - **The reconcile's sweep.** Its listing is covered (the boot story); the listing is empty, so no
   credential is ever given back.
-- **The container-to-idp credential exchange.** The workspace story reads the commissioned pair out
-  of the workload spec — the only place it exists, and exactly where a container finds it — and then
-  mints its dial bearer directly, because the stub idp answers an opaque string no gate could
-  validate. That the pair travelled is proved; that it can be exchanged is qits-platform-idp's own
-  claim.
+- **The container-to-edge credential exchange.** The workspace story runs under a public domain
+  (`StoryProfile.STORY_DOMAIN`), reads the workspace token out of the workload spec — the only place
+  it exists, and exactly where a container finds it — and then mints its dial bearer directly,
+  because there is no edge here and the stub idp's value is no JWT a gate could validate. That the
+  token travelled is proved; that it can be exchanged is the edge's own claim.
 - **The git host's protection hook and its authorization.** `StoryGitHost` exports what it serves
   unconditionally. Who may push a protected ref is qits-githost-service's suite's question.
 - **A landing losing a race.** The lease serialises this flow's own integrates, and staging a
