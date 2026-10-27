@@ -2,6 +2,7 @@ package eu.wohlben.qits.workspaces.containershost;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -258,25 +259,27 @@ class WorkspaceContainersTest {
   }
 
   @Test
-  void aCommissionedCredentialRidesTheSpecAsEnvAndChangesTheSpecHash() {
+  void aWorkspaceTokenRidesTheSpecAsEnvAndChangesTheSpecHash() {
     Spec plain = adapter().ensureRequest(REPO, "work", 1L, "main", null).spec();
-    Spec commissioned =
-        adapter(TestWorkspaceContainerFactory.commissioned("ws-1-a", "s3cr3t"))
+    Spec holding =
+        adapter(
+                TestWorkspaceContainerFactory.tokenHolding(
+                    "example.test", "qits_tok_1", "tok-workspace-admin-1"))
             .ensureRequest(REPO, "work", 1L, "main", null)
             .spec();
 
-    // The pair the workspace authenticates to the platform with, on the spec the orchestrator
+    // The token the workspace authenticates to the platform with, on the spec the orchestrator
     // stores — which is also why it must be derived from the row at every ensure and not handed in
     // on the provision path alone: the two specs below are DIFFERENT specs, and Recreate.ifChanged
     // replaces a container whose spec moved.
-    assertFalse(plain.env().containsKey("QITS_COMMISSIONED_CLIENT_ID"), plain.env().toString());
-    assertEquals("ws-1-a", commissioned.env().get("QITS_COMMISSIONED_CLIENT_ID"));
-    assertEquals("s3cr3t", commissioned.env().get("QITS_COMMISSIONED_CLIENT_SECRET"));
+    assertFalse(plain.env().containsKey("QITS_TOKEN"), plain.env().toString());
+    assertEquals("qits_tok_1", holding.env().get("QITS_TOKEN"));
+    assertNotEquals(plain.env(), holding.env());
   }
 
   /**
    * An admin row holding a workspace token (qits-1084): the token and the edge's addresses ride the
-   * spec the orchestrator stores, none of the pair does, and the DIRECT placement fields — the
+   * spec the orchestrator stores, nothing a container would mint with does, and the DIRECT placement fields — the
    * network, the extra host, the docker socket — are where they always were.
    */
   @Test

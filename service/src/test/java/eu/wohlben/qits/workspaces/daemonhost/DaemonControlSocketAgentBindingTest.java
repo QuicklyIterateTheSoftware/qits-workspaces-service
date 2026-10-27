@@ -28,9 +28,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * A {@code qits:agent} caller may open only the control socket of the workspace it was commissioned
- * for; a {@code qits:system} caller keeps today's behaviour. On a RUNNER row the bound identity is
- * its workspace token's subject (qits-812), and a client id never matches. Real RS256 bearers against
+ * A {@code qits:agent} caller may open only the control socket of the workspace whose token it
+ * holds; a {@code qits:system} caller keeps today's behaviour. The bound identity is the row's
+ * workspace token subject on either placement (qits-812, qits-1084), and a client id never matches —
+ * not even the legacy one a row's {@code commissioned_client_id} column may still name (qits-876). Real RS256 bearers against
  * the gate-on profile of {@link DaemonControlSocketMachineAuthTest}, so the roles and the {@code sub}
  * come out of a validated token rather than a test identity.
  */
@@ -58,10 +59,10 @@ class DaemonControlSocketAgentBindingTest {
   private String labelB;
   private Long rowA;
   private Long rowB;
-  private String clientA;
-  private String clientB;
+  private String subjectA;
+  private String subjectB;
 
-  /** Two workspaces, each with a commissioned client of its own. Labels are unique per run. */
+  /** Two DIRECT admin workspaces, each holding a workspace token. Labels are unique per run. */
   @BeforeEach
   void twoCommissionedWorkspaces() throws Exception {
     String repoId = TestOrigin.create(dataDir);
@@ -73,38 +74,37 @@ class DaemonControlSocketAgentBindingTest {
     workspaceService.createWorkspace(repoId, labelB, "master", labelB, null, false, false, true);
     rowA = workspaceIds.of(repoId, labelA);
     rowB = workspaceIds.of(repoId, labelB);
-    clientA = "dyn-workspace-" + rowA + "-" + suffix;
-    clientB = "dyn-workspace-" + rowB + "-" + suffix;
-    commission(rowA, clientA);
-    commission(rowB, clientB);
-  }
-
-  private void commission(Long rowId, String clientId) {
-    QuarkusTransaction.requiringNew()
-        .run(
-            () ->
-                workspaceRepository.findActiveById(rowId).orElseThrow().commissionedClientId =
-                    clientId);
+    subjectA = "tok-workspace-admin-" + rowA + "-" + suffix;
+    subjectB = "tok-workspace-admin-" + rowB + "-" + suffix;
+    directWithToken(rowA, subjectA);
+    directWithToken(rowB, subjectB);
   }
 
   @Test
   void anAgentOpensItsOwnWorkspacesSocket() throws Exception {
-    String token = DaemonMachineTokens.tokenWithRoles(clientA, AGENT, PLATFORM_AUDIENCE);
+    String token = DaemonMachineTokens.tokenWithRoles(subjectA, AGENT, PLATFORM_AUDIENCE);
 
     assertEquals(101, connect("/workspaces/daemon/" + rowA, token));
   }
 
   @Test
   void anAgentIsRefusedAnotherWorkspacesSocket() throws Exception {
-    String token = DaemonMachineTokens.tokenWithRoles(clientA, AGENT, PLATFORM_AUDIENCE);
+    String token = DaemonMachineTokens.tokenWithRoles(subjectA, AGENT, PLATFORM_AUDIENCE);
 
     assertEquals(403, connect("/workspaces/daemon/" + rowB, token));
   }
 
   @Test
-  void anAgentIsRefusedAWorkspaceWithNoCommission() throws Exception {
-    commission(rowB, null);
-    String token = DaemonMachineTokens.tokenWithRoles(clientB, AGENT, PLATFORM_AUDIENCE);
+  void anAgentIsRefusedAWorkspaceWithNoToken() throws Exception {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              var row = workspaceRepository.findActiveById(rowB).orElseThrow();
+              row.commissionedTokenId = null;
+              row.commissionedTokenSubject = null;
+              row.commissionedToken = null;
+            });
+    String token = DaemonMachineTokens.tokenWithRoles(subjectB, AGENT, PLATFORM_AUDIENCE);
 
     assertEquals(403, connect("/workspaces/daemon/" + rowB, token));
   }
@@ -121,7 +121,7 @@ class DaemonControlSocketAgentBindingTest {
   void theLegacyLabelPathIsGone() throws Exception {
     // LegacyDaemonControlSocket was deleted in qits-780: no daemon had dialled it in a week, and
     // every live daemon carries the id-addressed URL. Its own agent's bearer opens nothing there.
-    String token = DaemonMachineTokens.tokenWithRoles(clientA, AGENT, PLATFORM_AUDIENCE);
+    String token = DaemonMachineTokens.tokenWithRoles(subjectA, AGENT, PLATFORM_AUDIENCE);
 
     assertNotEquals(101, connect("/api/workspace-daemon/" + labelA, token));
   }
@@ -130,7 +130,7 @@ class DaemonControlSocketAgentBindingTest {
 
   /**
    * Row A turned a regular RUNNER row (an admin row is never RUNNER), holding a workspace token
-   * with {@code subject} (and its stale client).
+   * with {@code subject} and a stale legacy client in its column.
    */
   private void runnerWithToken(Long rowId, String subject) {
     QuarkusTransaction.requiringNew()
@@ -139,6 +139,7 @@ class DaemonControlSocketAgentBindingTest {
               var row = workspaceRepository.findActiveById(rowId).orElseThrow();
               row.admin = false;
               row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
+              row.commissionedClientId = "dyn-workspace-" + rowId;
               row.commissionedTokenId = "tok-id-" + rowId;
               row.commissionedTokenSubject = subject;
               row.commissionedToken = "qits_tok_" + rowId;
@@ -157,7 +158,8 @@ class DaemonControlSocketAgentBindingTest {
   @Test
   void aRunnerRowRefusesAClientIdEvenTheOneItsColumnStillNames() throws Exception {
     runnerWithToken(rowA, "tok-workspace-" + rowA);
-    String token = DaemonMachineTokens.tokenWithRoles(clientA, AGENT, PLATFORM_AUDIENCE);
+    String token =
+        DaemonMachineTokens.tokenWithRoles("dyn-workspace-" + rowA, AGENT, PLATFORM_AUDIENCE);
 
     assertEquals(403, connect("/workspaces/daemon/" + rowA, token));
   }
@@ -172,18 +174,14 @@ class DaemonControlSocketAgentBindingTest {
     assertEquals(403, connect("/workspaces/daemon/" + rowA, token));
   }
 
-  // --- a DIRECT row holding a token binds its token subject too (qits-1084) -----------------------
+  // --- a DIRECT row binds its token subject (qits-1084) ------------------------------------------
 
-  /**
-   * Row A as it is on an edge plane: still a DIRECT admin row, holding a workspace token in place of
-   * the pair — which every commission clears, so the client column is empty.
-   */
+  /** A DIRECT admin row as it is on an edge plane: holding a workspace token with {@code subject}. */
   private void directWithToken(Long rowId, String subject) {
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
               var row = workspaceRepository.findActiveById(rowId).orElseThrow();
-              row.commissionedClientId = null;
               row.commissionedTokenId = "tok-id-" + rowId;
               row.commissionedTokenSubject = subject;
               row.commissionedToken = "qits_tok_" + rowId;
@@ -200,14 +198,9 @@ class DaemonControlSocketAgentBindingTest {
   }
 
   @Test
-  public void aDirectRowHoldingATokenRefusesItsFormerClientAndAnotherSubject() throws Exception {
+  public void aDirectRowHoldingATokenRefusesAnotherSubject() throws Exception {
     directWithToken(rowA, "tok-workspace-admin-" + rowA);
 
-    assertEquals(
-        403,
-        connect(
-            "/workspaces/daemon/" + rowA,
-            DaemonMachineTokens.tokenWithRoles(clientA, AGENT, PLATFORM_AUDIENCE)));
     assertEquals(
         403,
         connect(
@@ -216,17 +209,27 @@ class DaemonControlSocketAgentBindingTest {
                 "tok-workspace-admin-somebody-else", AGENT, PLATFORM_AUDIENCE)));
   }
 
+  /**
+   * A DIRECT row whose legacy {@code commissioned_client_id} still names a client — left by a version
+   * that wrote it — binds nothing by it: with no token the row admits nobody, the client included.
+   */
   @Test
-  public void aDirectRowHoldingThePairStillBindsItsClient() throws Exception {
-    // The fallback's row (no edge plane): the client pair, no token, bound exactly as before.
-    String token = DaemonMachineTokens.tokenWithRoles(clientB, AGENT, PLATFORM_AUDIENCE);
+  public void aDirectRowBindsNothingByALegacyClientItsColumnStillNames() throws Exception {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              var row = workspaceRepository.findActiveById(rowB).orElseThrow();
+              row.commissionedClientId = "dyn-workspace-" + rowB;
+              row.commissionedTokenId = null;
+              row.commissionedTokenSubject = null;
+              row.commissionedToken = null;
+            });
 
-    assertEquals(101, connect("/workspaces/daemon/" + rowB, token));
     assertEquals(
         403,
         connect(
             "/workspaces/daemon/" + rowB,
-            DaemonMachineTokens.tokenWithRoles("tok-workspace-" + rowB, AGENT, PLATFORM_AUDIENCE)));
+            DaemonMachineTokens.tokenWithRoles("dyn-workspace-" + rowB, AGENT, PLATFORM_AUDIENCE)));
   }
 
   /** 101 when the socket opened, else the status the upgrade was refused with. */

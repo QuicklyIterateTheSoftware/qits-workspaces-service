@@ -12,6 +12,7 @@ import eu.wohlben.qits.workspaces.dto.WorkspaceHistoryDetailDto;
 import eu.wohlben.qits.workspaces.entity.WorkspaceEventType;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import java.nio.file.Path;
@@ -27,7 +28,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>The case that made it exist is an <b>absence</b>: the deletion fires no event, so without this
  * call the workspace standing on the released branch stays ACTIVE forever, holding a container, a
- * volume and a commissioned credential for a ref nobody can fetch. So the assertions are about the
+ * volume and a workspace token for a ref nobody can fetch. So the assertions are about the
  * teardown being complete, and about the two refusals that keep a release away from the workspace a
  * repository is actually worked in.
  *
@@ -53,12 +54,22 @@ public class ReleasedBranchResolutionTest {
 
   /**
    * Wired for these cases and unwired again afterwards: the double is one bean for the whole
-   * module's suite, so an armed issuer would commission for every other class's containers too.
+   * module's suite. An edge plane is installed beside it, so the admin row's container is minted a
+   * workspace token (qits-1084) for the teardown to give back; {@link QuarkusMock} uninstalls it
+   * after each test.
    */
   @BeforeEach
   void wireAnIssuer() {
     commissioner.reset();
     commissioner.wire();
+    QuarkusMock.installMockForType(
+        new WorkspaceAddressPlanes() {
+          @Override
+          public WorkspaceAddressPlane plane() {
+            return WorkspaceAddressPlane.of("example.test", List.of("registry.dev.localhost:8080"));
+          }
+        },
+        WorkspaceAddressPlanes.class);
   }
 
   @AfterEach
@@ -89,7 +100,7 @@ public class ReleasedBranchResolutionTest {
     Long rowId = workspaceIds.of(repoId, "feat");
     workspaceService.ensureContainer(rowId);
     String container = containers.containerName("feat", repoId);
-    WorkspaceCredential credential = credentials.forWorkspace(rowId).orElseThrow();
+    WorkspaceToken token = credentials.tokenFor(rowId).orElseThrow();
     assertTrue(containers.exists(container), "the fixture has a live container to tear down");
 
     WorkspaceService.BranchResolution answer =
@@ -104,15 +115,15 @@ public class ReleasedBranchResolutionTest {
     assertNotNull(resolved.resolvedAt(), "a resolution is stamped");
     assertEquals("released", resolved.result());
 
-    // The whole point: container, volume and credential all go.
+    // The whole point: container, volume and token all go.
     assertFalse(containers.exists(container), "the container is removed");
     // Filtered by repository: the fake runtime is one bean for the whole module's suite, so a bare
     // "no volumes at all" would be an assertion about whatever else ran first.
     assertTrue(
         containers.listWorkspaceVolumes().stream().noneMatch(v -> repoId.equals(v.repoId())),
         "and so is its /workspace volume");
-    assertEquals(List.of(credential.clientId()), commissioner.decommissioned());
-    assertEquals(List.of(), commissioner.liveClientIds());
+    assertEquals(List.of(token.tokenId()), commissioner.tokensDeleted());
+    assertEquals(List.of(), commissioner.liveTokenIds());
 
     // The timeline entry names what consumed the branch, so it can be followed back to the release.
     WorkspaceEventDto integrated =
@@ -151,7 +162,7 @@ public class ReleasedBranchResolutionTest {
     assertNull(answer.workspaceId());
     // The unrelated workspace is untouched — this is not a sweep.
     assertTrue(containers.exists(containers.containerName("feat", repoId)));
-    assertEquals(List.of(), commissioner.decommissioned());
+    assertEquals(List.of(), commissioner.tokensDeleted());
   }
 
   /**
@@ -220,14 +231,14 @@ public class ReleasedBranchResolutionTest {
 
     assertTrue(
         workspaceService.resolveReleasedBranch(repoId, "feat", "v1", null, null).resolved());
-    int decommissionedOnce = commissioner.decommissioned().size();
+    int deletedOnce = commissioner.tokensDeleted().size();
 
     WorkspaceService.BranchResolution again =
         workspaceService.resolveReleasedBranch(repoId, "feat", "v1", null, null);
 
     assertFalse(again.resolved());
     assertNull(again.workspaceId());
-    assertEquals(decommissionedOnce, commissioner.decommissioned().size(), "nothing runs twice");
+    assertEquals(deletedOnce, commissioner.tokensDeleted().size(), "nothing runs twice");
     assertEquals(WorkspaceStatus.INTEGRATED, detail(rowId).status());
   }
 }

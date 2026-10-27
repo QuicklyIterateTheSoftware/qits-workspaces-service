@@ -12,12 +12,15 @@ import eu.wohlben.qits.workspaces.control.ContainerRuntime;
 import eu.wohlben.qits.workspaces.control.FakeCredentialCommissioner;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
-import eu.wohlben.qits.workspaces.control.WorkspaceCredential;
+import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlane;
+import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlanes;
 import eu.wohlben.qits.workspaces.control.WorkspaceCredentials;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
+import eu.wohlben.qits.workspaces.control.WorkspaceToken;
 import eu.wohlben.qits.workspaces.entity.WorkspaceEventType;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
 import io.restassured.path.json.JsonPath;
@@ -35,8 +38,8 @@ import org.junit.jupiter.api.Test;
  * Release calls beside the branch deletion it just made.
  *
  * <p>It is a <b>workspace-lifecycle</b> door that a release happens to call, so what is asserted
- * here is the lifecycle: the row resolves, the container and its volume go, the credential goes
- * back, the timeline carries the release's version and sha — and the main workspace is refused on
+ * here is the lifecycle: the row resolves, the container and its volume go, the workspace token
+ * goes back, the timeline carries the release's version and sha — and the main workspace is refused on
  * both belts. The release half of it is one query parameter and two strings on an event.
  *
  * <p>The two cheap answers matter as much as the teardown. A branch with no workspace is {@code
@@ -57,10 +60,23 @@ public class BranchResolutionControllerTest {
   @Inject eu.wohlben.qits.workspaces.persistence.WorkspaceRepository workspaceRows;
   @Inject ContainerRuntime containers;
 
+  /**
+   * An issuer and an edge plane, so the admin row's container is minted a workspace token
+   * (qits-1084) for the teardown to give back. {@link QuarkusMock} uninstalls the plane after each
+   * test.
+   */
   @BeforeEach
   void wireAnIssuer() {
     commissioner.reset();
     commissioner.wire();
+    QuarkusMock.installMockForType(
+        new WorkspaceAddressPlanes() {
+          @Override
+          public WorkspaceAddressPlane plane() {
+            return WorkspaceAddressPlane.of("example.test", List.of("registry.dev.localhost:8080"));
+          }
+        },
+        WorkspaceAddressPlanes.class);
   }
 
   @AfterEach
@@ -108,7 +124,7 @@ public class BranchResolutionControllerTest {
     Long rowId = workspaceIds.of(repoId, "feat");
     workspaceService.ensureContainer(rowId);
     String container = containers.containerName("feat", repoId);
-    WorkspaceCredential credential = credentials.forWorkspace(rowId).orElseThrow();
+    WorkspaceToken token = credentials.tokenFor(rowId).orElseThrow();
 
     JsonPath answer =
         resolve(repoId, body("feat", "2026.905.120000", "0123456789abcdef", "released"), 200);
@@ -136,7 +152,7 @@ public class BranchResolutionControllerTest {
     assertThat(
         containers.listWorkspaceVolumes().stream().anyMatch(v -> repoId.equals(v.repoId())),
         is(false));
-    assertThat(commissioner.decommissioned(), is(List.of(credential.clientId())));
+    assertThat(commissioner.tokensDeleted(), is(List.of(token.tokenId())));
   }
 
   @Test
@@ -150,7 +166,7 @@ public class BranchResolutionControllerTest {
     assertThat(answer.getBoolean("resolved"), is(false));
     assertThat(answer.getList("agentIds"), is(java.util.List.of()));
     assertThat(containers.exists(containers.containerName("feat", repoId)), is(true));
-    assertThat(commissioner.decommissioned(), is(List.of()));
+    assertThat(commissioner.tokensDeleted(), is(List.of()));
   }
 
   /** Belt one: the row has no parent. The registry's main branch is moved out of the way first. */
@@ -197,11 +213,11 @@ public class BranchResolutionControllerTest {
     workspaceService.ensureContainer(workspaceIds.of(repoId, "feat"));
 
     assertThat(resolve(repoId, body("feat", "v1", null, null), 200).getBoolean("resolved"), is(true));
-    int handedBack = commissioner.decommissioned().size();
+    int handedBack = commissioner.tokensDeleted().size();
 
     JsonPath again = resolve(repoId, body("feat", "v1", null, null), 200);
 
     assertThat(again.getBoolean("resolved"), is(false));
-    assertThat(commissioner.decommissioned().size(), is(handedBack));
+    assertThat(commissioner.tokensDeleted().size(), is(handedBack));
   }
 }

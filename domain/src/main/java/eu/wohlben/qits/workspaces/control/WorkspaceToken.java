@@ -5,9 +5,9 @@ package eu.wohlben.qits.workspaces.control;
  * qits-802, qits-1084): one opaque {@code qits_tok_}, minted by this service at qits-idp and deleted
  * with the container it was minted for. Every TARGET row's lease holds one ({@code workspace}
  * kind); a DIRECT admin or editor row's holds one too whenever the deployment has an edge plane
- * ({@code workspace-admin} for an admin row, {@code workspace} for the editor). The counterpart is
- * {@link WorkspaceCredential}'s client pair, which a DIRECT row on no edge plane still holds; a row
- * holds one or the other, never both.
+ * ({@code workspace-admin} for an admin row, {@code workspace} for the editor). It is the only
+ * credential a workspace container is given: a DIRECT provision on no edge plane is refused rather
+ * than launched with anything else.
  *
  * <p>It rides into the container as {@code QITS_TOKEN} and {@code QITS_TOKEN_SUBJECT} ({@link
  * WorkspaceContainerFactory#tokenEnv}, from {@link RunnerWorkspaceSpecs} and the DIRECT spec alike),

@@ -83,10 +83,9 @@ public class WorkspaceService {
   @Inject ContainerRuntime containers;
 
   /**
-   * Optional: where a per-container platform credential is commissioned and given back. Absent — no
-   * implementation, or one with no issuer configured — means no credential is minted and no
-   * container carries one, which is what every workspace did before this port existed. See {@link
-   * CredentialCommissioner}.
+   * Optional: where a per-container workspace token is minted and given back. Absent — no
+   * implementation, or one with no issuer configured — means no token is minted and no container
+   * carries one. See {@link CredentialCommissioner}.
    */
   @Inject Instance<CredentialCommissioner> commissioner;
 
@@ -567,8 +566,8 @@ public class WorkspaceService {
       WorkspaceProcessTracker.Handle process,
       DirectStart start) {
     // A fresh container gets a fresh credential, and it is minted BEFORE anything is started: a
-    // commissioning failure must cost a launch that has not happened yet, never leave a container
-    // running with no identity. This is also the one place a recreate is covered — recreate rm's the
+    // failed mint — or a refusal for want of an edge plane — must cost a launch that has not
+    // happened yet, never leave a container running with no identity. This is also the one place a recreate is covered — recreate rm's the
     // container and comes back through here — so no second seam has to remember.
     commissionFor(repoId, workspaceId, rowId);
     if (stoppedSince(rowId, start)) {
@@ -650,124 +649,104 @@ public class WorkspaceService {
   }
 
   /**
-   * Commission the platform credential this workspace's next container will carry, and put it on the
-   * row so every later ensure composes the same container spec.
+   * Mint the workspace token this workspace's next container will carry, and put it on the row so
+   * every later ensure composes the same container spec.
    *
    * <p><b>It fails the provision.</b> A workspace launched with no identity would pull and push as
-   * nobody, which is precisely the state this credential exists to end, and the failure would only
-   * surface much later as a refused registry read. The launch already surfaces ensure failures, so
-   * throwing here reports it where it happened. The implementation is patient first — see {@code
+   * nobody, and the failure would only surface much later as a refused registry read. The launch
+   * already surfaces ensure failures, so throwing here reports it where it happened — before {@code
+   * containers.run}, so a refused or failed mint leaves no container, and {@link #ensureContainer}
+   * marks the row FAILED with the reason. The implementation is patient first — see {@code
    * wiring/IdpCredentialCommissioner} — so what reaches this point is an issuer that stayed
    * unreachable, not a redeploy window.
    *
-   * <p><b>Which credential: a workspace token whenever there is an edge, else the pair</b>
-   * (qits-1084). Only admin and editor rows provision here, and they stay DIRECT for good; given an
-   * edge plane ({@link WorkspaceAddressPlanes#plane} resolves) the container is minted the same
+   * <p><b>The credential is a workspace token, and it needs the edge</b> (qits-1084). Only admin and
+   * editor rows provision here, and they stay DIRECT for good; their container is minted the same
    * non-expiring {@code qits_tok_} a TARGET row holds — kind {@code workspace-admin} for an admin row,
    * {@code workspace} for the editor — stored on the row's token columns, and the factory addresses
-   * it through the edge. With no public {@code QITS_DOMAIN} it is commissioned the client pair as
-   * before, and that is logged at WARN rather than failing the provision.
+   * it through the edge plane ({@link WorkspaceAddressPlanes#plane}), because a token only works
+   * there. <b>With no edge plane — no public {@code QITS_DOMAIN} — and an issuer wired, the
+   * provision is refused</b> ({@link #refuseWithoutEdge}): there is no credential such a container
+   * could present, and launching it with none would hide a misconfiguration behind a workspace that
+   * cannot reach its registry. With no issuer wired there is nothing to refuse, and the container
+   * launches with no credential, as it does on every deployment with no idp.
    *
-   * <p>Any credential already on the row — pair or token — is given back first. That is the
-   * recreate case: the container it belonged to has just been removed, and a row can only carry
-   * one. It is also what keeps the state unambiguous: a row switched to a token holds no pair, and a
-   * row that fell back to the pair holds no token.
+   * <p>Any token already on the row is given back first. That is the recreate case: the container it
+   * belonged to has just been removed, and a row carries one at most.
    *
-   * <p>Its own transaction, and not the caller's: {@link #provisionContainer} runs outside one (each
-   * status transition commits separately), and the pair must be committed before {@code
+   * <p>Its own transactions, and not the caller's: {@link #provisionContainer} runs outside one (each
+   * status transition commits separately), and the token must be committed before {@code
    * containers.run} asks the factory to read it back.
    *
-   * <p><b>The commission says which project the credential is for</b>, resolved from the repository
-   * the workspace branches. That is the whole of per-context scoping on this side: the issuer turns
-   * it into a {@code project} claim, and a resource service then judges this container's token on the
-   * project rather than on its platform role alone — a workspace agent can have its own project's
-   * pipelines evaluated and nobody else's. The project the container is told about ({@code
+   * <p><b>The mint says which project the token is for</b>, resolved from the repository the
+   * workspace branches. That is the whole of per-context scoping on this side: the issuer turns it
+   * into a {@code project} claim, and a resource service then judges this container's token on the
+   * project rather than on its platform role alone. The project the container is told about ({@code
    * QITS_WORKSPACE_DAEMON_PROJECT_ID}, put there by {@link WorkspaceContainerFactory}) and the one
-   * the credential is scoped to are deliberately the same fact from the same registry.
+   * the token is scoped to are deliberately the same fact from the same registry.
    */
   private void commissionFor(String repoId, String workspaceId, Long rowId) {
     if (!commissioner.isResolvable()) {
       return;
     }
     decommissionFor(rowId);
-    // AN ADMIN ROW COMMISSIONS ITS OWN KIND (qits-628 follow-up): workspace-admin, which qits-idp
-    // issues qits:agent and qits:admin-agent — the container holds the host's docker socket, so its
-    // agent is admitted wherever qits:admin is. Every other row stays `workspace`. The kind is the issuer's record and never the container's environment, so the
-    // spec is unchanged by it.
+    // AN ADMIN ROW MINTS ITS OWN KIND (qits-628 follow-up): workspace-admin, which qits-idp issues
+    // qits:agent and qits:admin-agent — the container holds the host's docker socket, so its agent
+    // is admitted wherever qits:admin is. Every other row stays `workspace`. The kind is the
+    // issuer's record and never the container's environment, so the spec is unchanged by it.
     boolean admin =
         QuarkusTransaction.requiringNew()
             .call(() -> workspaceRepository.findActiveById(rowId).map(wt -> wt.admin).orElse(false));
+    // The edge plane, BEFORE anything is minted: the token is only worth minting for a container
+    // that can present it. No plane is refused when an issuer is wired, and nothing at all when
+    // none is — asked of the issuer's configuration, so the refusal costs no call.
+    try {
+      addressPlanes.plane();
+    } catch (EdgePlaneUnconfigured noEdge) {
+      if (commissioner.get().isWired()) {
+        throw refuseWithoutEdge(rowId, noEdge);
+      }
+      return;
+    }
     RepositoryLookup.RepositoryView repository = repositoryOf(repoId);
     // The Git refs this container may push: none. The workspace credential never pushes — the
     // daemon pushes with each agent's own token, whose refs are the agent's (qits-1152) — so the
-    // commission states an empty list rather than none, which would be unscoped.
+    // mint states an empty list rather than none, which would be unscoped.
     List<String> statedRefs = List.of();
-    // THE WORKSPACE TOKEN, WHENEVER THERE IS AN EDGE (qits-1084). An admin or editor row stays
-    // DIRECT for good, but its container no longer needs an hourly-minting client pair: given an
-    // edge plane it holds the same non-expiring qits_tok_ a TARGET row does — `workspace-admin` for
-    // an admin row, `workspace` for the editor (unscoped: it names no repository, so no project) —
-    // with the same Git refs the pair would have stated, and the factory addresses it through the
-    // edge (a token only works there). No plane — no public QITS_DOMAIN — is the one case the pair
-    // is still for: WARN and fall through to it, never fail the provision over it. A mint that
-    // fails throws out of here and fails the provision, as a failed commission does.
-    WorkspaceAddressPlane plane = edgePlaneOrNull(rowId);
-    if (plane != null) {
-      Optional<WorkspaceToken> minted = mintToken(rowId, repository, statedRefs, admin);
-      if (minted.isEmpty()) {
-        // No issuer wired. Supported, and the same as no implementation at all.
-        return;
-      }
-      WorkspaceToken token = minted.get();
-      if (!storeToken(rowId, token)) {
-        // A second provision stored its token first, or the row resolved meanwhile: this one is
-        // nobody's.
-        deleteToken(token.tokenId());
-        return;
-      }
-      LOG.debugf(
-          "Minted %s workspace token %s for DIRECT workspace %s/%s",
-          CredentialCommissioner.contextKindFor(admin), token.tokenId(), repoId, workspaceId);
-      return;
-    }
-    Optional<WorkspaceCredential> issued =
-        commissioner
-            .get()
-            .commission(rowId, projectOf(repository), statedRefs, admin);
-    if (issued.isEmpty()) {
+    // A mint that fails throws out of here and fails the provision.
+    Optional<WorkspaceToken> minted = mintToken(rowId, repository, statedRefs, admin);
+    if (minted.isEmpty()) {
       // No issuer wired. Supported, and the same as no implementation at all.
       return;
     }
-    WorkspaceCredential credential = issued.get();
-    QuarkusTransaction.requiringNew()
-        .run(
-            () ->
-                workspaceRepository
-                    .findActiveById(rowId)
-                    .ifPresent(
-                        wt -> {
-                          wt.commissionedClientId = credential.clientId();
-                          wt.commissionedClientSecret = credential.secret();
-                        }));
+    WorkspaceToken token = minted.get();
+    if (!storeToken(rowId, token)) {
+      // A second provision stored its token first, or the row resolved meanwhile: this one is
+      // nobody's.
+      deleteToken(token.tokenId());
+      return;
+    }
     LOG.debugf(
-        "Commissioned %s for workspace %s/%s", credential.clientId(), repoId, workspaceId);
+        "Minted %s workspace token %s for DIRECT workspace %s/%s",
+        CredentialCommissioner.contextKindFor(admin), token.tokenId(), repoId, workspaceId);
   }
 
   /**
-   * The edge plane a DIRECT row's token would be addressed through, or null — logged at WARN — when
-   * this deployment has none (no public {@code QITS_DOMAIN}): the one case a DIRECT row still holds
-   * the client pair (qits-1084).
+   * The refusal of a DIRECT provision on a deployment with an issuer and no edge plane: 503 {@code
+   * EDGE_PLANE_UNCONFIGURED}, the code a TARGET row refused for the same reason carries. A 503 and
+   * not a 4xx because nothing the caller sends could change it — it is this deployment that lacks a
+   * public {@code QITS_DOMAIN}, and the answer says so. Thrown before anything is minted or run, so
+   * the row holds no credential and there is no container; {@link #ensureContainer} records the
+   * message as the row's FAILED runtime error.
    */
-  private WorkspaceAddressPlane edgePlaneOrNull(Long rowId) {
-    try {
-      return addressPlanes.plane();
-    } catch (EdgePlaneUnconfigured noEdge) {
-      LOG.warnf(
-          "Workspace %s is commissioned a client pair rather than a workspace token: %s. A token"
-              + " only works through the public edge, so a DIRECT container on no edge plane keeps"
-              + " the pair.",
-          rowId, noEdge.getMessage());
-      return null;
-    }
+  private static DomainException refuseWithoutEdge(Long rowId, EdgePlaneUnconfigured noEdge) {
+    LOG.warnf("Refused to provision DIRECT workspace %s: %s", rowId, noEdge.getMessage());
+    return new DomainException(
+        503,
+        EdgePlaneUnconfigured.CODE,
+        noEdge.getMessage()
+            + ". A DIRECT workspace's container holds a workspace token, which only works through"
+            + " the public edge: set QITS_DOMAIN to the platform's public domain to provision it.");
   }
 
   /**
@@ -844,15 +823,15 @@ public class WorkspaceService {
   }
 
   /**
-   * Give back the credential a workspace's container held, and clear the row.
+   * Give back the workspace token a workspace's container held, and clear the row.
    *
    * <p><b>Best-effort, and never in the way of a teardown.</b> Every caller runs after something
-   * irreversible — a container removed, a branch deleted — so a revocation that fails is logged and
-   * the teardown continues. What that leaves behind is a credential nothing can use to reach a
-   * container that no longer exists, and the reconcile reaps it within the hour.
+   * irreversible — a container removed, a branch deleted — so a deletion that fails is logged and
+   * the teardown continues. What that leaves behind is a token nothing can use to reach a container
+   * that no longer exists, and the reconcile reaps it within the hour.
    *
-   * <p>The row is cleared even when the revocation fails, and that order is deliberate: the clientId
-   * is on the row so a teardown can find it, and a row still naming a client this service has
+   * <p>The row is cleared even when the deletion fails, and that order is deliberate: the token id
+   * is on the row so a teardown can find it, and a row still naming a token this service has
    * stopped tracking would make the reconcile spare an orphan forever.
    *
    * <p>Callers on a transactional path (the resolution verbs, {@code deleteContainer}) hold the
@@ -863,25 +842,16 @@ public class WorkspaceService {
     if (!commissioner.isResolvable() || rowId == null) {
       return;
     }
-    // [clientId, tokenId]: a row holds one or the other — the token on a TARGET row (qits-625) and on
-    // a DIRECT row on an edge plane (qits-1084), the pair on a DIRECT row on none.
-    String[] held =
+    // A TARGET row's token (qits-625) and a DIRECT row's on an edge plane (qits-1084) alike.
+    String held =
         QuarkusTransaction.requiringNew()
             .call(
                 () ->
                     workspaceRepository
                         .findByIdOptional(rowId)
-                        .map(
-                            wt -> {
-                              String[] was = {wt.commissionedClientId, wt.commissionedTokenId};
-                              wt.commissionedClientId = null;
-                              wt.commissionedClientSecret = null;
-                              clearToken(wt);
-                              return was;
-                            })
-                        .orElse(new String[2]));
-    decommission(held[0]);
-    deleteToken(held[1]);
+                        .map(WorkspaceService::clearToken)
+                        .orElse(null));
+    deleteToken(held);
   }
 
   /**
@@ -897,8 +867,8 @@ public class WorkspaceService {
   }
 
   /**
-   * The workspace token's deletion, for callers that already cleared the row. Best-effort, as
-   * {@link #decommission} is; null or blank is a row that held none and is silent.
+   * The workspace token's deletion, for callers that already cleared the row. Best-effort, for
+   * {@link #decommissionFor}'s reason; null or blank is a row that held none and is silent.
    */
   private void deleteToken(String tokenId) {
     if (!commissioner.isResolvable() || tokenId == null || tokenId.isBlank()) {
@@ -910,22 +880,6 @@ public class WorkspaceService {
       LOG.warnf(
           "Could not delete workspace token %s; the reconcile will reap it: %s",
           tokenId, e.toString());
-    }
-  }
-
-  /**
-   * The revocation itself, for callers that already hold the row and have cleared it themselves.
-   * Null or blank is the ordinary case — a workspace that never held a credential — and is silent.
-   */
-  private void decommission(String clientId) {
-    if (!commissioner.isResolvable() || clientId == null || clientId.isBlank()) {
-      return;
-    }
-    try {
-      commissioner.get().decommission(clientId);
-    } catch (RuntimeException e) {
-      LOG.warnf(
-          "Could not decommission %s; the reconcile will reap it: %s", clientId, e.toString());
     }
   }
 
@@ -2571,15 +2525,9 @@ public class WorkspaceService {
     interruptStart(repoId, workspaceId, workspace.id);
     tearDownDirect(repoId, workspaceId, workspace.id);
     // The row stays ACTIVE and fires no WorkspaceResolved, but the CONTAINER is gone — and the
-    // credential's lifetime is the container's, not the row's. So it goes back here too, and the
-    // next ensure commissions a fresh one for the container it provisions. This is the path an
+    // token's lifetime is the container's, not the row's (qits-1084). So it goes back here too, and
+    // the next ensure mints a fresh one for the container it provisions. This is the path an
     // observer on the resolution event could never have covered.
-    workspace.commissionedClientSecret = null;
-    String commissioned = workspace.commissionedClientId;
-    workspace.commissionedClientId = null;
-    decommission(commissioned);
-    // An admin or editor row on an edge plane holds a workspace token instead (qits-1084), and it
-    // goes with the container too — discardOnTarget's line, for the same reason.
     deleteToken(clearToken(workspace));
     workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
     workspace.runtimeError = null;
@@ -3086,8 +3034,9 @@ public class WorkspaceService {
       stopBeforeRemove(containers.containerName(workspace.workspaceId, repoId));
       containers.rm(containers.containerName(workspace.workspaceId, repoId));
       containers.removeWorkspaceVolume(workspace.workspaceId);
-      // The credential dies with the container, so it goes back here — beside the rm, not on the
-      // WorkspaceResolved event this method fires below.
+      // The workspace token an admin or editor row on an edge plane holds (qits-1084) dies with the
+      // container, so it goes back here — beside the rm, not on the WorkspaceResolved event this
+      // method fires below.
       //
       // An observer on that event would be the tidier-looking seam and would be wrong twice. It
       // covers the resolution paths and NOT deleteContainer, which removes a container while the row
@@ -3096,12 +3045,6 @@ public class WorkspaceService {
       // inside the resolving transaction so observers can join it, which is the one place this HTTP
       // call must not be. Beside containers.rm — itself an HTTP call, best-effort for the same
       // reason — is where the container's other teardown already sits.
-      workspace.commissionedClientSecret = null;
-      String commissioned = workspace.commissionedClientId;
-      workspace.commissionedClientId = null;
-      decommission(commissioned);
-      // The workspace token an admin or editor row on an edge plane holds instead (qits-1084),
-      // beside the pair and for the same reason.
       deleteToken(clearToken(workspace));
 
       if (deletesBranch && branch != null && !branch.isBlank()) {
@@ -3894,10 +3837,6 @@ public class WorkspaceService {
     try {
       String branch = workspace.branch;
       releaseFromTarget(workspace);
-      workspace.commissionedClientSecret = null;
-      String commissioned = workspace.commissionedClientId;
-      workspace.commissionedClientId = null;
-      decommission(commissioned);
       // The workspace token goes with the container it was minted for (qits-625), beside the
       // release and for doDiscard's reason not on the resolved event.
       deleteToken(clearToken(workspace));

@@ -20,12 +20,12 @@ import org.junit.jupiter.api.Test;
  * DIRECT for good. (The editor's row went with the editor, qits-1152; so did the branch, parent,
  * work-item and bootstrap keys: a workspace is a slot now.)
  *
- * <p>The admin row is pinned twice (qits-1084): holding the commissioned client pair —
- * the spec a deployment with no edge plane still composes, and every container launched before the
- * token, byte for byte as it was — and holding a workspace token, where the four addresses come off
- * the edge plane and the credential is {@code QITS_TOKEN} with the git helper on the plane's githost,
- * while qits-net, the extra host, the docker socket stay exactly where they
- * were.
+ * <p>The admin row is pinned twice (qits-1084): holding no credential — the spec a deployment with
+ * no issuer composes, on the internal addresses — and holding a workspace token, where the four
+ * addresses come off the edge plane and the credential is {@code QITS_TOKEN} with the git helper on
+ * the plane's githost, while qits-net, the extra host, the docker socket stay exactly where they
+ * were. There is no third spec: a DIRECT provision with an issuer and no edge plane is refused
+ * before it composes one.
  *
  * <p>The one field left out is {@code user}: it is this machine's uid, so it is asserted as a uid
  * and not as a value.
@@ -60,7 +60,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
     f.qitsHostResolver = resolver;
     f.qitsPort = "8080";
     f.containerGitUrl = "http://qits-platform-edge:8080";
-    f.idpUrl = "http://qits-idp:8080/idp";
     f.daemonApiToken = "qits-workspace-daemon";
     f.autoPushEnabled = true;
     f.nameResolver =
@@ -68,8 +67,8 @@ class WorkspaceContainerFactoryGoldenSpecTest {
             repoId ->
                 Optional.of(new RepositoryAddressResolver.ProjectScopedName("proj-1", "my-repo")));
     f.repositories = StubInstance.empty();
-    f.credentials =
-        StubInstance.of(rowId -> Optional.of(new WorkspaceCredential("ws-7-a", "s3cr3t")));
+    // No credential by default: no issuer wired. The token-holding admin row sets its own.
+    f.credentials = StubInstance.empty();
     f.postures = StubInstance.empty();
     return f;
   }
@@ -108,14 +107,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_WORKSPACE_DAEMON_REPO_NAME=my-repo
         env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
         env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
-        env QITS_COMMISSIONED_CLIENT_ID=ws-7-a
-        env QITS_COMMISSIONED_CLIENT_SECRET=s3cr3t
-        env GIT_CONFIG_GLOBAL=/etc/qits-gitconfig
-        env QITS_GIT_AUTH_HOST=qits-platform-edge:8080
-        env QITS_GIT_AUTH_TOKEN_URL=http://qits-idp:8080/idp/token
-        env QITS_GIT_AUTH_AUDIENCE=qits-platform
-        env QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL=http://qits-idp:8080/idp/token
-        env QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE=qits-platform
         env GIT_AUTHOR_NAME=qits
         env GIT_AUTHOR_EMAIL=qits@local
         env GIT_COMMITTER_NAME=qits
@@ -139,7 +130,7 @@ class WorkspaceContainerFactoryGoldenSpecTest {
    * workspace is DIRECT for good.
    */
   @Test
-  void anAdminWorkspacesSpecHoldingThePairIsExactlyThis() {
+  void anAdminWorkspacesSpecHoldingNoCredentialIsExactlyThis() {
     WorkspaceContainerFactory f = factory();
     f.postures =
         StubInstance.of(
@@ -182,14 +173,6 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         env QITS_WORKSPACE_DAEMON_REPO_NAME=my-repo
         env QITS_WORKSPACE_DAEMON_AUTO_PUSH_ENABLED=true
         env QITS_WORKSPACE_DAEMON_API_TOKEN=qits-workspace-daemon
-        env QITS_COMMISSIONED_CLIENT_ID=ws-7-a
-        env QITS_COMMISSIONED_CLIENT_SECRET=s3cr3t
-        env GIT_CONFIG_GLOBAL=/etc/qits-gitconfig
-        env QITS_GIT_AUTH_HOST=qits-platform-edge:8080
-        env QITS_GIT_AUTH_TOKEN_URL=http://qits-idp:8080/idp/token
-        env QITS_GIT_AUTH_AUDIENCE=qits-platform
-        env QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL=http://qits-idp:8080/idp/token
-        env QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE=qits-platform
         env GIT_AUTHOR_NAME=qits
         env GIT_AUTHOR_EMAIL=qits@local
         env GIT_COMMITTER_NAME=qits
@@ -209,20 +192,10 @@ class WorkspaceContainerFactoryGoldenSpecTest {
 
   // --- a DIRECT row that holds a workspace token (qits-1084) ------------------------------------
 
-  /** A credential lookup that answers a workspace token for every row, and no pair. */
+  /** A credential lookup that answers a workspace token for every row. */
   static jakarta.enterprise.inject.Instance<WorkspaceCredentials> tokenHolding(String token, String subject) {
-    return StubInstance.of(
-        new WorkspaceCredentials() {
-          @Override
-          public Optional<WorkspaceCredential> forWorkspace(Long rowId) {
-            return Optional.empty();
-          }
-
-          @Override
-          public Optional<WorkspaceToken> tokenFor(Long rowId) {
-            return Optional.of(new WorkspaceToken("tok-id-" + rowId, token, subject));
-          }
-        });
+    return StubInstance.<WorkspaceCredentials>of(
+        rowId -> Optional.of(new WorkspaceToken("tok-id-" + rowId, token, subject)));
   }
 
   static WorkspacePostures posture(boolean admin) {
@@ -236,8 +209,8 @@ class WorkspaceContainerFactoryGoldenSpecTest {
   }
 
   /**
-   * An admin row holding a workspace token: the edge's four addresses, the token's four lines where
-   * the pair's eight were, and every DIRECT field — the network, the extra host, the docker socket,
+   * An admin row holding a workspace token: the edge's four addresses, the token's four lines, and
+   * every DIRECT field — the network, the extra host, the docker socket,
    * the shared volumes — unchanged.
    */
   @Test

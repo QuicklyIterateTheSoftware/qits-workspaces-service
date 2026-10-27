@@ -119,6 +119,12 @@ public class StoryProfile implements QuarkusTestProfile, NecessaryTestProfileDup
    */
   public static final String CLIENT_SECRET = "story-workspaces-client-secret";
 
+  /**
+   * The public domain the catalogue runs under: an admin workspace's container holds a workspace
+   * token, and a token only works through an edge plane (qits-1084). Never a host anything resolves.
+   */
+  public static final String STORY_DOMAIN = "story.example";
+
   /** This catalogue's own workspace store. */
   private static final String DATABASE = "workspaces_stories_it";
 
@@ -192,13 +198,13 @@ public class StoryProfile implements QuarkusTestProfile, NecessaryTestProfileDup
     config.put("qits.workspaces.data-dir", "target/story-workspaces-data");
     config.put("qits.workspace.git.mirror-freshness-ms", "0");
 
-    // --- no edge plane, whatever the step container's QITS_DOMAIN says ------------------------------
-    // With a public domain an admin workspace is minted a workspace token and addressed
-    // through the edge (qits-1084); with none it holds the commissioned client pair. The provision
-    // story tells the pair's arc — a commission at POST /idp/api/clients, the pair in the spec — so
-    // the domain is pinned empty here, as %test pins it, and an ambient QITS_DOMAIN in the launching
-    // environment cannot turn the story into a different one.
-    config.put("qits.workspace.domain", "");
+    // --- an edge plane, whatever the step container's QITS_DOMAIN says -----------------------------
+    // With a public domain an admin workspace is minted a workspace token and addressed through
+    // the edge (qits-1084); with none, and an issuer wired, its provision is refused. The provision
+    // story tells the token's arc — a mint at POST /idp/api/tokens, QITS_TOKEN in the spec — so the
+    // domain is pinned to a public one here, and an ambient QITS_DOMAIN in the launching environment
+    // cannot turn the story into a different one.
+    config.put("qits.workspace.domain", STORY_DOMAIN);
 
     // --- what does not start -------------------------------------------------------------------------
     config.put("qits.bootstrap.autorun-enabled", "false");

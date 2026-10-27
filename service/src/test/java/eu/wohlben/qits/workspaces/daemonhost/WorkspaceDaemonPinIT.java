@@ -311,16 +311,15 @@ public class WorkspaceDaemonPinIT {
     // EVERY AMBIENT QITS_ VARIABLE IS REMOVED FIRST, and this is the difference between a test and a
     // coincidence. `ProcessBuilder` seeds the child from this process's environment, and this process
     // runs somewhere that has opinions: a workspace container carries the full
-    // QITS_WORKSPACE_DAEMON_* set plus a commissioned credential, and a CI step container carries
-    // QITS_COMMISSIONED_CLIENT_ID/SECRET and nothing else of the set.
+    // QITS_WORKSPACE_DAEMON_* set plus its own QITS_TOKEN, and a CI step container carries a
+    // credential of its own as well.
     //
-    // That difference is not cosmetic, because ControlSocket.authorization() refuses a PARTIAL
-    // commission: any one of client-id, secret, auth-token-url and auth-audience present means all
-    // four are required, and a step container supplies exactly two. The daemon then fails to mint,
-    // never dials, and the test times out with a daemon that started perfectly — measured on the
-    // first gating run, 2026-09-16, after the same test had passed locally for weeks of wall-clock.
-    // It passed there because a workspace container HAS all four, so the daemon minted a real token
-    // against the real idp: the assertion was riding on this container's credentials.
+    // That is not cosmetic, because the daemon dials with whatever credential its environment hands
+    // it: given a QITS_TOKEN it presents that token, and with none it dials anonymously. A child that
+    // inherited this process's credential would dial as this container — and the assertion would be
+    // riding on where the test runs rather than on the pin. Measured once already: on the first
+    // gating run, 2026-09-16, an inherited credential made a daemon that started perfectly never
+    // dial, after the same test had passed locally for weeks of wall-clock.
     //
     // A pin test whose result depends on where it runs proves nothing about the pin, which is the
     // same class of defect as the configuration entry this whole change replaced. So the child gets

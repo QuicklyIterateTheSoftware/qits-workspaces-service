@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
+import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
+import eu.wohlben.qits.workspaces.error.DomainException;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusMock;
@@ -21,18 +23,22 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Admin and editor workspaces carry their own {@code qits_tok_} (qits-1084).
+ * Admin workspaces carry their own {@code qits_tok_} (qits-1084), and nothing else.
  *
- * <p>Both stay DIRECT for good, and whenever the deployment has an edge plane their container is
- * minted the same non-expiring workspace token a RUNNER row holds — {@code workspace-admin} for an
- * admin row, an unscoped {@code workspace} one for the editor — in place of the hourly-minting client
- * pair. With no edge plane (no public {@code QITS_DOMAIN}, the suites' pinned posture) the pair is
- * still commissioned, which {@link WorkspaceCredentialCommissioningTest} covers whole; here the
- * fallback is asserted only as the other side of a switch. A row holds one or the other, never both,
- * and every teardown that gives the pair back deletes the token too.
+ * <p>An admin row stays DIRECT for good, and its container is minted the same non-expiring
+ * workspace token a RUNNER row holds — {@code workspace-admin} — whenever the deployment has an edge
+ * plane. With no edge plane (no public {@code QITS_DOMAIN}, the suites' pinned posture) and an
+ * issuer wired, the provision is refused: a token only works through the edge, and there is no other
+ * credential to give. With no issuer wired it launches with no credential, as every DIRECT
+ * container in the rest of the suite does. Every teardown deletes the token.
  *
  * <p>The plane is installed per test with {@link QuarkusMock}, as {@code WorkspaceTargetPlacementTest}
- * installs it; a test that wants the fallback installs none.
+ * installs it; a test that wants no edge installs one that refuses.
+ *
+ * <p>The editor row the refusal's ticket also names is gone (qits-1152, {@code V20}): an ACTIVE
+ * DIRECT row is admin by constraint ({@code ck_workspace_direct_only_admin}), and {@link
+ * WorkspacePlacements#requireDirectAllowed} refuses any other before it provisions, so the admin row
+ * is the one DIRECT provision there is to test.
  */
 @QuarkusTest
 public class DirectWorkspaceTokenTest {
@@ -49,7 +55,7 @@ public class DirectWorkspaceTokenTest {
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
 
-  /** Both halves of the issuer wired, so a fallback to the pair is visible as a pair. */
+  /** An issuer wired, so a DIRECT provision with no edge plane is one to refuse. */
   @BeforeEach
   void wireAnIssuer() {
     commissioner.reset();
@@ -108,69 +114,80 @@ public class DirectWorkspaceTokenTest {
     assertEquals(CredentialCommissioner.ADMIN_CONTEXT_KIND, minted.contextKind());
     assertEquals(FakeRepositoryLookup.PROJECT_ID, minted.projectId(), "scoped to its project");
     assertEquals(List.of(), minted.gitRefs(), "and may push nothing: agents push (qits-1152)");
-    assertEquals(List.of(), commissioner.commissionedFor(), "no client pair was asked for");
 
     Workspace row = read(rowId);
     assertEquals(WorkspacePlacement.DIRECT, row.placement, "it stays DIRECT");
     assertEquals(minted.token().tokenId(), row.commissionedTokenId);
     assertEquals(minted.token().subject(), row.commissionedTokenSubject);
     assertEquals(minted.token().token(), row.commissionedToken);
-    assertNull(row.commissionedClientId, "and holds no pair beside it");
+    assertNull(row.commissionedClientId, "the legacy client columns are never written");
     assertNull(row.commissionedClientSecret);
     assertEquals(minted.token().subject(), row.boundSubject(), "it is bound by the token subject");
 
-    // The lookup the container factory composes the spec from answers the token, and no pair.
+    // The lookup the container factory composes the spec from answers the token.
     assertEquals(minted.token(), credentials.tokenFor(rowId).orElseThrow());
-    assertTrue(credentials.forWorkspace(rowId).isEmpty());
   }
 
   @Test
-  public void withNoEdgePlaneTheAdminRowFallsBackToThePairAndHoldsNoToken() throws Exception {
+  public void withNoEdgePlaneAnAdminProvisionIsRefusedAndNothingIsStored() throws Exception {
     noEdgePlane();
     Long rowId = adminRow();
 
-    workspaceService.ensureContainer(rowId);
+    DomainException refused =
+        assertThrows(DomainException.class, () -> workspaceService.ensureContainer(rowId));
 
-    assertTrue(containers.exists(containerOf(rowId)), "the launch is normal");
-    assertEquals(List.of(), commissioner.tokensMinted(), "no token without an edge");
-    WorkspaceCredential pair = credentials.forWorkspace(rowId).orElseThrow();
-    assertEquals(CredentialCommissioner.ADMIN_CONTEXT_KIND, commissioner.contextKindFor(rowId));
+    assertEquals(503, refused.statusCode());
+    assertEquals(EdgePlaneUnconfigured.CODE, refused.code());
+    assertTrue(refused.getMessage().contains("QITS_DOMAIN"), refused.getMessage());
+    assertTrue(refused.getMessage().contains("public edge"), refused.getMessage());
+    assertFalse(containers.exists(containerOf(rowId)), "no container is started");
+    assertEquals(List.of(), commissioner.tokensMinted(), "no commission reached the issuer");
+    assertEquals(List.of(), commissioner.agentTokensMinted());
+    assertEquals(List.of(), commissioner.liveClientIds(), "and no client was commissioned");
     Workspace row = read(rowId);
-    assertEquals(pair.clientId(), row.commissionedClientId);
-    assertFalse(row.holdsToken(), "and no token beside it");
-    assertEquals(pair.clientId(), row.boundSubject(), "it is bound by its client, as before");
+    assertFalse(row.holdsToken(), "the row holds no token");
+    assertNull(row.commissionedTokenSubject);
+    assertNull(row.commissionedToken);
+    assertNull(row.commissionedClientId, "and no client");
+    assertNull(row.commissionedClientSecret);
+    assertNull(row.boundSubject(), "so it binds nobody");
+    assertEquals(WorkspaceRuntimeStatus.FAILED, row.runtimeStatus, "the row says it failed");
+    assertTrue(row.runtimeError.contains(EdgePlaneUnconfigured.CODE), row.runtimeError);
     assertTrue(credentials.tokenFor(rowId).isEmpty());
   }
 
   @Test
-  public void aRowSwitchesFromThePairToATokenAndBackAtItsNextContainer() throws Exception {
-    noEdgePlane();
+  public void anEdgeThatGoesAwayRefusesTheNextProvisionAndLeavesNoToken() throws Exception {
+    anEdgePlane();
     Long rowId = adminRow();
     workspaceService.ensureContainer(rowId);
-    String client = read(rowId).commissionedClientId;
-
-    anEdgePlane();
-    workspaceService.deleteContainer(rowId);
-    workspaceService.ensureContainer(rowId);
-
-    Workspace tokenRow = read(rowId);
-    assertTrue(tokenRow.holdsToken());
-    assertNull(tokenRow.commissionedClientId, "a token row holds no pair");
-    assertTrue(commissioner.decommissioned().contains(client), "the old pair went back");
-    assertFalse(commissioner.liveClientIds().contains(client));
-    String tokenId = tokenRow.commissionedTokenId;
+    String tokenId = read(rowId).commissionedTokenId;
 
     noEdgePlane();
     workspaceService.deleteContainer(rowId);
+    assertThrows(DomainException.class, () -> workspaceService.ensureContainer(rowId));
+
+    assertEquals(1, commissioner.tokensMinted().size(), "the refused provision minted nothing");
+    assertEquals(List.of(tokenId), commissioner.tokensDeleted());
+    assertEquals(List.of(), commissioner.liveTokenIds());
+    assertFalse(read(rowId).holdsToken());
+    assertFalse(containers.exists(containerOf(rowId)));
+  }
+
+  @Test
+  public void withNoEdgePlaneAndNoIssuerTheAdminRowLaunchesWithNoCredential() throws Exception {
+    commissioner.reset();
+    noEdgePlane();
+    Long rowId = adminRow();
+
     workspaceService.ensureContainer(rowId);
 
-    Workspace pairRow = read(rowId);
-    assertFalse(pairRow.holdsToken(), "a pair row holds no token");
-    assertNull(pairRow.commissionedTokenSubject);
-    assertNull(pairRow.commissionedToken);
-    assertTrue(pairRow.commissionedClientId != null, "it holds a fresh pair");
-    assertTrue(commissioner.tokensDeleted().contains(tokenId), "and the token went back");
-    assertFalse(commissioner.liveTokenIds().contains(tokenId));
+    assertTrue(containers.exists(containerOf(rowId)), "nothing to refuse without an issuer");
+    assertEquals(List.of(), commissioner.tokensMinted());
+    Workspace row = read(rowId);
+    assertFalse(row.holdsToken());
+    assertNull(row.commissionedClientId);
+    assertNull(row.commissionedClientSecret);
   }
 
   @Test
@@ -254,7 +271,7 @@ public class DirectWorkspaceTokenTest {
 
     assertTrue(failure.getMessage().contains("unreachable"), failure.getMessage());
     assertFalse(containers.exists(containerOf(rowId)), "no container for a row with no identity");
-    assertEquals(List.of(), commissioner.commissionedFor(), "and no fallback to the pair");
+    assertFalse(read(rowId).holdsToken(), "and nothing stored");
   }
 
   private String containerOf(Long rowId) {

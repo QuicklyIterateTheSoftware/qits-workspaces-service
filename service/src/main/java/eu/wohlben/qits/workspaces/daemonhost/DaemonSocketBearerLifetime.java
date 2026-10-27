@@ -36,8 +36,8 @@ import java.util.regex.Pattern;
  * <p><b>Only {@code /workspaces/daemon/{id}}, and only a token subject ({@code tok-…}).</b> Exactly
  * one path segment after the prefix, so the tunnel's dial-back ({@code /workspaces/daemon/stream/…},
  * a one-shot upgrade) and every other request keep their expiry. And only an identity whose subject
- * is a token's: a DIRECT daemon presents its commissioned client's hour-long JWT and keeps today's
- * lifetime exactly — excluded on purpose, because the DIRECT path is invariant.
+ * is a token's — a TARGET daemon's, or a DIRECT admin or editor daemon's on an edge plane
+ * (qits-1084). Any other bearer on that path keeps its own expiry exactly.
  */
 @ApplicationScoped
 public class DaemonSocketBearerLifetime implements SecurityIdentityAugmentor {

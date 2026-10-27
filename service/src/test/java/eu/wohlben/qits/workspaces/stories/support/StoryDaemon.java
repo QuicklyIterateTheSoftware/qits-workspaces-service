@@ -39,17 +39,16 @@ import java.util.concurrent.TimeUnit;
  * fails the launch with "no workspace-daemon dialed home". A story that stopped at the container
  * request would be a story about half a provision.
  *
- * <h2>The credential is a bearer, and the commissioned pair is what a story reads instead</h2>
+ * <h2>The credential is a bearer, and the workspace token is what a story reads instead</h2>
  *
  * <p>{@code DaemonControlSocket} is {@code @RolesAllowed("qits:system")}, enforced at the HTTP
  * <b>upgrade</b>, so the dial carries an idp-minted bearer for the platform audience. A real
- * container gets one by exchanging the pair the host commissioned for it — {@code
- * QITS_COMMISSIONED_CLIENT_ID}/{@code …_SECRET}, injected into its environment — and that exchange
- * happens at qits-platform-idp, which is a stub here: it would answer an opaque string, and an
- * opaque string is not a JWT the gate can validate. So the story mints the bearer directly and reads
- * the commissioned pair out of the workload spec qits-containers was handed, which is the only place
- * it exists and exactly where a container would find it. The two halves are proved separately
- * rather than pretended to be one.
+ * container gets one by presenting the workspace token the host minted for it — {@code
+ * QITS_TOKEN}, injected into its environment — at the platform edge, which exchanges it for a JWT;
+ * there is no edge here, and the stub idp's value is not a JWT the gate can validate. So the story
+ * mints the bearer directly and reads the token out of the workload spec qits-containers was
+ * handed, which is the only place it exists and exactly where a container would find it. The two
+ * halves are proved separately rather than pretended to be one.
  *
  * <h2>The tap, and why it is written here</h2>
  *

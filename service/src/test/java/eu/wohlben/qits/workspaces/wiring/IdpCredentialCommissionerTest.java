@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
 import eu.wohlben.qits.workspaces.control.CredentialCommissioner;
-import eu.wohlben.qits.workspaces.control.WorkspaceCredential;
 import eu.wohlben.qits.workspaces.control.WorkspaceToken;
 import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
 import io.quarkus.test.junit.QuarkusTest;
@@ -98,99 +97,49 @@ public class IdpCredentialCommissionerTest {
     return commissioner;
   }
 
-  @Test
-  public void aCommissionNamesTheWorkspaceContextAndAuthenticatesAsThisService() throws Exception {
-    String url =
-        serve(List.of(new Answer(201, "{\"clientId\":\"ws-7-a\",\"secret\":\"s3cr3t\"}")));
-
-    Optional<WorkspaceCredential> issued = commissionerAgainst(url).commission(7L, A_PROJECT);
-
-    assertEquals(Optional.of(new WorkspaceCredential("ws-7-a", "s3cr3t")), issued);
-    assertEquals(List.of("POST /api/clients"), requests);
-    // client_secret_basic — the same spelling qits-idp's token endpoint already accepts, and the
-    // whole reason this API needs no audience of its own.
-    assertEquals(
-        List.of(IdpCredentialCommissioner.basic("dev-qits-workspaces", "service-secret")),
-        authorizations);
-    // WHICH context this credential belongs to — the kind and the workspace row id, which is what
-    // the reconcile compares against live workspaces.
-    assertTrue(bodies.get(0).contains("\"contextKind\":\"workspace\""), bodies.get(0));
-    assertTrue(bodies.get(0).contains("\"contextId\":\"7\""), bodies.get(0));
-    // And what that context is ABOUT, which is what every resource service judges it on.
-    assertTrue(
-        bodies.get(0).contains("\"claims\":{\"project\":\"" + A_PROJECT + "\"}"), bodies.get(0));
-  }
-
-  @Test
-  public void anAdminRowsCommissionNamesTheAdminKindAndARegularOneTheWorkspaceKind()
-      throws Exception {
-    // qits-628 follow-up: an ADMIN row is commissioned as workspace-admin, which qits-idp issues
-    // qits:agent and qits:admin-agent; every other row stays workspace. Nothing else in the body
-    // moves with the flag.
-    String url =
-        serve(
-            List.of(
-                new Answer(201, "{\"clientId\":\"ws-7-a\",\"secret\":\"s3cr3t\"}"),
-                new Answer(201, "{\"clientId\":\"ws-8-a\",\"secret\":\"s3cr3t\"}")));
-    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
-
-    commissioner.commission(7L, A_PROJECT, List.of("refs/heads/ticket/t"), true);
-    commissioner.commission(8L, A_PROJECT, List.of("refs/heads/ticket/t"), false);
-
-    assertTrue(bodies.get(0).contains("\"contextKind\":\"workspace-admin\""), bodies.get(0));
-    assertTrue(bodies.get(0).contains("\"contextId\":\"7\""), bodies.get(0));
-    assertTrue(bodies.get(1).contains("\"contextKind\":\"workspace\""), bodies.get(1));
-    assertEquals(
-        bodies.get(0).replace("workspace-admin", "workspace").replace("\"7\"", "\"8\""),
-        bodies.get(1),
-        "the kind is the only thing the admin flag changes");
+  /** A minted token, as qits-idp answers one. */
+  private static Answer minted(String tokenId) {
+    return new Answer(
+        201,
+        "{\"tokenId\":\""
+            + tokenId
+            + "\",\"token\":\"qits_tok_"
+            + tokenId
+            + "\",\"subject\":\"tok-workspace-"
+            + tokenId
+            + "\"}");
   }
 
   @Test
   public void anUnresolvedProjectCostsTheScopeAndNotTheLaunch() throws Exception {
     // The registry could not name the project. That is a moment, not a verdict, and a workspace that
-    // does not start is a worse answer than a credential scoped as every one of them was before.
+    // does not start is a worse answer than a token scoped as every one of them was before.
     // No member at all — never a blank value and never "*", both of which qits-idp refuses.
-    String url =
-        serve(List.of(new Answer(201, "{\"clientId\":\"ws-7-a\",\"secret\":\"s3cr3t\"}")));
+    String url = serve(List.of(minted("t-7")));
 
-    assertEquals(
-        Optional.of(new WorkspaceCredential("ws-7-a", "s3cr3t")),
-        commissionerAgainst(url).commission(7L, null));
+    assertTrue(commissionerAgainst(url).commissionToken(7L, null, List.of()).isPresent());
     assertFalse(bodies.get(0).contains("project"), bodies.get(0));
     assertFalse(bodies.get(0).contains("*"), bodies.get(0));
 
     // Blank and whitespace are the same fact as absent, and travel the same way.
-    commissionerAgainst(url).commission(8L, "   ");
+    commissionerAgainst(url).commissionToken(8L, "   ", List.of());
     assertFalse(bodies.get(1).contains("project"), bodies.get(1));
   }
 
   @Test
-  public void anIdpThatPredatesTheClaimStillCommissions() throws Exception {
-    // The deploy order this change ships in: this service moves before the issuer does. The
-    // commission API ignores members it does not know, so the call lands and the credential is
-    // simply unscoped until the issuer catches up — measured against the live idp, which answered
-    // the access-denied of an unentitled caller rather than a 400 about the body.
-    String url =
-        serve(List.of(new Answer(201, "{\"clientId\":\"ws-9-a\",\"secret\":\"s3cr3t\"}")));
-
-    assertEquals(
-        Optional.of(new WorkspaceCredential("ws-9-a", "s3cr3t")),
-        commissionerAgainst(url).commission(9L, A_PROJECT),
-        "the answer is read for the pair and nothing else");
-  }
-
-  @Test
-  public void withTheSwitchOffNothingIsCommissionedAndNobodyIsCalled() throws Exception {
+  public void withTheSwitchOffNothingIsWiredAndNobodyIsCalled() throws Exception {
     String url = serve(List.of(new Answer(500, null)));
     IdpCredentialCommissioner commissioner = commissionerAgainst(url);
     commissioner.enabled = false;
 
-    // The shipped posture. Empty is a configuration, not a failure — the same standing as no
+    // The shipped posture. Not wired is a configuration, not a failure — the same standing as no
     // implementation at all — so a workspace launches with no credential and no error.
-    assertEquals(Optional.empty(), commissioner.commission(7L, A_PROJECT));
+    assertFalse(commissioner.isWired());
+    assertEquals(Optional.empty(), commissioner.commissionToken(7L, A_PROJECT, null));
     commissioner.decommission("ws-7-a");
+    commissioner.deleteToken("t-1");
     assertEquals(List.of(), commissioner.list());
+    assertEquals(List.of(), commissioner.listTokens());
     assertEquals(List.of(), requests, "an unwired commissioner dials nothing");
   }
 
@@ -201,8 +150,21 @@ public class IdpCredentialCommissionerTest {
     commissioner.clientSecret = Optional.empty();
 
     // The switch on but no secret in the process is the same state: there is nothing to
-    // authenticate with, so there is nothing to commission against.
-    assertEquals(Optional.empty(), commissioner.commission(7L, A_PROJECT));
+    // authenticate with, so there is nothing to mint against.
+    assertFalse(commissioner.isWired());
+    assertEquals(Optional.empty(), commissioner.commissionToken(7L, A_PROJECT, List.of()));
+    assertEquals(List.of(), requests);
+  }
+
+  /**
+   * Wired is a question about the configuration alone (qits-876): a DIRECT provision with no edge
+   * plane asks it to decide whether to refuse, and the answer costs no call.
+   */
+  @Test
+  public void aWiredDeploymentSaysSoWithoutCallingAnybody() throws Exception {
+    String url = serve(List.of(new Answer(500, null)));
+
+    assertTrue(commissionerAgainst(url).isWired());
     assertEquals(List.of(), requests);
   }
 
@@ -210,15 +172,12 @@ public class IdpCredentialCommissionerTest {
   public void aWindowIsHeldThroughAndTheAttemptAfterItLands() throws Exception {
     // The measured failure mode: a redeploy replaces qits-platform-idp and the next calls answer
     // 401 while the later ones pass. A verdict-shaped status that is really about the moment.
-    String url =
-        serve(
-            List.of(
-                new Answer(401, "{\"error\":\"invalid_client\"}"),
-                new Answer(201, "{\"clientId\":\"ws-7-b\",\"secret\":\"s3cr3t\"}")));
+    String url = serve(List.of(new Answer(401, "{\"error\":\"invalid_client\"}"), minted("t-8")));
 
-    Optional<WorkspaceCredential> issued = commissionerAgainst(url).commission(7L, A_PROJECT);
+    Optional<WorkspaceToken> issued =
+        commissionerAgainst(url).commissionToken(7L, A_PROJECT, List.of());
 
-    assertEquals(Optional.of(new WorkspaceCredential("ws-7-b", "s3cr3t")), issued);
+    assertEquals("t-8", issued.orElseThrow().tokenId());
     assertEquals(2, requests.size(), "the first answer was held through, not taken as a verdict");
   }
 
@@ -229,17 +188,19 @@ public class IdpCredentialCommissionerTest {
     // Not a moment, so not retried — and it throws rather than answering empty, because a wired
     // issuer that refused is not the same fact as no issuer at all. The launch fails loudly.
     RuntimeException failure =
-        assertThrows(RuntimeException.class, () -> commissionerAgainst(url).commission(7L, A_PROJECT));
+        assertThrows(
+            RuntimeException.class,
+            () -> commissionerAgainst(url).commissionToken(7L, A_PROJECT, null));
     assertTrue(failure.getMessage().contains("workspace 7"), failure.getMessage());
     assertEquals(1, requests.size(), "a refusal is one attempt");
   }
 
   @Test
-  public void anAlreadyGoneCredentialIsADecommissionThatSucceeded() throws Exception {
+  public void anAlreadyGoneClientIsADecommissionThatSucceeded() throws Exception {
     String url = serve(List.of(new Answer(404, "{\"error\":\"not_found\"}")));
 
-    // 404 is the state the call was asking for. A teardown must never throw — everything it runs
-    // after has already happened.
+    // 404 is the state the call was asking for. A give-back must never throw — the reconcile and
+    // the retired runner's give-back run it as housekeeping.
     commissionerAgainst(url).decommission("ws-7-a");
     assertEquals(List.of("DELETE /api/clients/ws-7-a"), requests);
   }
@@ -273,39 +234,23 @@ public class IdpCredentialCommissionerTest {
             new CredentialCommissioner.Commission("ws-7-a", "workspace", "7"),
             new CredentialCommissioner.Commission("run-3", "run", "3")),
         held);
-    // The kind travels because the reconcile filters on it: a credential commissioned for something
+    // The kind travels because the reconcile filters on it: a client commissioned for something
     // that is not a workspace is not the workspace rule's to sweep.
     assertFalse(held.get(1).contextKind().equals(CredentialCommissioner.CONTEXT_KIND));
   }
 
   @Test
-  public void aCommissionStatesTheGitRefsItWasGiven() throws Exception {
-    String url =
-        serve(List.of(new Answer(201, "{\"clientId\":\"ws-7-a\",\"secret\":\"s3cr3t\"}")));
+  public void aMintThatStatesNoGitRefsSendsNoMember() throws Exception {
+    String url = serve(List.of(minted("t-7")));
 
-    commissionerAgainst(url)
-        .commission(7L, A_PROJECT, List.of("refs/heads/epic/e", "refs/heads/task/e/*"));
-
-    // Contract C2: `gitRefs` beside `contextKind`, `contextId` and the claims.
-    assertTrue(
-        bodies.get(0).contains("\"gitRefs\":[\"refs/heads/epic/e\",\"refs/heads/task/e/*\"]"),
-        bodies.get(0));
-    assertTrue(bodies.get(0).contains("\"contextKind\":\"workspace\""), bodies.get(0));
-  }
-
-  @Test
-  public void aCommissionThatStatesNoGitRefsSendsNoMember() throws Exception {
-    String url =
-        serve(List.of(new Answer(201, "{\"clientId\":\"ws-7-a\",\"secret\":\"s3cr3t\"}")));
-
-    commissionerAgainst(url).commission(7L, A_PROJECT);
+    commissionerAgainst(url).commissionToken(7L, A_PROJECT, null);
 
     // Not stated means no git_refs claim at all — not an explicit null for the idp to read.
     assertFalse(bodies.get(0).contains("gitRefs"), bodies.get(0));
   }
 
   @Test
-  public void aRefusedGitRefListIsCommissionedAgainPushingNothing() throws Exception {
+  public void aRefusedGitRefListIsMintedAgainPushingNothingAndSaysSo() throws Exception {
     // An idp without C2 ignores the member, so a 400 is a C2 idp refusing the list. Fail closed:
     // the workspace launches with [] and never without the member.
     String url =
@@ -315,7 +260,7 @@ public class IdpCredentialCommissionerTest {
                     400,
                     "{\"error\":\"invalid_request\",\"error_description\":\"gitRefs has 501"
                         + " entries\"}"),
-                new Answer(201, "{\"clientId\":\"ws-7-b\",\"secret\":\"s3cr3t\"}")));
+                minted("t-9")));
     IdpCredentialCommissioner commissioner = commissionerAgainst(url);
     List<LogRecord> errors = new CopyOnWriteArrayList<>();
     Handler capture =
@@ -336,15 +281,15 @@ public class IdpCredentialCommissionerTest {
     java.util.logging.Logger logger =
         java.util.logging.Logger.getLogger(IdpCredentialCommissioner.class.getName());
     logger.addHandler(capture);
-    Optional<WorkspaceCredential> issued;
+    Optional<WorkspaceToken> issued;
     try {
-      issued = commissioner.commission(7L, A_PROJECT, List.of("refs/heads/ticket/x"));
+      issued = commissioner.commissionToken(7L, A_PROJECT, List.of("refs/heads/ticket/x"));
     } finally {
       logger.removeHandler(capture);
     }
 
-    assertEquals(Optional.of(new WorkspaceCredential("ws-7-b", "s3cr3t")), issued);
-    assertEquals(List.of("POST /api/clients", "POST /api/clients"), requests);
+    assertEquals("t-9", issued.orElseThrow().tokenId());
+    assertEquals(List.of("POST /api/tokens", "POST /api/tokens"), requests);
     assertTrue(bodies.get(0).contains("\"gitRefs\":[\"refs/heads/ticket/x\"]"), bodies.get(0));
     assertTrue(bodies.get(1).contains("\"gitRefs\":[]"), "may push nothing: " + bodies.get(1));
     assertTrue(
@@ -363,7 +308,7 @@ public class IdpCredentialCommissionerTest {
     // There is nothing narrower to ask for, so the refusal is an answer about the request.
     assertThrows(
         RuntimeException.class,
-        () -> commissionerAgainst(url).commission(7L, A_PROJECT, List.of()));
+        () -> commissionerAgainst(url).commissionToken(7L, A_PROJECT, List.of()));
     assertEquals(1, requests.size());
   }
 
@@ -396,8 +341,8 @@ public class IdpCredentialCommissionerTest {
   }
 
   /**
-   * An admin row's token is of the admin kind (qits-1084), picked by {@code contextKindFor} exactly
-   * as the pair's is; an unscoped one (the editor) states no claims at all.
+   * An admin row's token is of the admin kind (qits-1084), picked by {@code contextKindFor}; an
+   * unscoped one states no claims at all.
    */
   @Test
   public void anAdminRowsTokenIsMintedOfTheAdminKindAndTheEditorsUnscoped() throws Exception {
@@ -473,37 +418,6 @@ public class IdpCredentialCommissionerTest {
     commissionerAgainst(url).commissionAgentToken("a-1", null, List.of(), false);
 
     assertTrue(bodies.get(0).contains("\"claims\":{\"agent\":\"a-1\"}"), bodies.get(0));
-  }
-
-  @Test
-  public void aRefusedGitRefListMintsTheTokenAgainPushingNothing() throws Exception {
-    String url =
-        serve(
-            List.of(
-                new Answer(400, "{\"error\":\"too many refs\"}"),
-                new Answer(
-                    201,
-                    "{\"tokenId\":\"t-1\",\"token\":\"qits_tok_abc\","
-                        + "\"subject\":\"tok-workspace-t-1\"}")));
-
-    assertTrue(
-        commissionerAgainst(url)
-            .commissionToken(7L, A_PROJECT, List.of("refs/heads/task/a"))
-            .isPresent());
-    assertEquals(List.of("POST /api/tokens", "POST /api/tokens"), requests);
-    assertTrue(bodies.get(1).contains("\"gitRefs\":[]"), bodies.get(1));
-  }
-
-  @Test
-  public void anUnwiredDeploymentMintsNoTokenAndCallsNobody() throws Exception {
-    String url = serve(List.of(new Answer(500, null)));
-    IdpCredentialCommissioner commissioner = commissionerAgainst(url);
-    commissioner.enabled = false;
-
-    assertEquals(Optional.empty(), commissioner.commissionToken(7L, A_PROJECT, null));
-    commissioner.deleteToken("t-1");
-    assertEquals(List.of(), commissioner.listTokens());
-    assertEquals(List.of(), requests);
   }
 
   @Test

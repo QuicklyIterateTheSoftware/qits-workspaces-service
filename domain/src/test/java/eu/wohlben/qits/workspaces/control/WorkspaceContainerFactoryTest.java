@@ -79,7 +79,6 @@ class WorkspaceContainerFactoryTest {
     f.qitsHostResolver = resolver("qits");
     f.qitsPort = "8080";
     f.containerGitUrl = "http://qits-platform-edge:8080";
-    f.idpUrl = "http://qits-idp:8080/idp";
     // A live project scope, so the daemon self-clones name-addressed. Stubbed (the real resolver
     // needs a tx + DB); the no-scope fallback has its own test.
     f.nameResolver =
@@ -88,7 +87,7 @@ class WorkspaceContainerFactoryTest {
     // No repository registry by default — the lookup fallback has its own test.
     f.repositories = StubInstance.empty();
     // No credential lookup by default: the shipped posture is no issuer wired, so a container
-    // carries no commissioned pair. The two cases that do have one set this themselves.
+    // carries no workspace token. The cases that do have one set this themselves.
     f.credentials = StubInstance.empty();
     // No posture lookup either, which is the "port not installed" answer and must read as no admin
     // workspace exists — the socket is the one thing an absence may never grant.
@@ -372,56 +371,35 @@ class WorkspaceContainerFactoryTest {
   }
 
   @Test
-  void aCommissionedWorkspaceCarriesItsPlatformCredentialAsEnv() {
-    WorkspaceContainerFactory f = factory();
-    f.credentials =
-        StubInstance.of(rowId -> Optional.of(new WorkspaceCredential("ws-1-a", "s3cr3t")));
-
-    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
-
-    // The pair the workspace authenticates to the platform with — registry pulls and pushes from
-    // inside the container, once reads are gated. Two variables, both or neither.
-    assertEnv(c, "QITS_COMMISSIONED_CLIENT_ID", "ws-1-a");
-    assertEnv(c, "QITS_COMMISSIONED_CLIENT_SECRET", "s3cr3t");
-    assertEnv(c, "GIT_CONFIG_GLOBAL", "/etc/qits-gitconfig");
-    assertEnv(c, "QITS_GIT_AUTH_HOST", "qits-platform-edge:8080");
-    assertEnv(c, "QITS_GIT_AUTH_TOKEN_URL", "http://qits-idp:8080/idp/token");
-    // One platform-wide audience for both (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C4) — no longer
-    // qits-githost-specific or environment-qualified.
-    assertEnv(c, "QITS_GIT_AUTH_AUDIENCE", "qits-platform");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL", "http://qits-idp:8080/idp/token");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE", "qits-platform");
-  }
-
-  @Test
-  void noCommissionMeansNoCredentialEnvAtAll() {
+  void noTokenMeansNoCredentialEnvAtAll() {
     // Both spellings of "not wired" — no lookup installed, and one that answers empty — and the
-    // half-answer that must never become half a pair.
+    // half-answer that must never become half a credential.
     for (Instance<WorkspaceCredentials> lookup :
         List.of(
             StubInstance.<WorkspaceCredentials>empty(),
             StubInstance.<WorkspaceCredentials>of(rowId -> Optional.empty()),
             StubInstance.<WorkspaceCredentials>of(
-                rowId -> Optional.of(new WorkspaceCredential("ws-1-a", " "))))) {
+                rowId -> Optional.of(new WorkspaceToken("tok-id-1", "qits_tok_1", " "))))) {
       WorkspaceContainerFactory f = factory();
       f.credentials = lookup;
 
       WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
 
-      assertFalse(c.env().containsKey("QITS_COMMISSIONED_CLIENT_ID"), c.env().toString());
-      assertFalse(c.env().containsKey("QITS_COMMISSIONED_CLIENT_SECRET"), c.env().toString());
-      assertFalse(c.env().containsKey("QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL"), c.env().toString());
-      assertFalse(c.env().containsKey("QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE"), c.env().toString());
+      for (String key :
+          List.of("QITS_TOKEN", "QITS_TOKEN_SUBJECT", "GIT_CONFIG_GLOBAL", "QITS_GIT_AUTH_HOST")) {
+        assertFalse(c.env().containsKey(key), key + " in " + c.env());
+      }
+      assertEnv(c, "QITS_WORKSPACE_DAEMON_URL", "ws://qits:8080/workspaces/daemon/1");
     }
   }
 
   /**
    * A row holding a workspace token (qits-1084) is addressed through the WIRED address planes — the
    * bean the commission decided on — rather than this factory's own domain key, and carries the
-   * token and none of the pair block, even when a pair lookup would also answer.
+   * token: no client pair, no token url and no audience.
    */
   @Test
-  void aTokenHoldingRowTakesTheWiredPlaneAndCarriesNoPair() {
+  void aTokenHoldingRowTakesTheWiredPlaneAndCarriesTheToken() {
     WorkspaceContainerFactory f = factory();
     f.addressPlanes =
         StubInstance.of(
@@ -432,18 +410,8 @@ class WorkspaceContainerFactoryTest {
               }
             });
     f.credentials =
-        StubInstance.of(
-            new WorkspaceCredentials() {
-              @Override
-              public Optional<WorkspaceCredential> forWorkspace(Long rowId) {
-                return Optional.of(new WorkspaceCredential("ws-1-a", "s3cr3t"));
-              }
-
-              @Override
-              public Optional<WorkspaceToken> tokenFor(Long rowId) {
-                return Optional.of(new WorkspaceToken("tok-id-1", "qits_tok_1", "tok-workspace-1"));
-              }
-            });
+        StubInstance.<WorkspaceCredentials>of(
+            rowId -> Optional.of(new WorkspaceToken("tok-id-1", "qits_tok_1", "tok-workspace-1")));
 
     WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
 
@@ -452,6 +420,7 @@ class WorkspaceContainerFactoryTest {
     assertEnv(c, "QITS_TOKEN", "qits_tok_1");
     assertEnv(c, "QITS_TOKEN_SUBJECT", "tok-workspace-1");
     assertEnv(c, "QITS_GIT_AUTH_HOST", "githost.qits.wired.example");
+    assertEnv(c, "GIT_CONFIG_GLOBAL", "/etc/qits-gitconfig");
     for (String pairKey :
         List.of(
             "QITS_COMMISSIONED_CLIENT_ID",
@@ -465,31 +434,6 @@ class WorkspaceContainerFactoryTest {
     // Everything DIRECT stays: the network and the extra host.
     assertEquals("qits-net", c.network());
     assertEquals(List.of("host.docker.internal:host-gateway"), c.addHosts());
-  }
-
-  /** A token with a blank value or subject is no token: the pair's spec, unchanged. */
-  @Test
-  void aBlankTokenIsNoTokenAndThePairStands() {
-    WorkspaceContainerFactory f = factory();
-    f.credentials =
-        StubInstance.of(
-            new WorkspaceCredentials() {
-              @Override
-              public Optional<WorkspaceCredential> forWorkspace(Long rowId) {
-                return Optional.of(new WorkspaceCredential("ws-1-a", "s3cr3t"));
-              }
-
-              @Override
-              public Optional<WorkspaceToken> tokenFor(Long rowId) {
-                return Optional.of(new WorkspaceToken("tok-id-1", " ", "tok-workspace-1"));
-              }
-            });
-
-    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
-
-    assertFalse(c.env().containsKey("QITS_TOKEN"), c.env().toString());
-    assertEnv(c, "QITS_COMMISSIONED_CLIENT_ID", "ws-1-a");
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_URL", "ws://qits:8080/workspaces/daemon/1");
   }
 
   /** Assert the container carries {@code key} with exactly {@code value} in its environment. */

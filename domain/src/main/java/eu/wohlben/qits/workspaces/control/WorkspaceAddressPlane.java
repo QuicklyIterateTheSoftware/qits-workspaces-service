@@ -14,7 +14,7 @@ import java.util.Locale;
  * address is the PUBLIC name of the service that answers it, {@code <host>.qits.<domain>}, reached
  * through the platform edge. There is no docker network to join and no extra host to add, and no
  * idp token url is composed: nothing in a token-holding container mints. A DIRECT container that
- * holds the client pair is not composed from this record at all; one that holds a workspace token
+ * holds no credential is not composed from this record at all; one that holds a workspace token
  * (an admin or editor row on an edge plane, qits-1084) takes its four addresses from it through
  * {@link WorkspaceContainerFactory#addressEnv}, because the token only works through the edge, and
  * keeps everything else DIRECT — qits-net, the extra host, the docker socket, the editor block.

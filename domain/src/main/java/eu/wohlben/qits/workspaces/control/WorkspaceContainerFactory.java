@@ -4,7 +4,6 @@ import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceImage;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.ZoneId;
@@ -131,13 +130,13 @@ public class WorkspaceContainerFactory {
    * the workspace image derives every package host from it in code — {@code
    * https://registry.qits.<domain>} (qits-artifacts: the {@code @qits} npm scope, the hosted Maven
    * repository) and {@code https://mirror.qits.<domain>} (qits-mirror: the npmjs and Maven Central
-   * caches) — through the public edge, authenticated by the container's commissioned client pair.
+   * caches) — through the public edge, authenticated by the container's workspace token.
    * No URL is configured here and none is injected: a URL handed out by the deployment is how
    * internal addresses ({@code dev-qits-artifacts:8080}) used to leak into committed lockfiles.
    *
    * <p>Unset or blank injects nothing, and the image falls back to the platform's own domain.
    *
-   * <p><b>It rides the spec, so it obeys the spec-hash rule</b> the credential block
+   * <p><b>It rides the spec, so it obeys the spec-hash rule</b> the credential lines
    * carry: environment is part of the spec, and a spec that differs from the running container's
    * is a {@code Recreate.ifChanged} REPLACEMENT. The value is therefore a CONSTANT off config,
    * never derived per call.
@@ -257,9 +256,9 @@ public class WorkspaceContainerFactory {
   @Inject Instance<RepositoryLookup> repositories;
 
   /**
-   * The credential this workspace's container holds toward the platform, injected as {@code
-   * QITS_COMMISSIONED_CLIENT_ID}/{@code …_SECRET} below. A lookup rather than an argument, and
-   * optional rather than required — {@link WorkspaceCredentials} carries both reasons.
+   * The workspace token this workspace's container holds toward the platform, injected as {@code
+   * QITS_TOKEN}/{@code QITS_TOKEN_SUBJECT} below. A lookup rather than an argument, and optional
+   * rather than required — {@link WorkspaceCredentials} carries both reasons.
    */
   @Inject Instance<WorkspaceCredentials> credentials;
 
@@ -267,8 +266,8 @@ public class WorkspaceContainerFactory {
    * The edge plane a DIRECT row that holds a workspace token is addressed through (qits-1084): a
    * {@code qits_tok_} only works through the public edge, which exchanges it for a JWT, so such a
    * container's dial-home, MCP and git addresses are the plane's public names — exactly as a TARGET
-   * spec's are ({@link RunnerWorkspaceSpecs}). Asked only when the row holds a token, so a
-   * pair-holding row never reads it. An {@code Instance<>} for every port's reason here: the
+   * spec's are ({@link RunnerWorkspaceSpecs}). Asked only when the row holds a token, so a row
+   * with no credential never reads it. An {@code Instance<>} for every port's reason here: the
    * hand-built unit-test factory leaves it unresolvable, and then the plane is composed from this
    * factory's own {@code qits.workspace.domain} — the same key {@link WorkspaceAddressPlanes} reads.
    */
@@ -315,15 +314,9 @@ public class WorkspaceContainerFactory {
   }
 
   /**
-   * The commissioned pair for this workspace, or none. A lookup failure costs the credential and
-   * never the container: by the time this runs the provision has already decided a credential is in
-   * hand (or that there is none to have), and a read that stumbles here must not turn a resume into
-   * a failed launch. A blank half is no credential — see the env block for why never half a pair.
-   */
-  /**
    * Whether this workspace's container is the admin kind. <b>Every failure direction is false</b>:
    * no port wired, no row, a read that stumbled. A privilege that could be acquired by a lookup
-   * going wrong would be a privilege nobody granted — unlike the credential above, where an absence
+   * going wrong would be a privilege nobody granted — unlike the workspace token, where an absence
    * costs the container something it was meant to have, an absence here costs it something it was
    * meant not to have.
    */
@@ -343,9 +336,11 @@ public class WorkspaceContainerFactory {
 
 
   /**
-   * The row's workspace token, or none (qits-1084). A lookup failure costs the token and falls to
-   * the pair's reading, for {@link #workspaceCredential}'s reason; a token with a blank value or
-   * subject is no token.
+   * The row's workspace token, or none (qits-1084). A lookup failure costs the token and never the
+   * container: by the time this runs the provision has already decided a token is in hand (or that
+   * there is none to have), and a read that stumbles here must not turn a resume into a failed
+   * launch. A token with a blank value or subject is no token — half a credential is one that
+   * cannot be presented.
    */
   private Optional<WorkspaceToken> workspaceToken(Long rowId) {
     if (rowId == null || credentials == null || !credentials.isResolvable()) {
@@ -376,20 +371,6 @@ public class WorkspaceContainerFactory {
       return addressPlanes.get().plane();
     }
     return WorkspaceAddressPlane.of(set(domain).orElse(""), java.util.List.of());
-  }
-
-  private Optional<WorkspaceCredential> workspaceCredential(Long rowId) {
-    if (!credentials.isResolvable()) {
-      return Optional.empty();
-    }
-    try {
-      return credentials
-          .get()
-          .forWorkspace(rowId)
-          .filter(pair -> present(pair.clientId()) && present(pair.secret()));
-    } catch (RuntimeException e) {
-      return Optional.empty();
-    }
   }
 
   /**
@@ -439,20 +420,6 @@ public class WorkspaceContainerFactory {
   String containerGitUrl;
 
   /**
-   * The audience a container's Git helper AND the daemon's dial-home control socket bearer both
-   * request: the one platform audience (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C4), never a
-   * qits-githost-specific or an environment-qualified one. Every receiver on this platform accepts
-   * it and nothing else, and judges the caller on its roles from there. A literal rather than a
-   * config key: the value is the platform's own name, the same string in every service, so there is
-   * nothing here for a deployment to state.
-   */
-  static final String CONTAINER_TOKEN_AUDIENCE = "qits-platform";
-
-  /** Reuse the one IdP authority this service already uses for its own machine client. */
-  @ConfigProperty(name = "quarkus.oidc-client.qits.auth-server-url")
-  String idpUrl;
-
-  /**
    * The bearer every container's {@code WorkspaceApi} requires — injected as the fifteenth {@code
    * QITS_WORKSPACE_DAEMON_*} var. Read the config key's comment before treating it as a secret.
    */
@@ -466,7 +433,7 @@ public class WorkspaceContainerFactory {
 
   /**
    * The image's git config naming its credential helper: {@code GIT_CONFIG_GLOBAL} on a container
-   * that holds a credential, DIRECT pair or TARGET token alike.
+   * that holds a workspace token, DIRECT or TARGET alike.
    */
   static final String GIT_CONFIG_GLOBAL = "/etc/qits-gitconfig";
 
@@ -612,7 +579,7 @@ public class WorkspaceContainerFactory {
    * the configured git commit identity as {@code GIT_*} env ({@link GitIdentity}), the shared
    * credential + build-cache volumes (whenever configured), the configured resource limits (memory
    * cap, memory+swap total, pids, cpus — whenever configured), the image, and the {@code qits-workspace-daemon}
-   * dial-home env, and the commissioned platform credential when the workspace holds one. The
+   * dial-home env, and the workspace token when the workspace holds one. The
    * container's process is {@code qits-workspace-daemon} via the image
    * ENTRYPOINT (no command is appended) — with no {@code sleep infinity}
    * fallback, so a container that can't run the daemon fails to start rather than lingering
@@ -665,7 +632,7 @@ public class WorkspaceContainerFactory {
     // it dials — the daemon socket, the MCP server and the git base — from the plane, exactly
     // as a TARGET spec does, through the same method (addressEnv). Everything else DIRECT stays:
     // qits-net, the extra host, the docker socket, the editor block, the host-to-daemon tunnel. A
-    // row holding the pair (or nothing) keeps the internal addresses below, byte for byte.
+    // row holding no credential keeps the internal addresses below.
     Optional<WorkspaceToken> token = workspaceToken(rowId);
     WorkspaceAddressPlane edge = token.isPresent() ? edgePlane() : null;
     if (edge != null) {
@@ -710,41 +677,14 @@ public class WorkspaceContainerFactory {
     // own comment for what it is NOT: it is a handshake constant, not a boundary.
     container.env("QITS_WORKSPACE_DAEMON_API_TOKEN", daemonApiToken);
     // The credential this container holds toward the PLATFORM — the other direction from the token
-    // above, which is what the host presents to the daemon. It is an idp client id and secret
-    // commissioned for this container alone (WorkspaceService provisions it, CredentialCommissioner
-    // mints it), so registry pulls and pushes from inside the workspace authenticate as this
-    // workspace rather than as a durable identity shared by everything on the network.
-    //
-    // Both vars or neither: half a pair is a credential that cannot be presented, and a container
-    // launched with one would look configured and fail at the first pull. Absent is the shipped
-    // posture and today's behaviour — no issuer wired, no credential on the row, no env here.
-    //
-    // A row that holds a workspace token instead (qits-1084) carries that and none of the pair
-    // block: QITS_TOKEN, its subject, and the git helper told the plane's githost — tokenEnv, the
-    // TARGET spec's own lines. No token url and no audience: nothing in the container mints.
+    // above, which is what the host presents to the daemon. A row that holds a workspace token
+    // (qits-1084) carries QITS_TOKEN, its subject, and the git helper told the plane's githost —
+    // tokenEnv, the TARGET spec's own lines. No token url and no audience: nothing in the container
+    // mints. A row that holds none — no issuer wired — carries no credential env at all: a DIRECT
+    // provision with an issuer but no edge plane is refused before it composes a spec
+    // (WorkspaceService#commissionFor), so there is no third case to write here.
     if (edge != null) {
       tokenEnv(token.get().token(), token.get().subject(), edge, container::env);
-    } else {
-      workspaceCredential(rowId)
-          .ifPresent(
-              credential -> {
-                container.env("QITS_COMMISSIONED_CLIENT_ID", credential.clientId());
-                container.env("QITS_COMMISSIONED_CLIENT_SECRET", credential.secret());
-                // The image's credential helper mints a fresh bearer for each Git authentication.
-                // It compares Git's requested authority with this value before it ever exchanges the
-                // client secret, so an absolute submodule or an ad-hoc external remote cannot obtain
-                // a platform token.
-                container.env("GIT_CONFIG_GLOBAL", GIT_CONFIG_GLOBAL);
-                container.env("QITS_GIT_AUTH_HOST", gitAuthority(containerGitUrl));
-                container.env("QITS_GIT_AUTH_TOKEN_URL", tokenUrl(idpUrl));
-                container.env("QITS_GIT_AUTH_AUDIENCE", CONTAINER_TOKEN_AUDIENCE);
-                // The same short-lived credential authenticates the daemon's dial-home socket, and —
-                // since C4 — asks for the same one platform audience the Git helper above does. Keep
-                // the token endpoint and target explicit: deriving either from the Git endpoint would
-                // silently put a workspace's control plane behind a different service's policy.
-                container.env("QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL", tokenUrl(idpUrl));
-                container.env("QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE", CONTAINER_TOKEN_AUDIENCE);
-              });
     }
     // Resource limits (opt-out): without a memory cap, every JVM in the container sizes its heap
     // against the whole host's RAM and a dev server can OOM the host. Blank config disables a cap.
@@ -933,22 +873,6 @@ public class WorkspaceContainerFactory {
     }
     String value = configured.trim();
     return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
-  }
-
-  private static String tokenUrl(String idpBase) {
-    return idpBase.replaceAll("/+$", "") + "/token";
-  }
-
-  private static String gitAuthority(String gitBase) {
-    try {
-      URI uri = URI.create(gitBase);
-      if (uri.getScheme() == null || uri.getRawAuthority() == null || uri.getUserInfo() != null) {
-        throw new IllegalArgumentException("not an absolute git host URL");
-      }
-      return uri.getRawAuthority();
-    } catch (RuntimeException badUrl) {
-      throw new IllegalStateException("qits.githost.url must be an absolute URL", badUrl);
-    }
   }
 
   private static String gitBase(String base) {

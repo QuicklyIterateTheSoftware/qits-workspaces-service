@@ -76,20 +76,9 @@ public final class TestWorkspaceContainerFactory {
   }
 
   /**
-   * A factory whose workspaces hold a commissioned platform credential — the shape a deployment with
-   * an issuer wired has. The shipped posture is the other one, which is why the two builders above
-   * leave the lookup empty.
-   */
-  public static WorkspaceContainerFactory commissioned(String clientId, String secret) {
-    WorkspaceContainerFactory f = build(true);
-    f.credentials = StubInstance.of(rowId -> Optional.of(new WorkspaceCredential(clientId, secret)));
-    return f;
-  }
-
-  /**
    * A factory whose workspaces hold a workspace token on an edge plane under {@code domain} — the
-   * shape an admin or editor row has on a deployment with a public {@code QITS_DOMAIN} (qits-1084).
-   * The admin posture, because a DIRECT token row is an admin or editor row.
+   * shape an admin row has on a deployment with a public {@code QITS_DOMAIN} (qits-1084). The admin
+   * posture, because a DIRECT token row is an admin row.
    */
   public static WorkspaceContainerFactory tokenHolding(
       String domain, String token, String subject) {
@@ -97,18 +86,8 @@ public final class TestWorkspaceContainerFactory {
     f.domain = Optional.of(domain);
     f.postures = StubInstance.of(rowId -> true);
     f.credentials =
-        StubInstance.of(
-            new WorkspaceCredentials() {
-              @Override
-              public Optional<WorkspaceCredential> forWorkspace(Long rowId) {
-                return Optional.empty();
-              }
-
-              @Override
-              public Optional<WorkspaceToken> tokenFor(Long rowId) {
-                return Optional.of(new WorkspaceToken("tok-id-" + rowId, token, subject));
-              }
-            });
+        StubInstance.<WorkspaceCredentials>of(
+            rowId -> Optional.of(new WorkspaceToken("tok-id-" + rowId, token, subject)));
     return f;
   }
 
@@ -143,7 +122,6 @@ public final class TestWorkspaceContainerFactory {
     f.qitsHostResolver = resolver();
     f.qitsPort = "8080";
     f.containerGitUrl = "http://qits-platform-edge:8080";
-    f.idpUrl = "http://qits-idp:8080/idp";
     f.daemonApiToken = "qits-workspace-daemon";
     f.autoPushEnabled = true;
     f.nameResolver =
@@ -151,7 +129,7 @@ public final class TestWorkspaceContainerFactory {
             repoId ->
                 Optional.of(new RepositoryAddressResolver.ProjectScopedName("proj-1", "my-repo")));
     f.repositories = StubInstance.empty();
-    // No issuer wired — the shipped posture, so no container carries a commissioned pair.
+    // No issuer wired — the shipped posture, so no container carries a workspace token.
     f.credentials = StubInstance.empty();
     // No posture lookup — an ordinary workspace, which is what every workspace is unless somebody
     // asked otherwise at creation. `admin()` below is the other one.

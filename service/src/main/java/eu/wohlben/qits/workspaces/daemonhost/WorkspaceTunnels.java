@@ -200,15 +200,15 @@ public class WorkspaceTunnels {
    * What a dial-back for one workspace's stream must present beside its nonce (qits-625, qits-812,
    * qits-1084).
    *
-   * <p>A row holding the client pair (or nothing) dials back over {@code qits-net} and the nonce is
-   * its whole authentication, as it always was. A row holding a workspace token — every TARGET row,
+   * <p>A row holding no token — a DIRECT row on a deployment with no issuer — dials back over {@code
+   * qits-net} and the nonce is its whole authentication. A row holding a workspace token — every TARGET row,
    * and a DIRECT admin or editor row on an edge plane — dials back through the edge with that token,
    * so it must also carry a bearer this service validated whose {@code sub} is the row's token
    * subject ({@code boundSubject}); a token-bound row with no subject admits nothing.
    */
   record DialBack(boolean tokenBound, String boundSubject) {
 
-    /** A pair-holding row's: the nonce alone. */
+    /** A row holding no token: the nonce alone. */
     static final DialBack NONCE_ONLY = new DialBack(false, null);
   }
 
@@ -314,8 +314,8 @@ public class WorkspaceTunnels {
    * Who may dial back for {@code workspaceRowId}'s streams: whether the row holds a workspace token
    * and, when it does, the token's subject. A row holding a token — every TARGET row, and a DIRECT
    * admin or editor row on an edge plane (qits-1084) — has a daemon that dials back through the edge
-   * with that token, so its subject is required beside the nonce; a row holding the pair, or
-   * nothing, dials back over {@code qits-net} on the nonce alone. Decided by what the row holds, not
+   * with that token, so its subject is required beside the nonce; a row holding no token dials back
+   * over {@code qits-net} on the nonce alone. Decided by what the row holds, not
    * by its placement. Read off the row on the blocking path that opens a tunnel, never on the event
    * loop that mints a nonce. A row that cannot be read is nonce-only, which is what every row was
    * before tokens — no token-holding row reaches here without a row to read.

@@ -126,14 +126,11 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
   }
 
   /**
-   * Every commissioned client id an ACTIVE workspace currently claims — what the commission
-   * reconcile keeps and decommissions everything else.
-   *
-   * <p>ACTIVE and non-null together are the whole claim, and both halves matter. A resolved row's
-   * credential was given back when it resolved, and a row whose container was deleted has a null
-   * column, so either state leaves whatever qits-idp still holds an orphan. The id is compared
-   * rather than the row's existence, so a recreate — which mints a new pair over the old one — makes
-   * the previous client an orphan the moment it is replaced.
+   * Every idp client id an ACTIVE workspace still names in its legacy {@code
+   * commissioned_client_id} column — what the commission reconcile keeps, decommissioning every
+   * other workspace client qits-idp lists. Nothing writes that column any more, so this answers
+   * empty on every row this version provisioned, and the reconcile gives back every workspace
+   * client it finds; a rollback to a version that wrote the column finds its own clients spared.
    */
   public List<String> liveCommissionedClientIds() {
     return list("status = ?1 and commissionedClientId is not null", WorkspaceStatus.ACTIVE).stream()
