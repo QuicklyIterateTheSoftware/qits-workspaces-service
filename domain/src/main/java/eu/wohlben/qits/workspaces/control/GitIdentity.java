@@ -7,10 +7,10 @@ import java.util.Map;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
- * The single configurable identity every commit qits manufactures is attributed to — the host-side
- * integration merges ({@code WorkspaceService.mergeIntoTarget}), the container-side parent merges,
- * and any commit made inside a workspace container (the coding agent, an action, an ad-hoc {@code
- * git commit}). First-class because the identity used to live as scattered {@code qits@local}
+ * The configurable platform identity the commits qits makes itself are attributed to — the
+ * host-side integration and parent merges ({@code WorkspaceService.mergeIntoTarget}), and any commit
+ * made inside a workspace container outside an agent (an action, an ad-hoc {@code git commit}). An
+ * agent's harness commits as the agent instead: {@link #forAgent} (qits-1666). First-class because the identity used to live as scattered {@code qits@local}
  * literals — and, on the host-side merge path, as an ambient-{@code ~/.gitconfig} dependency that
  * failed with "Committer identity unknown" in identity-less environments. One config-backed bean
  * means an operator sets {@code qits.git.author-name}/{@code qits.git.author-email} once and every
@@ -47,6 +47,27 @@ public class GitIdentity {
     env.put("GIT_AUTHOR_EMAIL", email);
     env.put("GIT_COMMITTER_NAME", name);
     env.put("GIT_COMMITTER_EMAIL", email);
+    return env;
+  }
+
+  /**
+   * The identity env of one agent's harness: author and committer {@code agent-<id>
+   * <agent-<id>@<platformDomain>>}, so a commit names the agent that made it. Several agents share
+   * one workspace container, so this rides in the agent's own harness env, not the container's. A
+   * blank {@code platformDomain} (no public domain configured) falls back to the domain of the
+   * platform's own address.
+   */
+  public Map<String, String> forAgent(String agentId, String platformDomain) {
+    String user = "agent-" + agentId;
+    String domain =
+        platformDomain == null || platformDomain.isBlank()
+            ? email.substring(email.indexOf('@') + 1)
+            : platformDomain;
+    Map<String, String> env = new LinkedHashMap<>();
+    env.put("GIT_AUTHOR_NAME", user);
+    env.put("GIT_AUTHOR_EMAIL", user + "@" + domain);
+    env.put("GIT_COMMITTER_NAME", user);
+    env.put("GIT_COMMITTER_EMAIL", user + "@" + domain);
     return env;
   }
 

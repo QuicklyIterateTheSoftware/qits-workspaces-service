@@ -228,6 +228,25 @@ public class AgentServiceTest {
   }
 
   @Test
+  void aStartCarriesTheAgentsOwnCommitIdentity() {
+    // qits-1666: author and committer name the agent, not the platform, under qits.<domain>.
+    AgentService.Dispatch dispatched = dispatch("w-identity", true, "go");
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+
+    service.reconcile();
+
+    AgentDaemon.Start start =
+        daemon.starts().stream().filter(s -> s.agentId().equals(agentId)).findFirst().orElseThrow();
+    assertEquals("agent-" + agentId, start.env().get("GIT_AUTHOR_NAME"));
+    assertEquals("agent-" + agentId + "@qits.example.test", start.env().get("GIT_AUTHOR_EMAIL"));
+    assertEquals("agent-" + agentId, start.env().get("GIT_COMMITTER_NAME"));
+    assertEquals("agent-" + agentId + "@qits.example.test", start.env().get("GIT_COMMITTER_EMAIL"));
+    liveness.markDead(slot);
+  }
+
+  @Test
   void aStartCarriesNoAgentConfigWhenEitherPropertyIsBlank() {
     // qits-1382: this class's profile ships both qits.workspace.agent-config.* blank, the shipped
     // default; AgentConfigStartTest is the pair-set half, on the shared profile that pins them.

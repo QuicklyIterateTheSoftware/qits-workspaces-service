@@ -44,4 +44,21 @@ class GitIdentityTest {
         List.of("-c", "user.email=qits-bot@example.com", "-c", "user.name=qits-bot"),
         identity().inlineArgs());
   }
+
+  @Test
+  void anAgentCommitsAsItselfUnderThePlatformDomain() {
+    assertEquals(
+        Map.of(
+            "GIT_AUTHOR_NAME", "agent-a1",
+            "GIT_AUTHOR_EMAIL", "agent-a1@qits.wohlben.eu",
+            "GIT_COMMITTER_NAME", "agent-a1",
+            "GIT_COMMITTER_EMAIL", "agent-a1@qits.wohlben.eu"),
+        identity().forAgent("a1", "qits.wohlben.eu"));
+  }
+
+  @Test
+  void anAgentWithNoPublicDomainTakesThePlatformAddressDomain() {
+    assertEquals("agent-a1@example.com", identity().forAgent("a1", null).get("GIT_AUTHOR_EMAIL"));
+    assertEquals("agent-a1@example.com", identity().forAgent("a1", " ").get("GIT_COMMITTER_EMAIL"));
+  }
 }
