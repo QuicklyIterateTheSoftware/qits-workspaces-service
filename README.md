@@ -300,79 +300,61 @@ none of it is a leftover of regular DIRECT rows:
 - The volume and resource keys — `qits.workspace.workspace-volume-prefix`, `claude-volume`,
   `maven-volume`, `pnpm-volume`, `memory-limit`, `memory-swap-limit` — the platform host's volumes
   and limits for admin containers (the limits are a TARGET lease's too).
-- `commissionFor`, `CommissionReconciler` and the `V3` columns — the commissioned client pair is the
-  admin container's credential on a deployment with **no** edge plane. With a public
-  `QITS_DOMAIN` an admin container holds a workspace token instead, as every TARGET row's
-  lease does (qits-1084) — see "The credential a workspace container holds".
+- `commissionFor` and `CommissionReconciler` — an admin container's workspace token is minted on
+  provision and reaped by the hourly reconcile, as every TARGET row's lease token is (qits-1084);
+  see "The credential a workspace container holds".
 
 ### The credential a workspace container holds
 
-A workspace container is a **dynamic context**, so it gets an idp client of its own rather than a
-share of a durable one: commissioned from qits-idp when the container is provisioned, injected as
-container environment, and given back when the container is torn down. That pair is what lets a
-workspace pull and push through the edge as *itself* once anonymous reads are gated — the model is
-the superproject's `authenticated-reads-plan.md`.
-
-    QITS_COMMISSIONED_CLIENT_ID       the commissioned idp client
-    QITS_COMMISSIONED_CLIENT_SECRET   its secret
-    QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL  its token endpoint
-    QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE   the platform audience, qits-platform (C4)
-
-**On a deployment with a public `QITS_DOMAIN` an admin container holds a workspace token
-instead of that pair** (qits-1084) — the same non-expiring `qits_tok_` every TARGET container holds,
-minted at `POST /idp/api/tokens` and stored on the row. An admin row's is of kind `workspace-admin`
-(so `qits:agent` and `qits:admin-agent`), the editor's of kind `workspace` and unscoped. The
-container carries
+A workspace container is a **dynamic context**, so it gets a credential of its own rather than a
+share of a durable one: a **workspace token**, the same non-expiring `qits_tok_` every TARGET
+container holds, minted at `POST /idp/api/tokens` when the container is provisioned, stored on the
+row, injected as container environment, and deleted when the container is torn down. An admin row's
+is of kind `workspace-admin` (so `qits:agent` and `qits:admin-agent`), every other row's of kind
+`workspace`. The container carries
 
     QITS_TOKEN                        the token
     QITS_TOKEN_SUBJECT                its subject, tok-…: what the daemon socket binds the agent to
     GIT_CONFIG_GLOBAL                 /etc/qits-gitconfig, the image's git credential helper
     QITS_GIT_AUTH_HOST                githost.qits.<domain>, the one host that helper answers for
 
-and none of the pair block above. Because the edge is the only thing that accepts a `qits_tok_`
-(it exchanges it for a JWT), such a container's daemon socket, MCP server and git base are the
-public `<app>.qits.<domain>` names rather than the internal ones; it is otherwise the same DIRECT
-container — on qits-net, the admin one with the docker socket, the editor with its port and project
-list. With **no** public domain the pair is commissioned as before and a WARN says so; that is the
-only case the pair is still for. A container keeps whichever credential it was launched with until it
-is recreated or deleted, and teardown and the hourly reconcile treat the token exactly as they treat
-the pair.
+and nothing a container would mint with: no client pair, no token url, no audience. Because the edge
+is the only thing that accepts a `qits_tok_` (it exchanges it for a JWT), such a container's daemon
+socket, MCP server and git base are the public `<app>.qits.<domain>` names rather than the internal
+ones; it is otherwise the same DIRECT container — on qits-net, with the docker socket.
 
-The client pair and its control-socket token coordinates are injected together or not at all; a
-partial set cannot authenticate and is never a valid container specification. They sit beside
-`QITS_WORKSPACE_DAEMON_API_TOKEN`, which points the **other** way — that one is the host proving
-itself to the in-container API, this set is the container proving itself to the platform. The daemon
-uses the token URL and audience with its client pair to authenticate its dial-home control socket;
-Git asks for the same one platform audience now (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C4) rather than a
-qits-githost-specific one. The socket takes `qits:system` or `qits:agent`; a token with `qits:agent`
-alone opens only the socket of the workspace whose commissioned client is its `sub`, and any other
-path is a 403.
+**With no public `QITS_DOMAIN` an admin provision is refused** (qits-876): a token only works
+through the edge, and there is no other credential to give, so the ensure answers 503
+`EDGE_PLANE_UNCONFIGURED` naming the missing domain, before anything is minted or run — the row
+reads FAILED with that reason and no container is started. A deployment with no issuer wired has
+nothing to refuse: its containers launch with no credential at all. The hourly idp client pair
+(`QITS_COMMISSIONED_CLIENT_ID`/`_SECRET`) this service used to commission is gone; the `V3` columns
+that held it stay, unwritten, so a rollback still reads them.
 
-**It is scoped to the repository's project.** The commission states
+The token sits beside `QITS_WORKSPACE_DAEMON_API_TOKEN`, which points the **other** way — that one
+is the host proving itself to the in-container API, the token is the container proving itself to the
+platform. The socket takes `qits:system` or `qits:agent`; a token with `qits:agent` alone opens only
+the socket of the workspace whose token subject is its `sub`, and any other path is a 403.
+
+**It is scoped to the repository's project.** The mint states
 `{"claims":{"project":"<projectId>"}}`, resolved from the repository the workspace branches, and
-qits-idp turns that into a `project` claim on every token the pair mints. That is what lets a
+qits-idp turns that into a `project` claim on the JWT the edge exchanges it for. That is what lets a
 resource service judge this container on its project rather than on its platform role alone —
 qits-ci's manual trigger reads exactly this claim to decide which repositories a caller may have
 evaluated, so a workspace agent reaches its own project's pipelines and nobody else's. The project
 the credential is scoped to and the one the container is told about
 (`QITS_WORKSPACE_DAEMON_PROJECT_ID`) are the same fact from the same registry.
 
-**An admin workspace's credential is of its own kind** (qits-628 follow-up). An ADMIN row is
-commissioned with `contextKind: "workspace-admin"`, which qits-idp issues `qits:agent` **and**
-`qits:admin-agent` — the role every door here (and on the platform) that admits `qits:admin` also
-admits by name, because that container already holds the host's docker socket. Every other row, the
-editor included, stays `contextKind: "workspace"` and `qits:agent` alone. The kind is the issuer's
-record and is not in the container's environment, so the spec — and with it `Recreate.ifChanged` — is
-unchanged by it. **An admin container that already exists keeps the `workspace` credential it was
-launched with** until it is next recreated or deleted (a stop and start keeps the pair, by design);
-only then is a `workspace-admin` one commissioned. `CommissionReconciler` reaps and spares both kinds
-by the one rule. **qits-idp must be released first**: an idp that does not know the kind gives it no
-role at all, not even `qits:agent`.
+**An admin workspace's credential is of its own kind** (qits-628 follow-up): `contextKind:
+"workspace-admin"`, which qits-idp issues `qits:agent` **and** `qits:admin-agent` — the role every
+door here (and on the platform) that admits `qits:admin` also admits by name, because that container
+already holds the host's docker socket. The kind is the issuer's record and is not in the container's
+environment, so the spec — and with it `Recreate.ifChanged` — is unchanged by it.
+`CommissionReconciler` reaps and spares both kinds by the one rule.
 
-A project the registry cannot name **costs the scope, not the launch**: the commission states no
-claim and the credential is issued as every workspace credential was before scoping existed. A
-blinking registry must not be able to stop a workspace from starting, and it is never sent as `"*"` —
-qits-idp refuses the wildcard on a commission by design.
+A project the registry cannot name **costs the scope, not the launch**: the mint states no claim and
+the token is issued unscoped. A blinking registry must not be able to stop a workspace from
+starting, and it is never sent as `"*"` — qits-idp refuses the wildcard by design.
 
 **It states that the container may push nothing**: `"gitRefs": []`, never an absent list, which
 would be unscoped. Since qits-1152 the push scope is the agent's — its token carries the refs of its
@@ -380,19 +362,18 @@ own branch (`agent_worktree.git_refs`), and the daemon pushes with it — so a w
 refs of its own. The per-workspace list and its narrowing (contracts C4 and C5 in the superproject's
 `principal-bound-git-refs-plan.md`) are gone, and `V27` dropped their columns (qits-1385).
 
-**It mirrors the container's lifetime, not the row's.** A provision commissions, a recreate
-commissions afresh and hands the old one back, `deleteContainer` hands it back while the workspace
-stays ACTIVE (the next start commissions again), and every resolution — discard, the
-branch-gone abandon — hands it back for good. **A stop-then-start keeps it**, because the
-orchestrator has no start verb: a stopped container is started by presenting its spec again, and a
-spec whose environment moved is a *replaced* container. That is also why the pair lives on the
-workspace row rather than being handed in at provision time.
+**It mirrors the container's lifetime, not the row's.** A provision mints, a recreate mints afresh
+and deletes the old one, `deleteContainer` deletes it while the workspace stays ACTIVE (the next
+start mints again), and every resolution — discard, the branch-gone abandon — deletes it for good.
+**A stop-then-start keeps it**, because the orchestrator has no start verb: a stopped container is
+started by presenting its spec again, and a spec whose environment moved is a *replaced* container.
+That is also why the token lives on the workspace row rather than being handed in at provision time.
 
 **It is off unless this service holds its own idp credential.** There is no key of ours:
 `quarkus.oidc-client.qits.client-enabled` decides it, the same switch that decides whether a machine
-token is fetched for qits-containers. Off, nothing is commissioned and no container carries the two
-variables — exactly what every workspace did before. Where the commission API answers is derived from
-`quarkus.oidc-client.qits.auth-server-url`, so the two can never name different idps.
+token is fetched for qits-containers. Off, nothing is minted and no container carries a credential.
+Where the commission API answers is derived from `quarkus.oidc-client.qits.auth-server-url`, so the
+two can never name different idps.
 
 **The credential is the deployer's `idp:client` resource, and configuring nothing is the normal
 state.** `.config/qits/deployments.yml` declares it, and the deployer injects `QITS_RESOURCE_IDP_URL`,
@@ -401,11 +382,12 @@ resource, so `client-enabled` ships **true** (off under `%dev`/`%test`) and ther
 flip by hand. Configuring `QUARKUS_OIDC_CLIENT_*` sets nothing — the old unnamed-client fallback is
 gone.
 
-**A commissioning failure fails the launch**, after holding through
-`qits.workspace.commission.patience` (30s, for an idp mid-redeploy). A workspace is never launched
-half-credentialed. **A decommissioning failure never blocks a teardown** — it is logged, and
-`wiring/CommissionReconciler` asks qits-idp hourly (and at boot) what it is holding and gives back
-whatever no live workspace container claims. That reconcile, not a TTL, is what answers a crash.
+**A failed mint fails the launch**, after holding through `qits.workspace.commission.patience` (30s,
+for an idp mid-redeploy). A workspace is never launched half-credentialed. **A failed deletion never
+blocks a teardown** — it is logged, and `wiring/CommissionReconciler` asks qits-idp hourly (and at
+boot) what it is holding and gives back whatever no live workspace container claims: every workspace
+token no row holds, and every workspace idp client it still lists. That reconcile, not a TTL, is what
+answers a crash.
 
 ## Where it answers
 

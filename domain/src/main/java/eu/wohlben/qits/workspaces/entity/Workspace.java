@@ -137,18 +137,13 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public String result;
 
   /**
-   * The idp client commissioned for this workspace's <em>current container</em>, and its secret.
-   * Both null whenever no container holds a credential — before the first provision, after a
-   * teardown, and in every deployment with no issuer wired.
-   *
-   * <p>They are two columns and not a value object because they are read back one at a time by
-   * {@code PersistedWorkspaceCredentials} and cleared together by every teardown seam. <b>Cleared
-   * with the decommission, never after it</b>: a row naming a client qits-idp no longer has is a
-   * credential nobody can find, and the reconcile would have to guess.
-   *
-   * <p>The secret is here for the reason {@code WorkspaceCredentials} spells out — the container's
-   * spec must be reproducible at every ensure, and the issuer hands a secret out once. It is
-   * {@code text} rather than {@code @Lob}, like every other unbounded string on this entity.
+   * <b>Legacy, and no longer written.</b> The idp client a workspace's container was once
+   * commissioned, and its secret ({@code V3}). Every container this service starts now holds a
+   * workspace token (the three columns below) or no credential at all, so nothing sets these and
+   * nothing reads them as a credential; {@code WorkspaceRepository#liveCommissionedClientIds} still
+   * reads the id, for the commission reconcile, which gives back any client qits-idp still lists
+   * that no ACTIVE row names. The columns stay so that a rollback to a version that wrote them
+   * still reads them; dropping them is a follow-up migration.
    */
   @Column(name = "commissioned_client_id", columnDefinition = "text")
   public String commissionedClientId;
@@ -159,13 +154,14 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   /**
    * The workspace token minted for this row's <em>current container</em> (qits-625, {@code V13}):
    * qits-idp's id for it, the {@code sub} the edge stamps on its JWT, and the value. A TARGET row's
-   * container always holds one; a DIRECT (admin) row's holds one in place of the pair
-   * above whenever the deployment has an edge plane (qits-1084). All three null on a row whose
-   * container holds no token, and never set beside the pair: every commission clears both first.
+   * container always holds one; a DIRECT (admin or editor) row's holds one whenever the deployment
+   * has an edge plane (qits-1084), and a DIRECT provision with no edge plane is refused. All three
+   * null on a row whose container holds no token.
    *
-   * <p>The value is stored for {@link #commissionedClientSecret}'s reason: the spec has to be
-   * reproducible at every start, and qits-idp answers a value once. <b>Cleared with the deletion,
-   * never after it</b>, like the pair above.
+   * <p>The value is stored because the spec has to be reproducible at every start ({@code
+   * WorkspaceCredentials}), and qits-idp answers a value once. <b>Cleared with the deletion, never
+   * after it</b>: a row naming a token qits-idp no longer has is a token nobody can find, and the
+   * reconcile would have to guess.
    */
   @Column(name = "commissioned_token_id", length = 64)
   public String commissionedTokenId;
@@ -177,10 +173,9 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public String commissionedToken;
 
   /**
-   * Whether this row's container holds a workspace token (qits-1084) — the one test every reader
-   * that has to choose between the token and the client pair makes, on either placement. A row that
-   * holds a token reaches the platform through the edge with it, and is bound by its subject; a row
-   * that does not is bound by its commissioned client, if any. Placement no longer decides it.
+   * Whether this row's container holds a workspace token (qits-1084), on either placement. A row
+   * that holds a token reaches the platform through the edge with it, and is bound by its subject;
+   * a row that does not is bound by nothing. Placement does not decide it.
    */
   public boolean holdsToken() {
     return commissionedTokenId != null && !commissionedTokenId.isBlank();
@@ -188,12 +183,14 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
 
   /**
    * The principal this row's own container presents to the platform: its token's subject ({@code
-   * tok-…}) when it {@link #holdsToken holds a token}, else its commissioned client id, else null.
+   * tok-…}) when it {@link #holdsToken holds a token}, else null — which never matches a caller.
    * What the daemon socket's agent binding, the tunnel's dial-back and a dispatch's {@code
-   * agentIdentity} all compare a caller with.
+   * agentIdentity} all compare a caller with. The legacy {@link #commissionedClientId} binds
+   * nothing: no container presents it any more, so a stale value left on a row must not admit
+   * whoever still holds that client.
    */
   public String boundSubject() {
-    return holdsToken() ? commissionedTokenSubject : commissionedClientId;
+    return holdsToken() ? commissionedTokenSubject : null;
   }
 
   /**

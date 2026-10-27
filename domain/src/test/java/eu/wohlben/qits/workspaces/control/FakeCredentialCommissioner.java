@@ -11,30 +11,27 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Test double for {@link CredentialCommissioner} that mints pairs in memory and records every call.
+ * Test double for {@link CredentialCommissioner} that mints tokens in memory and records every call.
  *
- * <p><b>It starts UNWIRED, and that is the point.</b> A bean in {@code src/test} is a bean for every
- * {@code @QuarkusTest} in the module, so a double that commissioned by default would put credential
- * environment into every container the suite launches and quietly change what dozens of unrelated
- * tests are about. Unwired it answers exactly as no implementation does — empty, no credential, no
- * environment — which is also the shipped posture, so the default is the case worth defaulting to.
- * {@link #wire()} turns it on for the test that is about commissioning, and {@link #reset()} turns
- * it back off.
+ * <p><b>Its issuer question starts UNWIRED, and that is the point.</b> A bean in {@code src/test} is
+ * a bean for every {@code @QuarkusTest} in the module, and the suites pin no public domain — so a
+ * double whose {@link #isWired} answered true by default would have every DIRECT (admin or editor)
+ * provision in the suite refused for want of an edge plane, and quietly change what dozens of
+ * unrelated tests are about. Unwired, such a provision launches with no credential, exactly as on a
+ * deployment with no issuer. {@link #wire()} turns the question on for the test that is about
+ * provisioning a DIRECT row's credential, and {@link #reset()} turns it back off. The client listing
+ * answers only while wired, too.
  *
- * <p>The issued pairs are kept, so a test can ask what a workspace was given and whether a later
- * launch was given the same thing.
+ * <p>The idp clients it holds are only ever {@link #plant planted}: nothing commissions a client any
+ * more, and a test of the reconcile or of the retired runner's give-back puts them in place.
  */
 @ApplicationScoped
 public class FakeCredentialCommissioner implements CredentialCommissioner {
 
-  private final AtomicInteger minted = new AtomicInteger();
-  private final Map<String, WorkspaceCredential> live = new LinkedHashMap<>();
-  private final Map<String, String> contexts = new LinkedHashMap<>();
-  private final List<Long> commissionedFor = new CopyOnWriteArrayList<>();
+  private final Map<String, String> live = new LinkedHashMap<>();
   private final List<String> decommissioned = new CopyOnWriteArrayList<>();
 
   private volatile boolean wired;
-  private volatile RuntimeException failure;
 
   /** Behave as a deployment with an issuer configured. */
   public void wire() {
@@ -44,14 +41,8 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
   /** Back to the shipped posture: no issuer, so nothing is commissioned. */
   public void reset() {
     wired = false;
-    failure = null;
-    minted.set(0);
     live.clear();
-    contexts.clear();
-    commissionedFor.clear();
     decommissioned.clear();
-    gitRefs.clear();
-    kinds.clear();
     tokensWired = true;
     tokenFailure = null;
     tokensMinted.clear();
@@ -64,12 +55,12 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
 
   // --- the workspace token (qits-625) ------------------------------------------------------------
   //
-  // WIRED BY DEFAULT, unlike the pair above, and for the opposite reason: a RUNNER start refuses to
-  // queue a row without a token, so a double that minted nothing by default would fail every RUNNER
-  // start in the suite. A DIRECT (admin or editor) row is minted one only when an edge plane
-  // resolves (qits-1084), and the suites pin no public domain, so minting changes nothing about a
-  // DIRECT container unless a test installs a plane. unwireTokens() is the shipped posture with no
-  // issuer.
+  // WIRED BY DEFAULT, unlike the issuer question above, and for the opposite reason: a RUNNER start
+  // refuses to queue a row without a token, so a double that minted nothing by default would fail
+  // every RUNNER start in the suite. A DIRECT (admin or editor) row is minted one only when an edge
+  // plane resolves (qits-1084), and the suites pin no public domain, so minting changes nothing
+  // about a DIRECT container unless a test installs a plane. unwireTokens() is the shipped posture
+  // with no issuer.
 
   private volatile boolean tokensWired = true;
   private volatile RuntimeException tokenFailure;
@@ -217,14 +208,13 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     }
   }
 
-  /** Make the next and every following commission fail the way an unreachable issuer does. */
-  public void failCommissioning(String why) {
-    failure = new IllegalStateException(why);
-  }
-
-  /** Every row id a commission was asked for, in order — including the ones that failed. */
-  public List<Long> commissionedFor() {
-    return List.copyOf(commissionedFor);
+  /**
+   * Whether an issuer is configured: {@link #wire()} was called and {@link #unwireTokens()} was not.
+   * Answered from the two flags alone, as the shipped implementation answers from its config alone.
+   */
+  @Override
+  public boolean isWired() {
+    return wired && tokensWired;
   }
 
   /** Every client id handed back, in order. */
@@ -239,71 +229,11 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     }
   }
 
-  /** Put a commission in place that this service never asked for — an orphan, for the reconcile. */
+  /** Put an idp client in place this service never asked for — an orphan, for the reconcile. */
   public void plant(String clientId, String contextKind, String contextId) {
     synchronized (live) {
-      live.put(clientId, new WorkspaceCredential(clientId, "secret-of-" + clientId));
-      contexts.put(clientId, contextKind + ":" + contextId);
+      live.put(clientId, contextKind + ":" + contextId);
     }
-  }
-
-  /** The project each commission was scoped to, by row id. Null is the unscoped answer. */
-  private final java.util.Map<Long, String> scopes = new java.util.concurrent.ConcurrentHashMap<>();
-
-  /** What the service asked this credential to be scoped to, or null when it asked for nothing. */
-  public String scopeFor(Long rowId) {
-    return scopes.get(rowId);
-  }
-
-  /** The Git refs each commission stated, by row id. Absent is "stated nothing". */
-  private final Map<Long, List<String>> gitRefs = new java.util.concurrent.ConcurrentHashMap<>();
-
-  /** The Git refs the last commission for {@code rowId} stated, or null when it stated none. */
-  public List<String> gitRefsFor(Long rowId) {
-    return gitRefs.get(rowId);
-  }
-
-  private final Map<Long, String> kinds = new java.util.concurrent.ConcurrentHashMap<>();
-
-  /**
-   * The context kind the last commission for {@code rowId} asked for ({@code workspace} or, for an
-   * admin row, {@code workspace-admin}), or null when none was asked.
-   */
-  public String contextKindFor(Long rowId) {
-    return kinds.get(rowId);
-  }
-
-  @Override
-  public Optional<WorkspaceCredential> commission(
-      Long rowId, String projectId, List<String> statedGitRefs, boolean admin) {
-    commissionedFor.add(rowId);
-    // The kind each commission asked for, recorded before the wiring arm like the scope below.
-    kinds.put(rowId, CredentialCommissioner.contextKindFor(admin));
-    if (statedGitRefs != null) {
-      gitRefs.put(rowId, List.copyOf(statedGitRefs));
-    } else {
-      gitRefs.remove(rowId);
-    }
-    // Recorded before the wiring and failure arms, so a test can assert the scope a launch asked for
-    // even on the paths where nothing is issued.
-    if (projectId != null) {
-      scopes.put(rowId, projectId);
-    } else {
-      scopes.remove(rowId);
-    }
-    if (!wired) {
-      return Optional.empty();
-    }
-    if (failure != null) {
-      throw failure;
-    }
-    String clientId = "ws-" + rowId + "-" + minted.incrementAndGet();
-    WorkspaceCredential credential = new WorkspaceCredential(clientId, "secret-" + clientId);
-    synchronized (live) {
-      live.put(clientId, credential);
-      contexts.put(clientId, CredentialCommissioner.contextKindFor(admin) + ":" + rowId);
-    }
-    return Optional.of(credential);
   }
 
   @Override
@@ -311,7 +241,6 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     decommissioned.add(clientId);
     synchronized (live) {
       live.remove(clientId);
-      contexts.remove(clientId);
     }
   }
 
@@ -322,9 +251,9 @@ public class FakeCredentialCommissioner implements CredentialCommissioner {
     }
     synchronized (live) {
       List<Commission> all = new ArrayList<>();
-      for (String clientId : live.keySet()) {
-        String[] context = contexts.getOrDefault(clientId, CONTEXT_KIND + ":").split(":", 2);
-        all.add(new Commission(clientId, context[0], context.length > 1 ? context[1] : ""));
+      for (Map.Entry<String, String> client : live.entrySet()) {
+        String[] context = client.getValue().split(":", 2);
+        all.add(new Commission(client.getKey(), context[0], context.length > 1 ? context[1] : ""));
       }
       return all;
     }

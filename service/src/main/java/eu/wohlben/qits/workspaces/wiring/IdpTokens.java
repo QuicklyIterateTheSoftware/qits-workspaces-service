@@ -25,7 +25,8 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
  * (qits-idp {@code IdpTokensController.commission}), and this service's is one.
  *
  * <p>It mints the per-lease token of kind {@code workspace} a TARGET row holds (qits-625, epic
- * qits-1481, {@code IdpCredentialCommissioner}) and an agent's, and {@code
+ * qits-1481, {@code IdpCredentialCommissioner}), the token a DIRECT admin or editor row holds on an
+ * edge plane (qits-1084) and an agent's, and {@code
  * targethost/LegacyRunnerClients} lists and deletes the retired runners' tokens through it.
  *
  * <p><b>The value is answered once.</b> qits-idp stores a hash; the listing never carries a value,

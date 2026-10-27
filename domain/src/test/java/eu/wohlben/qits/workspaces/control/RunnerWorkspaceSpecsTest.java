@@ -15,8 +15,8 @@ import org.junit.jupiter.api.Test;
  * The lease spec (qits-851, qits-799, qits-802, epic qits-1481): {@code LeaseSpec{image, env, user,
  * limits}} with the DIRECT spec's identity, behaviour, handshake and home environment, every address
  * off the {@link WorkspaceAddressPlane}, the row's workspace token, the public image, user 1000 and
- * the configured limits — and none of the wire aliases or the client pair a DIRECT container
- * carries, nor any env key the WORKSPACE slot policy owns. Plain JUnit over the golden test's fixture, so the DIRECT spec it is compared
+ * the configured limits — and none of the wire aliases a DIRECT container carries, nor any env key
+ * the WORKSPACE slot policy owns. Plain JUnit over the golden test's fixture, so the DIRECT spec it is compared
  * with is the pinned one.
  */
 class RunnerWorkspaceSpecsTest {
@@ -168,10 +168,10 @@ class RunnerWorkspaceSpecsTest {
 
   /**
    * qits-802: the credential is the row's token, with the git helper told the plane's githost, and
-   * nothing of the DIRECT pair block — no client pair, no token url, no audience.
+   * nothing a container would mint with — no client pair, no token url, no audience.
    */
   @Test
-  void carriesTheRowsTokenAndNoneOfTheDirectPairBlock() {
+  void carriesTheRowsTokenAndNothingToMintWith() {
     Map<String, String> env = spec().env();
 
     assertEquals("qits_tok_seven", env.get("QITS_TOKEN"));
@@ -191,35 +191,30 @@ class RunnerWorkspaceSpecsTest {
   }
 
   /**
-   * The two credential env sets are disjoint as qits-802 lists them: what a DIRECT row with a
-   * commissioned pair carries and a RUNNER row never does, and what a RUNNER row carries and a
-   * DIRECT row never does. The two keys both write (the helper's config and its host) are the shared
-   * mechanism, not a credential.
+   * A DIRECT row holding a workspace token (qits-1084) carries the lease's credential keys, in the
+   * same order and with the same values for the same token: the one credential either placement is
+   * given, written by the one method ({@link WorkspaceContainerFactory#tokenEnv}).
    */
   @Test
-  void theTargetAndDirectCredentialSetsAreDisjoint() {
-    // The golden fixture's DIRECT row holds a commissioned pair.
+  void aTokenHoldingDirectRowCarriesTheLeasesCredentialKeys() {
     WorkspaceContainerFactory factory = WorkspaceContainerFactoryGoldenSpecTest.factory();
+    factory.credentials =
+        WorkspaceContainerFactoryGoldenSpecTest.tokenHolding("qits_tok_seven", "tok-workspace-7");
     Map<String, String> direct =
         factory.forWorkspace("repo12345678abc", "work", 7L, "task/a", "epic/b", "qits-614").env();
     Map<String, String> runner = specs(factory).compose(row(), PLANE).env();
 
-    List<String> directOnly =
-        List.of(
-            "QITS_COMMISSIONED_CLIENT_ID",
-            "QITS_COMMISSIONED_CLIENT_SECRET",
-            "QITS_GIT_AUTH_TOKEN_URL",
-            "QITS_GIT_AUTH_AUDIENCE",
-            "QITS_WORKSPACE_DAEMON_AUTH_TOKEN_URL",
-            "QITS_WORKSPACE_DAEMON_AUTH_AUDIENCE");
-    List<String> runnerOnly = List.of("QITS_TOKEN", "QITS_TOKEN_SUBJECT");
-    for (String key : directOnly) {
-      assertTrue(direct.containsKey(key), key);
-      assertFalse(runner.containsKey(key), key);
+    List<String> credential =
+        List.of("QITS_TOKEN", "QITS_TOKEN_SUBJECT", "GIT_CONFIG_GLOBAL", "QITS_GIT_AUTH_HOST");
+    for (String key : List.of("QITS_TOKEN", "QITS_TOKEN_SUBJECT", "GIT_CONFIG_GLOBAL")) {
+      assertEquals(runner.get(key), direct.get(key), key);
     }
-    for (String key : runnerOnly) {
-      assertTrue(runner.containsKey(key), key);
-      assertFalse(direct.containsKey(key), key);
+    assertEquals(
+        credential,
+        direct.keySet().stream().filter(credential::contains).toList(),
+        "the DIRECT spec writes them in the lease's order");
+    for (String key : direct.keySet()) {
+      assertFalse(key.startsWith("QITS_COMMISSIONED_"), key);
     }
   }
 

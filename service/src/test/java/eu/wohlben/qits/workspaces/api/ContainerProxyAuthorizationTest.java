@@ -130,7 +130,6 @@ class ContainerProxyAuthorizationTest {
         .run(
             () -> {
               var row = workspaceRepository.findActiveById(rowId).orElseThrow();
-              row.commissionedClientId = null;
               row.commissionedTokenId = "tok-id-" + rowId;
               row.commissionedTokenSubject = subject;
               row.commissionedToken = "qits_tok_" + rowId;

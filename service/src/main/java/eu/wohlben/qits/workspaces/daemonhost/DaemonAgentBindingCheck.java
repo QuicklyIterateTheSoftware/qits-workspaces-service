@@ -17,11 +17,12 @@ import org.jboss.logging.Logger;
  *
  * <p>The control socket ({@link DaemonControlSocket}) takes the workspace from the path. {@code qits:system} callers are trusted to name any workspace, as today.
  * A {@code qits:agent} caller is not (phase 4 of principal-bound-git-refs-plan.md): the token's
- * {@code sub} must be the identity bound to that workspace's container: for a DIRECT row the idp
- * client commissioned for it ({@code commissioned_client_id}), and for a TARGET row the subject of
- * its workspace token ({@code commissioned_token_subject}, qits-625 — the {@code sub} the edge puts
- * on the JWT it mints for the token). Anything else is refused with 403 before the socket opens: a
- * TARGET row's client id never matches, because it holds none, and another row's token never does.
+ * {@code sub} must be the identity bound to that workspace's container: the subject of its
+ * workspace token ({@code commissioned_token_subject}, qits-625 — the {@code sub} the edge puts on
+ * the JWT it mints for the token), which every TARGET row holds and a DIRECT admin or editor row
+ * holds on an edge plane (qits-1084). Anything else is refused with 403 before the socket opens: a
+ * row holding no token binds nobody, and another row's token never matches. The legacy {@code
+ * commissioned_client_id} binds nothing ({@code Workspace.boundSubject}).
  * (The pre-id label path, {@code LegacyDaemonControlSocket}, is gone with its label branch here:
  * qits-780, after a week with no daemon dialling it.)
  *
@@ -94,9 +95,9 @@ public class DaemonAgentBindingCheck implements HttpUpgradeCheck {
   /**
    * The subject an agent must present for the workspace the path names ({@code
    * Workspace.boundSubject}): its token subject when the row holds a workspace token — every TARGET
-   * row, and a DIRECT admin or editor row on an edge plane (qits-1084) — else its commissioned
-   * client. Decided by what the row holds, never by its placement. Null — no such ACTIVE workspace,
-   * no credential, or a segment that is not an id — never matches a caller.
+   * row, and a DIRECT admin or editor row on an edge plane (qits-1084). Decided by what the row
+   * holds, never by its placement. Null — no such ACTIVE workspace, no token, or a segment that is
+   * not an id — never matches a caller.
    */
   String boundSubjectOf(String segment) {
     if (segment == null || segment.isBlank()) {

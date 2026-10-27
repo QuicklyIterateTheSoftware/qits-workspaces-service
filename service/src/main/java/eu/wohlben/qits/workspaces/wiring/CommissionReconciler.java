@@ -27,10 +27,13 @@ import org.jboss.logging.Logger;
  * story. What all of those leave is a credential qits-idp still honours and nothing can use, and the
  * only way to see one is to ask the issuer what it is holding.
  *
- * <p><b>The claim is the row, and it is compared by client id rather than by workspace.</b> A
- * credential is kept when an ACTIVE workspace names that exact id — so a recreate, which mints a new
- * pair over the old one, makes the previous client an orphan the instant it is replaced, and a
- * delete-container (which clears the columns while the row stays ACTIVE) does the same.
+ * <p><b>The client arm: every workspace client qits-idp still lists.</b> This service commissions
+ * no client any more — every container holds a workspace token — so a {@code workspace} or {@code
+ * workspace-admin} client in the listing is one a container no longer holds, and it is given back.
+ * The claim is still compared by client id against the legacy {@code commissioned_client_id}
+ * column ({@code WorkspaceRepository#liveCommissionedClientIds}), which nothing writes: it spares
+ * nothing on rows this version provisioned, and a rollback to a version that wrote it finds its own
+ * clients spared.
  *
  * <p><b>It only ever deletes what the issuer just listed.</b> A listing that could not be read comes
  * back empty, so a qits-idp blip reaps nothing rather than everything; and the kind filter means a

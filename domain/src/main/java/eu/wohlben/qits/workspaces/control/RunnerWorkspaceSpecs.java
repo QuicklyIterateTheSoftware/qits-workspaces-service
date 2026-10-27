@@ -30,7 +30,7 @@ import java.util.Set;
  * {@code QITS_TOKEN} and {@code QITS_TOKEN_SUBJECT}, minted immediately before the lease is asked
  * for and read off the row, with the image's git credential helper ({@code GIT_CONFIG_GLOBAL})
  * answering for the plane's githost only ({@code QITS_GIT_AUTH_HOST}) — {@link
- * WorkspaceContainerFactory#tokenEnv}. None of the pair block is written.
+ * WorkspaceContainerFactory#tokenEnv}, and nothing else.
  *
  * <p><b>The daemon API handshake and its path base are the DIRECT spec's</b>, value for value:
  * {@code QITS_WORKSPACE_DAEMON_API_TOKEN} and {@code QITS_WORKSPACE_DAEMON_API_BASE_PATH}.

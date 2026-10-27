@@ -5,11 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.workspaces.control.CredentialCommissioner;
 import eu.wohlben.qits.workspaces.control.FakeCredentialCommissioner;
-import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
-import eu.wohlben.qits.workspaces.control.TestOrigin;
-import eu.wohlben.qits.workspaces.control.WorkspaceCredentials;
-import eu.wohlben.qits.workspaces.control.WorkspaceIds;
-import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
@@ -22,7 +17,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +26,7 @@ import org.junit.jupiter.api.Test;
  * workspace container claims is given back.
  *
  * <p>This is the structural answer to leaked credentials — the reason there is no TTL on a
- * commission and the reason every teardown seam is allowed to be best-effort. What it must get right
+ * workspace token and the reason every teardown seam is allowed to be best-effort. What it must get right
  * is the two directions of "spare": a live workspace's credential survives every pass, and anything
  * else does not.
  */
@@ -41,14 +35,7 @@ public class CommissionReconcilerTest {
 
   @Inject CommissionReconciler reconciler;
   @Inject FakeCredentialCommissioner commissioner;
-  @Inject FakeRepositoryLookup repositories;
-  @Inject WorkspaceCredentials credentials;
-  @Inject WorkspaceIds workspaceIds;
-  @Inject WorkspaceService workspaceService;
   @Inject WorkspaceRepository workspaceRepository;
-
-  @ConfigProperty(name = "qits.test.origins-dir")
-  String dataDir;
 
   @BeforeEach
   void wireAnIssuer() {
@@ -62,94 +49,54 @@ public class CommissionReconcilerTest {
   }
 
   /**
-   * A repository with a live workspace whose container holds a commissioned credential — an admin
-   * one: the commissioned pair is the direct path's credential, and that path is admin and editor
-   * only (qits-780).
+   * The client arm: this service commissions no client any more (qits-876), so every {@code
+   * workspace} or {@code workspace-admin} client qits-idp still lists for it is one no container
+   * holds, and it is given back — while a client of any other kind is not the workspace rule's.
    */
-  private String liveWorkspace(String workspaceId) throws Exception {
-    String repoId = TestOrigin.create(dataDir);
-    repositories.register(repoId);
-    workspaceService.createWorkspace(
-        repoId, workspaceId, "master", workspaceId, null, false, false, true);
-    workspaceService.ensureContainer(workspaceIds.of(repoId, workspaceId));
-    return repoId;
-  }
-
   @Test
-  public void aStrayIsReapedAndALiveWorkspacesCredentialIsSpared() throws Exception {
-    String repoId = liveWorkspace("feat");
-    String claimed =
-        credentials.forWorkspace(workspaceIds.of(repoId, "feat")).orElseThrow().clientId();
-    // What a crash between a decommission and its row write leaves behind: a credential the issuer
-    // still honours that no workspace claims.
+  public void everyWorkspaceClientTheIssuerStillListsIsReaped() {
     commissioner.plant("ws-999-stray", CredentialCommissioner.CONTEXT_KIND, "999");
-
-    assertEquals(1, reconciler.reconcile(), "the stray is given back");
-
-    assertEquals(List.of("ws-999-stray"), commissioner.decommissioned());
-    assertEquals(List.of(claimed), commissioner.liveClientIds(), "the live workspace keeps its own");
-  }
-
-  @Test
-  public void anAdminWorkspacesCredentialIsSparedWhileClaimedAndReapedWhenOrphaned()
-      throws Exception {
-    // qits-628 follow-up: an admin row's credential is of kind workspace-admin. The reconcile judges
-    // it by the workspace rule exactly as a regular one: never reaped while an ACTIVE row claims it,
-    // reaped as soon as nothing does.
-    String repoId = liveWorkspace("admin");
-    Long rowId = workspaceIds.of(repoId, "admin");
-    assertEquals(CredentialCommissioner.ADMIN_CONTEXT_KIND, commissioner.contextKindFor(rowId));
-    String claimed = credentials.forWorkspace(rowId).orElseThrow().clientId();
     commissioner.plant("ws-998-admin-stray", CredentialCommissioner.ADMIN_CONTEXT_KIND, "998");
-    commissioner.plant("ws-997-stray", CredentialCommissioner.CONTEXT_KIND, "997");
-
-    assertEquals(2, reconciler.reconcile(), "both orphans, one of each kind, are given back");
-    assertTrue(commissioner.decommissioned().contains("ws-998-admin-stray"));
-    assertTrue(commissioner.decommissioned().contains("ws-997-stray"));
-    assertEquals(
-        List.of(claimed), commissioner.liveClientIds(), "the claimed admin credential is kept");
-    assertEquals(0, reconciler.reconcile(), "and a second pass still keeps it");
-    assertEquals(List.of(claimed), commissioner.liveClientIds());
-  }
-
-  @Test
-  public void aSecondPassOverALiveWorkspaceReapsNothing() throws Exception {
-    String repoId = liveWorkspace("feat");
-    String claimed =
-        credentials.forWorkspace(workspaceIds.of(repoId, "feat")).orElseThrow().clientId();
-
-    assertEquals(0, reconciler.reconcile());
-    assertEquals(0, reconciler.reconcile(), "an hourly pass is not a slow revocation");
-    assertEquals(List.of(claimed), commissioner.liveClientIds());
-  }
-
-  @Test
-  public void aCredentialCommissionedForAnotherKindIsNotTheWorkspaceRulesToSweep() throws Exception {
-    liveWorkspace("feat");
-    // Nothing commissions these today. The filter is what keeps the next thing this service
-    // commissions from being swept by a rule that was never about it.
+    // Nothing commissions this kind. The filter is what keeps a client of another kind from being
+    // swept by a rule that was never about it.
     commissioner.plant("run-3", "run", "3");
 
-    assertEquals(0, reconciler.reconcile());
-    assertTrue(commissioner.liveClientIds().contains("run-3"));
+    assertEquals(2, reconciler.reconcile(), "both workspace clients, one of each kind, go back");
+
+    assertEquals(
+        java.util.Set.of("ws-999-stray", "ws-998-admin-stray"),
+        java.util.Set.copyOf(commissioner.decommissioned()));
+    assertEquals(List.of("run-3"), commissioner.liveClientIds());
+    assertEquals(0, reconciler.reconcile(), "and a second pass finds nothing left");
+  }
+
+  /**
+   * A client an ACTIVE row still names in the legacy {@code commissioned_client_id} column is
+   * spared — the column nothing writes any more, kept so a rollback to a version that wrote it
+   * finds its own clients alive.
+   */
+  @Test
+  public void aClientALegacyRowStillNamesIsSpared() {
+    Long row = directAdminRowHolding("tok-legacy-row");
+    QuarkusTransaction.requiringNew()
+        .run(() -> workspaceRepository.findById(row).commissionedClientId = "ws-legacy");
+    commissioner.plant("ws-legacy", CredentialCommissioner.ADMIN_CONTEXT_KIND, row.toString());
+    try {
+      assertEquals(0, reconciler.reconcile());
+      assertEquals(List.of("ws-legacy"), commissioner.liveClientIds());
+    } finally {
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  workspaceRepository
+                      .findByIdOptional(row)
+                      .ifPresent(w -> w.status = WorkspaceStatus.ABANDONED));
+    }
   }
 
   @Test
-  public void aDeletedContainersCredentialIsGoneBeforeTheReconcileEverSeesIt() throws Exception {
-    String repoId = liveWorkspace("feat");
-    String claimed =
-        credentials.forWorkspace(workspaceIds.of(repoId, "feat")).orElseThrow().clientId();
-
-    // The teardown seam hands it back itself; the reconcile is the backstop, not the mechanism.
-    workspaceService.deleteContainer(workspaceIds.of(repoId, "feat"));
-
-    assertEquals(List.of(claimed), commissioner.decommissioned());
-    assertEquals(0, reconciler.reconcile(), "nothing is left for the reconcile to find");
-  }
-
-  @Test
-  public void withNoIssuerWiredThereIsNothingToReconcile() throws Exception {
-    liveWorkspace("feat");
+  public void withNoIssuerWiredThereIsNothingToReconcile() {
+    commissioner.plant("ws-999-stray", CredentialCommissioner.CONTEXT_KIND, "999");
     commissioner.reset(); // back to the shipped posture
 
     assertEquals(0, reconciler.reconcile());
@@ -246,7 +193,7 @@ public class CommissionReconcilerTest {
     assertEquals(List.of("tok-no-lease"), commissioner.tokensDeleted());
   }
 
-  /** An ACTIVE DIRECT admin row holding the workspace token {@code tokenId}, and no pair. */
+  /** An ACTIVE DIRECT admin row holding the workspace token {@code tokenId}. */
   private Long directAdminRowHolding(String tokenId) {
     return QuarkusTransaction.requiringNew()
         .call(

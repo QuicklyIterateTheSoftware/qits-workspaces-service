@@ -12,8 +12,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@link DaemonSocketBearerLifetime} (qits-812): the bearer's expiry is dropped for a token subject
- * on the daemon control socket and nowhere else — not for a commissioned client on the same path
- * (the DIRECT socket keeps today's lifetime), not for the tunnel's dial-back, not for the API.
+ * on the daemon control socket and nowhere else — not for any other bearer on the same path, not for
+ * the tunnel's dial-back, not for the API.
  */
 class DaemonSocketBearerLifetimeTest {
 

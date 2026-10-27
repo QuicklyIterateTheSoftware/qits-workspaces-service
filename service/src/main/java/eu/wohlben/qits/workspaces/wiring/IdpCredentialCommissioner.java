@@ -1,7 +1,6 @@
 package eu.wohlben.qits.workspaces.wiring;
 
 import eu.wohlben.qits.workspaces.control.CredentialCommissioner;
-import eu.wohlben.qits.workspaces.control.WorkspaceCredential;
 import eu.wohlben.qits.workspaces.control.WorkspaceToken;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -31,9 +30,12 @@ import org.jboss.logging.Logger;
  * quarkus.oidc-client.qits.client-enabled} already governs whether a token is fetched for
  * qits-containers ({@code containers/ContainersClientProducer} reads the same key for the same
  * reason) — off, there is no secret in this process to authenticate with and there is nothing to
- * commission against. So off means {@link #commission} answers empty, no container carries a
- * credential, and every workspace behaves exactly as it did before this class existed. A key of our
- * own would be a second thing to get wrong.
+ * commission against. So off means {@link #isWired} answers false, every mint answers empty, and no
+ * container carries a credential. A key of our own would be a second thing to get wrong.
+ *
+ * <p><b>It mints tokens and never a client.</b> The workspace token ({@link IdpTokens}) is the one
+ * credential a container is given; the client half ({@link IdpClients}) is only listed and given
+ * back — by {@link CommissionReconciler} and {@code targethost/LegacyRunnerClients}.
  *
  * <p><b>{@code @DefaultBean}, and keep it.</b> A test-scoped double must win, and two unqualified
  * beans of one type fail the build at {@code ArcProcessor#validate} — for every test at once. Same
@@ -44,12 +46,12 @@ import org.jboss.logging.Logger;
  * rebootstrap replaced qits-platform-idp and the next three container launches died with {@code 401}
  * while the following ones passed. So a commission holds through the answers that are about the
  * moment — unreachable, 401, 403, 5xx — for {@code qits.workspace.commission.patience}, and takes
- * everything else at its word. A decommission runs after the container is already gone and has
- * nobody to report to, so it is one attempt: what a failure leaves behind is an orphan, and {@link
+ * everything else at its word. A deletion runs after the container is already gone and has nobody
+ * to report to, so it is one attempt: what a failure leaves behind is an orphan, and {@link
  * CommissionReconciler} is the structural answer to those.
  *
- * <p><b>404 on a decommission is success.</b> The credential is not there, which is the state the
- * call was asking for.
+ * <p><b>404 on a deletion is success.</b> The credential is not there, which is the state the call
+ * was asking for.
  */
 @ApplicationScoped
 @DefaultBean
@@ -88,6 +90,10 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
   @ConfigProperty(name = "qits.workspace.commission.patience")
   Duration patience;
 
+  /**
+   * The client half: listed and given back, never asked for a new client — the retired runner's
+   * clients and whatever workspace client qits-idp still lists.
+   */
   @Inject @RestClient IdpClients clients;
 
   /**
@@ -99,72 +105,21 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
   /** The most of the idp's answer an ERROR line carries. */
   private static final int MAX_REASON = 500;
 
-  /**
-   * {@inheritDoc}
-   *
-   * <p><b>A 400 to a commission that states Git refs fails closed.</b> An idp without C2 ignores the
-   * {@code gitRefs} member and answers 201, so a 400 means an idp with C2 refused the list itself —
-   * an epic list over 500 entries, say. The commission is asked again with {@code gitRefs: []}, so
-   * the workspace launches and may push nothing, and an ERROR names the workspace and the idp's
-   * reason. It is never asked again without the member: that would let the credential push every
-   * ref. A 400 to a commission that states no list, or an empty one, stays an answer about the
-   * request and fails the launch.
-   */
+  /** {@inheritDoc} Wired exactly when there is a {@code Basic} credential to present. */
   @Override
-  public Optional<WorkspaceCredential> commission(
-      Long rowId, String projectId, List<String> gitRefs, boolean admin) {
-    String authorization = authorization();
-    if (authorization == null || rowId == null) {
-      return Optional.empty();
-    }
-    IdpClients.CommissionRequest[] request = {
-      new IdpClients.CommissionRequest(
-          CredentialCommissioner.contextKindFor(admin),
-          Long.toString(rowId),
-          claims(projectId),
-          gitRefs == null ? null : List.copyOf(gitRefs))
-    };
-    return Optional.of(
-        patiently(
-            patience,
-            "a credential for workspace " + rowId,
-            () -> {
-              IdpClients.CommissionResponse issued = clients.commission(authorization, request[0]);
-              if (issued == null || blank(issued.clientId()) || blank(issued.secret())) {
-                throw new IllegalStateException(
-                    "qits-idp answered a commission for workspace "
-                        + rowId
-                        + " with no usable credential in it");
-              }
-              return new WorkspaceCredential(issued.clientId(), issued.secret());
-            },
-            failure -> {
-              if (request[0].gitRefs() == null
-                  || request[0].gitRefs().isEmpty()
-                  || status(failure) != 400) {
-                return false;
-              }
-              LOG.error(
-                  "qits-idp refused the Git refs of workspace "
-                      + rowId
-                      + " ("
-                      + reasonOf(failure)
-                      + "). Commissioning it with gitRefs [] instead: its container may push"
-                      + " nothing until the list is one qits-idp accepts.");
-              request[0] = request[0].pushingNothing();
-              return true;
-            }));
+  public boolean isWired() {
+    return authorization() != null;
   }
 
   /**
-   * The patient loop every commission this service makes runs through: the workspace credential
-   * and token above. It asks
+   * The patient loop every mint this service makes runs through: a workspace's token and an
+   * agent's. It asks
    * {@code attempt} until it answers, holding through the failures that are about the moment ({@link
    * #holdThrough}) for {@code patience}, and throws naming {@code what} once the window is spent or
    * a failure is an answer about the request.
    *
    * <p>{@code askAgainAtOnce} sees every failure first, and answering true asks again with no pause
-   * and no patience spent: the caller changed its request (the Git refs fallback above), so the next
+   * and no patience spent: the caller changed its request (the Git refs fallback below), so the next
    * attempt is a different question rather than the same one repeated.
    */
   static <T> T patiently(
@@ -274,11 +229,14 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
   /**
    * {@inheritDoc}
    *
-   * <p>{@code POST /idp/api/tokens} through {@link #patiently}, exactly as {@link #commission}: the
-   * same window, the same claims rule, and the same fail-closed retry with {@code gitRefs: []} when
-   * qits-idp refuses a stated list. The kind is {@link CredentialCommissioner#contextKindFor}'s,
-   * as for the pair: {@code workspace-admin} for an admin row, {@code workspace} for every other
-   * (qits-1084).
+   * <p>{@code POST /idp/api/tokens} through {@link #patiently}: the claims rule below, and a
+   * fail-closed retry with {@code gitRefs: []} when qits-idp refuses a stated list. An idp without C2
+   * ignores the {@code gitRefs} member and answers 201, so a 400 means an idp with C2 refused the
+   * list itself; the token is minted again with {@code gitRefs: []}, so the workspace launches and
+   * may push nothing, and an ERROR names the context and the idp's reason. It is never minted again
+   * without the member: that would let the token push every ref. The kind is {@link
+   * CredentialCommissioner#contextKindFor}'s: {@code workspace-admin} for an admin row, {@code
+   * workspace} for every other (qits-1084).
    */
   @Override
   public Optional<WorkspaceToken> commissionToken(
@@ -439,7 +397,7 @@ public class IdpCredentialCommissioner implements CredentialCommissioner {
 
   /**
    * The {@code Basic} header, or null when this deployment has no credential to present — which is
-   * the whole "not wired" condition, checked in one place so all three verbs answer it identically.
+   * the whole "not wired" condition, checked in one place so every verb answers it identically.
    */
   private String authorization() {
     return authorization(enabled, clientId, clientSecret);

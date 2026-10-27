@@ -20,9 +20,9 @@ import java.util.Optional;
  *
  * <p><b>Absent is a supported configuration</b>, in both spellings, and the two are deliberately the
  * same behaviour: with no implementation installed the {@code Instance} is unresolvable, and with a
- * wired implementation that has no issuer configured {@link #commission} answers empty. Either way no
- * credential is minted and {@link WorkspaceContainerFactory} injects no environment — which is what
- * every workspace container did before this port existed.
+ * wired implementation that has no issuer configured {@link #isWired} answers false and {@link
+ * #commissionToken} answers empty. Either way no credential is minted and {@link
+ * WorkspaceContainerFactory} injects no credential environment.
  *
  * <p><b>An implementation that IS wired must throw rather than answer empty when a call fails.</b>
  * The distinction is {@link RepositoryLookup}'s and is load-bearing for the same reason: "there is no
@@ -83,7 +83,7 @@ public interface CredentialCommissioner {
    */
   String AGENT_CLAIM = "agent";
 
-  /** One live commission as the owner's reconcile reads it back. Never carries a secret. */
+  /** One live idp client as the owner's reconcile reads it back. Never carries a secret. */
   record Commission(String clientId, String contextKind, String contextId) {}
 
   /**
@@ -94,71 +94,31 @@ public interface CredentialCommissioner {
       String tokenId, String contextKind, String contextId, java.time.Instant createdAt) {}
 
   /**
-   * Commission a credential for the workspace row {@code rowId}, or empty when this deployment has
-   * no issuer to ask (see the class javadoc — that is a configuration, not a failure).
+   * Whether this deployment has an issuer to ask at all — the question {@link #commissionToken}
+   * otherwise answers by coming back empty, for the one caller that must know before it asks.
    *
-   * <p>The secret is returned <b>once</b>: the issuer stores a hash, so a caller that loses it has
-   * to decommission and commission again.
-   *
-   * <p><b>{@code projectId} is what the credential is ABOUT, and it is not the same fact as {@code
-   * rowId}.</b> The row id says which context this credential belongs to — it is the {@code
-   * contextId} a reconcile compares against live workspaces — while the project is the scope every
-   * resource service judges it on: a workspace belongs to a repository, a repository belongs to a
-   * project, and a credential handed to a container in one project has no business acting in
-   * another. The issuer turns it into a {@code project} claim on every token the credential mints,
-   * which is exactly what qits-ci's manual trigger reads to decide which repositories a caller may
-   * have evaluated.
-   *
-   * <p><b>Null is accepted and means unscoped</b>, which is what every workspace credential was
-   * before this argument existed. It is the answer when the repository registry could not name the
-   * project, and that must cost a scope rather than a launch: a registry blinking is a moment, and
-   * refusing to start a workspace over it would trade a narrower credential for no workspace at all.
-   *
-   * @throws RuntimeException when an issuer is configured and the call did not succeed
+   * <p>That caller is a DIRECT provision on a deployment with no edge plane (no public {@code
+   * QITS_DOMAIN}): a {@code qits_tok_} only works through the edge, so such a row cannot be minted
+   * one, and with an issuer wired the provision is refused rather than launched with an identity
+   * nobody could present. With no issuer there is nothing to refuse — the container launches with no
+   * credential, the shipped posture — and telling the two apart must not cost a mint. An
+   * implementation answers from its configuration alone and never calls out.
    */
-  default Optional<WorkspaceCredential> commission(Long rowId, String projectId) {
-    return commission(rowId, projectId, null);
-  }
-
-  /** The commission of a regular (non-admin) workspace row: kind {@link #CONTEXT_KIND}. */
-  default Optional<WorkspaceCredential> commission(
-      Long rowId, String projectId, List<String> gitRefs) {
-    return commission(rowId, projectId, gitRefs, false);
-  }
+  boolean isWired();
 
   /**
-   * The same commission, also stating the Git refs the credential may push ({@code gitRefs}, contract
-   * C2). The issuer stamps the list onto every token as {@code git_refs}, and the git host enforces
-   * it.
+   * Give an idp client back. This service commissions no client any more — every container it
+   * starts holds a {@link #commissionToken workspace token} — so the clients this answers for are
+   * the ones qits-idp still lists for it: what {@code wiring/CommissionReconciler} reaps and what
+   * {@code targethost/LegacyRunnerClients} gives back for the retired runner.
    *
-   * <p><b>Null states nothing</b> — no {@code gitRefs} member, the commission as it was before C2.
-   * An empty list states "may push nothing".
-   *
-   * <p><b>A refused list fails closed.</b> An issuer without C2 ignores the member, so a 400 to a
-   * stated list means the issuer refused the list itself. An implementation then commissions again
-   * with an empty list (may push nothing), logs an ERROR naming the workspace and the issuer's
-   * reason, and returns that credential. It never commissions again without the list: that would
-   * let the credential push every ref.
-   *
-   * <p><b>{@code admin} picks the kind</b> ({@link #contextKindFor}): an ADMIN row's credential is
-   * {@link #ADMIN_CONTEXT_KIND}, every other row's {@link #CONTEXT_KIND}. It is the only thing the
-   * flag changes — the context id, the claims and the Git refs are the same either way — and it
-   * never reaches the container's spec: the kind is the issuer's, not the container's environment.
-   */
-  Optional<WorkspaceCredential> commission(
-      Long rowId, String projectId, List<String> gitRefs, boolean admin);
-
-  /**
-   * Give a credential back — the container it belonged to is gone.
-   *
-   * <p>Best-effort by contract: every caller runs after something irreversible has already happened,
-   * so an implementation reports a failure and never throws. A credential a failure leaves behind is
-   * the reconcile's to reap, which is why that exists.
+   * <p>Best-effort by contract: an implementation reports a failure and never throws. A client a
+   * failure leaves behind is the reconcile's to reap at its next pass.
    */
   void decommission(String clientId);
 
   /**
-   * Every commission this service currently owns, for the reconcile. Empty when nothing could be
+   * Every idp client this service currently owns, for the reconcile. Empty when nothing could be
    * asked — a read failure must not be read as "nothing is out there", since that answer would
    * decommission nothing rather than everything.
    */
@@ -168,15 +128,25 @@ public interface CredentialCommissioner {
 
   /**
    * Mint the {@code qits_tok_} for the workspace row {@code rowId}, or empty when this deployment has
-   * no issuer to ask. The {@link #commission} of a row that reaches the platform through the edge:
-   * every TARGET row, and — whenever an edge plane resolves (qits-1084) — a DIRECT admin or editor
-   * row too. The same context, the same {@code project} claim (null is unscoped), the same Git refs
-   * (null states nothing) and the same fail-closed answer to a refused list. The value is answered
-   * once.
+   * no issuer to ask (see the class javadoc — that is a configuration, not a failure). The
+   * credential of every container this service starts: every TARGET row's, and a DIRECT admin or
+   * editor row's whenever an edge plane resolves (qits-1084) — with none, that provision is refused
+   * before it gets here ({@link #isWired}). The value is answered once: qits-idp stores a hash.
    *
-   * <p><b>{@code admin} picks the kind</b> exactly as it does for {@link #commission(Long, String,
-   * List, boolean)}: {@link #ADMIN_CONTEXT_KIND} for an admin row, {@link #CONTEXT_KIND} for every
-   * other. A TARGET row is never admin, so a TARGET mint always passes false.
+   * <p><b>{@code projectId} is what the token is ABOUT, and it is not the same fact as {@code
+   * rowId}.</b> The row id is the {@code contextId} a reconcile compares against live workspaces,
+   * while the project is the scope every resource service judges the token on: the issuer turns it
+   * into a {@code project} claim. <b>Null is accepted and means unscoped</b> — the answer when the
+   * repository registry could not name the project, which must cost a scope rather than a launch.
+   *
+   * <p><b>{@code gitRefs}</b> are the Git refs the token may push (contract C2): null states nothing,
+   * an empty list states "may push nothing", and a refused list fails closed — the implementation
+   * mints again with an empty list and logs an ERROR, and never mints again without the list.
+   *
+   * <p><b>{@code admin} picks the kind</b> ({@link #contextKindFor}): {@link #ADMIN_CONTEXT_KIND}
+   * for an admin row, {@link #CONTEXT_KIND} for every other. It is the only thing the flag changes,
+   * and it never reaches the container's spec. A TARGET row is never admin, so a TARGET mint always
+   * passes false.
    *
    * @throws RuntimeException when an issuer is configured and the call did not succeed
    */

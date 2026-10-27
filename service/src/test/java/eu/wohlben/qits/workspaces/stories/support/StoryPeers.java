@@ -36,7 +36,7 @@ import java.util.concurrent.Executors;
  *                                                   GET  /projects/api/projects/{p}/repositories
  * the container orchestrator  qits-containers       GET/PUT/DELETE /containers/api/containers/{owner}/workspace…
  * the identity provider       qits-platform-idp     POST /idp/token          (this service's own credentials)
- *                                                   POST /idp/api/clients    (a workspace's commissioned one)
+ *                                                   POST /idp/api/tokens     (a workspace's own token)
  * the event log               qits-events           PUT  /events/api/events/{id}   (an event published)
  *                                                   GET  /events/api/events        (the catch-up read)
  *                                                   GET  /events/stream            (the websocket dial: 404)
@@ -57,7 +57,7 @@ import java.util.concurrent.Executors;
  * <h2>Stateless, with two deliberate exceptions</h2>
  *
  * <p>Almost every answer is a pure function of the path: the registry is a file the stories write
- * before they act, the token is a constant, and the idp commissions the same pair every time.
+ * before they act, the token is a constant, and the idp mints the same workspace token every time.
  *
  * <p>The first exception is the container table. A workspace provision <b>asks whether a container
  * is there, puts one, and later lists them</b>, and a stub that answered "absent" to all three would
@@ -79,8 +79,8 @@ import java.util.concurrent.Executors;
  *
  * <p>quarkus-oidc-client caches the token it acquires and re-mints only when it expires, and this
  * service has <b>one</b> named client, {@code qits} (epic qits-540 dossier, 'Plan (as of 2026-09-13)', C4) — the
- * bearer sent to qits-containers, to qits-githost and to qits-projects, and the Basic pair the
- * commission call presents to qits-idp, all sharing the one credential. The token here says {@code
+ * bearer sent to qits-containers, to qits-githost and to qits-projects, and the Basic pair a
+ * token mint presents to qits-idp, all sharing the one credential. The token here says {@code
  * expires_in: 3600}, so the one mint lands in the first story that needs it and never again — and
  * every bearer call draws as ONE arrow, because an edge is {@code (kind, from, to, label)} and every
  * call agrees in all four.
@@ -119,10 +119,13 @@ public final class StoryPeers {
   /** {@code quarkus.oidc-client.qits.token-path} joined onto the auth-server url. */
   public static final String TOKEN_PATH = "/idp/token";
 
-  /** {@code IdpClients}' commission API, under the idp's own segment. */
+  /** {@code IdpClients}' client API, under the idp's own segment: listed and given back only. */
   public static final String CLIENTS_PATH = "/idp/api/clients";
 
-  /** {@code IdpTokens}' commissioned-token API — the runner-registration-token reconcile's read. */
+  /**
+   * {@code IdpTokens}' commissioned-token API: the mint of a workspace's token (qits-1084) and the
+   * reconciles' reads.
+   */
   public static final String TOKENS_PATH = "/idp/api/tokens";
 
   /** {@code ContainersClient.CONTAINERS_PATH} plus the workspace workload segment. */
@@ -159,11 +162,11 @@ public final class StoryPeers {
   /** The opaque machine token this service's one named oidc client receives. Never a real JWT. */
   public static final String MACHINE_TOKEN = "story-workspaces-machine-token";
 
-  /** The client id qits-platform-idp commissions for a workspace. */
-  public static final String COMMISSIONED_CLIENT_ID = "story-workspace-client";
+  /** The subject qits-platform-idp answers for a workspace token it mints. */
+  public static final String WORKSPACE_TOKEN_SUBJECT = "tok-workspace-story";
 
-  /** …and its secret, which travels into the container and must never reach a report. */
-  public static final String COMMISSIONED_SECRET = "story-workspace-commissioned-secret";
+  /** …and its value, which travels into the container and must never reach a report. */
+  public static final String WORKSPACE_TOKEN = "qits_tok_story-workspace-token-value";
 
   /** What a refused peer answers. */
   public static final int REFUSED_STATUS = 503;
@@ -322,18 +325,10 @@ public final class StoryPeers {
     }
     if (CLIENTS_PATH.equals(path)) {
       return switch (method) {
-        case "POST" ->
-            new Answer(
-                201,
-                "{\"clientId\":\""
-                    + COMMISSIONED_CLIENT_ID
-                    + "\",\"secret\":\""
-                    + COMMISSIONED_SECRET
-                    + "\"}");
         // The reconcile's read. Empty rather than a row: nothing in this catalogue reconciles, and
         // an answer that claimed a live commission would invite a sweep nobody asked for.
         case "GET" -> new Answer(200, "[]");
-        default -> new Answer(405, notFound("only POST and GET live here"));
+        default -> new Answer(405, notFound("only GET lives here: nothing commissions a client"));
       };
     }
     if (path.startsWith(CLIENTS_PATH + "/") && "DELETE".equals(method)) {
@@ -341,12 +336,20 @@ public final class StoryPeers {
       return new Answer(204, null);
     }
     if (TOKENS_PATH.equals(path)) {
-      // The registration-token reconcile's read, every boot. Empty: nothing in this catalogue
-      // commissions a runner's registration token, so an answer that claimed a live one would
-      // invite a reap nobody asked for — the same reasoning CLIENTS_PATH's GET carries.
       return switch (method) {
+        // A workspace's token (qits-1084): the same token every time, as the machine token is.
+        case "POST" ->
+            new Answer(
+                201,
+                "{\"tokenId\":\"story-workspace-token-id\",\"token\":\""
+                    + WORKSPACE_TOKEN
+                    + "\",\"subject\":\""
+                    + WORKSPACE_TOKEN_SUBJECT
+                    + "\"}");
+        // The reconciles' read, every boot. Empty: an answer that claimed a live token would
+        // invite a reap nobody asked for — the same reasoning CLIENTS_PATH's GET carries.
         case "GET" -> new Answer(200, "[]");
-        default -> new Answer(405, notFound("only GET lives here"));
+        default -> new Answer(405, notFound("only POST and GET live here"));
       };
     }
     if (path.startsWith(CONTAINERS_PATH)) {

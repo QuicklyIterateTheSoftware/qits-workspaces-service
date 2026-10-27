@@ -4,6 +4,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -63,12 +64,12 @@ import org.junit.jupiter.api.TestMethodOrder;
  * asking the launched process anything.
  *
  * <p>The <b>credential</b> is the one place the two halves are proved separately. A real container
- * exchanges the pair the host commissioned for it — {@code QITS_COMMISSIONED_CLIENT_ID}/{@code
- * …_SECRET}, injected into its environment — for a bearer at qits-platform-idp, which is a stub
- * here and answers an opaque string no gate could validate. So the story reads the pair out of the
+ * presents the workspace token the host minted for it — {@code QITS_TOKEN}, injected into its
+ * environment — at the platform edge, which exchanges it for a JWT; there is no edge here, and the
+ * stub idp answers an opaque value no gate could validate. So the story reads the token out of the
  * workload spec (the only place it exists, and exactly where a container finds it) and mints its
- * dial bearer directly. What is proved is that the credential travelled; what is not is the exchange
- * itself, which is qits-platform-idp's own claim to make.
+ * dial bearer directly. What is proved is that the credential travelled; what is not is the
+ * exchange itself, which is the edge's own claim to make.
  *
  * <h2>The repository id here is AUTHORED, unlike every other fixture in this catalogue</h2>
  *
@@ -131,8 +132,8 @@ public class WorkspaceProvisionIT {
       socket: it asks qits-containers to put a container at a place, under a spec it composes — the
       pinned workspace image, the volumes, the network, and the environment the daemon inside will
       read. `QITS_WORKSPACE_DAEMON_URL` is the address the daemon dials back on, which is why the
-      container needs no inbound route. And `QITS_COMMISSIONED_CLIENT_ID`/`_SECRET` are an idp
-      client of the container's OWN, commissioned for this workspace a moment earlier.
+      container needs no inbound route. And `QITS_TOKEN` is a workspace token of the container's
+      OWN, minted for this workspace a moment earlier, which the container spends at the edge.
 
       Then the host WAITS. A container that started is not a workspace: the daemon inside has to
       clone the wrapper, and only it knows when that is done. So the provision is not complete until
@@ -207,9 +208,11 @@ public class WorkspaceProvisionIT {
     String spec = StoryPeers.lastEnsureRequest();
     assertNotNull(spec, "no workload spec reached qits-containers");
     assertTrue(
-        spec.contains("QITS_COMMISSIONED_CLIENT_ID")
-            && spec.contains(StoryPeers.COMMISSIONED_CLIENT_ID),
-        "the container was launched without the credential commissioned for it");
+        spec.contains("QITS_TOKEN") && spec.contains(StoryPeers.WORKSPACE_TOKEN),
+        "the container was launched without the token minted for it");
+    assertFalse(
+        spec.contains("QITS_COMMISSIONED_CLIENT_"),
+        "the container was handed a client pair, which nothing issues any more");
     assertTrue(
         spec.contains("QITS_WORKSPACE_DAEMON_URL")
             && spec.contains("/workspaces/daemon/" + rowId),
@@ -220,7 +223,7 @@ public class WorkspaceProvisionIT {
         "the container was not told its repository's public identity");
     story
         .note(
-            "the spec carries the idp client commissioned for THIS workspace a moment earlier, the"
+            "the spec carries the workspace token minted for THIS workspace a moment earlier, the"
                 + " control-socket address keyed on the workspace's row id, and the repository's"
                 + " public (project, name) pair so the daemon can self-clone name-addressed")
         .as("container-requested");
@@ -319,7 +322,7 @@ public class WorkspaceProvisionIT {
     to(StoryGitHost.SERVICE_NAME, StoryGitHost.read(StoryTarget.PROJECT, StoryTarget.WORKSPACE_REPO));
 
     // The credential this workspace's container was given, minted at qits-platform-idp for it alone.
-    to(StoryPeers.IDP, StoryPeers.posted(StoryPeers.CLIENTS_PATH, 201));
+    to(StoryPeers.IDP, StoryPeers.posted(StoryPeers.TOKENS_PATH, 201));
     // …and this service's OWN credential for qits-containers, which is a different token for a
     // different reason and draws as the same arrow the release stories' two clients drew. It is
     // here rather than there because the containers client is the one of the three that no release
@@ -371,8 +374,8 @@ public class WorkspaceProvisionIT {
         StoryPeers.label("PUT", StoryPeers.EVENTS_PATH + java.util.UUID.randomUUID(), 201));
 
     // EIGHTEEN across four planes: three doors, one registry read, one agent-waiting relay
-    // (qits-1274), two git reads, one commission, one token, three container calls, one event
-    // publish, one dial and four frames. The count is
+    // (qits-1274), two git reads, one workspace token, one machine token, three container calls,
+    // one event publish, one dial and four frames. The count is
     // what would notice a peer call creeping into a path that is supposed to be finished — a status
     // poll after the ensure, say, which the design deliberately does not make because the wait is
     // on the socket instead.
@@ -384,11 +387,10 @@ public class WorkspaceProvisionIT {
 
     ReportAssertions.assertNotLeaked(CATEGORY_SLUG, PROVISIONED_SLUG, StoryProfile.CLIENT_SECRET);
     ReportAssertions.assertNotLeaked(CATEGORY_SLUG, PROVISIONED_SLUG, StoryPeers.MACHINE_TOKEN);
-    // The one that matters most here: the commissioned secret really was on this JVM's disk, in the
+    // The one that matters most here: the workspace token really was on this JVM's disk, in the
     // workload spec the story read. A report that carried it would be a credential published as
     // documentation.
-    ReportAssertions.assertNotLeaked(
-        CATEGORY_SLUG, PROVISIONED_SLUG, StoryPeers.COMMISSIONED_SECRET);
+    ReportAssertions.assertNotLeaked(CATEGORY_SLUG, PROVISIONED_SLUG, StoryPeers.WORKSPACE_TOKEN);
     for (String bearer : MINTED) {
       ReportAssertions.assertNotLeaked(CATEGORY_SLUG, PROVISIONED_SLUG, bearer);
     }

@@ -10,7 +10,6 @@ import au.com.dius.pact.consumer.dsl.PactDslJsonBody;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import eu.wohlben.qits.workspaces.control.CredentialCommissioner;
-import eu.wohlben.qits.workspaces.control.WorkspaceCredential;
 import eu.wohlben.qits.workspaces.control.WorkspaceToken;
 import eu.wohlben.qits.workspaces.testing.contracts.ContractRow;
 import eu.wohlben.qits.workspaces.testing.contracts.ContractTable;
@@ -44,10 +43,10 @@ import java.util.Optional;
  *
  * <ul>
  *   <li>{@link IdpCredentialCommissioner} — the commission doors for a workspace's credential: a
- *       client pair ({@code /idp/api/clients}) or a token ({@code /idp/api/tokens}, a workspace's
- *       or an agent's), commissioned when the scheduler starts a slot or places an agent ({@code
- *       AgentService.reconcile}), listed and handed back by {@code
- *       CommissionReconciler.reconcile}, and a token handed back with its container ({@code
+ *       token ({@code /idp/api/tokens}, a workspace's or an agent's), minted when the scheduler
+ *       starts a slot or places an agent ({@code AgentService.reconcile}); tokens and clients
+ *       ({@code /idp/api/clients}, which nothing commissions any more, qits-876) listed and handed
+ *       back by {@code CommissionReconciler.reconcile}, and a token handed back with its container ({@code
  *       deleteWorkspaceContainer}, {@code discardWorkspace}, {@code recreateWorkspaceContainer}, and
  *       the scheduler's removal of a slot or an agent).
  *   <li>{@code targethost/LegacyRunnerClients} — the retired workspaces runners' clients and tokens
@@ -78,11 +77,6 @@ public final class IdpContract {
 
   // One state per commission body this service sends (qits-idp qits-1149 round 3): the state's
   // params are the row's values, and the body binds each with a provider-state expression.
-  static final String WORKSPACE_CLIENT = "a workspace's client being commissioned";
-  static final String WORKSPACE_CLIENT_REFUSED =
-      "a workspace's client whose stated Git refs are refused";
-  static final String WORKSPACE_CLIENT_PUSHING_NOTHING =
-      "a workspace's client being commissioned to push nothing";
   static final String WORKSPACE_TOKEN = "a workspace's token being commissioned";
   static final String WORKSPACE_TOKEN_REFUSED =
       "a workspace's token whose stated Git refs are refused";
@@ -104,28 +98,6 @@ public final class IdpContract {
           GoldenMasters.IDP,
           List.of(
               // --- a workspace's credential ---------------------------------------------------
-              ContractRow.of(
-                  RECONCILE,
-                  WORKSPACE_CLIENT,
-                  "commissionClient",
-                  basic(workspaceCommission(WORKSPACE_CLIENT, "${gitRef}")),
-                  List.of("$.clientId", "$.secret"),
-                  (url, params) -> {
-                    Optional<WorkspaceCredential> issued =
-                        commissionerAgainst(url, params)
-                            .commission(
-                                workspaceId(params),
-                                params.get("projectId"),
-                                List.of(params.get("gitRef")),
-                                false);
-                    JsonNode recorded =
-                        GoldenMasters.json(GoldenMasters.IDP, WORKSPACE_CLIENT, "commissionClient");
-                    assertEquals(
-                        Optional.of(
-                            new WorkspaceCredential(
-                                recorded.path("clientId").asText(), recorded.path("secret").asText())),
-                        issued);
-                  }),
               ContractRow.of(
                   RECONCILE,
                   WORKSPACE_TOKEN,
@@ -292,45 +264,12 @@ public final class IdpContract {
                   List.of(),
                   (url, params) ->
                       commissionerAgainst(url, params).deleteToken(params.get("tokenId"))),
-              // A commission whose stated Git refs qits-idp refuses: 400, the answer the commissioner
+              // A token mint whose stated Git refs qits-idp refuses: 400, the answer the commissioner
               // tells apart from every other refusal (IdpCredentialCommissioner.status) to ask again
               // with gitRefs: [] and fail closed. Each refused row is that first request and the
               // status it reads, made through the commissioner's own client; each "push nothing"
               // row is the retry, the same request's pushingNothing(). The refused ref is the
               // state's.
-              ContractRow.of(
-                  RECONCILE,
-                  WORKSPACE_CLIENT_REFUSED,
-                  "commissionClient",
-                  basic(workspaceCommission(WORKSPACE_CLIENT_REFUSED, "${refusedGitRef}")),
-                  List.of(),
-                  (url, params) -> {
-                    IdpCredentialCommissioner commissioner = commissionerAgainst(url, params);
-                    assertRefused(
-                        () ->
-                            commissioner.clients.commission(
-                                basicOf(params),
-                                workspaceClientRequest(params, List.of(params.get("refusedGitRef")))));
-                  }),
-              ContractRow.of(
-                  RECONCILE,
-                  WORKSPACE_CLIENT_PUSHING_NOTHING,
-                  "commissionClient",
-                  basic(workspaceCommission(WORKSPACE_CLIENT_PUSHING_NOTHING)),
-                  List.of("$.clientId", "$.secret"),
-                  (url, params) -> {
-                    IdpClients.CommissionResponse issued =
-                        commissionerAgainst(url, params)
-                            .clients
-                            .commission(
-                                basicOf(params),
-                                workspaceClientRequest(params, List.of(params.get("gitRef")))
-                                    .pushingNothing());
-                    JsonNode recorded =
-                        GoldenMasters.json(
-                            GoldenMasters.IDP, WORKSPACE_CLIENT_PUSHING_NOTHING, "commissionClient");
-                    assertEquals(recorded.path("clientId").asText(), issued.clientId());
-                  }),
               ContractRow.of(
                   RECONCILE,
                   WORKSPACE_TOKEN_REFUSED,
@@ -463,16 +402,6 @@ public final class IdpContract {
   /** The workspace row a state names: its {@code workspaceId} param. */
   private static Long workspaceId(Map<String, String> params) {
     return Long.valueOf(params.get("workspaceId"));
-  }
-
-  /** The request {@code commission} builds for a workspace row, stating {@code gitRefs}. */
-  private static IdpClients.CommissionRequest workspaceClientRequest(
-      Map<String, String> params, List<String> gitRefs) {
-    return new IdpClients.CommissionRequest(
-        "workspace",
-        params.get("workspaceId"),
-        Map.of(CredentialCommissioner.PROJECT_CLAIM, params.get("projectId")),
-        gitRefs);
   }
 
   /** The request {@code commissionToken} builds for a workspace row, stating {@code gitRefs}. */
