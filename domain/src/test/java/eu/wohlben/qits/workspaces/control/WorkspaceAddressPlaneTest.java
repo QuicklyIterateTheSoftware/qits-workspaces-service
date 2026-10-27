@@ -37,6 +37,7 @@ class WorkspaceAddressPlaneTest {
 
     assertEquals("wohlben.eu", plane.domain());
     assertEquals("githost.qits.wohlben.eu", plane.gitAuthHost());
+    assertEquals("qits.wohlben.eu", plane.platformDomain());
   }
 
   @ParameterizedTest

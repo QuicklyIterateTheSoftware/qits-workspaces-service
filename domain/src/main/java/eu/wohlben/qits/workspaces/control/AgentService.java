@@ -246,6 +246,8 @@ public class AgentService {
 
   @Inject WorkspaceAddressPlanes addressPlanes;
 
+  @Inject GitIdentity gitIdentity;
+
   @Inject WorkspaceChangePublisher changePublisher;
 
   /** The daemons' agent surface. Absent: no agent is ever started. */
@@ -2908,14 +2910,28 @@ public class AgentService {
     }
   }
 
-  /** The harness environment the agent's credential rides in, and nowhere else (D18). */
-  private static Map<String, String> agentEnv(AgentWorktree agent) {
+  /**
+   * The harness environment the agent's credential rides in, and nowhere else (D18), and the agent's
+   * own commit identity (qits-1666): the container's env carries only the platform's, since several
+   * agents share one container.
+   */
+  Map<String, String> agentEnv(AgentWorktree agent) {
     Map<String, String> env = new LinkedHashMap<>();
     if (agent.holdsToken() && agent.commissionedToken != null) {
       env.put("QITS_TOKEN", agent.commissionedToken);
       env.put("QITS_TOKEN_SUBJECT", agent.commissionedTokenSubject);
     }
+    env.putAll(gitIdentity.forAgent(agent.id.toString(), platformDomain()));
     return env;
+  }
+
+  /** {@code qits.<domain>}, or null when no public domain is configured. */
+  private String platformDomain() {
+    try {
+      return addressPlanes.plane().platformDomain();
+    } catch (EdgePlaneUnconfigured noDomain) {
+      return null;
+    }
   }
 
   /** {@code [refs/heads/<wrapper>, refs/heads/<wrapper>-*]}, never the default branch (D22). */

@@ -753,9 +753,10 @@ public class WorkspaceContainerFactory {
     pidsLimit.filter(v -> !v.isBlank()).ifPresent(container::pidsLimit);
     cpus.filter(v -> !v.isBlank()).ifPresent(container::cpus);
     container.oomScoreAdj(oomScoreAdj);
-    // The commit identity, as container-level env so *every* git process in the container — qits'
-    // own verbs, the coding agent, actions, ad-hoc shells — inherits it regardless of cwd or
-    // .git/config (identity env beats every git config level).
+    // The platform's commit identity, as container-level env so every git process in the container
+    // — qits' own verbs, actions, ad-hoc shells — inherits it regardless of cwd or .git/config
+    // (identity env beats every git config level). An agent's harness env lays its own over this
+    // (AgentService#agentEnv, qits-1666).
     gitIdentity.envMap().forEach(container::env);
     // The shared credential volume so an in-container `claude` can read the one-time OAuth login.
     // Mounted read/write on every workspace container (agent and daemon share the container), so

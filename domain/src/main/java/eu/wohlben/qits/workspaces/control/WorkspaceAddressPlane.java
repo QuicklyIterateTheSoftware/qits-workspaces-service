@@ -137,6 +137,11 @@ public record WorkspaceAddressPlane(String domain, List<String> registrySpelling
     return host(REGISTRY_HOST) + image.substring(slash);
   }
 
+  /** {@code qits.<d>}: the platform's own domain, the one its hosts and mail names sit under. */
+  public String platformDomain() {
+    return PLATFORM_PROJECT + "." + domain;
+  }
+
   private String host(String app) {
     return app + "." + PLATFORM_PROJECT + "." + domain;
   }
