@@ -104,19 +104,19 @@
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1027.63255</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1027.154457</qits.projects-golden-masters.version>
         <!-- The other providers' golden masters (qits-1149), the same rule: qits-idp's for the
              commission doors, the peer token mint and the tenant's discovery and keys
              (wiring/IdpContract); qits-containers' for the place and volume doors
              (containershost/ContainersContract); qits-workspace-daemon's for the agent-worktree
              doors DaemonAgentClient calls (daemonhost/WorkspaceDaemonContract). -->
-        <qits.idp-golden-masters.version>2026.1022.183304</qits.idp-golden-masters.version>
+        <qits.idp-golden-masters.version>2026.1027.165632</qits.idp-golden-masters.version>
         <qits.containers-golden-masters.version>2026.1019.103940</qits.containers-golden-masters.version>
         <qits.workspace-daemon-golden-masters.version>2026.1018.152111</qits.workspace-daemon-golden-masters.version>
         <!-- qits-system's golden masters (epic qits-1481): the lease, work-volume and target doors
              targethost/TargetLeasePlacement calls (targethost/SystemContract). The same rule: a
              qits-maintenance bump moves it. -->
-        <qits.system-golden-masters.version>2026.1025.191214</qits.system-golden-masters.version>
+        <qits.system-golden-masters.version>2026.1027.185636</qits.system-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
              and ConsumerPactVerificationTest verifies consumers' pacts against this service.
@@ -129,7 +129,7 @@
              qits-maintenance bumps it when the consumer releases a changed pact. -->
         <qits.landing-app-pacts-qits-workspaces-service.version>2026.1025.101017</qits.landing-app-pacts-qits-workspaces-service.version>
         <!-- qits-projects' consumer pact against this service (qits-1152). -->
-        <qits.projects-service-pacts-qits-workspaces-service.version>2026.1019.190811</qits.projects-service-pacts-qits-workspaces-service.version>
+        <qits.projects-service-pacts-qits-workspaces-service.version>2026.1027.154457</qits.projects-service-pacts-qits-workspaces-service.version>
         <!-- qits-artifacts', qits-orchestrator's and the qits CLI's consumer pacts against this
              service (qits-1149). qits-bootstrap-cli's is gone: it calls this service no more
              (qits-bootstrap-cli-rr-60). -->
