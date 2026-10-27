@@ -260,28 +260,35 @@ public class DaemonAgentClient implements AgentDaemon {
         dirty.add(String.valueOf(dirtyArray.getValue(i)));
       }
     }
-    List<CleanupCheck.Unpushed> unpushed = new ArrayList<>();
-    JsonArray unpushedArray = json.getJsonArray("unpushed");
-    if (unpushedArray != null) {
-      for (int i = 0; i < unpushedArray.size(); i++) {
-        JsonObject entry = unpushedArray.getJsonObject(i);
-        if (entry == null) {
-          continue;
-        }
-        Integer commits = entry.getInteger("commits");
-        unpushed.add(
-            new CleanupCheck.Unpushed(
-                entry.getString("repository"),
-                entry.getString("branch"),
-                commits == null ? 0 : commits));
-      }
-    }
-    // busy (qits-1233) is optional: a daemon that predates it is never busy.
+    boolean clean = Boolean.TRUE.equals(json.getBoolean("clean"));
+    // busy (qits-1233) is optional: a daemon that predates it is never busy. inRelease and
+    // delivered (qits-1688) are optional too: a daemon that predates them reads delivered = clean.
+    Boolean delivered = json.getBoolean("delivered");
     return new CleanupCheck(
-        Boolean.TRUE.equals(json.getBoolean("clean")),
+        clean,
         dirty,
-        unpushed,
+        leftovers(json.getJsonArray("unpushed")),
+        leftovers(json.getJsonArray("inRelease")),
+        delivered == null ? clean : delivered,
         Boolean.TRUE.equals(json.getBoolean("busy")));
+  }
+
+  private static List<CleanupCheck.Unpushed> leftovers(JsonArray array) {
+    List<CleanupCheck.Unpushed> out = new ArrayList<>();
+    if (array == null) {
+      return out;
+    }
+    for (int i = 0; i < array.size(); i++) {
+      JsonObject entry = array.getJsonObject(i);
+      if (entry == null) {
+        continue;
+      }
+      Integer commits = entry.getInteger("commits");
+      out.add(
+          new CleanupCheck.Unpushed(
+              entry.getString("repository"), entry.getString("branch"), commits == null ? 0 : commits));
+    }
+    return out;
   }
 
   private Outcome simple(Long workspaceRowId, HttpMethod method, String path, JsonObject body) {

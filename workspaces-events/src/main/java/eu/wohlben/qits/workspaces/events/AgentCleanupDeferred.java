@@ -26,6 +26,8 @@ import java.util.UUID;
  *   <li>{@link #REMOVAL_UNANSWERED} — the removal was answered with neither OK nor a refusal.
  *   <li>{@link #LEFTOVER_WORK_PROMPTED} — it holds leftover work, was prompted to clean up and has
  *       not worked since.
+ *   <li>{@link #IN_RELEASE} — its work is on the git host, in a release that has not reached the
+ *       default branch yet (qits-1688). Nothing is asked of the agent.
  * </ul>
  *
  * <p>{@code detail} is the sentence the service logs. Everything else is {@link AgentPlaced}'s.
@@ -70,6 +72,9 @@ public record AgentCleanupDeferred(
 
   /** Leftover work, prompted, not worked since. */
   public static final String LEFTOVER_WORK_PROMPTED = "LEFTOVER_WORK_PROMPTED";
+
+  /** Work in a release that has not reached the default branch yet (qits-1688). */
+  public static final String IN_RELEASE = "IN_RELEASE";
 
   public AgentCleanupDeferred {
     if (eventId == null) {

@@ -19,6 +19,7 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
+import eu.wohlben.qits.workspaces.events.AgentCleanupDeferred;
 import eu.wohlben.qits.workspaces.events.AgentNudged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
@@ -1930,6 +1931,72 @@ public class AgentServiceTest {
     assertTrue(said.contains(AgentService.CLEANUP_PROMPT), said);
     assertTrue(said.contains("2 unpushed commit(s) in qits-ci-service on a detached HEAD"), said);
     liveness.markDead(slot);
+  }
+
+  /** qits-1688: the check found work on the git host that is not on the default branch yet. */
+  private static AgentDaemon.CleanupCheck inRelease() {
+    return new AgentDaemon.CleanupCheck(
+        true,
+        List.of(),
+        List.of(),
+        List.of(new AgentDaemon.CleanupCheck.Unpushed("qits-ci-service", "ticket/w-1", 2)),
+        false,
+        false);
+  }
+
+  @Test
+  void workInAReleaseWaitsForTheDefaultBranchAndAsksNothing() {
+    // qits-1688: cleanup is tied to finalization. A release that has not reached main yet — or
+    // one superseded by a request that has not — holds the work; nothing is asked of the agent.
+    AgentService.Dispatch dispatched = dispatch("w-in-release", true, null);
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    UUID id = UUID.fromString(agentId);
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      daemon.leftover(agentId, inRelease());
+      service.markEntity("w-in-release", new EntityFacts(null, "VERIFIED", false), null, null);
+      service.resolveReleasedBranch(repoId, "ticket/w-in-release", "2026.1.1", "abc", null);
+      QuarkusTransaction.requiringNew()
+          .run(() -> agents.findById(id).lastActivityAt = Instant.now().minusSeconds(3600));
+
+      service.cleanUp();
+
+      AgentWorktree waiting = row(agentId);
+      assertEquals(AgentState.OBSOLETE, waiting.state, "not removed");
+      assertNull(waiting.cleanupPromptedAt, "not prompted");
+      assertNull(waiting.pendingText);
+      assertFalse(daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("remove ")));
+      assertTrue(
+          announced
+              .of(AgentCleanupDeferred.class, e -> e.agentId().equals(agentId))
+              .stream()
+              .anyMatch(e -> AgentCleanupDeferred.IN_RELEASE.equals(e.reason())));
+
+      // The release that carries the work reaches the default branch: delivered.
+      daemon.leftover(agentId, new AgentDaemon.CleanupCheck(true, List.of(), List.of()));
+      service.cleanUp();
+
+      assertEquals(AgentState.REMOVED, row(agentId).state);
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aDroppedItemsWorkInAReleaseDoesNotHoldItsCleanup() {
+    // A dropped item's work never reaches the default branch, so nothing lost is enough.
+    String agentId =
+        closedUnreleased("w-dropped-in-release", "DROPPED", id -> daemon.leftover(id, inRelease()));
+    Long slot = row(agentId).workspaceId;
+    try {
+      service.reconcile();
+
+      assertEquals(AgentState.REMOVED, row(agentId).state);
+    } finally {
+      liveness.markDead(slot);
+    }
   }
 
   @Test

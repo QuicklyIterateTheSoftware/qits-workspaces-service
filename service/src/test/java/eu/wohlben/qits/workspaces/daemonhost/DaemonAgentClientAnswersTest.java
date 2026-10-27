@@ -64,6 +64,31 @@ class DaemonAgentClientAnswersTest {
   }
 
   @Test
+  void workInAReleaseIsReadAndAnOlderDaemonReadsDeliveredAsClean() {
+    // qits-1688.
+    AgentDaemon.CleanupCheck check =
+        DaemonAgentClient.cleanupCheckOf(
+            new JsonObject(
+                "{\"clean\":true,\"delivered\":false,\"dirty\":[],\"unpushed\":[],"
+                    + "\"inRelease\":[{\"repository\":\"wrapper\",\"branch\":\"ticket/qits-1\","
+                    + "\"commits\":2}],\"busy\":false}"));
+    assertTrue(check.clean());
+    assertFalse(check.delivered());
+    assertEquals(
+        List.of(new AgentDaemon.CleanupCheck.Unpushed("wrapper", "ticket/qits-1", 2)),
+        check.inRelease());
+
+    assertTrue(
+        DaemonAgentClient.cleanupCheckOf(
+                new JsonObject("{\"clean\":true,\"dirty\":[],\"unpushed\":[]}"))
+            .delivered());
+    assertFalse(
+        DaemonAgentClient.cleanupCheckOf(
+                new JsonObject("{\"clean\":false,\"dirty\":[\"wrapper\"],\"unpushed\":[]}"))
+            .delivered());
+  }
+
+  @Test
   void aCheckAnswered404IsAnUnknownAgentNotAnUnreachableDaemon() {
     // qits-1233: the daemon answers 404 for an agent it already removed.
     AgentDaemon.CleanupAnswer answer =

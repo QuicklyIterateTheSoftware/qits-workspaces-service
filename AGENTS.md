@@ -1139,6 +1139,10 @@ makes every daemon call, one pass at a time, kicked after each door and every
    stores) and that has been idle for `qits.workspace.agent.cleanup-idle` (30 s) is checked
    (`cleanup-check`): clean → `DELETE agent-worktrees/{id}`, token deleted, REMOVED; leftover work →
    the D7 prompt is its next turn, never a deletion. It is prompted again only after it has worked.
+   Work on the git host that is not on the default branch yet (`inRelease`: a release that has not
+   finalized, or one superseded by a request that has not) is neither removed nor prompted; the
+   sweep waits until the release reaches the default branch (qits-1688). A dropped item does not
+   wait: its work never gets there.
    A check that says `busy` (background work in the harness after its main turn ended) is neither
    removed nor prompted, nor is a removal the daemon refuses as busy; a check answered 404 is an
    agent the daemon no longer knows, and the row is REMOVED. Every pass that leaves an agent alone
@@ -1277,7 +1281,7 @@ payload's top-level fields:
 | `AgentNudged` | the four, `nudgeCount` (this nudge included), `reason` | `IDLE`, `SELF_BLOCKED` |
 | `AgentResumed` | the four, `reason` | `TURN_PENDING`, `WORKS_AGAIN` |
 | `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs, as stored when it consumed the branch if the item closed later; both absent for a dropped item, and for a closed item whose branch was gone or merged with no release) — one per agent | |
-| `AgentCleanupDeferred` | the four, `reason`, `detail` | `ITEM_NOT_CLOSED`, `RECENTLY_ACTIVE`, `TURN_PENDING`, `HARNESS_BUSY`, `DAEMON_NOT_CONNECTED`, `NO_DAEMON_CLIENT`, `CHECK_UNANSWERED`, `BUSY_IN_BACKGROUND`, `REMOVAL_UNANSWERED`, `LEFTOVER_WORK_PROMPTED` |
+| `AgentCleanupDeferred` | the four, `reason`, `detail` | `ITEM_NOT_CLOSED`, `RECENTLY_ACTIVE`, `TURN_PENDING`, `HARNESS_BUSY`, `DAEMON_NOT_CONNECTED`, `NO_DAEMON_CLIENT`, `CHECK_UNANSWERED`, `BUSY_IN_BACKGROUND`, `REMOVAL_UNANSWERED`, `LEFTOVER_WORK_PROMPTED`, `IN_RELEASE` |
 | `AgentRemoved` | the four, `reason`, `harnessStopped`, `detail` | `OBSOLETE_NEVER_PLACED`, `OBSOLETE_WORKSPACE_GONE`, `UNKNOWN_TO_DAEMON`, `RELEASED_IDLE_CLEAN`, `DROPPED_IDLE_CLEAN`, `DISCARDED` |
 | `AgentHarnessExited` | the four, `commandId`, `status`, `exitCode`, `stoppedBy` | `stoppedBy`: `DAEMON_REMOVE`, `DAEMON_YIELD`, `KILLED`, `SELF` |
 | `WorkspaceStarted` | `workspaceId`, `repositoryId` | |

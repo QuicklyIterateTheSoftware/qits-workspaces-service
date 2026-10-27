@@ -78,8 +78,25 @@ public interface AgentDaemon {
    * whether the harness is {@code busy} with background work (qits-1233). {@code clean} is about
    * git only, so a busy agent is never described as holding leftover work; a daemon that does not
    * say {@code busy} reads as not busy.
+   *
+   * <p>{@code inRelease} and {@code delivered} are qits-1688. A commit the git host holds on a
+   * branch or in a release tag, but not on the default branch yet, is in release: nothing is lost,
+   * so it is not leftover work, but the work is not delivered until its release reaches the
+   * default branch. {@code delivered} is {@code clean} with nothing in release. A daemon that does
+   * not say it reads as {@code delivered = clean}, as before.
    */
-  record CleanupCheck(boolean clean, List<String> dirty, List<Unpushed> unpushed, boolean busy) {
+  record CleanupCheck(
+      boolean clean,
+      List<String> dirty,
+      List<Unpushed> unpushed,
+      List<Unpushed> inRelease,
+      boolean delivered,
+      boolean busy) {
+
+    /** A check with nothing in release. */
+    public CleanupCheck(boolean clean, List<String> dirty, List<Unpushed> unpushed, boolean busy) {
+      this(clean, dirty, unpushed, List.of(), clean, busy);
+    }
 
     /** A check that says nothing about background work: not busy. */
     public CleanupCheck(boolean clean, List<String> dirty, List<Unpushed> unpushed) {

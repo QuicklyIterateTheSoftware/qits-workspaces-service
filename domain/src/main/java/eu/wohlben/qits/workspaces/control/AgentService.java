@@ -141,7 +141,9 @@ public class AgentService {
   /** The D7 prompt, ahead of the list of what the check found. */
   static final String CLEANUP_PROMPT =
       "Your work item is released, so this worktree is about to be removed, but the cleanup check"
-          + " found work in it that never reached the git host. Either release these changes if"
+          + " found work in it that never reached the git host. Work already on the git host, in a"
+          + " release or on the default branch, is not listed: do not push or release it again."
+          + " Either release these changes if"
           + " they were meant to be part of your work, or discard them. Only in special and rare"
           + " cases, if they are blocked somehow, create a new ticket and push them under that"
           + " workId. Say explicitly what you committed, why, and why it has not been released yet.";
@@ -2590,6 +2592,20 @@ public class AgentService {
       skip(agent, AgentCleanupDeferred.BUSY_IN_BACKGROUND, BUSY_IN_BACKGROUND, false);
       return;
     }
+    if (check.clean() && !check.delivered() && !isDropped(status)) {
+      // Cleanup is tied to finalization (qits-1688): the work is on the git host, in a release
+      // that has not reached the default branch yet — not finalized, or superseded by a request
+      // that has not finalized. Nothing is lost and nothing is asked; the sweep looks again, and
+      // once the release that carries the work reaches the default branch it is delivered. A
+      // dropped item's work never reaches it, so for one, clean is enough.
+      skip(
+          agent,
+          AgentCleanupDeferred.IN_RELEASE,
+          "its work is in a release that has not reached the default branch: "
+              + describeInRelease(check),
+          false);
+      return;
+    }
     if (check.clean()) {
       AgentDaemon.Outcome removed = port.remove(workspace.id, agent.id.toString(), false);
       if (removed == AgentDaemon.Outcome.OK || removed == AgentDaemon.Outcome.UNKNOWN_AGENT) {
@@ -2987,6 +3003,18 @@ public class AgentService {
               + " unpushed commit(s) in "
               + unpushed.repository()
               + (unpushed.branch() == null ? " on a detached HEAD" : " on " + unpushed.branch()));
+    }
+    return parts.isEmpty() ? "nothing it could name" : String.join("; ", parts);
+  }
+
+  private static String describeInRelease(AgentDaemon.CleanupCheck check) {
+    List<String> parts = new ArrayList<>();
+    for (AgentDaemon.CleanupCheck.Unpushed held : check.inRelease()) {
+      parts.add(
+          held.commits()
+              + " commit(s) in "
+              + held.repository()
+              + (held.branch() == null ? " on a detached HEAD" : " on " + held.branch()));
     }
     return parts.isEmpty() ? "nothing it could name" : String.join("; ", parts);
   }
