@@ -12,6 +12,8 @@ contracts:
     # pacts/qits-workspaces-service_qits-eventstream-javalib_qits-events-service.json (qits-1163):
     # what the qits-eventstream library asks on this service's behalf, written by
     # service/src/test/.../wiring/EventstreamPactTest.
+    # qits-1668: also pacts/qits-workspaces-service_qits-events-service.json, a declared wait's
+    # look-back, written by service/src/test/.../wiring/EventsLogPactTest.
     qits-events-service: { packages: [maven] }
     qits-projects-service: { packages: [maven] }
     # qits-1149: this service's pacts against qits-idp, qits-containers and its workspace daemons

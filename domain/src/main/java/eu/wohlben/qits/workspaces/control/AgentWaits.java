@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.control;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import eu.wohlben.qits.eventstream.control.EventFrame;
 import eu.wohlben.qits.eventstream.selection.EventSelection;
 import eu.wohlben.qits.eventstream.selection.EventSelectionEvaluator;
 import eu.wohlben.qits.eventstream.selection.EventSelectionException;
@@ -32,6 +33,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 /**
@@ -68,6 +70,9 @@ import org.jboss.logging.Logger;
  *       in its own transaction, and the event is announced once that committed. The bus taking it
  *       marks the row announced; every sweep publishes again what was never marked, under the same
  *       id. A desk wait is never cancelled for want of an ACTIVE agent.
+ *   <li><b>The look-back</b> (qits-1668): a declared wait also replays the events of its name from
+ *       {@code qits.workspaces.waits.lookback} before the declaration ({@link RecentEvents}), through
+ *       the same matcher. So a wait on an outcome that already happened fires at once.
  * </ul>
  */
 @ApplicationScoped
@@ -101,6 +106,13 @@ public class AgentWaits {
   @Inject Instance<AgentWaitingReporter> waitingReporter;
 
   @Inject WorkspaceChangePublisher changePublisher;
+
+  /** The event log, read back for {@link #lookback} (qits-1668). Absent: waits see new events only. */
+  @Inject Instance<RecentEvents> recentEvents;
+
+  /** How far before its declaration a wait looks for a matching event (qits-1668). Zero: not at all. */
+  @ConfigProperty(name = "qits.workspaces.waits.lookback", defaultValue = "PT15M")
+  Duration lookback;
 
   /** Where a desk wait's close is announced (qits-1618). Absent: nothing is, and rows stay unmarked. */
   @Inject Instance<LifecycleAnnouncer> lifecycle;
@@ -140,7 +152,8 @@ public class AgentWaits {
 
   /**
    * Declare a wait. It stays OPEN until an event matches {@code selection}, {@code timeout} passes,
-   * or it is cancelled. Declaring does not yield the agent (W5).
+   * or it is cancelled. Declaring does not yield the agent (W5). An event from the look-back can
+   * match it at once, so the answer may already say MATCHED (qits-1668).
    *
    * @param label what the agent calls it; null = the selection's one-line description
    * @param timeout null = never
@@ -151,6 +164,7 @@ public class AgentWaits {
   public AgentWaitDto create(UUID agentId, String label, EventSelection selection, Duration timeout) {
     String finalLabel = validated(label, selection, timeout);
     UUID id = UUID.randomUUID();
+    Instant declaredAt = Instant.now();
     AgentWorktree agent =
         QuarkusTransaction.requiringNew()
             .call(
@@ -179,7 +193,7 @@ public class AgentWaits {
                   wait.label = finalLabel;
                   wait.selection = selection.toJson();
                   wait.eventName = selection.event();
-                  wait.createdAt = Instant.now();
+                  wait.createdAt = declaredAt;
                   wait.expiresAt = timeout == null ? null : wait.createdAt.plus(timeout);
                   waits.persist(wait);
                   // It said what it waits on: a later quiet period earns a fresh nudge (qits-1460).
@@ -190,6 +204,7 @@ public class AgentWaits {
     LOG.infof("Agent %s waits on %s (%s)", agentId, finalLabel, id);
     hint(List.of(Placed.of(agent)));
     relayWaits(agent, CAUSE_WAIT);
+    catchUp(id, selection.event(), declaredAt);
     return get(agentId, id);
   }
 
@@ -276,6 +291,7 @@ public class AgentWaits {
       UUID projectId, String label, EventSelection selection, Duration timeout) {
     String finalLabel = validated(label, selection, timeout);
     UUID id = UUID.randomUUID();
+    Instant declaredAt = Instant.now();
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
@@ -295,12 +311,13 @@ public class AgentWaits {
               wait.label = finalLabel;
               wait.selection = selection.toJson();
               wait.eventName = selection.event();
-              wait.createdAt = Instant.now();
+              wait.createdAt = declaredAt;
               wait.expiresAt = timeout == null ? null : wait.createdAt.plus(timeout);
               waits.persist(wait);
             });
     addName(selection.event());
     LOG.infof("The desk of project %s waits on %s (%s)", projectId, finalLabel, id);
+    catchUp(id, selection.event(), declaredAt);
     return getForDesk(projectId, id);
   }
 
@@ -374,6 +391,36 @@ public class AgentWaits {
    * @return how many waits matched
    */
   public int onEvent(String eventId, String name, Instant occurredAt, String payload) {
+    return match(eventId, name, occurredAt, payload, null);
+  }
+
+  /**
+   * The look-back (qits-1668): replay the events of {@code name} from {@link #lookback} before the
+   * declaration through {@link #match}, for this one wait, and stop at the first match. Called once
+   * the wait is committed and its name is in {@link #openNames}, so an event the listener skipped
+   * before that is read here. A log that cannot be read leaves the wait OPEN.
+   */
+  private void catchUp(UUID waitId, String name, Instant declaredAt) {
+    if (lookback.isZero() || lookback.isNegative() || !recentEvents.isResolvable()) {
+      return;
+    }
+    List<EventFrame> recent;
+    try {
+      recent = recentEvents.get().since(name, declaredAt.minus(lookback));
+    } catch (RuntimeException e) {
+      LOG.warnf("Wait %s: could not read recent %s events, so it sees new ones only: %s", waitId, name, e.getMessage());
+      return;
+    }
+    for (EventFrame frame : recent) {
+      if (name.equals(frame.name())
+          && match(frame.id(), frame.name(), frame.occurredAt(), frame.payload(), waitId) > 0) {
+        return;
+      }
+    }
+  }
+
+  /** {@link #onEvent}, for every OPEN wait of the name, or only the wait {@code only} when not null. */
+  private int match(String eventId, String name, Instant occurredAt, String payload, UUID only) {
     if (name == null || name.isBlank()) {
       return 0;
     }
@@ -386,6 +433,9 @@ public class AgentWaits {
                 () -> {
                   List<Woken> out = new ArrayList<>();
                   for (AgentWait wait : waits.findOpenByEventForUpdate(name)) {
+                    if (only != null && !only.equals(wait.id)) {
+                      continue;
+                    }
                     EventSelection selection;
                     try {
                       selection = EventSelection.fromJson(wait.selection);
