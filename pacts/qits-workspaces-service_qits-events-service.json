@@ -1,0 +1,155 @@
+{
+  "consumer": {
+    "name": "qits-workspaces-service"
+  },
+  "interactions": [
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-events-service",
+            "operationId": "listEvents"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "createAgentWait"
+          }
+        }
+      },
+      "description": "createAgentWait: listEvents (the look-back of one event name)",
+      "key": "2dfbe522",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a few recent events",
+          "params": {
+            "deploymentEventId": "00000000-0000-4000-8000-000000000001",
+            "requestEventId": "00000000-0000-4000-8000-000000000002",
+            "ticketEventId": "00000000-0000-4000-8000-000000000003"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/events/api/events",
+        "query": {
+          "limit": [
+            "200"
+          ],
+          "name": [
+            "DeploymentActive"
+          ],
+          "order": [
+            "asc"
+          ],
+          "since": [
+            "2026-01-01T00:00:00Z"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "content": {
+            "events": [
+              {
+                "id": "00000000-0000-4000-8000-000000000001",
+                "name": "DeploymentActive",
+                "occurredAt": "2026-01-01T00:00:00Z",
+                "payload": "{\"application\":\"qits-projects\"}"
+              },
+              {
+                "id": "00000000-0000-4000-8000-000000000001",
+                "name": "DeploymentActive",
+                "occurredAt": "2026-01-01T00:00:00Z",
+                "payload": "{\"application\":\"qits-projects\"}"
+              },
+              {
+                "id": "00000000-0000-4000-8000-000000000001",
+                "name": "DeploymentActive",
+                "occurredAt": "2026-01-01T00:00:00Z",
+                "payload": "{\"application\":\"qits-projects\"}"
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.events": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 3
+                }
+              ]
+            },
+            "$.events[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.events[*].name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.events[*].occurredAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+                }
+              ]
+            },
+            "$.events[*].payload": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "4.0"
+    },
+    "plugins": []
+  },
+  "provider": {
+    "name": "qits-events-service"
+  }
+}

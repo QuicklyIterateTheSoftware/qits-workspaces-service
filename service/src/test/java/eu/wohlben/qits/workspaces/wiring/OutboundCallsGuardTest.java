@@ -72,7 +72,8 @@ class OutboundCallsGuardTest {
       Map.of(
           "qits-idp", new Base(GoldenMasters.IDP, "/idp"),
           "qits-projects", new Base(GoldenMasters.PROJECTS, ""),
-          "qits-system", new Base(GoldenMasters.SYSTEM, ""));
+          "qits-system", new Base(GoldenMasters.SYSTEM, ""),
+          "qits-events", new Base(EventsLogPactTest.EVENTS, ""));
 
   /**
    * The route of each {@code SystemContract} operation, for while its rows wait (epic qits-1481):
@@ -288,6 +289,9 @@ class OutboundCallsGuardTest {
   private static List<String> rowsOf(GoldenMasters.Provider provider) {
     if (provider.equals(GoldenMasters.PROJECTS)) {
       return ProjectsContract.CASES.stream().map(ProjectsContract.Case::operationId).toList();
+    }
+    if (provider.equals(EventsLogPactTest.EVENTS)) {
+      return List.of(EventsLogPactTest.OPERATION);
     }
     if (provider.equals(GoldenMasters.SYSTEM)) {
       return eu.wohlben.qits.workspaces.targethost.SystemContract.TABLE.rows().stream()
