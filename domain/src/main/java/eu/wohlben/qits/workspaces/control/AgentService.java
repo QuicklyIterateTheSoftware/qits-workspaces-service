@@ -141,9 +141,7 @@ public class AgentService {
   /** The D7 prompt, ahead of the list of what the check found. */
   static final String CLEANUP_PROMPT =
       "Your work item is released, so this worktree is about to be removed, but the cleanup check"
-          + " found work in it that never reached the git host. Work already on the git host, in a"
-          + " release or on the default branch, is not listed: do not push or release it again."
-          + " Either release these changes if"
+          + " found work in it that never reached the git host. Either release these changes if"
           + " they were meant to be part of your work, or discard them. Only in special and rare"
           + " cases, if they are blocked somehow, create a new ticket and push them under that"
           + " workId. Say explicitly what you committed, why, and why it has not been released yet.";
