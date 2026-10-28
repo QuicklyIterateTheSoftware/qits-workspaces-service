@@ -26,8 +26,10 @@ import org.junit.jupiter.api.Test;
 /**
  * <b>What this service asks qits-events itself</b> (qits-1668): a declared wait's look-back, {@link
  * HttpRecentEvents} over the real generated {@link EventsLog} client, against a pact mock server
- * that answers the recorded state {@code a few recent events}. The committed file is {@code
- * pacts/qits-workspaces-service_qits-events-service.json}; {@code -Dgolden.update=true} rewrites it.
+ * that answers the recorded state {@code DeploymentActive events to catch up on}. The committed
+ * file is {@code pacts/qits-workspaces-service_qits-events-service.json}; {@code
+ * -Dgolden.update=true} rewrites it. The state names the look-back's name filter (qits-1727): the
+ * look-back filters by name, so the recording has to be made with that same filter.
  *
  * <p>{@code @QuarkusTest} for {@code ProjectsConsumerPactTest}'s reason: the REST client is built
  * only inside a running application.
@@ -43,7 +45,7 @@ public class EventsLogPactTest {
 
   static final String OPERATION = "listEvents";
 
-  static final String STATE = "a few recent events";
+  static final String STATE = "DeploymentActive events to catch up on";
 
   static final String NAME = "DeploymentActive";
 

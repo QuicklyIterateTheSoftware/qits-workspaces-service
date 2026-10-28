@@ -18,15 +18,14 @@
         }
       },
       "description": "createAgentWait: listEvents (the look-back of one event name)",
-      "key": "2dfbe522",
+      "key": "47dbc571",
       "pending": false,
       "providerStates": [
         {
-          "name": "a few recent events",
+          "name": "DeploymentActive events to catch up on",
           "params": {
-            "deploymentEventId": "00000000-0000-4000-8000-000000000001",
-            "requestEventId": "00000000-0000-4000-8000-000000000002",
-            "ticketEventId": "00000000-0000-4000-8000-000000000003"
+            "firstEventId": "00000000-0000-4000-8000-000000000001",
+            "secondEventId": "00000000-0000-4000-8000-000000000002"
           }
         }
       ],
@@ -56,19 +55,13 @@
                 "id": "00000000-0000-4000-8000-000000000001",
                 "name": "DeploymentActive",
                 "occurredAt": "2026-01-01T00:00:00Z",
-                "payload": "{\"application\":\"qits-projects\"}"
+                "payload": "{\"applicationName\":\"qits-ci\",\"browserHost\":\"ci.qits.example\",\"endpoints\":[{\"path\":\"/ci\",\"upstreamHost\":\"dev-qits-ci\",\"upstreamPort\":8080}],\"environmentName\":\"dev\",\"navigation\":[{\"label\":\"CI\",\"position\":10,\"slot\":\"main\",\"subpath\":\"/\"}],\"version\":\"2026.101.100000\"}"
               },
               {
                 "id": "00000000-0000-4000-8000-000000000001",
                 "name": "DeploymentActive",
                 "occurredAt": "2026-01-01T00:00:00Z",
-                "payload": "{\"application\":\"qits-projects\"}"
-              },
-              {
-                "id": "00000000-0000-4000-8000-000000000001",
-                "name": "DeploymentActive",
-                "occurredAt": "2026-01-01T00:00:00Z",
-                "payload": "{\"application\":\"qits-projects\"}"
+                "payload": "{\"applicationName\":\"qits-ci\",\"browserHost\":\"ci.qits.example\",\"endpoints\":[{\"path\":\"/ci\",\"upstreamHost\":\"dev-qits-ci\",\"upstreamPort\":8080}],\"environmentName\":\"dev\",\"navigation\":[{\"label\":\"CI\",\"position\":10,\"slot\":\"main\",\"subpath\":\"/\"}],\"version\":\"2026.101.100000\"}"
               }
             ]
           },
@@ -87,7 +80,7 @@
               "matchers": [
                 {
                   "match": "type",
-                  "min": 3
+                  "min": 2
                 }
               ]
             },
