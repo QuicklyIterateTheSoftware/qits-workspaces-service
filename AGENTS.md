@@ -227,6 +227,13 @@ nullable beside a new `desk_project_id` (the qits-projects project uuid, no fore
 `ck_agent_wait_holder` holds exactly one of them. `closed_event_id`, `closed_turn` and `announced_at`
 carry a closed desk wait's `DeskWaitClosed` until the bus has taken it. Columns on a `CausedRow`, so
 no `ArchRulesTest` decision; see "Declared waits".
+**`V33__agent_attention.sql`** (epic qits-1681) adds what a wait waits on to `agent_wait`
+(`subject_kind`, `subject_ref`, `subject_id`, `subject_qualified_id`, `target_states`,
+`subject_state`, `subject_state_at`, `subject_expected_by`, `subject_resolved_at`, `subject_error`)
+and what an agent needs to `agent_worktree` (`blocked_at`, backfilled with `now()` for the explicit
+blocks standing at migration, `desk_asked_at`, `attention_code`, `attention_reason`,
+`attention_since`, `attention_wait_id`). All nullable, on two `CausedRow`s, so no `ArchRulesTest`
+decision; see "Declared waits".
 **`V30__workspace_leases.sql`** (epic qits-1481, qits-1532) retires the workspace runners: it first
 copies every row with a `runner_id` into `legacy_placement(row_id, old_runner_id, engine_id,
 hostname, runner_name)` — `engine_id` and `hostname` from the runner's `capabilities ->> 'engineId'`
@@ -1244,6 +1251,16 @@ event name, optional expiry) and gets a turn when it happens:
   `AgentDto.waitingOnSince` when the oldest of them was declared (qits-1229; not `waitingSince`,
   the hook's clock). A wait opening or closing fires `AGENTS` on the agent's workspace channel after
   it commits; an agent with no workspace fires nothing.
+- **The subject** (epic qits-1681, `V33`, `WaitSubjects`). An agent's wait records what it waits
+  on, parsed from its selection at declaration: `subject_kind` (`RELEASE_REQUEST` from
+  `ReleaseRequestStateChanged` naming `releaseRequestQualifiedId` or `releaseRequestId`; `CI_RUN` from
+  `BuildStatusChanged`, `BuildSuccessful` or `BuildFailed` naming `runId`; `WORK_ITEM` from
+  `EntityTransitioned` naming `entities[].entityId`; `COMMENTS` from `EntityCommented` naming
+  `entityId`; else `OTHER`), `subject_ref` (the value, as written, and only when every group names
+  the same one with `exact`) and `target_states` (the state values the groups wait for, a JSON
+  array). Before matching, every event of the wait's name that names its subject writes
+  `subject_state` and `subject_state_at`, and a change is announced as `AgentWaitChanged`; the
+  selection and the matching are untouched. A desk's wait records none of it.
 - **Limits.** 8 OPEN waits per agent, timeout at most 30 days, label at most 200 characters (default:
   the selection in one line). The native image registers `EventSelection`, its `Condition` and `Op`
   on `AgentWaitController`.
@@ -1288,6 +1305,10 @@ payload's top-level fields:
 | `WorkspaceFailed` | `workspaceId`, `repositoryId`, `runtimeError` | |
 | `WorkspaceRemoved` | `workspaceId`, `repositoryId`, `reason` | `NO_AGENT_LEFT` |
 | `DeskWaitClosed` | `waitId`, `projectId`, `label`, `state`, `eventName`, `matchedEventId` (absent on a timeout), `turn`, `closedAt` — not a lifecycle fact but a project desk's wake (qits-1618, "Declared waits") | `state`: `MATCHED`, `TIMED_OUT` |
+| `AgentWaitOpened` | the four, `projectId`, `waitId`, `label`, `eventName`, `subjectKind`, `subjectRef` (absent for OTHER), `targetStates` — an agent's wait declared (epic qits-1681) | `subjectKind`: `RELEASE_REQUEST`, `CI_RUN`, `WORK_ITEM`, `COMMENTS`, `OTHER` |
+| `AgentWaitChanged` | the four, `projectId`, `waitId`, `subjectKind`, `subjectRef`, `subjectQualifiedId`, `subjectState`, `subjectStateAt` — an event of the wait's name moved its subject's recorded state (epic qits-1681) | |
+| `AgentWaitClosed` | the four, `projectId`, `waitId`, `state`, `matchedEventId` (a match only) — an agent's wait matched, timed out, was cancelled, or went with its agent (epic qits-1681) | `state`: `MATCHED`, `TIMED_OUT`, `CANCELLED` |
+| `AgentActivityChanged` | the four, `projectId`, `activity`, `waitingSince` (absent once it works), `at` — the waiting flip `onActivity` relays to qits-projects, and no other frame (epic qits-1681) | `activity`: `IDLE`, `BUSY`, `WAITING`, `ENDED` |
 
 The rules they keep:
 
