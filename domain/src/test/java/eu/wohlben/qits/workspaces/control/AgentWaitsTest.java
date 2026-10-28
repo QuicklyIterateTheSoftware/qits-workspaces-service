@@ -121,7 +121,8 @@ public class AgentWaitsTest {
     assertNull(row(id).pendingText);
 
     String payload = "{\"entities\":[{\"entityId\":\"e-1\",\"status\":\"VERIFIED\"}]}";
-    assertEquals(1, waits.onEvent("ev-3", "EntityTransitioned", Instant.parse("2026-10-10T10:00:00Z"), payload));
+    // An event older than the wait would skip it (qits-1677), so this one is dated after it.
+    assertEquals(1, waits.onEvent("ev-3", "EntityTransitioned", Instant.parse("2036-10-10T10:00:00Z"), payload));
 
     AgentWait closed = waitRow(wait.id());
     assertEquals(AgentWaitState.MATCHED, closed.state);
@@ -129,10 +130,10 @@ public class AgentWaitsTest {
     assertNotNull(closed.closedAt);
     String turn = row(id).pendingText;
     assertTrue(turn.contains("\"ticket e-1 verified\" matched: EntityTransitioned"), turn);
-    assertTrue(turn.contains("2026-10-10T10:00:00Z"), turn);
+    assertTrue(turn.contains("2036-10-10T10:00:00Z"), turn);
     assertTrue(turn.contains("entities[].entityId = \"e-1\""), turn);
     assertTrue(turn.contains("entities[].status = \"VERIFIED\""), turn);
-    assertTrue(turn.contains("--filter=EntityTransitioned --since 2026-10-10T10:00:00Z"), turn);
+    assertTrue(turn.contains("--filter=EntityTransitioned --since 2036-10-10T10:00:00Z"), turn);
     assertNull(service.get(id).waitingOn());
 
     // A second delivery of the same event changes nothing.

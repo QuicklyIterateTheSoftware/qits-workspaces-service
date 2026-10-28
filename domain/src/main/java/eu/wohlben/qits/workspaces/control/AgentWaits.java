@@ -81,7 +81,14 @@ import org.jboss.logging.Logger;
  *       id. A desk wait is never cancelled for want of an ACTIVE agent.
  *   <li><b>The look-back</b> (qits-1668): a declared wait also replays the events of its name from
  *       {@code qits.workspaces.waits.lookback} before the declaration ({@link RecentEvents}), through
- *       the same matcher. So a wait on an outcome that already happened fires at once.
+ *       the same matcher. So a wait on an outcome that already happened fires at once — but only
+ *       while it still holds (qits-1677): an event that occurred before a wait was declared may
+ *       match it only when it is the latest event about the wait's stateful subject (a release
+ *       request, a run, a work item: {@link WaitSubjects}); every other event must occur at or
+ *       after the wait's {@code createdAt}. A request REJECTED and then PENDING again does not fire
+ *       a wait on its final states, a comment from before the declaration does not fire a wait on
+ *       the next one, and a selection naming no subject replays nothing older than itself. The
+ *       live path holds the same line: an event delivered late, older than the wait, skips it.
  *   <li><b>The subject</b> (epic qits-1681, {@code V33}): an agent's wait records what it waits on,
  *       parsed from its selection at declaration ({@link WaitSubjects}), and every event of its name
  *       that names that subject writes the subject's state before matching. The selection and the
@@ -278,7 +285,7 @@ public class AgentWaits {
     }
     hint(List.of(Placed.of(agent)));
     relayWaits(agent, CAUSE_WAIT);
-    catchUp(id, selection.event(), declaredAt);
+    catchUp(id, selection, declaredAt);
     // A declared wait ends IDLE_NO_WAIT, and its looked-up subject may have passed already.
     attentions.reevaluate(agentId);
     return get(agentId, id);
@@ -394,7 +401,7 @@ public class AgentWaits {
             });
     addName(selection.event());
     LOG.infof("The desk of project %s waits on %s (%s)", projectId, finalLabel, id);
-    catchUp(id, selection.event(), declaredAt);
+    catchUp(id, selection, declaredAt);
     return getForDesk(projectId, id);
   }
 
@@ -472,15 +479,24 @@ public class AgentWaits {
   }
 
   /**
-   * The look-back (qits-1668): replay the events of {@code name} from {@link #lookback} before the
-   * declaration through {@link #match}, for this one wait, and stop at the first match. Called once
-   * the wait is committed and its name is in {@link #openNames}, so an event the listener skipped
-   * before that is read here. A log that cannot be read leaves the wait OPEN.
+   * The look-back (qits-1668): replay the events of {@code selection}'s name from {@link #lookback}
+   * before the declaration through {@link #match}, for this one wait, and stop at the first match.
+   * Called once the wait is committed and its name is in {@link #openNames}, so an event the
+   * listener skipped before that is read here. A log that cannot be read leaves the wait OPEN.
+   *
+   * <p>Only what still holds is replayed (qits-1677). On a stateful subject — a release request, a
+   * run, a work item ({@link WaitSubjects#parse}, which reads a desk wait's selection as well) — only
+   * the <b>latest</b> frame that says the subject's state ({@link WaitSubjects#stateIn}, by the ref
+   * as written and, for an agent's wait, the id and qualified id {@link #resolveSubject} found) is
+   * replayed: when its state is not one the selection wants, a newer event superseded the outcome
+   * and nothing fires. On comments and on a selection naming no subject, only frames at or after
+   * the declaration are replayed — the gap between the wait's commit and {@link #addName}.
    */
-  private void catchUp(UUID waitId, String name, Instant declaredAt) {
+  private void catchUp(UUID waitId, EventSelection selection, Instant declaredAt) {
     if (lookback.isZero() || lookback.isNegative() || !recentEvents.isResolvable()) {
       return;
     }
+    String name = selection.event();
     List<EventFrame> recent;
     try {
       recent = recentEvents.get().since(name, declaredAt.minus(lookback));
@@ -488,12 +504,52 @@ public class AgentWaits {
       LOG.warnf("Wait %s: could not read recent %s events, so it sees new ones only: %s", waitId, name, e.getMessage());
       return;
     }
-    for (EventFrame frame : recent) {
-      if (name.equals(frame.name())
-          && match(frame.id(), frame.name(), frame.occurredAt(), frame.payload(), waitId) > 0) {
+    for (EventFrame frame : replayed(waitId, selection, declaredAt, recent)) {
+      if (match(frame.id(), frame.name(), frame.occurredAt(), frame.payload(), waitId) > 0) {
         return;
       }
     }
+  }
+
+  /** The frames of {@code recent} (oldest first) the look-back may match the wait against (qits-1677). */
+  private List<EventFrame> replayed(
+      UUID waitId, EventSelection selection, Instant declaredAt, List<EventFrame> recent) {
+    String name = selection.event();
+    WaitSubjects.Subject subject = WaitSubjects.parse(selection);
+    List<EventFrame> named = recent.stream().filter(frame -> name.equals(frame.name())).toList();
+    return switch (subject.kind()) {
+      case OTHER, COMMENTS ->
+          named.stream().filter(frame -> !occurredBefore(frame.occurredAt(), declaredAt)).toList();
+      case RELEASE_REQUEST, CI_RUN, WORK_ITEM -> {
+        List<String> refs = new ArrayList<>();
+        refs.add(subject.ref());
+        AgentWait row = QuarkusTransaction.requiringNew().call(() -> waits.findById(waitId));
+        if (row != null) {
+          refs.add(row.subjectId);
+          refs.add(row.subjectQualifiedId);
+        }
+        EventFrame latest = null;
+        for (EventFrame frame : named) {
+          JsonNode tree = EventSelectionEvaluator.parsePayload(frame.payload());
+          if (WaitSubjects.stateIn(name, tree, refs).isPresent()) {
+            latest = frame;
+          }
+        }
+        yield latest == null ? List.of() : List.of(latest);
+      }
+    };
+  }
+
+  /**
+   * Whether an event at {@code occurredAt} happened before a wait created at {@code createdAt}
+   * (qits-1677). The column keeps microseconds, rounded, so the event is before only when the whole
+   * microsecond it fell in is: an event at the wait's own instant is never before it, whether {@code
+   * createdAt} is the declaration's clock or the row's. An event with no time counts as new.
+   */
+  static boolean occurredBefore(Instant occurredAt, Instant createdAt) {
+    return occurredAt != null
+        && createdAt != null
+        && occurredAt.truncatedTo(ChronoUnit.MICROS).plus(1, ChronoUnit.MICROS).isBefore(createdAt);
   }
 
   /** {@link #onEvent}, for every OPEN wait of the name, or only the wait {@code only} when not null. */
@@ -525,6 +581,11 @@ public class AgentWaits {
                       selection = EventSelection.fromJson(wait.selection);
                     } catch (EventSelectionException unreadable) {
                       LOG.warnf("Wait %s has an unreadable selection; skipped: %s", wait.id, unreadable.getMessage());
+                      continue;
+                    }
+                    // A delivered event older than the wait never matches it (qits-1677); the
+                    // look-back ({@code only}) chose its frame by that rule already.
+                    if (only == null && occurredBefore(occurredAt, wait.createdAt)) {
                       continue;
                     }
                     if (!EventSelectionEvaluator.matches(selection, name, tree)) {
