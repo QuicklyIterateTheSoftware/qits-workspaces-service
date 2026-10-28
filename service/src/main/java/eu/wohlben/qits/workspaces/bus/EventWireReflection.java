@@ -5,6 +5,10 @@ import eu.wohlben.qits.eventstream.control.EventFrame;
 import eu.wohlben.qits.workspaces.events.AgentCleanupDeferred;
 import eu.wohlben.qits.workspaces.events.AgentHarnessExited;
 import eu.wohlben.qits.workspaces.events.AgentNudged;
+import eu.wohlben.qits.workspaces.events.AgentWaitOpened;
+import eu.wohlben.qits.workspaces.events.AgentWaitChanged;
+import eu.wohlben.qits.workspaces.events.AgentWaitClosed;
+import eu.wohlben.qits.workspaces.events.AgentActivityChanged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentPlaced;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
@@ -61,6 +65,10 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
       WorkspaceFailed.class,
       WorkspaceRemoved.class,
       DeskWaitClosed.class,
+      AgentWaitOpened.class,
+      AgentWaitChanged.class,
+      AgentWaitClosed.class,
+      AgentActivityChanged.class,
       TargetLeaseChanged.class,
       EventEnvelope.class,
       EventFrame.class

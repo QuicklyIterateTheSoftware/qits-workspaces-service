@@ -99,6 +99,27 @@ class LifecycleEventsContractTest {
         deskWaitMatched(),
         List.of(
             "closedAt", "eventName", "label", "matchedEventId", "projectId", "state", "turn", "waitId"));
+    // Epic qits-1681: an agent's waits and its activity flips. Each carries projectId.
+    List<String> agentInProject = with(agent, "projectId");
+    out.put(
+        new AgentWaitOpened(
+            AGENT, WORK, "385", REPO, PROJECT, "wait-1", "release request x-rr-1 to end",
+            "ReleaseRequestStateChanged", "RELEASE_REQUEST", "x-rr-1", List.of("FINALIZED"), AT),
+        with(agentInProject, "eventName", "label", "subjectKind", "subjectRef", "targetStates", "waitId"));
+    out.put(
+        new AgentWaitChanged(
+            AGENT, WORK, "385", REPO, PROJECT, "wait-1", "RELEASE_REQUEST", "x-rr-1", "x-rr-1",
+            "RELEASED", Instant.parse("2026-10-13T09:00:00Z"), AT),
+        with(
+            agentInProject, "subjectKind", "subjectQualifiedId", "subjectRef", "subjectState",
+            "subjectStateAt", "waitId"));
+    out.put(
+        new AgentWaitClosed(AGENT, WORK, "385", REPO, PROJECT, "wait-1", AgentWaitClosed.MATCHED, "ev-1", AT),
+        with(agentInProject, "matchedEventId", "state", "waitId"));
+    out.put(
+        new AgentActivityChanged(
+            AGENT, WORK, "385", REPO, PROJECT, "IDLE", Instant.parse("2026-10-13T09:00:00Z"), AT),
+        with(agentInProject, "activity", "at", "waitingSince"));
     return out;
   }
 
@@ -126,7 +147,11 @@ class LifecycleEventsContractTest {
             "WorkspaceStarted",
             "WorkspaceFailed",
             "WorkspaceRemoved",
-            "DeskWaitClosed"),
+            "DeskWaitClosed",
+            "AgentWaitOpened",
+            "AgentWaitChanged",
+            "AgentWaitClosed",
+            "AgentActivityChanged"),
         everyEvent().keySet().stream().map(e -> EventEnvelope.of(e).name()).toList());
   }
 
@@ -143,8 +168,9 @@ class LifecycleEventsContractTest {
       payload.fieldNames().forEachRemaining(keys::add);
       assertEquals(entry.getValue(), keys.stream().sorted().toList(), event.name());
       assertFalse(envelope.payload().contains(event.eventId().toString()), event.name());
-      if (!(event instanceof DeskWaitClosed)) {
-        // DeskWaitClosed alone carries an instant in its payload: closedAt, by contract.
+      if (!(event instanceof DeskWaitClosed) && !(event instanceof AgentActivityChanged)) {
+        // DeskWaitClosed carries closedAt in its payload, by contract, and AgentActivityChanged its
+        // `at` (the frame's time, which is also its occurrence).
         assertFalse(envelope.payload().contains("2026-10-14"), event.name());
       }
     }
