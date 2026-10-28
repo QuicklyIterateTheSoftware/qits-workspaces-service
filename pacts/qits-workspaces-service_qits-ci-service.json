@@ -18,48 +18,37 @@
         }
       },
       "description": "createAgentWait: getRun",
-      "key": "80cbd56",
+      "key": "c392ae5c",
       "pending": false,
       "providerStates": [
         {
-          "name": "a running run",
+          "name": "a failed run that retries another",
           "params": {
-            "authorization": "Bearer qits_tok_contract-ci-run",
             "repositoryId": "00000000-0000-4000-8000-000000000001",
-            "runId": "00000000-0000-4000-8000-000000000002"
+            "retryOfRunId": "00000000-0000-4000-8000-000000000002",
+            "runId": "00000000-0000-4000-8000-000000000003"
           }
         }
       ],
       "request": {
         "generators": {
-          "header": {
-            "Authorization": {
-              "dataType": "RAW",
-              "expression": "${authorization}",
-              "type": "ProviderState"
-            }
-          },
           "path": {
             "dataType": "RAW",
             "expression": "/ci/api/runs/${runId}",
             "type": "ProviderState"
           }
         },
-        "headers": {
-          "Authorization": [
-            "Bearer qits_tok_contract-ci-run"
-          ]
-        },
         "method": "GET",
-        "path": "/ci/api/runs/00000000-0000-4000-8000-000000000002"
+        "path": "/ci/api/runs/00000000-0000-4000-8000-000000000003"
       },
       "response": {
         "body": {
           "content": {
             "createdAt": "2026-01-01T00:00:00Z",
-            "id": "00000000-0000-4000-8000-000000000002",
+            "finishedAt": "2026-01-01T00:00:00Z",
+            "id": "00000000-0000-4000-8000-000000000003",
             "startedAt": "2026-01-01T00:00:00Z",
-            "status": "RUNNING"
+            "status": "FAILED"
           },
           "contentType": "application/json",
           "encoded": false
@@ -72,6 +61,15 @@
         "matchingRules": {
           "body": {
             "$.createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+                }
+              ]
+            },
+            "$.finishedAt": {
               "combine": "AND",
               "matchers": [
                 {

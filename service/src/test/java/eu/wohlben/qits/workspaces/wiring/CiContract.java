@@ -35,21 +35,25 @@ import java.util.Optional;
  *       scheduler pass makes the same call again for a wait whose lookup failed.
  * </ul>
  *
- * <p>Two states: {@code a running run}, and {@code no run with the given id}, whose 404 is read by
- * its status alone and becomes the wait's {@code subject_error}. The answer's paths bound are the
- * ones the running recording holds a value for; {@code finishedAt} and {@code
- * expectedStepDurationsMillis} are null there, and the code reads them as absent.
+ * <p>Two states: {@code a failed run that retries another}, a finished run recorded with no caller
+ * token (qits-ci's {@code a running run} records a run-bound token this service never holds, and
+ * qits-ci answered that row 403), and {@code no run with the given id}, whose 404 is read by its
+ * status alone and becomes the wait's {@code subject_error}. The answer's paths bound are the ones
+ * the recording holds a value for; {@code expectedStepDurationsMillis} is null there, and the code
+ * reads it as absent.
  */
 public final class CiContract {
 
-  static final String A_RUNNING_RUN = "a running run";
+  /**
+   * A finished run, recorded with no caller of its own: {@code a running run} records a run token
+   * bound to that run, which this service's own bearer never is, so qits-ci answered its row 403.
+   */
+  static final String A_FINISHED_RUN = "a failed run that retries another";
   static final String NO_RUN = "no run with the given id";
 
   static final String GET_RUN = "getRun";
 
   static final Trigger CREATE_WAIT = Trigger.operation("createAgentWait");
-
-  private static final String BEARER = "{authorization}";
 
   public static final ContractTable TABLE =
       new ContractTable(
@@ -57,20 +61,20 @@ public final class CiContract {
           List.of(
               ContractRow.of(
                   CREATE_WAIT,
-                  A_RUNNING_RUN,
+                  A_FINISHED_RUN,
                   GET_RUN,
-                  Request.NONE.header("Authorization", BEARER),
-                  List.of("$.id", "$.status", "$.createdAt", "$.startedAt"),
+                  Request.NONE,
+                  List.of("$.id", "$.status", "$.createdAt", "$.startedAt", "$.finishedAt"),
                   (url, params) -> {
                     WaitSubjectResolver.Resolved run =
                         resolverAgainst(url, params)
                             .resolve(WaitSubjects.Kind.CI_RUN, params.get("runId"), null)
                             .orElseThrow();
-                    JsonNode recorded = GoldenMasters.json(GoldenMasters.CI, A_RUNNING_RUN, GET_RUN);
+                    JsonNode recorded = GoldenMasters.json(GoldenMasters.CI, A_FINISHED_RUN, GET_RUN);
                     assertEquals(params.get("runId"), run.subjectId());
                     assertNull(run.subjectQualifiedId());
                     assertEquals(recorded.path("status").asText(), run.state());
-                    assertEquals(Instant.parse(recorded.path("startedAt").asText()), run.stateAt());
+                    assertEquals(Instant.parse(recorded.path("finishedAt").asText()), run.stateAt());
                     assertNotNull(run.expectedBy(), "a run always has an expected finish");
                   }),
               ContractRow.of(
