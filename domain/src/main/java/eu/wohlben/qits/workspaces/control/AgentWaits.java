@@ -520,7 +520,7 @@ public class AgentWaits {
     return switch (subject.kind()) {
       case OTHER, COMMENTS ->
           named.stream().filter(frame -> !occurredBefore(frame.occurredAt(), declaredAt)).toList();
-      case RELEASE_REQUEST, CI_RUN, WORK_ITEM -> {
+      case RELEASE_REQUEST, CI_RUN, WORK_ITEM, BRANCH -> {
         List<String> refs = new ArrayList<>();
         refs.add(subject.ref());
         AgentWait row = QuarkusTransaction.requiringNew().call(() -> waits.findById(waitId));
