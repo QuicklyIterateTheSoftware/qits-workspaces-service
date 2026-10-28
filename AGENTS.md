@@ -862,7 +862,9 @@ now, the consumer is still ours.
 
 **What else of the bus is here**: the causation half (above) — `EventstreamPushCausation` reading
 the ambient scope onto every push, and the eventstream jar's persistence trio on the entities; one
-listener, `bus/AgentWaitListener` (qits-1153, "Declared waits"); and since qits-1236 one publisher,
+listener, `bus/AgentWaitListener` (qits-1153, "Declared waits"), and since epic qits-1681 a second,
+`bus/DeskMentionListener` (durable, consumer id `qits-workspaces.desk-mentions`, on
+`EntityCommented`: "Attention"), both rows of `wiring/EventstreamPactTest`; and since qits-1236 one publisher,
 the lifecycle events ("The lifecycle events"). `qits.eventstream.enabled` stays off in
 `%dev`/`%test`: a clone-alone suite has no qits-events to reach, and the tests assert the events at
 the `LifecycleAnnouncer` port instead.
@@ -1187,7 +1189,12 @@ pass and the next frames: every placed agent, RUNNING or YIELDED, is started aga
   (qits-1605). `resolved` is true whenever an ACTIVE agent owned the branch. A branch an agent
   merely pushed marks nobody. An old-model workspace on the branch resolves as before when no agent
   owned it.
-- `GET /workspaces/api/agents?workId=&workspaceId=&state=`, `GET /workspaces/api/agents/{id}`;
+- `GET /workspaces/api/agents?workId=&workspaceId=&state=&projectId=`, `GET /workspaces/api/agents/{id}`
+  (every `AgentDto`, here and on the other doors, carries `waits` — its OPEN waits as the wait doors'
+  `WaitView`, oldest first, read for the whole listing in one query — `attention`
+  (`{code, reason, since, waitId}` or null), `blockedAt` and `deskAskedAt`; epic qits-1681).
+  `projectId` keeps the agents whose repository is that project's, each distinct repository's
+  project looked up once and remembered (`AgentWaits.projectOf`); it combines with the others;
   person doors `{qits:admin, qits:admin-agent}`: `POST /workspaces/api/agents` (an agent for an
   existing work item, D24; `wrapperBranch` defaults to `ticket|epic/<entityId>`) and `POST
   /workspaces/api/agents/{id}/discard` (`409 AGENT_BUSY` for a still-working harness, or
@@ -1216,7 +1223,7 @@ the name is mapped to a repository id through the agent's project and upserted i
 An agent says which event it waits on (`agent_wait`: label, qits-eventstream `EventSelection` JSON,
 event name, optional expiry) and gets a turn when it happens:
 
-- **Matching.** `AgentWaitListener` is this service's one bus listener: durable, consumer id
+- **Matching.** `AgentWaitListener` is this service's wait listener: durable, consumer id
   `qits-workspaces.agent-waits` (never change it), signatures `*`. `selects` looks the event name up
   in an in-memory set of the OPEN waits' names (read from the database on first use, refreshed on
   every create, close and scheduler pass). `onFrame` evaluates the OPEN waits of that name with
@@ -1302,6 +1309,50 @@ event name, optional expiry) and gets a turn when it happens:
   desk wait is never cancelled by the sweep — only a match, its timeout or the door's cancel closes
   it — and a cancel announces nothing.
 
+**Attention** (epic qits-1681; `control/AgentAttention`, pure, and `control/AgentAttentions`, the
+bean). What an ACTIVE agent needs a person for, in one code and one line, stored on the row
+(`attention_code`, `attention_reason`, `attention_since`, `attention_wait_id`, `V33`) and served as
+`AgentDto.attention`. The first rule that holds wins:
+
+| # | `code` | holds when | `since` | reason, e.g. |
+|---|---|---|---|---|
+| 1 | `WAIT_SUBJECT_PASSED` | an OPEN wait whose `subject_state` is one of its `target_states`, or final for its kind (`WaitSubjects.isFinal`) and not one of them | `subject_state_at` | `Waits on qits-projects-service-rr-368 to end; it is FINALIZED since 10:42` |
+| 2 | `BLOCKED_NO_DESK` | `entity_blocked` with `block_source` `EXPLICIT` or `BOTH`, `blocked_at` at least `blocked-after` ago, and no `desk_asked_at` at or after `blocked_at` | `blocked_at` | `Blocked 50 min by <blockAuthor>, no @desk comment since` |
+| 3 | `IDLE_NO_WAIT` | `run_state` RUNNING, `waiting_since` at least `idle-after` ago, no OPEN wait, no `pending_text`, no explicit block (as the nudge reads it: `EXPLICIT`, `BOTH` or no source; the derived `AGENT_WAITING` block alone does not excuse it), not `BETWEEN_PHASES` | `waiting_since` | `Idle 42 min with no wait and no block` |
+| 4 | `WAIT_OVERDUE` | an OPEN `CI_RUN` wait QUEUED or RUNNING past `subject_expected_by`; or an OPEN `RELEASE_REQUEST` wait in a state that is not final, unchanged for `request-overdue-after` | `subject_expected_by`, or `subject_state_at + request-overdue-after` | `Run 9677c59a RUNNING for 1 h 40 min, expected about 35 min` / `qits-qits-rr-12 PENDING, unchanged for 3 h 10 min` |
+
+Times are UTC `HH:mm`, durations `N min` or, from an hour, `N h M min` (whole minutes, rounded
+down). A run is named `run <first 8 of its id>`, anything else by its qualified id, else its ref.
+"Expected about" is `subject_expected_by − subject_state_at` (a RUNNING run's start); a QUEUED one
+says `past its expected finish at HH:mm`. Codes 1 and 4 name the wait. Keys:
+`qits.workspaces.attention.idle-after` (PT30M), `…blocked-after` (PT30M) and
+`…request-overdue-after` (PT3H), beside the run's three above.
+
+- **When it is evaluated** (`AgentAttentions.reevaluate`): after an agent's wait opens (`create`,
+  after its lookup), changes, matches, times out, is cancelled or goes with its agent (every
+  `AgentWaits` announcement); after a waiting flip (`onActivity`); after `markBlocked` /
+  `markEntity`, for every live agent of the item; after an `@desk` comment; and at the end of every
+  scheduler pass for every ACTIVE agent and every other still storing an attention
+  (`reevaluateAll`: one read of the rows and their OPEN waits, a write only where the answer
+  differs). The pass is what announces the codes time alone brings. Never throws into a caller.
+- **Announced once per change.** A different code or wait id writes the row (on its locked row,
+  re-evaluated there) and, after the commit, publishes `AgentAttentionChanged`; a cleared one
+  publishes it with no `code`. A reason whose minutes moved (or its `since`) is written silently.
+  An agent that is no longer ACTIVE clears quietly, and `AgentDto.attention` is null for it
+  whatever the row holds.
+- **Block time.** `blocked_at` is set (`stampBlockTime`, in `markBlocked`, `markEntity` and the
+  dispatch's facts) when the block turns `EXPLICIT` or `BOTH` and none is recorded, kept while it
+  stays explicit, and cleared when it ends or only the derived `AGENT_WAITING` block is left, so
+  the next explicit block is timed from its own start. `V33` backfilled `now()` for the explicit
+  blocks standing at migration.
+- **The desk was asked** (`bus/DeskMentionListener`, durable, consumer id
+  `qits-workspaces.desk-mentions`, never change it): qits-projects' `EntityCommented` whose
+  `mentions` (lower case) hold `desk` sets `desk_asked_at = commentedAt` on the item's ACTIVE agent
+  (`work_id = entityId`; an older comment never moves it back) and evaluates it again. The payload
+  binds to `bus/EntityCommented`, a transcribed record of the three fields read (`entityId`,
+  `mentions`, `commentedAt`), registered in `EventWireReflection`; one that does not bind is
+  settled with a WARN.
+
 **The lifecycle events** (qits-1236; the records in `workspaces-events/`, the port
 `control/LifecycleAnnouncer`, the publisher `bus/EventstreamLifecycleAnnouncer`). What the scheduler
 does to an agent and its workspace is announced on the bus, one event per fact, so an agent or a
@@ -1329,6 +1380,7 @@ payload's top-level fields:
 | `AgentWaitChanged` | the four, `projectId`, `waitId`, `subjectKind`, `subjectRef`, `subjectQualifiedId`, `subjectState`, `subjectStateAt` — an event of the wait's name moved its subject's recorded state (epic qits-1681) | |
 | `AgentWaitClosed` | the four, `projectId`, `waitId`, `state`, `matchedEventId` (a match only) — an agent's wait matched, timed out, was cancelled, or went with its agent (epic qits-1681) | `state`: `MATCHED`, `TIMED_OUT`, `CANCELLED` |
 | `AgentActivityChanged` | the four, `projectId`, `activity`, `waitingSince` (absent once it works), `at` — the waiting flip `onActivity` relays to qits-projects, and no other frame (epic qits-1681) | `activity`: `IDLE`, `BUSY`, `WAITING`, `ENDED` |
+| `AgentAttentionChanged` | the four, `projectId`, `code` (absent once cleared), `reason` (this service's one line), `since`, `waitId` (codes 1 and 4) — what an ACTIVE agent needs a person for changed code or wait ("Attention"; epic qits-1681) | `code`: `WAIT_SUBJECT_PASSED`, `BLOCKED_NO_DESK`, `IDLE_NO_WAIT`, `WAIT_OVERDUE` |
 
 The rules they keep:
 
@@ -1337,6 +1389,8 @@ The rules they keep:
   value (a never-placed agent's workspace) is an absent key.
 - **No text a person or an agent wrote.** No instruction, pending turn, prompt draft, work item title
   or a release's `result`; a `detail` is a sentence this service wrote, or a daemon's refusal.
+  `AgentAttentionChanged`'s `reason` is this service's sentence; it may name the block's author (a
+  subject), and a subject's qualified id or ref, never a label unless the wait names no subject.
   `DeskWaitClosed` is the one exception, by contract with its consumer: its `label` is the desk's own
   and its `turn` is the wake, fenced matched values included — what the desk asked to be told.
   Its id is fixed when the wait closes and kept across re-publishes, unlike every other event's.
