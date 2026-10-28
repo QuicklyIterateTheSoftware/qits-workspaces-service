@@ -70,6 +70,21 @@ public class AgentWaitRepository implements PanacheRepositoryBase<AgentWait, UUI
         "closedEventId is not null and announcedAt is null order by closedAt");
   }
 
+  /**
+   * OPEN agent waits whose subject was parsed and never looked up (epic qits-1681), oldest first, at
+   * most {@code limit}: what a scheduler pass resolves again. A desk wait and an OTHER one are never
+   * among them.
+   */
+  public List<AgentWait> findOpenUnresolved(int limit) {
+    return find(
+            "state = ?1 and agentId is not null and subjectKind is not null and subjectKind <> ?2"
+                + " and subjectResolvedAt is null order by createdAt",
+            AgentWaitState.OPEN,
+            "OTHER")
+        .page(0, limit)
+        .list();
+  }
+
   /** The bus took the wait's announcement; a second confirmation changes nothing. */
   public void markAnnounced(UUID waitId, Instant at) {
     update("announcedAt = ?1 where id = ?2 and announcedAt is null", at, waitId);

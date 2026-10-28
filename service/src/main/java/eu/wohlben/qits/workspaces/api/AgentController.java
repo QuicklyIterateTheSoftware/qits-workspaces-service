@@ -20,6 +20,7 @@ import jakarta.ws.rs.core.MediaType;
 import java.util.List;
 import java.util.UUID;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -58,12 +59,23 @@ public class AgentController {
     "qits:agent"
   })
   @GET
-  @Operation(operationId = "listAgents", summary = "Agents, newest first, each filter optional")
+  @Operation(
+      operationId = "listAgents",
+      summary = "Agents, newest first, each filter optional",
+      description =
+          "Each agent carries its OPEN waits (`waits`, oldest first, with what each waits on) and"
+              + " what it needs a person for (`attention`, null when nothing).")
   public ListAgentsRequest.Response list(
       @QueryParam("workId") String workId,
       @QueryParam("workspaceId") Long workspaceId,
-      @QueryParam("state") AgentState state) {
-    return new ListAgentsRequest.Response(agents.list(workId, workspaceId, state));
+      @QueryParam("state") AgentState state,
+      @Parameter(
+              description =
+                  "A project's uuid: only the agents whose repository is that project's. A"
+                      + " repository whose project cannot be named is in none.")
+          @QueryParam("projectId")
+          String projectId) {
+    return new ListAgentsRequest.Response(agents.list(workId, workspaceId, state, projectId));
   }
 
   @jakarta.annotation.security.RolesAllowed({

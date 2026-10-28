@@ -84,6 +84,10 @@ keys:
     type: string
     description: "Where qits-system answers: scheme, host and port, no path. Every regular workspace's container runs under a WORKSPACE lease asked for there."
 
+  env.QITS_CI_URL:
+    type: string
+    description: "Where qits-ci answers: scheme, host and port, no path. A declared wait on a CI run is looked up there; unset, the qits-net alias of this environment's qits-ci."
+
   # --- what each workspace container is handed ---------------------------------------------------
 
   env.QITS_WORKSPACE_CONTAINER_GIT_URL:

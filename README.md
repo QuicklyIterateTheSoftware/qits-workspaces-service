@@ -77,6 +77,7 @@ the consuming application implements:
 | `CredentialCommissioner` | no | no container is given a platform credential — today's behaviour |
 | `ContainerRuntime` | *implemented here* | `WorkspaceContainers`, over qits-containers — **admin workspaces only**; every regular workspace runs under a qits-system lease (`TargetPlacement`) and never reaches it (qits-780) |
 | `LifecycleAnnouncer` | *implemented here* | `EventstreamLifecycleAnnouncer`, onto the bus (qits-1236); absent means the lifecycle events are not published and nothing else changes |
+| `WaitSubjectResolver` | *implemented here* | `HttpWaitSubjectResolver`, over qits-projects (release requests, work items) and qits-ci (runs) (epic qits-1681); absent means a declared wait's subject is never looked up, and its state comes from events alone |
 
 In the other direction this context publishes `WorkspaceResolved` when a workspace is integrated or
 abandoned. Because the delete is **soft**, no FK cascade ever fires for rows other contexts hang off

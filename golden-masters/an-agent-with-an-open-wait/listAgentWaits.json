@@ -25,7 +25,16 @@
       "createdAt": "2026-01-01T00:00:00Z",
       "expiresAt": "2026-01-01T00:00:00Z",
       "matchedEventId": null,
-      "closedAt": null
+      "closedAt": null,
+      "subjectKind": null,
+      "subjectRef": null,
+      "subjectId": null,
+      "subjectQualifiedId": null,
+      "targetStates": null,
+      "subjectState": null,
+      "subjectStateAt": null,
+      "subjectExpectedBy": null,
+      "subjectError": null
     }
   ]
 }

@@ -209,6 +209,30 @@ public class AgentWorktree extends PanacheEntityBase implements CausedRow {
   @Column(name = "nudge_count", nullable = false)
   public int nudgeCount;
 
+  /** When the item's explicit block (source EXPLICIT or BOTH) began (epic qits-1681, {@code V33}). */
+  @Column(name = "blocked_at")
+  public Instant blockedAt;
+
+  /** When the agent last asked the desk: an {@code @desk} comment on its item ({@code V33}). */
+  @Column(name = "desk_asked_at")
+  public Instant deskAskedAt;
+
+  /** What the agent needs a person for, or null ({@code V33}). */
+  @Column(name = "attention_code", columnDefinition = "text")
+  public String attentionCode;
+
+  /** {@link #attentionCode}'s one line. */
+  @Column(name = "attention_reason", columnDefinition = "text")
+  public String attentionReason;
+
+  /** When {@link #attentionCode} began. */
+  @Column(name = "attention_since")
+  public Instant attentionSince;
+
+  /** The wait {@link #attentionCode} is about, when it is about one. */
+  @Column(name = "attention_wait_id")
+  public UUID attentionWaitId;
+
   @Column(name = "created_at", nullable = false, updatable = false)
   public Instant createdAt;
 

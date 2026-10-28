@@ -53,7 +53,8 @@ public class ProjectsConsumerPactTest {
                         new ProjectsContract.Clients(
                             HttpRepositoryLookupTest.lookupAgainst(mockServer.getUrl()),
                             filerAgainst(mockServer.getUrl()),
-                            reporterAgainst(mockServer.getUrl())),
+                            reporterAgainst(mockServer.getUrl()),
+                            subjectsAgainst(mockServer.getUrl())),
                         GoldenMasters.params(row.state()));
                 return null;
               });
@@ -98,6 +99,30 @@ public class ProjectsConsumerPactTest {
             .baseUri(java.net.URI.create(baseUrl))
             .build(ProjectsAgentWaiting.class);
     return reporter;
+  }
+
+  /**
+   * The shipped {@link HttpWaitSubjectResolver} with the real generated qits-projects clients, and
+   * no bearer (epic qits-1681). Its qits-ci client is {@code CiContract}'s.
+   */
+  static HttpWaitSubjectResolver subjectsAgainst(String baseUrl) {
+    HttpWaitSubjectResolver resolver = new HttpWaitSubjectResolver();
+    resolver.bearer =
+        new IdpProjectsBearer() {
+          @Override
+          public java.util.Optional<String> authorization() {
+            return java.util.Optional.empty();
+          }
+        };
+    resolver.releaseRequests =
+        io.quarkus.rest.client.reactive.QuarkusRestClientBuilder.newBuilder()
+            .baseUri(java.net.URI.create(baseUrl))
+            .build(ProjectsReleaseRequests.class);
+    resolver.workItems =
+        io.quarkus.rest.client.reactive.QuarkusRestClientBuilder.newBuilder()
+            .baseUri(java.net.URI.create(baseUrl))
+            .build(ProjectsWorkItems.class);
+    return resolver;
   }
 
   private static String describe(PactVerificationResult result) {

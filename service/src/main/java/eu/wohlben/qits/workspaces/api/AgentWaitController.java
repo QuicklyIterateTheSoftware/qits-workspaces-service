@@ -6,6 +6,8 @@ import eu.wohlben.qits.eventstream.selection.EventSelection;
 import eu.wohlben.qits.eventstream.selection.EventSelectionException;
 import eu.wohlben.qits.workspaces.control.AgentWaits;
 import eu.wohlben.qits.workspaces.dto.AgentWaitDto;
+import eu.wohlben.qits.workspaces.dto.WaitView;
+import eu.wohlben.qits.workspaces.dto.WaitView.SelectionSchema;
 import eu.wohlben.qits.workspaces.entity.AgentWaitState;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
@@ -24,13 +26,11 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import org.eclipse.microprofile.openapi.annotations.Operation;
-import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -83,27 +83,6 @@ public class AgentWaitController {
 
   @Inject ObjectMapper json;
 
-  /** The selection's JSON form, for the openapi document only. */
-  @Schema(
-      name = "EventSelection",
-      description =
-          "qits-eventstream's EventSelection: the event name, matched exactly, and `when` groups"
-              + " (ORed) of conditions (ANDed). Empty `when` = every event of that name.")
-  public record SelectionSchema(
-      @Schema(required = true, example = "ReleaseRequestStateChanged") String event,
-      List<List<ConditionSchema>> when) {}
-
-  /** One condition, for the openapi document only. */
-  @Schema(name = "EventSelectionCondition")
-  public record ConditionSchema(
-      @Schema(required = true, description = "Dot path; `name[]` = some element of the array")
-          String path,
-      @Schema(required = true, enumeration = {"exact", "prefix", "exists"}) String op,
-      @Schema(
-              description = "A string for exact and prefix; true or false for exists (false = absent)",
-              type = SchemaType.STRING)
-          Object value) {}
-
   /**
    * @param label what the agent calls the wait; default: the selection in one line
    * @param selection the event and conditions to wait for
@@ -113,18 +92,6 @@ public class AgentWaitController {
       String label,
       @Schema(implementation = SelectionSchema.class, required = true) JsonNode selection,
       @Schema(example = "PT2H") String timeout) {}
-
-  /** A wait as the doors answer it. */
-  public record WaitView(
-      String id,
-      String agentId,
-      String label,
-      @Schema(implementation = SelectionSchema.class) JsonNode selection,
-      AgentWaitState state,
-      Instant createdAt,
-      Instant expiresAt,
-      String matchedEventId,
-      Instant closedAt) {}
 
   public record WaitList(List<WaitView> waits) {}
 
@@ -256,21 +223,6 @@ public class AgentWaitController {
 
   /** A wait as both doors answer it; {@code agentId} is null for a desk's. */
   static WaitView view(ObjectMapper json, AgentWaitDto wait) {
-    JsonNode selection;
-    try {
-      selection = json.readTree(wait.selection());
-    } catch (Exception unreadable) {
-      selection = json.getNodeFactory().textNode(wait.selection());
-    }
-    return new WaitView(
-        wait.id(),
-        wait.agentId(),
-        wait.label(),
-        selection,
-        wait.state(),
-        wait.createdAt(),
-        wait.expiresAt(),
-        wait.matchedEventId(),
-        wait.closedAt());
+    return WaitView.of(wait);
   }
 }

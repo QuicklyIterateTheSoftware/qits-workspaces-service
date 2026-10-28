@@ -138,6 +138,24 @@ public class NativeImageContractTest {
   }
 
   /**
+   * The subject lookup's clients (epic qits-1681) bind their answers with Jackson: each record is
+   * registered on its client interface, so a native image keeps its accessors.
+   */
+  @Test
+  public void everySubjectLookupRecordIsRegisteredForReflection() {
+    for (Class<?> client :
+        List.of(
+            eu.wohlben.qits.workspaces.wiring.ProjectsReleaseRequests.class,
+            eu.wohlben.qits.workspaces.wiring.ProjectsWorkItems.class,
+            eu.wohlben.qits.workspaces.wiring.CiRuns.class)) {
+      Set<Class<?>> registered = Set.of(client.getAnnotation(RegisterForReflection.class).targets());
+      for (Class<?> needed : client.getDeclaredClasses()) {
+        assertTrue(registered.contains(needed), needed + " is not in " + client.getSimpleName() + "'s targets");
+      }
+    }
+  }
+
+  /**
    * The declared-wait selection (qits-1153) is bound by qits-eventstream's own Jackson reader, which
    * a native image only runs on registered types: the record, its condition and its operator.
    */

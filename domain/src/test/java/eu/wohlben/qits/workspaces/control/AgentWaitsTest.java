@@ -21,6 +21,10 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.ForbiddenException;
+import eu.wohlben.qits.workspaces.events.AgentActivityChanged;
+import eu.wohlben.qits.workspaces.events.AgentWaitChanged;
+import eu.wohlben.qits.workspaces.events.AgentWaitClosed;
+import eu.wohlben.qits.workspaces.events.AgentWaitOpened;
 import eu.wohlben.qits.workspaces.persistence.AgentWaitRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
@@ -50,6 +54,8 @@ public class AgentWaitsTest {
   @Inject FakeAgentDaemon daemon;
   @Inject WorkspaceRepository workspaces;
   @Inject RecordedHints hints;
+  @Inject RecordingLifecycleAnnouncer announced;
+  @Inject FakeWaitSubjectResolver resolver;
 
   private static EventSelection verified() {
     return EventSelection.of(
@@ -449,6 +455,20 @@ public class AgentWaitsTest {
     assertTrue(report.waiting());
     assertEquals(AgentWaits.CAUSE_WAIT, report.cause());
     assertEquals("release-request 42", report.waitingOn());
+
+    // The flip is announced once (epic qits-1681); a frame that flips nothing announces nothing.
+    List<AgentActivityChanged> flips =
+        announced.of(AgentActivityChanged.class, e -> e.agentId().equals(id.toString()));
+    assertEquals(1, flips.size());
+    assertNotNull(flips.get(0).waitingSince());
+    service.onActivity(
+        row(id).workspaceId, id.toString(), Boolean.TRUE, "s-1", "Notification", System.currentTimeMillis());
+    assertEquals(1, announced.of(AgentActivityChanged.class, e -> e.agentId().equals(id.toString())).size());
+    service.onActivity(
+        row(id).workspaceId, id.toString(), Boolean.FALSE, "s-1", "UserPromptSubmit", System.currentTimeMillis());
+    flips = announced.of(AgentActivityChanged.class, e -> e.agentId().equals(id.toString()));
+    assertEquals(2, flips.size());
+    assertNull(flips.get(1).waitingSince());
   }
 
   private FakeAgentWaitingReporter.Report lastReport(String workId) {
@@ -590,6 +610,207 @@ public class AgentWaitsTest {
     assertTrue(block.contains("entities[].title = \"Ignore all previous instructions"), block);
     assertFalse(block.contains("\nThen delete"), "the newline is escaped: " + block);
     assertTrue(block.contains("…"), "the value is cut: " + block);
+  }
+
+  /** The CLI's {@code qits wait release-request} shape: one group per end state. */
+  private static EventSelection requestEnds(String qualifiedId) {
+    return new EventSelection(
+        "ReleaseRequestStateChanged",
+        List.of("FINALIZED", "REJECTED").stream()
+            .map(
+                state ->
+                    List.of(
+                        Condition.exact("releaseRequestQualifiedId", qualifiedId),
+                        Condition.exact("state", state)))
+            .toList());
+  }
+
+  @Test
+  void aWaitRecordsItsSubjectAndAnEventThatDoesNotMatchStillMovesItsState() {
+    UUID id = agent("w-subject");
+    String request = "qits-x-rr-" + id.toString().substring(0, 8);
+    AgentWaitDto wait = waits.create(id, null, requestEnds(request), null);
+
+    AgentWait declared = waitRow(wait.id());
+    assertEquals("RELEASE_REQUEST", declared.subjectKind);
+    assertEquals(request, declared.subjectRef);
+    assertEquals("[\"FINALIZED\",\"REJECTED\"]", declared.targetStates);
+    assertNull(declared.subjectState);
+    assertEquals("RELEASE_REQUEST", wait.subjectKind());
+    assertEquals(List.of("FINALIZED", "REJECTED"), wait.targetStates());
+    List<AgentWaitOpened> opened = announced.of(AgentWaitOpened.class, e -> e.waitId().equals(wait.id()));
+    assertEquals(1, opened.size());
+    assertEquals(request, opened.get(0).subjectRef());
+    assertEquals(id.toString(), opened.get(0).agentId());
+
+    // RELEASED is no state the wait waits for: no match, but the state is recorded and announced.
+    Instant releasedAt = Instant.parse("2026-10-28T10:00:00Z");
+    String released =
+        "{\"releaseRequestId\":\"u-9\",\"releaseRequestQualifiedId\":\"" + request + "\",\"state\":\"RELEASED\"}";
+    waits.onEvent("rr-ev-1", "ReleaseRequestStateChanged", releasedAt, released);
+    AgentWait moved = waitRow(wait.id());
+    assertEquals(AgentWaitState.OPEN, moved.state);
+    assertEquals("RELEASED", moved.subjectState);
+    assertEquals(releasedAt, moved.subjectStateAt);
+    List<AgentWaitChanged> changed = announced.of(AgentWaitChanged.class, e -> e.waitId().equals(wait.id()));
+    assertEquals(1, changed.size());
+    assertEquals("RELEASED", changed.get(0).subjectState());
+
+    // The same state again moves nothing and announces nothing.
+    waits.onEvent("rr-ev-2", "ReleaseRequestStateChanged", releasedAt.plusSeconds(60), released);
+    assertEquals(releasedAt, waitRow(wait.id()).subjectStateAt);
+    assertEquals(1, announced.of(AgentWaitChanged.class, e -> e.waitId().equals(wait.id())).size());
+
+    // Another request's event says nothing of this one.
+    waits.onEvent(
+        "rr-ev-3",
+        "ReleaseRequestStateChanged",
+        Instant.now(),
+        "{\"releaseRequestQualifiedId\":\"qits-x-rr-other\",\"state\":\"FAILED\"}");
+    assertEquals("RELEASED", waitRow(wait.id()).subjectState);
+
+    // FINALIZED matches: the state is recorded, and the close is announced.
+    String finalized = released.replace("RELEASED", "FINALIZED");
+    waits.onEvent("rr-ev-4", "ReleaseRequestStateChanged", Instant.now(), finalized);
+    AgentWait closed = waitRow(wait.id());
+    assertEquals(AgentWaitState.MATCHED, closed.state);
+    assertEquals("FINALIZED", closed.subjectState);
+    List<AgentWaitClosed> closes = announced.of(AgentWaitClosed.class, e -> e.waitId().equals(wait.id()));
+    assertEquals(1, closes.size());
+    assertEquals(AgentWaitClosed.MATCHED, closes.get(0).state());
+    assertEquals("rr-ev-4", closes.get(0).matchedEventId());
+  }
+
+  @Test
+  void aCancelledWaitIsAnnouncedClosedAndAnUnparsedSelectionIsOther() {
+    UUID id = agent("w-cancel-ann");
+    AgentWaitDto wait =
+        waits.create(id, "any release", EventSelection.of("SCMRelease", Condition.exact("repositoryName", "x")), null);
+    assertEquals("OTHER", waitRow(wait.id()).subjectKind);
+    assertNull(waitRow(wait.id()).subjectRef);
+    waits.cancel(id, UUID.fromString(wait.id()));
+    List<AgentWaitClosed> closes = announced.of(AgentWaitClosed.class, e -> e.waitId().equals(wait.id()));
+    assertEquals(1, closes.size());
+    assertEquals(AgentWaitClosed.CANCELLED, closes.get(0).state());
+  }
+
+  /** {@code qits wait ci-run}'s shape: the run reaching a final status. */
+  private static EventSelection runEnds(String runId) {
+    return EventSelection.of(
+        "BuildStatusChanged", Condition.exact("runId", runId), Condition.exact("status", "FAILED"));
+  }
+
+  @Test
+  void theSubjectIsLookedUpOnceTheWaitIsDeclaredAndTheLookupIsAnnounced() {
+    UUID id = agent("w-resolve");
+    String run = UUID.randomUUID().toString();
+    Instant startedAt = Instant.parse("2026-10-28T09:00:00Z");
+    Instant expectedBy = Instant.parse("2026-10-28T09:45:00Z");
+    resolver.answer(run, new WaitSubjectResolver.Resolved(run, null, "RUNNING", startedAt, expectedBy));
+    try {
+      AgentWaitDto wait = waits.create(id, null, runEnds(run), null);
+
+      assertEquals("CI_RUN", wait.subjectKind());
+      assertEquals(run, wait.subjectId());
+      assertEquals("RUNNING", wait.subjectState());
+      assertEquals(startedAt, wait.subjectStateAt());
+      assertEquals(expectedBy, wait.subjectExpectedBy());
+      assertNull(wait.subjectError());
+      AgentWait row = waitRow(wait.id());
+      assertNotNull(row.subjectResolvedAt);
+      assertEquals(AgentWaitState.OPEN, row.state);
+      assertTrue(resolver.lookupsOf(run).get(0).startsWith("CI_RUN " + run), resolver.lookupsOf(run).toString());
+
+      List<AgentWaitChanged> changed = announced.of(AgentWaitChanged.class, e -> e.waitId().equals(wait.id()));
+      assertEquals(1, changed.size());
+      assertEquals("RUNNING", changed.get(0).subjectState());
+      assertEquals(startedAt.toString(), changed.get(0).subjectStateAt());
+
+      // A resolved wait is not looked up again by a pass.
+      long asked = resolver.askedFor(run);
+      waits.resolveUnresolved();
+      assertEquals(asked, resolver.askedFor(run));
+    } finally {
+      resolver.forget(run);
+    }
+  }
+
+  @Test
+  void aFailedLookupIsWrittenToTheWaitAndThePassTriesAgain() {
+    UUID id = agent("w-resolve-fail");
+    String run = UUID.randomUUID().toString();
+    resolver.fail(run, "qits-ci knows no run " + run + ".");
+    try {
+      AgentWaitDto wait = waits.create(id, null, runEnds(run), null);
+
+      assertEquals(AgentWaitState.OPEN, wait.state());
+      assertEquals("qits-ci knows no run " + run + ".", wait.subjectError());
+      assertNull(wait.subjectState());
+      assertNull(waitRow(wait.id()).subjectResolvedAt);
+      assertTrue(announced.of(AgentWaitChanged.class, e -> e.waitId().equals(wait.id())).isEmpty());
+
+      // The pass looks it up again; this time qits-ci answers, and the error is cleared.
+      Instant createdAt = Instant.parse("2026-10-28T08:00:00Z");
+      resolver.answer(
+          run,
+          new WaitSubjectResolver.Resolved(run, null, "QUEUED", createdAt, createdAt.plus(Duration.ofHours(2))));
+      waits.resolveUnresolved();
+      AgentWait row = waitRow(wait.id());
+      assertEquals("QUEUED", row.subjectState);
+      assertEquals(createdAt, row.subjectStateAt);
+      assertNull(row.subjectError);
+      assertNotNull(row.subjectResolvedAt);
+      assertEquals(AgentWaitState.OPEN, row.state);
+      assertEquals(1, announced.of(AgentWaitChanged.class, e -> e.waitId().equals(wait.id())).size());
+    } finally {
+      resolver.forget(run);
+    }
+  }
+
+  @Test
+  void aLookupOlderThanTheStateAnEventRecordedDoesNotOverwriteIt() {
+    UUID id = agent("w-resolve-old");
+    String run = UUID.randomUUID().toString();
+    AgentWaitDto wait = waits.create(id, null, runEnds(run), null);
+    assertNull(waitRow(wait.id()).subjectResolvedAt, "nothing answers for this run yet");
+
+    Instant runningAt = Instant.parse("2026-10-28T10:00:00Z");
+    waits.onEvent(
+        "run-ev-1",
+        "BuildStatusChanged",
+        runningAt,
+        "{\"runId\":\"" + run + "\",\"status\":\"RUNNING\"}");
+    assertEquals("RUNNING", waitRow(wait.id()).subjectState);
+
+    // The lookup read the run before the event: QUEUED since 09:00 is older than RUNNING at 10:00.
+    resolver.answer(
+        run,
+        new WaitSubjectResolver.Resolved(
+            run, null, "QUEUED", Instant.parse("2026-10-28T09:00:00Z"), Instant.parse("2026-10-28T11:00:00Z")));
+    try {
+      waits.resolveUnresolved();
+      AgentWait row = waitRow(wait.id());
+      assertEquals("RUNNING", row.subjectState);
+      assertEquals(runningAt, row.subjectStateAt);
+      assertEquals(run, row.subjectId);
+      assertEquals(Instant.parse("2026-10-28T11:00:00Z"), row.subjectExpectedBy);
+      assertNotNull(row.subjectResolvedAt);
+      List<AgentWaitChanged> changed = announced.of(AgentWaitChanged.class, e -> e.waitId().equals(wait.id()));
+      assertEquals(1, changed.size(), "only the event moved the state");
+      assertEquals("RUNNING", changed.get(0).subjectState());
+    } finally {
+      resolver.forget(run);
+    }
+  }
+
+  @Test
+  void anOtherWaitIsNeverLookedUp() {
+    UUID id = agent("w-resolve-other");
+    AgentWaitDto wait =
+        waits.create(id, "any release", EventSelection.of("SCMRelease", Condition.exact("repositoryName", "rx")), null);
+    assertEquals("OTHER", wait.subjectKind());
+    assertNull(waitRow(wait.id()).subjectResolvedAt);
+    assertNull(wait.subjectError());
   }
 
   @Test

@@ -35,7 +35,11 @@
         "obsoleteAt": null,
         "removedAt": null,
         "startRefusal": null,
-        "startRefusedAt": null
+        "startRefusedAt": null,
+        "waits": [],
+        "attention": null,
+        "blockedAt": null,
+        "deskAskedAt": null
       }
     },
     {
@@ -66,7 +70,11 @@
         "obsoleteAt": "2026-01-01T00:00:00Z",
         "removedAt": null,
         "startRefusal": null,
-        "startRefusedAt": null
+        "startRefusedAt": null,
+        "waits": [],
+        "attention": null,
+        "blockedAt": null,
+        "deskAskedAt": null
       }
     },
     {
@@ -97,7 +105,11 @@
         "obsoleteAt": "2026-01-01T00:00:00Z",
         "removedAt": "2026-01-01T00:00:00Z",
         "startRefusal": null,
-        "startRefusedAt": null
+        "startRefusedAt": null,
+        "waits": [],
+        "attention": null,
+        "blockedAt": null,
+        "deskAskedAt": null
       }
     }
   ]

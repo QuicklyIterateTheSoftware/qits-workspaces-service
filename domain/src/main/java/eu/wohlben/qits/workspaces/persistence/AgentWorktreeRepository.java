@@ -164,6 +164,14 @@ public class AgentWorktreeRepository implements PanacheRepositoryBase<AgentWorkt
         .toList();
   }
 
+  /**
+   * The agents whose attention a scheduler pass evaluates (epic qits-1681): every ACTIVE one, and
+   * every other that still stores an attention, so leaving ACTIVE clears it.
+   */
+  public List<AgentWorktree> findAttentionCandidates() {
+    return list("state = ?1 or attentionCode is not null", AgentState.ACTIVE);
+  }
+
   /** Every query of the listing door, each filter optional. */
   public List<AgentWorktree> search(String workId, Long workspaceId, AgentState state) {
     StringBuilder q = new StringBuilder("1 = 1");

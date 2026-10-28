@@ -2,11 +2,13 @@ package eu.wohlben.qits.workspaces.control;
 
 import eu.wohlben.qits.eventstream.QitsEvent;
 import eu.wohlben.qits.workspaces.dto.AgentDto;
+import eu.wohlben.qits.workspaces.dto.WaitView;
 import eu.wohlben.qits.workspaces.dto.WorkItemWorkspaceDto;
 import eu.wohlben.qits.workspaces.entity.AgentBranch;
 import eu.wohlben.qits.workspaces.entity.AgentHarness;
 import eu.wohlben.qits.workspaces.entity.AgentRunState;
 import eu.wohlben.qits.workspaces.entity.AgentState;
+import eu.wohlben.qits.workspaces.entity.AgentWait;
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
@@ -15,6 +17,7 @@ import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.events.AgentCleanupDeferred;
+import eu.wohlben.qits.workspaces.events.AgentActivityChanged;
 import eu.wohlben.qits.workspaces.events.AgentHarnessExited;
 import eu.wohlben.qits.workspaces.events.AgentNudged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
@@ -263,10 +266,16 @@ public class AgentService {
 
   @Inject Instance<WorkspaceDaemonLiveness> liveness;
 
-  /** Declared waits (qits-1153): swept every pass; they also own the waiting relay to qits-projects. */
+  /**
+   * Declared waits (qits-1153): swept every pass, and their unresolved subjects looked up again
+   * (epic qits-1681); they also own the waiting relay to qits-projects.
+   */
   @Inject AgentWaits waits;
 
   @Inject AgentWaitRepository waitRows;
+
+  /** What an agent needs a person for (epic qits-1681): evaluated after a flip, a mark and each pass. */
+  @Inject AgentAttentions attentions;
 
   /**
    * The lifecycle events (qits-1236), each announced after the write it reports committed. Absent:
@@ -780,6 +789,7 @@ public class AgentService {
                       agent.entityBlocked = facts.blocked();
                       agent.blockSource = trimmed(blockSource);
                       agent.blockAuthor = trimmed(blockedBy);
+                      stampBlockTime(agent, Instant.now());
                     } else {
                       applyFacts(agent, facts, blockSource, blockedBy);
                     }
@@ -789,6 +799,8 @@ public class AgentService {
     if (stored.isEmpty()) {
       return new EntityMark(null, false);
     }
+    // A block, its end or a status between phases moves what the agent needs a person for.
+    attentions.reevaluate(stored.stream().map(a -> a.id).toList());
     AgentWorktree agent = stored.get(0);
     boolean applied = false;
     if (agent.workspaceId != null && started.containsKey(agent.id) && daemon.isResolvable()) {
@@ -949,8 +961,29 @@ public class AgentService {
   }
 
   public List<AgentDto> list(String workId, Long workspaceId, AgentState state) {
+    return list(workId, workspaceId, state, null);
+  }
+
+  /**
+   * The listing door: each filter optional. {@code projectId} (epic qits-1681) keeps the agents
+   * whose repository is that project's, each distinct repository's project asked once (and
+   * remembered: a repository never changes project); a repository whose project cannot be named is
+   * in no project.
+   */
+  public List<AgentDto> list(String workId, Long workspaceId, AgentState state, String projectId) {
     List<AgentWorktree> rows =
         QuarkusTransaction.requiringNew().call(() -> agents.search(workId, workspaceId, state));
+    if (projectId != null && !projectId.isBlank()) {
+      String wanted = projectId.trim();
+      Map<String, Boolean> inProject = new HashMap<>();
+      rows =
+          rows.stream()
+              .filter(
+                  a ->
+                      inProject.computeIfAbsent(
+                          a.repositoryId, repo -> wanted.equals(waits.projectOf(repo))))
+              .toList();
+    }
     return views(rows);
   }
 
@@ -1095,7 +1128,7 @@ public class AgentService {
                     return null;
                   }
                   agent.waitingSince = awaitingInput ? when : null;
-                  return new String[] {agent.workId};
+                  return new String[] {agent.workId, idOf(agent.workspaceId), agent.repositoryId};
                 });
     if (wokeUp[0] != null) {
       announce(wokeUp[0]);
@@ -1103,6 +1136,19 @@ public class AgentService {
     if (relay != null) {
       // With an OPEN wait, a waiting agent is reported as waiting on it (qits-1153, W5).
       waits.relayActivity(relay[0], id, awaitingInput, hookEvent, sessionId, when);
+      // The same flip, announced (epic qits-1681); never on a frame that flipped nothing.
+      announce(
+          new AgentActivityChanged(
+              id.toString(),
+              relay[0],
+              relay[1],
+              relay[2],
+              waits.projectOf(relay[2]),
+              activityWord(id, awaitingInput),
+              awaitingInput ? when : null,
+              when));
+      // Waiting for input starts IDLE_NO_WAIT's clock; working again ends it.
+      attentions.reevaluate(id);
     }
     if (Boolean.TRUE.equals(awaitingInput) || busyAgain.get()) {
       kick();
@@ -1313,6 +1359,11 @@ public class AgentService {
       } catch (RuntimeException e) {
         LOG.warnf(e, "declared-wait sweep failed");
       }
+      try {
+        waits.resolveUnresolved();
+      } catch (RuntimeException e) {
+        LOG.warnf(e, "declared-wait subject lookup failed");
+      }
       resumeYielded();
       placeQueued();
       repairStaleIdle();
@@ -1323,6 +1374,13 @@ public class AgentService {
       obsoleteReleasedClosed();
       cleanUp();
       removeEmptyWorkspaces();
+      try {
+        // Last, so an agent this pass made OBSOLETE clears quietly, and what time alone brings
+        // (an idle agent, a block with no @desk comment, an overdue wait) is announced.
+        attentions.reevaluateAll();
+      } catch (RuntimeException e) {
+        LOG.warnf(e, "agent attention pass failed");
+      }
     }
   }
 
@@ -2504,7 +2562,7 @@ public class AgentService {
     return out;
   }
 
-  private static boolean isBetweenPhases(String status) {
+  static boolean isBetweenPhases(String status) {
     return status != null && BETWEEN_PHASES.contains(status.toUpperCase(Locale.ROOT));
   }
 
@@ -2771,6 +2829,25 @@ public class AgentService {
     return liveness.isResolvable() && liveness.get().isDaemonLive(workspaceId);
   }
 
+  /**
+   * The activity an {@link AgentActivityChanged} says: what the agent doors show for it ({@link
+   * AgentActivityView#reportedActivityOf}), else what the flip itself says — IDLE while it waits
+   * for input, BUSY once it does not.
+   */
+  private String activityWord(UUID id, boolean awaitingInput) {
+    if (activity.isResolvable()) {
+      try {
+        Optional<AgentActivityState> reported = activity.get().reportedActivityOf(id.toString());
+        if (reported.isPresent()) {
+          return reported.get().name();
+        }
+      } catch (RuntimeException unreadable) {
+        LOG.debugf("No activity reading for agent %s: %s", id, unreadable.getMessage());
+      }
+    }
+    return awaitingInput ? AgentActivityState.IDLE.name() : AgentActivityState.BUSY.name();
+  }
+
   /** {@code event} to the lifecycle port; call it only once the write it reports committed. */
   private void announce(QitsEvent event) {
     LifecycleAnnouncer.announce(lifecycle, event);
@@ -2977,7 +3054,8 @@ public class AgentService {
         defaultBranch);
   }
 
-  private String projectOf(String repositoryId) {
+  /** The project of {@code repositoryId}; null when qits-projects cannot name it. Never throws. */
+  String projectOf(String repositoryId) {
     try {
       return repositories.find(repositoryId).map(RepositoryLookup.RepositoryView::projectId).orElse(null);
     } catch (RuntimeException registryDidNotAnswer) {
@@ -3010,6 +3088,23 @@ public class AgentService {
     agent.entityBlocked = normalized.blocked();
     agent.blockSource = trimmed(blockSource);
     agent.blockAuthor = trimmed(blockedBy);
+    stampBlockTime(agent, Instant.now());
+  }
+
+  /**
+   * {@code blocked_at} (epic qits-1681): when an explicit block ({@code EXPLICIT} or {@code BOTH})
+   * began. Set when the block turns explicit and none is recorded; kept while it stays explicit;
+   * cleared when it ends or only the derived {@code AGENT_WAITING} block is left, so the next
+   * explicit block is timed from its own start.
+   */
+  static void stampBlockTime(AgentWorktree agent, Instant now) {
+    if (AgentAttention.explicitlyBlocked(agent)) {
+      if (agent.blockedAt == null) {
+        agent.blockedAt = now.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+      }
+    } else {
+      agent.blockedAt = null;
+    }
   }
 
   static String describe(AgentDaemon.CleanupCheck check) {
@@ -3064,9 +3159,17 @@ public class AgentService {
                 pushed
                     .computeIfAbsent(b.key.agentId, id -> new ArrayList<>())
                     .add(new AgentDto.Branch(b.key.repositoryId, b.key.branch, b.sha, b.pushedAt)));
-    Map<UUID, AgentWaits.WaitingOn> waitingOn =
+    // One read of every listed agent's OPEN waits, oldest first: the labels and the waits both.
+    List<AgentWait> open =
         QuarkusTransaction.requiringNew()
-            .call(() -> waits.waitingOn(rows.stream().map(a -> a.id).toList()));
+            .call(() -> waitRows.findOpenByAgents(rows.stream().map(a -> a.id).toList()));
+    Map<UUID, AgentWaits.WaitingOn> waitingOn = AgentWaits.waitingOnOf(open);
+    Map<UUID, List<WaitView>> openWaits = new HashMap<>();
+    for (AgentWait wait : open) {
+      openWaits
+          .computeIfAbsent(wait.agentId, id -> new ArrayList<>())
+          .add(WaitView.of(AgentWaits.view(wait)));
+    }
     return rows.stream()
         .map(
             a ->
@@ -3102,7 +3205,17 @@ public class AgentService {
                     a.obsoleteAt,
                     a.removedAt,
                     a.startRefusal,
-                    a.startRefusedAt))
+                    a.startRefusedAt,
+                    openWaits.getOrDefault(a.id, List.of()),
+                    a.attentionCode == null || a.state != AgentState.ACTIVE
+                        ? null
+                        : new AgentDto.Attention(
+                            a.attentionCode,
+                            a.attentionReason,
+                            a.attentionSince,
+                            a.attentionWaitId == null ? null : a.attentionWaitId.toString()),
+                    a.blockedAt,
+                    a.deskAskedAt))
         .toList();
   }
 

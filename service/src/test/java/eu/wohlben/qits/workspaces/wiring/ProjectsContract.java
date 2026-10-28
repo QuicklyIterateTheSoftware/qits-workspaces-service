@@ -12,10 +12,13 @@ import au.com.dius.pact.core.model.V4Pact;
 import com.fasterxml.jackson.databind.JsonNode;
 import eu.wohlben.qits.workspaces.control.AgentWaitingReporter;
 import eu.wohlben.qits.workspaces.control.RepositoryLookup;
+import eu.wohlben.qits.workspaces.control.WaitSubjectResolver;
+import eu.wohlben.qits.workspaces.control.WaitSubjects;
 import eu.wohlben.qits.workspaces.control.WorkFiler;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenMasters;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenMasters.Trigger;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -48,7 +51,10 @@ import java.util.Map;
  *       W5).
  *   <li>{@code createAgentWait} — an agent declares a wait, usually mid-turn: the same call with
  *       {@code waiting: false} and the label in {@code waitingOn}, which every relay now carries
- *       whether or not the agent waits for input (qits-1460).
+ *       whether or not the agent waits for input (qits-1460). And since epic qits-1681 the wait's
+ *       subject is looked up once the wait is committed ({@link HttpWaitSubjectResolver}): a release
+ *       request with {@code getProjectReleaseRequest} under the agent's project, a work item (or its
+ *       comments) with {@code getWork}.
  * </ul>
  */
 final class ProjectsContract {
@@ -85,8 +91,18 @@ final class ProjectsContract {
   static final String DISPATCHED_TICKET = "a ticket with a dispatched agent";
   static final String REPORT_AGENT_WAITING = "reportWorkAgentWaiting";
 
+  static final String REQUESTS_IN_EVERY_STATE = "a project with release requests in every state";
+  static final String GET_PROJECT_RELEASE_REQUEST = "getProjectReleaseRequest";
+
+  static final String BUG_TICKET = "a bug ticket in detail";
+  static final String GET_WORK = "getWork";
+
   /** The clients a row drives, each built against the row's mock server. */
-  record Clients(RepositoryLookup lookup, WorkFiler filer, AgentWaitingReporter reporter) {}
+  record Clients(
+      RepositoryLookup lookup,
+      WorkFiler filer,
+      AgentWaitingReporter reporter,
+      WaitSubjectResolver subjects) {}
 
   /** What the consumer does with the clients for one row, asserting what that code path reads. */
   @FunctionalInterface
@@ -180,6 +196,40 @@ final class ProjectsContract {
               .reporter()
               .report(params.get("ticketId"), false, "Wait", "ci-run 7", "s-1", 1234L);
 
+  /** A wait on a release request: its id, qualified id, state and when that state began. */
+  private static final Call RESOLVE_REQUEST =
+      (clients, params) -> {
+        WaitSubjectResolver.Resolved resolved =
+            clients
+                .subjects()
+                .resolve(
+                    WaitSubjects.Kind.RELEASE_REQUEST,
+                    params.get("requestQualifiedId"),
+                    params.get("projectId"))
+                .orElseThrow();
+        JsonNode request =
+            GoldenMasters.json(REQUESTS_IN_EVERY_STATE, GET_PROJECT_RELEASE_REQUEST).path("request");
+        assertEquals(request.path("id").asText(), resolved.subjectId());
+        assertEquals(request.path("qualifiedId").asText(), resolved.subjectQualifiedId());
+        assertEquals(request.path("state").asText(), resolved.state());
+        assertEquals(Instant.parse(request.path("updatedAt").asText()), resolved.stateAt());
+      };
+
+  /** A wait on a work item: its id, qualified id, status and when it last changed. */
+  private static final Call RESOLVE_ITEM =
+      (clients, params) -> {
+        WaitSubjectResolver.Resolved resolved =
+            clients
+                .subjects()
+                .resolve(WaitSubjects.Kind.WORK_ITEM, params.get("qualifiedId"), null)
+                .orElseThrow();
+        JsonNode item = GoldenMasters.json(BUG_TICKET, GET_WORK);
+        assertEquals(item.path("id").asText(), resolved.subjectId());
+        assertEquals(item.path("qualifiedId").asText(), resolved.subjectQualifiedId());
+        assertEquals(item.path("status").asText(), resolved.state());
+        assertEquals(Instant.parse(item.path("updatedAt").asText()), resolved.stateAt());
+      };
+
   static final List<Case> CASES =
       List.of(
           new Case(
@@ -255,7 +305,20 @@ final class ProjectsContract {
                   .integerType("at", 1234L)
                   .stringType("waitingOn", "ci-run 7"),
               READS_NOTHING,
-              REPORT_BUSY));
+              REPORT_BUSY),
+          // Epic qits-1681: the declared wait's subject, looked up once the wait is committed.
+          new Case(
+              Trigger.operation("createAgentWait"),
+              REQUESTS_IN_EVERY_STATE,
+              GET_PROJECT_RELEASE_REQUEST,
+              List.of("$.request.id", "$.request.qualifiedId", "$.request.state", "$.request.updatedAt"),
+              RESOLVE_REQUEST),
+          new Case(
+              Trigger.operation("createAgentWait"),
+              BUG_TICKET,
+              GET_WORK,
+              List.of("$.id", "$.qualifiedId", "$.status", "$.updatedAt"),
+              RESOLVE_ITEM));
 
   private ProjectsContract() {}
 

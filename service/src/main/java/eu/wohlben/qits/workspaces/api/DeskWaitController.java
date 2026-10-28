@@ -5,7 +5,7 @@ import eu.wohlben.qits.auth.MachineIdentity;
 import eu.wohlben.qits.auth.QitsClaims;
 import eu.wohlben.qits.workspaces.api.AgentWaitController.CreateWaitRequest;
 import eu.wohlben.qits.workspaces.api.AgentWaitController.WaitList;
-import eu.wohlben.qits.workspaces.api.AgentWaitController.WaitView;
+import eu.wohlben.qits.workspaces.dto.WaitView;
 import eu.wohlben.qits.workspaces.control.AgentWaits;
 import eu.wohlben.qits.workspaces.dto.AgentWaitDto;
 import eu.wohlben.qits.workspaces.error.BadRequestException;

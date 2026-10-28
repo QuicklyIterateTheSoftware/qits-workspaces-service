@@ -25,5 +25,9 @@
   "obsoleteAt": null,
   "removedAt": null,
   "startRefusal": null,
-  "startRefusedAt": null
+  "startRefusedAt": null,
+  "waits": [],
+  "attention": null,
+  "blockedAt": null,
+  "deskAskedAt": null
 }

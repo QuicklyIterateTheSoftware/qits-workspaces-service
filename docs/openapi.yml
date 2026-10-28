@@ -89,6 +89,16 @@ components:
           type: string
         startRefusedAt:
           $ref: "#/components/schemas/Instant"
+        waits:
+          type: array
+          items:
+            $ref: "#/components/schemas/WaitView"
+        attention:
+          $ref: "#/components/schemas/Attention"
+        blockedAt:
+          $ref: "#/components/schemas/Instant"
+        deskAskedAt:
+          $ref: "#/components/schemas/Instant"
     AgentHarness:
       type: string
       enum:
@@ -169,6 +179,22 @@ components:
         messageCount:
           type: integer
           format: int32
+    Attention:
+      type: object
+      properties:
+        code:
+          type: string
+          enum:
+          - WAIT_SUBJECT_PASSED
+          - BLOCKED_NO_DESK
+          - IDLE_NO_WAIT
+          - WAIT_OVERDUE
+        reason:
+          type: string
+        since:
+          $ref: "#/components/schemas/Instant"
+        waitId:
+          type: string
     Branch:
       type: object
       properties:
@@ -711,6 +737,43 @@ components:
           type: string
         closedAt:
           $ref: "#/components/schemas/Instant"
+        subjectKind:
+          type: string
+          description: What the selection waits on
+          enum:
+          - RELEASE_REQUEST
+          - CI_RUN
+          - WORK_ITEM
+          - COMMENTS
+          - OTHER
+        subjectRef:
+          type: string
+          description: The subject's id as the selection names it; null for OTHER
+        subjectId:
+          type: string
+          description: "The subject's uuid, once resolved"
+        subjectQualifiedId:
+          type: string
+          description: "The subject's qualified id, once resolved; null for a run"
+        targetStates:
+          type: array
+          items:
+            type: string
+          description: The states the selection waits for; empty when it names none
+        subjectState:
+          type: string
+          description: The subject's last known state
+        subjectStateAt:
+          $ref: "#/components/schemas/Instant"
+          description: When that state was seen to begin
+          type: string
+        subjectExpectedBy:
+          $ref: "#/components/schemas/Instant"
+          description: "Runs only: when the run should have finished"
+          type: string
+        subjectError:
+          type: string
+          description: The last failure to look the subject up
     WorkItemWorkspaceDto:
       type: object
       properties:
@@ -1169,8 +1232,17 @@ paths:
   /workspaces/api/agents:
     get:
       summary: "Agents, newest first, each filter optional"
+      description: "Each agent carries its OPEN waits (`waits`, oldest first, with\
+        \ what each waits on) and what it needs a person for (`attention`, null when\
+        \ nothing)."
       operationId: listAgents
       parameters:
+      - description: "A project's uuid: only the agents whose repository is that project's.\
+          \ A repository whose project cannot be named is in none."
+        name: projectId
+        in: query
+        schema:
+          type: string
       - name: state
         in: query
         schema:

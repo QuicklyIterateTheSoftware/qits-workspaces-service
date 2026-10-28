@@ -201,6 +201,11 @@ class ConsumerPactVerificationTest {
     return states.params(ProviderStates.AN_AGENT_WAITING_ON_A_CI_RUN);
   }
 
+  @State(ProviderStates.A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION)
+  Map<String, String> aProjectWithAgentsNeedingAttention() {
+    return states.params(ProviderStates.A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION);
+  }
+
   @State(ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES)
   Map<String, String> repositoriesWithMergedBranches() {
     return states.params(ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES);

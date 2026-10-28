@@ -71,5 +71,20 @@
   "createdAt": "2026-01-01T00:00:00Z",
   "expiresAt": null,
   "matchedEventId": null,
-  "closedAt": null
+  "closedAt": null,
+  "subjectKind": "RELEASE_REQUEST",
+  "subjectRef": "00000000-0000-4000-8000-0000000000c1",
+  "subjectId": null,
+  "subjectQualifiedId": null,
+  "targetStates": [
+    "FINALIZED",
+    "REJECTED",
+    "FAILED",
+    "WITHDRAWN",
+    "OBSOLETE"
+  ],
+  "subjectState": null,
+  "subjectStateAt": null,
+  "subjectExpectedBy": null,
+  "subjectError": null
 }

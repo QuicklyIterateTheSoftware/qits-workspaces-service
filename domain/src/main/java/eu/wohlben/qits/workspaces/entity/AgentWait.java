@@ -96,6 +96,48 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
   @Column(name = "announced_at")
   public Instant announcedAt;
 
+  // --- the subject (epic qits-1681, V33): parsed from the selection at declaration, agent waits only
+
+  /** {@code RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS} or {@code OTHER}. */
+  @Column(name = "subject_kind", columnDefinition = "text")
+  public String subjectKind;
+
+  /** The value the selection names, as written: a uuid or a qualified id. */
+  @Column(name = "subject_ref", columnDefinition = "text")
+  public String subjectRef;
+
+  /** The subject's uuid, once resolved. */
+  @Column(name = "subject_id", columnDefinition = "text")
+  public String subjectId;
+
+  /** {@code qits-x-rr-12} or {@code qits-1681}, once resolved; null for a run. */
+  @Column(name = "subject_qualified_id", columnDefinition = "text")
+  public String subjectQualifiedId;
+
+  /** A JSON array of the state values the selection waits for; {@code []} when it names none. */
+  @Column(name = "target_states", columnDefinition = "text")
+  public String targetStates;
+
+  /** The subject's last known state. */
+  @Column(name = "subject_state", columnDefinition = "text")
+  public String subjectState;
+
+  /** When {@link #subjectState} was seen to begin. */
+  @Column(name = "subject_state_at")
+  public Instant subjectStateAt;
+
+  /** Runs only: when the run should have finished. */
+  @Column(name = "subject_expected_by")
+  public Instant subjectExpectedBy;
+
+  /** The last successful REST resolution of the subject. */
+  @Column(name = "subject_resolved_at")
+  public Instant subjectResolvedAt;
+
+  /** The last resolution failure, for the CLI; never shown as attention. */
+  @Column(name = "subject_error", columnDefinition = "text")
+  public String subjectError;
+
   /** Whether a project's desk holds this wait rather than an agent. */
   public boolean isDeskWait() {
     return deskProjectId != null;

@@ -27,7 +27,11 @@
       "obsoleteAt": null,
       "removedAt": null,
       "startRefusal": null,
-      "startRefusedAt": null
+      "startRefusedAt": null,
+      "waits": [],
+      "attention": null,
+      "blockedAt": null,
+      "deskAskedAt": null
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000a1",
@@ -56,7 +60,48 @@
       "obsoleteAt": null,
       "removedAt": null,
       "startRefusal": null,
-      "startRefusedAt": null
+      "startRefusedAt": null,
+      "waits": [
+        {
+          "id": "00000000-0000-4000-8000-0000000000b1",
+          "agentId": "00000000-0000-4000-8000-0000000000a1",
+          "label": "release-request 00000000-0000-4000-8000-0000000000c1",
+          "selection": {
+            "event": "ReleaseRequestStateChanged",
+            "when": [
+              [
+                {
+                  "path": "releaseRequestId",
+                  "op": "exact",
+                  "value": "00000000-0000-4000-8000-0000000000c1"
+                },
+                {
+                  "path": "state",
+                  "op": "exact",
+                  "value": "FINALIZED"
+                }
+              ]
+            ]
+          },
+          "state": "OPEN",
+          "createdAt": "2026-01-01T00:00:00Z",
+          "expiresAt": "2026-01-01T00:00:00Z",
+          "matchedEventId": null,
+          "closedAt": null,
+          "subjectKind": null,
+          "subjectRef": null,
+          "subjectId": null,
+          "subjectQualifiedId": null,
+          "targetStates": null,
+          "subjectState": null,
+          "subjectStateAt": null,
+          "subjectExpectedBy": null,
+          "subjectError": null
+        }
+      ],
+      "attention": null,
+      "blockedAt": null,
+      "deskAskedAt": null
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000a4",
@@ -85,7 +130,11 @@
       "obsoleteAt": null,
       "removedAt": null,
       "startRefusal": null,
-      "startRefusedAt": null
+      "startRefusedAt": null,
+      "waits": [],
+      "attention": null,
+      "blockedAt": null,
+      "deskAskedAt": null
     }
   ]
 }
