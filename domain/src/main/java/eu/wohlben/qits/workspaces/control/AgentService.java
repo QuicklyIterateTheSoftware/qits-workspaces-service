@@ -264,7 +264,10 @@ public class AgentService {
 
   @Inject Instance<WorkspaceDaemonLiveness> liveness;
 
-  /** Declared waits (qits-1153): swept every pass; they also own the waiting relay to qits-projects. */
+  /**
+   * Declared waits (qits-1153): swept every pass, and their unresolved subjects looked up again
+   * (epic qits-1681); they also own the waiting relay to qits-projects.
+   */
   @Inject AgentWaits waits;
 
   @Inject AgentWaitRepository waitRows;
@@ -1324,6 +1327,11 @@ public class AgentService {
         waits.sweep();
       } catch (RuntimeException e) {
         LOG.warnf(e, "declared-wait sweep failed");
+      }
+      try {
+        waits.resolveUnresolved();
+      } catch (RuntimeException e) {
+        LOG.warnf(e, "declared-wait subject lookup failed");
       }
       resumeYielded();
       placeQueued();

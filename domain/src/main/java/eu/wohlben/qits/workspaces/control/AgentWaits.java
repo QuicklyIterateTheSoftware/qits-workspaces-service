@@ -86,6 +86,12 @@ import org.jboss.logging.Logger;
  *       parsed from its selection at declaration ({@link WaitSubjects}), and every event of its name
  *       that names that subject writes the subject's state before matching. The selection and the
  *       matching are untouched.
+ *   <li><b>The subject's lookup</b> (epic qits-1681, "Resolution at open"): once an agent's wait on
+ *       a subject is committed, {@link WaitSubjectResolver} looks the subject up — its id, qualified
+ *       id, state and, for a run, when it should have finished — and the scheduler pass looks up
+ *       again every OPEN wait still unresolved ({@link #resolveUnresolved}). A failure is written to
+ *       {@code subject_error} and fails nothing; a state older than the one an event recorded is not
+ *       written over it.
  *   <li><b>The announcements</b> (epic qits-1681): an agent's wait opening, its subject's state
  *       changing and its closing (match, timeout, cancel, or its agent leaving ACTIVE) are announced
  *       as {@link AgentWaitOpened}, {@link AgentWaitChanged} and {@link AgentWaitClosed}, after the
@@ -133,6 +139,28 @@ public class AgentWaits {
 
   /** Where a desk wait's close is announced (qits-1618). Absent: nothing is, and rows stay unmarked. */
   @Inject Instance<LifecycleAnnouncer> lifecycle;
+
+  /** Where a wait's subject is looked up (epic qits-1681). Absent: nothing is resolved. */
+  @Inject Instance<WaitSubjectResolver> subjectResolver;
+
+  /**
+   * How long after a failed lookup a wait's subject is not asked again: a subject that does not
+   * exist would otherwise be asked for on every scheduler pass. Zero: every pass.
+   */
+  @ConfigProperty(name = "qits.workspaces.waits.subject-retry-every", defaultValue = "PT1M")
+  Duration subjectRetryEvery;
+
+  /** At most this many unresolved waits are looked up per scheduler pass. */
+  static final int MAX_RESOLVED_PER_PASS = 20;
+
+  /** A pass stops looking subjects up once it spent this long on it; the rest wait for the next. */
+  static final Duration RESOLVE_BUDGET_PER_PASS = Duration.ofSeconds(10);
+
+  /** The longest {@code subject_error} stored. */
+  static final int MAX_SUBJECT_ERROR = 300;
+
+  /** Waits whose last lookup failed, and when they may be asked again. */
+  private final Map<UUID, Instant> retryAfter = new ConcurrentHashMap<>();
 
   /** Each repository's project, once qits-projects named it: a repository never changes project. */
   private final Map<String, String> projects = new ConcurrentHashMap<>();
@@ -242,6 +270,9 @@ public class AgentWaits {
             subject.ref(),
             subject.targetStates(),
             declaredAt));
+    if (subject.kind() != WaitSubjects.Kind.OTHER) {
+      resolveSubject(id);
+    }
     hint(List.of(Placed.of(agent)));
     relayWaits(agent, CAUSE_WAIT);
     catchUp(id, selection.event(), declaredAt);
@@ -1020,11 +1051,17 @@ public class AgentWaits {
     }
     wait.subjectState = state.get();
     wait.subjectStateAt = at;
+    LOG.infof("Agent %s's wait %s: its subject %s is %s", wait.agentId, wait.label, wait.subjectRef, wait.subjectState);
+    return changedEvent(wait, kind);
+  }
+
+  /** The {@link AgentWaitChanged} of the wait's subject state as it now stands on the row. */
+  private static Pending changedEvent(AgentWait wait, WaitSubjects.Kind kind) {
     String waitId = wait.id.toString();
     String ref = wait.subjectRef;
     String qualifiedId = wait.subjectQualifiedId;
     String subjectState = wait.subjectState;
-    LOG.infof("Agent %s's wait %s: its subject %s is %s", wait.agentId, wait.label, ref, subjectState);
+    Instant at = wait.subjectStateAt;
     return new Pending(
         wait.agentId,
         a ->
@@ -1041,6 +1078,174 @@ public class AgentWaits {
                 subjectState,
                 at,
                 Instant.now()));
+  }
+
+  // --- the subject's lookup (epic qits-1681, "Resolution at open") ---------------------------------
+
+  /** What a lookup needs of a wait, read before the call so no transaction spans it. */
+  private record Lookup(WaitSubjects.Kind kind, String ref, String repositoryId) {}
+
+  /**
+   * Look up the subject of the agent wait {@code waitId} now, and write what was found: after its
+   * create committed, and on a scheduler pass while it is OPEN and unresolved. Called with no
+   * transaction open, so the call to the provider holds no lock. A desk wait, an OTHER one or a
+   * closed one is left as it is. Never throws.
+   *
+   * @return whether the subject was resolved
+   */
+  boolean resolveSubject(UUID waitId) {
+    if (subjectResolver == null || !subjectResolver.isResolvable()) {
+      return false;
+    }
+    try {
+      Lookup lookup =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () -> {
+                    AgentWait wait = waits.findById(waitId);
+                    if (wait == null || wait.isDeskWait() || wait.state != AgentWaitState.OPEN) {
+                      return null;
+                    }
+                    WaitSubjects.Kind kind = WaitSubjects.kindOf(wait.subjectKind);
+                    if (kind == null || kind == WaitSubjects.Kind.OTHER || wait.subjectRef == null) {
+                      return null;
+                    }
+                    AgentWorktree agent = agents.findById(wait.agentId);
+                    return new Lookup(kind, wait.subjectRef, agent == null ? null : agent.repositoryId);
+                  });
+      if (lookup == null) {
+        return false;
+      }
+      String projectId =
+          lookup.kind() == WaitSubjects.Kind.RELEASE_REQUEST ? projectOf(lookup.repositoryId()) : null;
+      Optional<WaitSubjectResolver.Resolved> found;
+      String error = null;
+      try {
+        found = subjectResolver.get().resolve(lookup.kind(), lookup.ref(), projectId);
+      } catch (WaitSubjectResolver.Unresolvable e) {
+        found = Optional.empty();
+        error = e.getMessage();
+      } catch (RuntimeException e) {
+        found = Optional.empty();
+        error = "The " + lookup.kind() + " " + lookup.ref() + " could not be looked up: " + e.getMessage();
+      }
+      if (found.isEmpty() && error == null) {
+        return false;
+      }
+      Instant now = Instant.now();
+      if (error != null) {
+        if (subjectRetryEvery.isPositive()) {
+          retryAfter.put(waitId, now.plus(subjectRetryEvery));
+        }
+        String failure = bounded(error, MAX_SUBJECT_ERROR);
+        QuarkusTransaction.requiringNew()
+            .run(
+                () ->
+                    waits
+                        .findByIdOptional(waitId, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                        .filter(w -> w.state == AgentWaitState.OPEN)
+                        .ifPresent(w -> w.subjectError = failure));
+        LOG.infof("Wait %s: its subject %s %s was not looked up: %s", waitId, lookup.kind(), lookup.ref(), failure);
+        return false;
+      }
+      retryAfter.remove(waitId);
+      WaitSubjectResolver.Resolved resolved = found.get();
+      List<Pending> changed = new ArrayList<>();
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  waits
+                      .findByIdOptional(waitId, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                      .filter(w -> w.state == AgentWaitState.OPEN)
+                      .map(w -> applyResolution(w, lookup.kind(), resolved, now))
+                      .ifPresent(changed::add));
+      announceAll(changed);
+      return true;
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "Wait %s: its subject was not looked up", waitId);
+      return false;
+    }
+  }
+
+  /**
+   * Write a lookup onto the wait, in the caller's transaction: the ids, a run's expected finish, the
+   * resolution's time, and no error. The state is written unless it is the one recorded or older
+   * than it — an event that said another state at a later instant than the provider's {@code
+   * stateAt} was seen after what the lookup read (a lookup with no {@code stateAt} writes only over
+   * no state at all). Answers the {@link AgentWaitChanged} to announce when the state moved.
+   */
+  static Pending applyResolution(
+      AgentWait wait, WaitSubjects.Kind kind, WaitSubjectResolver.Resolved resolved, Instant now) {
+    if (resolved.subjectId() != null) {
+      wait.subjectId = resolved.subjectId();
+    }
+    if (resolved.subjectQualifiedId() != null) {
+      wait.subjectQualifiedId = resolved.subjectQualifiedId();
+    }
+    wait.subjectExpectedBy = micros(resolved.expectedBy());
+    wait.subjectResolvedAt = micros(now);
+    wait.subjectError = null;
+    if (kind == WaitSubjects.Kind.COMMENTS || resolved.state() == null) {
+      return null;
+    }
+    Instant at = micros(resolved.stateAt());
+    boolean older =
+        wait.subjectState != null
+            && (at == null
+                || (wait.subjectStateAt != null && at.isBefore(wait.subjectStateAt)));
+    if (older || resolved.state().equals(wait.subjectState)) {
+      return null;
+    }
+    wait.subjectState = resolved.state();
+    wait.subjectStateAt = at;
+    LOG.infof("Agent %s's wait %s: its subject %s is %s (looked up)", wait.agentId, wait.label, wait.subjectRef, wait.subjectState);
+    return changedEvent(wait, kind);
+  }
+
+  /**
+   * The scheduler pass's share (epic qits-1681): look up again the OPEN agent waits whose subject
+   * was never resolved, oldest first, each at most once, at most {@link #MAX_RESOLVED_PER_PASS} and
+   * for at most {@link #RESOLVE_BUDGET_PER_PASS}; a wait whose lookup failed is skipped until
+   * {@code qits.workspaces.waits.subject-retry-every} passed. Never throws.
+   *
+   * @return how many were resolved
+   */
+  public int resolveUnresolved() {
+    if (subjectResolver == null || !subjectResolver.isResolvable()) {
+      return 0;
+    }
+    Instant now = Instant.now();
+    retryAfter.values().removeIf(at -> !at.isAfter(now));
+    List<UUID> due;
+    try {
+      due =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () ->
+                      waits.findOpenUnresolved(10 * MAX_RESOLVED_PER_PASS).stream()
+                          .map(w -> w.id)
+                          .filter(id -> !retryAfter.containsKey(id))
+                          .limit(MAX_RESOLVED_PER_PASS)
+                          .toList());
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "the unresolved waits could not be read");
+      return 0;
+    }
+    long deadline = System.nanoTime() + RESOLVE_BUDGET_PER_PASS.toNanos();
+    int resolved = 0;
+    for (UUID id : due) {
+      if (System.nanoTime() > deadline) {
+        break;
+      }
+      if (resolveSubject(id)) {
+        resolved++;
+      }
+    }
+    return resolved;
+  }
+
+  private static Instant micros(Instant at) {
+    return at == null ? null : at.truncatedTo(ChronoUnit.MICROS);
   }
 
   /** The {@link AgentWaitClosed} of an agent's wait, to announce once the close committed. */
