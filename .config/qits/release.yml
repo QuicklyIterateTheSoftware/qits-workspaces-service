@@ -24,4 +24,7 @@ contracts:
     # epic qits-1481: the lease, work-volume and target doors of qits-system
     # (targethost/SystemContract, kept current by testing/contracts/ConsumerPactFilesTest).
     qits-system-service: { packages: [maven] }
+    # epic qits-1681: the run read a declared wait on a run makes
+    # (wiring/CiContract, kept current by testing/contracts/ConsumerPactFilesTest).
+    qits-ci-service: { packages: [maven] }
 userflows: qits-workspaces

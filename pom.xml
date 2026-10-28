@@ -117,6 +117,9 @@
              targethost/TargetLeasePlacement calls (targethost/SystemContract). The same rule: a
              qits-maintenance bump moves it. -->
         <qits.system-golden-masters.version>2026.1027.185636</qits.system-golden-masters.version>
+        <!-- qits-ci's golden masters (epic qits-1681): the run read a declared wait on a run makes
+             (wiring/CiContract). The same rule: a qits-maintenance bump moves it. -->
+        <qits.ci-golden-masters.version>2026.1026.163551</qits.ci-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
              and ConsumerPactVerificationTest verifies consumers' pacts against this service.
@@ -387,6 +390,11 @@
                 <groupId>${project.groupId}</groupId>
                 <artifactId>qits-system-golden-masters</artifactId>
                 <version>${qits.system-golden-masters.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${project.groupId}</groupId>
+                <artifactId>qits-ci-golden-masters</artifactId>
+                <version>${qits.ci-golden-masters.version}</version>
             </dependency>
             <dependency>
                 <groupId>au.com.dius.pact.consumer</groupId>

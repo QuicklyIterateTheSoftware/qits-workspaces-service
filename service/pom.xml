@@ -278,6 +278,13 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <!-- qits-ci's recorded answers (epic qits-1681): wiring/CiContract's consumer pact
+                 against the run read is built from them. Pinned in the root pom. -->
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-ci-golden-masters</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <!-- The qits-containers-client kit (qits-1163): ContainersContract's qits-via
                  reference (ContainersClientPact.VIA) and OutboundCallsGuardTest's ClientUsage scan.
                  After the golden-master jars, so their order on the classpath is unchanged. -->
