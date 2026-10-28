@@ -142,9 +142,9 @@ exists as data at such a write site, set `causationId` explicitly — qits-ci pa
 client a container was commissioned with, and its secret. **No `ArchRulesTest` decision to make**:
 they are columns on an entity that is already a `CausedRow`, not a new entity, and the rule is about
 the entity. **Legacy since qits-876: nothing writes them any more** — every container holds a
-workspace token (`V13`) or no credential. **Unmapped since qits-1683**: `Workspace` no longer
-names them and nothing reads them; they stay in the schema only so the old instance draining
-during a rolling deploy still finds them, and a follow-up migration (qits-1683) drops them.
+workspace token (`V13`) or no credential. **Gone since qits-1683**: `Workspace` stopped
+naming them in one release, and `V34__drop_commissioned_client_columns.sql` dropped them in the
+next, so the old instance draining during the rolling deploy never lost a column it still mapped.
 
 **`V5__workspace_subject.sql` adds two more**, `ticket_id` and `epic_id` — what a *dispatched*
 workspace is for, where qits-projects said so. Same shape and same non-decision: columns on an entity
@@ -1554,10 +1554,9 @@ constraint.)
 - **Teardown** is the TARGET row's: `deleteDirectContainer` and the DIRECT arm of `doDiscard`
   delete the token (`deleteToken(clearToken(…))`); recreate, abandon and a failed provision go
   through `decommissionFor`. The reconcile reaps both token kinds by `isWorkspaceKind`.
-- **The `V3` columns** (`commissioned_client_id`/`_secret`) are unwritten and, since qits-1683,
-  unmapped: the entity no longer names them and the reconcile's client arm that read them is gone.
-  They stay in the schema for this release so the draining old instance still finds them; a
-  follow-up migration (qits-1683) drops them.
+- **The `V3` columns** (`commissioned_client_id`/`_secret`) are gone: qits-1683 unmapped them
+  and retired the reconcile's client arm that read them, then dropped them in `V34`, a release
+  later, so the draining old instance never lost a column it still mapped.
 
 **Absent is a supported configuration in two spellings and they behave identically**: no
 implementation of `CredentialCommissioner`, or one wired against no issuer. The switch is
