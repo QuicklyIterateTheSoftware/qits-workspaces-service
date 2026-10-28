@@ -249,9 +249,12 @@ public final class AgentAttention {
     return stored == null ? List.of() : stored;
   }
 
-  /** "to end" when the wait names no state, or only final ones; else the states it names. */
+  /**
+   * "to end" when the wait names no state, or any final one (a preset names every way its subject
+   * can end, some of them words this side does not call final); else the states it names.
+   */
   private static boolean waitsForTheEnd(WaitSubjects.Kind kind, List<String> targets) {
-    return targets.isEmpty() || targets.stream().allMatch(t -> WaitSubjects.isFinal(kind, t));
+    return targets.isEmpty() || targets.stream().anyMatch(t -> WaitSubjects.isFinal(kind, t));
   }
 
   /**
