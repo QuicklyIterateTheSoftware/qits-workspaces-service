@@ -288,6 +288,72 @@ public class WorkspaceTargetPlacementTest {
     assertEquals(WorkspacePlacement.TARGET, listed.placement());
   }
 
+  /** GRANTED on a QUEUED row shows the lease's detail (e.g. an image pull) as the runtime error. */
+  @Test
+  public void grantedWithADetailOnAQueuedRowShowsItWhileProvisioning() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "pulling", false);
+    UUID leaseId = read(created.id).leaseId;
+    String detail = "pulling registry.x/qits/workspace:2026.1027.144757 since 2026-10-27T19:55:49Z";
+
+    states.observe(placement.move(leaseId, LeaseState.GRANTED, UUID.randomUUID(), null, detail));
+
+    Workspace granted = read(created.id);
+    assertEquals(WorkspaceRuntimeStatus.PROVISIONING, granted.runtimeStatus);
+    assertEquals(detail, granted.runtimeError);
+  }
+
+  /** A fresh GRANTED detail on a row already PROVISIONING replaces the old one, and it is written. */
+  @Test
+  public void grantedWithANewDetailOnAProvisioningRowUpdatesAndPersistsIt() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "stillpulling", false);
+    UUID leaseId = read(created.id).leaseId;
+    UUID target = UUID.randomUUID();
+    states.observe(placement.move(leaseId, LeaseState.GRANTED, target, null, "pulling the image"));
+
+    states.observe(
+        placement.move(leaseId, LeaseState.GRANTED, target, null, "still pulling the image"));
+
+    Workspace row = read(created.id);
+    assertEquals(WorkspaceRuntimeStatus.PROVISIONING, row.runtimeStatus);
+    assertEquals("still pulling the image", row.runtimeError);
+  }
+
+  /** RUNNING clears whatever pull detail GRANTED left on the row. */
+  @Test
+  public void runningClearsThePullDetailLeftByGranted() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "pulled", false);
+    UUID leaseId = read(created.id).leaseId;
+    UUID target = UUID.randomUUID();
+    states.observe(placement.move(leaseId, LeaseState.GRANTED, target, null, "pulling the image"));
+    assertEquals("pulling the image", read(created.id).runtimeError);
+
+    states.observe(placement.move(leaseId, LeaseState.RUNNING, target, null, null));
+    awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
+
+    assertNull(read(created.id).runtimeError);
+  }
+
+  /** A GRANTED detail never overwrites an agent-kill error standing on the row. */
+  @Test
+  public void grantedWithADetailDoesNotOverwriteAnAgentKillError() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "killed", false);
+    UUID leaseId = read(created.id).leaseId;
+    UUID target = UUID.randomUUID();
+    states.observe(placement.move(leaseId, LeaseState.GRANTED, target, null, "pulling the image"));
+    String killError = AgentKills.describe(false, "cmd-1", null);
+    update(created.id, w -> w.runtimeError = killError);
+
+    states.observe(placement.move(leaseId, LeaseState.GRANTED, target, null, "pulling again"));
+
+    Workspace row = read(created.id);
+    assertEquals(WorkspaceRuntimeStatus.PROVISIONING, row.runtimeStatus);
+    assertEquals(killError, row.runtimeError);
+  }
+
   @Test
   public void aDaemonThatNeverDialsHomeFailsTheRow() throws Exception {
     String repoId = repo();

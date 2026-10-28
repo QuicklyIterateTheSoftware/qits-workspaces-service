@@ -45,7 +45,9 @@ import org.jboss.logging.Logger;
  * <ul>
  *   <li>QUEUED → {@code QUEUED}, the lease's {@code detail} (why it waits) as the row's runtime
  *       error;
- *   <li>GRANTED → {@code PROVISIONING}: a target is starting the container;
+ *   <li>GRANTED → {@code PROVISIONING}: a target is starting the container, and the lease's {@code
+ *       detail} — what it waits on now, such as an image pull — as the row's runtime error, same as
+ *       QUEUED's;
  *   <li>RUNNING → still {@code PROVISIONING} until the container's workspace-daemon has dialled home
  *       and reported its self-clone, then {@code RUNNING} — through the same {@link
  *       WorkspaceDaemonProvisioner} and windows as rung 3 of the DIRECT ladder. A daemon that never
@@ -359,9 +361,16 @@ public class TargetLeaseStates {
         }
         if (was == WorkspaceRuntimeStatus.QUEUED) {
           row.runtimeStatus = WorkspaceRuntimeStatus.PROVISIONING;
-          row.runtimeError = null;
+          row.runtimeError = truncatedDetail(lease);
           row.queuedAt = null;
           follow = Follow.GRANTED;
+        } else if (was == WorkspaceRuntimeStatus.PROVISIONING
+            && !awaitingDaemon.contains(row.id)
+            && !AgentKills.isAgentKill(row.runtimeError)) {
+          // Still pulling, or whatever else the lease now waits on: refresh the detail, but never
+          // ahead of the daemon wait (which owns the row's next write) or over an agent kill (which
+          // is not this detail's to overwrite).
+          row.runtimeError = truncatedDetail(lease);
         }
       }
       case RUNNING -> {
@@ -785,5 +794,11 @@ public class TargetLeaseStates {
 
   static String truncate(String s) {
     return s == null || s.length() <= 2000 ? s : s.substring(0, 2000);
+  }
+
+  /** {@link #truncate}, reading a blank detail as none: a lease with nothing to say waits on. */
+  private static String truncatedDetail(Lease lease) {
+    String detail = lease.detail();
+    return detail == null || detail.isBlank() ? null : truncate(detail);
   }
 }

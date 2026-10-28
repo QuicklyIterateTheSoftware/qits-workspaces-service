@@ -31,7 +31,9 @@ import java.util.UUID;
  *     independent of {@code status}: the branch is the source of truth, the container is a
  *     recreatable cache of it
  * @param runtimeError when {@code runtimeStatus} is FAILED, why the last re-provision failed; when it
- *     is QUEUED on a TARGET workspace, why its lease waits (the lease's {@code detail}). Also
+ *     is QUEUED on a TARGET workspace, why its lease waits (the lease's {@code detail}); when it is
+ *     PROVISIONING on a TARGET workspace, what its lease now waits on, such as an image pull (also
+ *     the lease's {@code detail}, refreshed as it changes). Also
  *     set on a RUNNING workspace whose coding agent was killed rather than finished — {@code
  *     AGENT_OOM_KILLED: …} or {@code AGENT_KILLED: …}, with the exit code and, where the daemon
  *     could read it, the memory cap (see {@code AgentKills}). That is the one thing telling such a
