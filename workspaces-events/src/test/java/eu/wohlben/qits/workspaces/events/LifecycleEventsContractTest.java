@@ -81,7 +81,8 @@ class LifecycleEventsContractTest {
         with(agent, "detail", "reason"));
     out.put(
         new AgentRemoved(
-            AGENT, WORK, "385", REPO, AgentRemoved.RELEASED_IDLE_CLEAN, true, "released, idle and clean", AT),
+            AGENT, WORK, "385", REPO, AgentRemoved.RELEASED_IDLE_CLEAN, true, "released, idle and clean",
+            null, AT),
         with(agent, "detail", "harnessStopped", "reason"));
     out.put(
         new AgentHarnessExited(
@@ -163,7 +164,7 @@ class LifecycleEventsContractTest {
         CanonicalJson.payload(
             new AgentRemoved(
                 AGENT, WORK, "385", REPO, AgentRemoved.RELEASED_IDLE_CLEAN, true,
-                "released, idle and clean", AT)));
+                "released, idle and clean", null, AT)));
     // A never-placed agent has no workspace, and an obsolete one's release may name no commit.
     assertEquals(
         "{\"agentId\":\"" + AGENT + "\",\"branch\":\"ticket/x\",\"repositoryId\":\"" + REPO
@@ -178,6 +179,29 @@ class LifecycleEventsContractTest {
         CanonicalJson.payload(
             new AgentHarnessExited(
                 AGENT, WORK, "385", REPO, "cmd-1", "KILLED", null, AgentHarnessExited.KILLED, AT)));
+  }
+
+  /**
+   * {@code discardedBy} names the token subject of the caller who discarded the agent (qits-1694):
+   * present on the wire only when known, and additive — a null stays an absent key, exactly as
+   * every other optional field here does, so an old consumer ignores it. Production sets it only
+   * alongside {@link AgentRemoved#DISCARDED} (the agent-page discard); the wire itself admits it on
+   * any reason, which is what this asserts.
+   */
+  @Test
+  void discardedByNamesTheDiscardingCallerWhenKnown() {
+    AgentRemoved discardedByAPerson =
+        new AgentRemoved(
+            AGENT, WORK, "385", REPO, AgentRemoved.DISCARDED, true, "discarded by a person",
+            "person@example.com", AT);
+    JsonNode discardedPayload = CanonicalJson.parse(EventEnvelope.of(discardedByAPerson).payload());
+    assertEquals("person@example.com", discardedPayload.get("discardedBy").asText());
+
+    AgentRemoved discardedByUnknownCaller =
+        new AgentRemoved(
+            AGENT, WORK, "385", REPO, AgentRemoved.DISCARDED, true, "discarded by a person", null, AT);
+    JsonNode unknownPayload = CanonicalJson.parse(EventEnvelope.of(discardedByUnknownCaller).payload());
+    assertFalse(unknownPayload.has("discardedBy"), "null is an absent key, not a null one");
   }
 
   /**

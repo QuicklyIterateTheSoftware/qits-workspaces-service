@@ -18,14 +18,17 @@ import java.util.UUID;
  *   <li>{@link #RELEASED_IDLE_CLEAN} — released, closed, idle, and its worktrees clean and pushed.
  *   <li>{@link #DROPPED_IDLE_CLEAN} — its item was dropped, idle, and its worktrees clean and
  *       pushed (qits-1276).
- *   <li>{@link #DISCARDED} — a person discarded it.
+ *   <li>{@link #DISCARDED} — a person or the project's delivery desk (which holds {@code qits:desk}
+ *       on the discard door) discarded it.
  * </ul>
  *
  * <p><b>{@code harnessStopped}</b> is true exactly when the daemon answered this removal OK — its
  * harness and worktrees were removed by it. False says nothing was confirmed stopped: there was no
  * daemon to ask, the daemon no longer knew the agent, or a person's forced discard went past an
- * unreachable one. {@code detail} is the sentence the service logs. Everything else is {@link
- * AgentPlaced}'s.
+ * unreachable one. {@code detail} is the sentence the service logs. {@code discardedBy} names the
+ * token subject of the caller who discarded the agent — set only for {@link #DISCARDED}, null for
+ * every other reason and null when the caller is unknown; additive on the wire, for consumers that
+ * care who pressed discard. Everything else is {@link AgentPlaced}'s.
  */
 public record AgentRemoved(
     UUID eventId,
@@ -36,6 +39,7 @@ public record AgentRemoved(
     String reason,
     boolean harnessStopped,
     String detail,
+    String discardedBy,
     Instant occurredAt)
     implements QitsEvent {
 
@@ -72,7 +76,18 @@ public record AgentRemoved(
       String reason,
       boolean harnessStopped,
       String detail,
+      String discardedBy,
       Instant occurredAt) {
-    this(null, agentId, workId, workspaceId, repositoryId, reason, harnessStopped, detail, occurredAt);
+    this(
+        null,
+        agentId,
+        workId,
+        workspaceId,
+        repositoryId,
+        reason,
+        harnessStopped,
+        detail,
+        discardedBy,
+        occurredAt);
   }
 }

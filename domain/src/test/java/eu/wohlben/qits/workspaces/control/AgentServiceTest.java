@@ -2139,6 +2139,36 @@ public class AgentServiceTest {
   }
 
   @Test
+  void aPersonsDiscardNamesTheDiscardingCallerOnTheAnnouncedRemoval() {
+    // qits-1694: the discard door's caller is threaded onto the published AgentRemoved, so a
+    // consumer can tell who pressed discard. Every other removal path names nobody.
+    AgentService.Dispatch dispatched = dispatch("w-discard-by", true, null);
+    String agentId = dispatched.agent().agentId();
+    daemon.forget(agentId);
+
+    AgentDto discarded = service.discard(UUID.fromString(agentId), false, "person@example.com");
+
+    assertEquals(AgentState.REMOVED, discarded.state());
+    AgentRemoved event =
+        announced.of(AgentRemoved.class, e -> e.agentId().equals(agentId)).get(0);
+    assertEquals(AgentRemoved.DISCARDED, event.reason());
+    assertEquals("person@example.com", event.discardedBy());
+  }
+
+  @Test
+  void aPersonsDiscardWithNoCallerNamedLeavesDiscardedByNull() {
+    AgentService.Dispatch dispatched = dispatch("w-discard-unknown", true, null);
+    String agentId = dispatched.agent().agentId();
+    daemon.forget(agentId);
+
+    service.discard(UUID.fromString(agentId), false);
+
+    AgentRemoved event =
+        announced.of(AgentRemoved.class, e -> e.agentId().equals(agentId)).get(0);
+    assertNull(event.discardedBy());
+  }
+
+  @Test
   void anAgentBusyInTheBackgroundIsNeitherRemovedNorPrompted() {
     // qits-1233 (qits-1212's agent): a background verify task ran after the main turn's Stop, and
     // the sweep removed the agent mid tool call — clean, idle by its last frame, and not BUSY.

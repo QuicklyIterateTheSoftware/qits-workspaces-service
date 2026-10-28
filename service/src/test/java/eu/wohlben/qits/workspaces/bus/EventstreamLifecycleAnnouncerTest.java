@@ -69,7 +69,8 @@ class EventstreamLifecycleAnnouncerTest {
         new AgentObsolete("a-1", "w-1", "385", "repo", "ticket/w-1", "2026.1014.1", "abc", at);
     AgentRemoved removed =
         new AgentRemoved(
-            "a-1", "w-1", "385", "repo", AgentRemoved.RELEASED_IDLE_CLEAN, true, "released", at);
+            "a-1", "w-1", "385", "repo", AgentRemoved.RELEASED_IDLE_CLEAN, true, "released", null,
+            at);
 
     CausationScope.with(cause, () -> port.get().announce(obsolete));
     port.get().announce(removed);

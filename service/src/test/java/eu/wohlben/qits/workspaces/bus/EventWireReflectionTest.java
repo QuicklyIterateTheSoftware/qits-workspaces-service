@@ -120,7 +120,7 @@ class EventWireReflectionTest {
     AgentRemoved out =
         new AgentRemoved(
             "a-1", "w-1", "385", "repo", AgentRemoved.DISCARDED, false, "discarded by a person",
-            Instant.parse("2026-10-14T09:24:09Z"));
+            "subj-1", Instant.parse("2026-10-14T09:24:09Z"));
 
     EventEnvelope envelope = EventEnvelope.of(out);
     assertEquals("AgentRemoved", CanonicalJson.parse(CanonicalJson.envelope(envelope)).get("name").asText());
@@ -142,5 +142,6 @@ class EventWireReflectionTest {
     assertEquals(out.reason(), back.reason());
     assertEquals(out.harnessStopped(), back.harnessStopped());
     assertEquals(out.detail(), back.detail());
+    assertEquals(out.discardedBy(), back.discardedBy());
   }
 }
