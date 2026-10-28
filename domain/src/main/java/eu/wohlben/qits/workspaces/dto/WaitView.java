@@ -31,7 +31,7 @@ public record WaitView(
     Instant closedAt,
     @Schema(
             description = "What the selection waits on",
-            enumeration = {"RELEASE_REQUEST", "CI_RUN", "WORK_ITEM", "COMMENTS", "OTHER"})
+            enumeration = {"RELEASE_REQUEST", "CI_RUN", "WORK_ITEM", "COMMENTS", "BRANCH", "OTHER"})
         String subjectKind,
     @Schema(description = "The subject's id as the selection names it; null for OTHER")
         String subjectRef,
@@ -55,7 +55,8 @@ public record WaitView(
           "qits-eventstream's EventSelection: the event name, matched exactly, and `when` groups"
               + " (ORed) of conditions (ANDed). Empty `when` = every event of that name.")
   public record SelectionSchema(
-      @Schema(required = true, example = "ReleaseRequestStateChanged") String event,
+      @Schema(required = true, examples = {"ReleaseRequestStateChanged", "BranchDeliveryChanged"})
+          String event,
       List<List<ConditionSchema>> when) {}
 
   /** One condition, for the openapi document only. */

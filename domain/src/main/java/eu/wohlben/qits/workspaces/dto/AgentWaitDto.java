@@ -12,8 +12,8 @@ import java.util.List;
  * @param expiresAt when it times out; null = never
  * @param matchedEventId the event that matched it; null unless MATCHED
  * @param closedAt when it left OPEN; null while OPEN
- * @param subjectKind {@code RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS}
- *     or {@code OTHER}
+ * @param subjectKind {@code RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS},
+ *     {@code BRANCH} or {@code OTHER}
  * @param subjectRef the value the selection names, as written; null for OTHER
  * @param subjectId the subject's uuid, once resolved
  * @param subjectQualifiedId the subject's qualified id, once resolved; null for a run

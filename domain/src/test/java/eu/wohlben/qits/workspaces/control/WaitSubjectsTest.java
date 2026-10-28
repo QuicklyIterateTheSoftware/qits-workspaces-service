@@ -188,6 +188,100 @@ class WaitSubjectsTest {
   }
 
   @Test
+  void theBranchPresetNamesTheBranchAndItsSteps() {
+    Subject subject =
+        WaitSubjects.parse(
+            perState(
+                "BranchDeliveryChanged", "branch", "ticket/qits-1615", "step", "LIVE", "WITHDRAWN"));
+    assertEquals(Kind.BRANCH, subject.kind());
+    assertEquals("ticket/qits-1615", subject.ref());
+    assertEquals(List.of("LIVE", "WITHDRAWN"), subject.targetStates());
+  }
+
+  @Test
+  void aBranchWaitMayAlsoNameTheRepository() {
+    EventSelection withRepository =
+        new EventSelection(
+            "BranchDeliveryChanged",
+            List.of(
+                List.of(
+                    Condition.exact("branch", "ticket/qits-1615"),
+                    Condition.exact("repository", "qits-workspaces-service"),
+                    Condition.exact("step", "LIVE"))));
+    Subject subject = WaitSubjects.parse(withRepository);
+    assertEquals(new Subject(Kind.BRANCH, "ticket/qits-1615", List.of("LIVE")), subject);
+  }
+
+  @Test
+  void aBranchWaitMayNameEverywhereInsteadOfStep() {
+    EventSelection selection =
+        new EventSelection(
+            "BranchDeliveryChanged",
+            List.of(
+                List.of(
+                    Condition.exact("branch", "ticket/qits-1615"),
+                    Condition.exact("everywhere", "LIVE"))));
+    assertEquals(
+        new Subject(Kind.BRANCH, "ticket/qits-1615", List.of("LIVE")), WaitSubjects.parse(selection));
+  }
+
+  @Test
+  void anEarlyFireBranchWaitUsesStepInEveryGroup() {
+    EventSelection selection =
+        new EventSelection(
+            "BranchDeliveryChanged",
+            List.of(
+                List.of(Condition.exact("branch", "ticket/qits-1615"), Condition.exact("step", "JOINED")),
+                List.of(Condition.exact("branch", "ticket/qits-1615"), Condition.exact("step", "CONFLICTED"))));
+    assertEquals(
+        new Subject(Kind.BRANCH, "ticket/qits-1615", List.of("JOINED", "CONFLICTED")),
+        WaitSubjects.parse(selection));
+  }
+
+  @Test
+  void aBranchWaitMixingStepAndEverywhereIsStillBranch() {
+    EventSelection selection =
+        new EventSelection(
+            "BranchDeliveryChanged",
+            List.of(
+                List.of(Condition.exact("branch", "ticket/qits-1615"), Condition.exact("step", "JOINED")),
+                List.of(Condition.exact("branch", "ticket/qits-1615"), Condition.exact("everywhere", "LIVE"))));
+    assertEquals(
+        new Subject(Kind.BRANCH, "ticket/qits-1615", List.of("JOINED", "LIVE")),
+        WaitSubjects.parse(selection));
+  }
+
+  @Test
+  void aGroupNamingAnotherBranchIsOther() {
+    EventSelection mixed =
+        new EventSelection(
+            "BranchDeliveryChanged",
+            List.of(
+                List.of(Condition.exact("branch", "ticket/qits-1615"), Condition.exact("step", "LIVE")),
+                List.of(Condition.exact("branch", "ticket/qits-1616"), Condition.exact("step", "LIVE"))));
+    assertEquals(Kind.OTHER, WaitSubjects.parse(mixed).kind());
+    assertNull(WaitSubjects.parse(mixed).ref());
+  }
+
+  @Test
+  void aBranchEventSaysItsStepWhenItNamesTheBranch() throws Exception {
+    JsonNode event = json("{\"branch\":\"ticket/qits-1615\",\"repository\":\"qits-workspaces-service\",\"step\":\"LIVE\"}");
+    assertEquals(
+        Optional.of("LIVE"), WaitSubjects.stateIn("BranchDeliveryChanged", event, List.of("ticket/qits-1615")));
+    assertEquals(
+        Optional.empty(),
+        WaitSubjects.stateIn("BranchDeliveryChanged", event, List.of("ticket/other")));
+  }
+
+  @Test
+  void branchFinalStates() {
+    assertTrue(WaitSubjects.isFinal(Kind.BRANCH, "LIVE"));
+    assertTrue(WaitSubjects.isFinal(Kind.BRANCH, "WITHDRAWN"));
+    assertFalse(WaitSubjects.isFinal(Kind.BRANCH, "JOINED"));
+    assertFalse(WaitSubjects.isFinal(Kind.BRANCH, "RELEASED"));
+  }
+
+  @Test
   void aStoredKindReadsBack() {
     assertNull(WaitSubjects.kindOf(null));
     assertEquals(Kind.CI_RUN, WaitSubjects.kindOf("CI_RUN"));

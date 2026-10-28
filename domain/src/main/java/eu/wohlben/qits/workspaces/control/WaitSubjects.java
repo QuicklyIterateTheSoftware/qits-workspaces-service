@@ -15,8 +15,8 @@ import java.util.Set;
 
 /**
  * What a declared wait waits on (epic qits-1681, {@code V33}): its <b>subject</b> — a release
- * request, a CI run, a work item or a work item's comments — read out of its {@link
- * EventSelection}. Pure: no bean, no database, no clock.
+ * request, a CI run, a work item, a work item's comments or a branch's delivery — read out of its
+ * {@link EventSelection}. Pure: no bean, no database, no clock.
  *
  * <p><b>Parsing</b> ({@link #parse}). A subject is recognised only when <b>every</b> group of the
  * selection names the <b>same</b> ref, with op {@code exact}, on the path its event carries the
@@ -31,18 +31,25 @@ import java.util.Set;
  *   <tr><td>{@code EntityTransitioned}</td><td>{@code entities[].entityId}</td><td>WORK_ITEM</td>
  *       <td>{@code entities[].status}</td></tr>
  *   <tr><td>{@code EntityCommented}</td><td>{@code entityId}</td><td>COMMENTS</td><td>none</td></tr>
+ *   <tr><td>{@code BranchDeliveryChanged}</td><td>{@code branch}</td><td>BRANCH</td>
+ *       <td>{@code step} (the union also takes {@code everywhere}'s exact values, in the same
+ *       order)</td></tr>
  * </table>
  *
  * Anything else — another event, a group naming no ref or a different one, a {@code prefix} on the
  * ref path — is {@link Kind#OTHER} with a null ref. The target states are the union of the target
- * path's {@code exact} values across the groups, in their order; {@code []} when it names none.
+ * path's {@code exact} values across the groups, in their order; {@code []} when it names none. A
+ * BRANCH wait's target path is {@code step}, but a group may instead (or additionally) name {@code
+ * everywhere} with {@code exact}: both contribute to the same union, in the order their groups
+ * appear, and a selection mixing the two is still BRANCH rather than OTHER.
  *
  * <p><b>Reading an event</b> ({@link #stateIn}): what state an event says the subject is in, when it
- * names this subject at all.
+ * names this subject at all. For BRANCH that is always the event's {@code step} — {@code
+ * everywhere} is only ever a way to name a target state, never what is reported back.
  *
  * <p><b>Final states</b> ({@link #isFinal}), which the attention evaluation reads: a request is done
  * FINALIZED, WITHDRAWN or OBSOLETE; a run is done in anything but QUEUED and RUNNING; an item DONE or
- * DROPPED; comments and OTHER never are.
+ * DROPPED; a branch is done LIVE or WITHDRAWN; comments and OTHER never are.
  */
 public final class WaitSubjects {
 
@@ -52,6 +59,7 @@ public final class WaitSubjects {
     CI_RUN,
     WORK_ITEM,
     COMMENTS,
+    BRANCH,
     OTHER
   }
 
@@ -81,6 +89,8 @@ public final class WaitSubjects {
 
   public static final String ENTITY_COMMENTED = "EntityCommented";
 
+  public static final String BRANCH_DELIVERY_CHANGED = "BranchDeliveryChanged";
+
   /** A release request's final states. */
   public static final Set<String> RELEASE_REQUEST_FINAL = Set.of("FINALIZED", "WITHDRAWN", "OBSOLETE");
 
@@ -89,6 +99,9 @@ public final class WaitSubjects {
 
   /** A work item's final states. */
   public static final Set<String> WORK_ITEM_FINAL = Set.of("DONE", "DROPPED");
+
+  /** A branch's final states ({@code step} values). */
+  public static final Set<String> BRANCH_FINAL = Set.of("LIVE", "WITHDRAWN");
 
   /** The status {@code BuildSuccessful} stands for. */
   public static final String SUCCESS = "SUCCESS";
@@ -102,8 +115,20 @@ public final class WaitSubjects {
 
   private static final String ENTITY_STATUS = "status";
 
-  /** Per event: the kind, the ref paths and the target path (null: none). */
-  private record Rule(Kind kind, Set<String> refPaths, String targetPath) {}
+  private static final String STEP = "step";
+
+  private static final String EVERYWHERE = "everywhere";
+
+  /**
+   * Per event: the kind, the ref paths and the target path(s) (empty: none). BRANCH is the only
+   * kind with two — {@code step} and {@code everywhere} both contribute to the one union of target
+   * states, in the order their groups appear.
+   */
+  private record Rule(Kind kind, Set<String> refPaths, Set<String> targetPaths) {
+    Rule(Kind kind, Set<String> refPaths, String targetPath) {
+      this(kind, refPaths, targetPath == null ? Set.of() : Set.of(targetPath));
+    }
+  }
 
   private static final Map<String, Rule> RULES =
       Map.of(
@@ -111,14 +136,15 @@ public final class WaitSubjects {
           new Rule(
               Kind.RELEASE_REQUEST, Set.of("releaseRequestQualifiedId", "releaseRequestId"), "state"),
           BUILD_STATUS_CHANGED, new Rule(Kind.CI_RUN, Set.of("runId"), "status"),
-          BUILD_SUCCESSFUL, new Rule(Kind.CI_RUN, Set.of("runId"), null),
-          BUILD_FAILED, new Rule(Kind.CI_RUN, Set.of("runId"), null),
+          BUILD_SUCCESSFUL, new Rule(Kind.CI_RUN, Set.of("runId"), (String) null),
+          BUILD_FAILED, new Rule(Kind.CI_RUN, Set.of("runId"), (String) null),
           ENTITY_TRANSITIONED,
           new Rule(
               Kind.WORK_ITEM,
               Set.of(ENTITY_PATH + "." + ENTITY_ID),
               ENTITY_PATH + "." + ENTITY_STATUS),
-          ENTITY_COMMENTED, new Rule(Kind.COMMENTS, Set.of(ENTITY_ID), null));
+          ENTITY_COMMENTED, new Rule(Kind.COMMENTS, Set.of(ENTITY_ID), (String) null),
+          BRANCH_DELIVERY_CHANGED, new Rule(Kind.BRANCH, Set.of("branch"), Set.of(STEP, EVERYWHERE)));
 
   private WaitSubjects() {}
 
@@ -144,7 +170,7 @@ public final class WaitSubjects {
             return Subject.OTHER;
           }
           groupRef = condition.value();
-        } else if (condition.path().equals(rule.targetPath())
+        } else if (rule.targetPaths().contains(condition.path())
             && condition.op() == Op.EXACT
             && condition.value() != null) {
           targets.add(condition.value());
@@ -165,7 +191,8 @@ public final class WaitSubjects {
    * uuid and qualified id once resolved (nulls are ignored). {@code BuildSuccessful} is {@link
    * #SUCCESS} and {@code BuildFailed} {@link #FAILED}; an {@code EntityTransitioned} answers the
    * status of the entity whose id is a ref. {@code EntityCommented} carries no state, so it is
-   * always empty.
+   * always empty. {@code BranchDeliveryChanged} answers its {@code step} when its {@code branch} is
+   * a ref — {@code everywhere} is never read back, only matched against as a target state.
    */
   public static Optional<String> stateIn(String eventName, JsonNode payload, Collection<String> refs) {
     if (eventName == null || payload == null || !payload.isObject()) {
@@ -191,6 +218,10 @@ public final class WaitSubjects {
       case BUILD_FAILED ->
           known.contains(text(payload, "runId")) ? Optional.of(FAILED) : Optional.empty();
       case ENTITY_TRANSITIONED -> entityStatus(payload.get("entities"), known);
+      case BRANCH_DELIVERY_CHANGED ->
+          known.contains(text(payload, "branch"))
+              ? Optional.ofNullable(text(payload, STEP))
+              : Optional.empty();
       default -> Optional.empty();
     };
   }
@@ -204,6 +235,7 @@ public final class WaitSubjects {
       case RELEASE_REQUEST -> RELEASE_REQUEST_FINAL.contains(state);
       case CI_RUN -> !CI_RUN_ACTIVE.contains(state);
       case WORK_ITEM -> WORK_ITEM_FINAL.contains(state);
+      case BRANCH -> BRANCH_FINAL.contains(state);
       case COMMENTS, OTHER -> false;
     };
   }

@@ -98,7 +98,7 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
 
   // --- the subject (epic qits-1681, V33): parsed from the selection at declaration, agent waits only
 
-  /** {@code RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS} or {@code OTHER}. */
+  /** {@code RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS}, {@code BRANCH} or {@code OTHER}. */
   @Column(name = "subject_kind", columnDefinition = "text")
   public String subjectKind;
 

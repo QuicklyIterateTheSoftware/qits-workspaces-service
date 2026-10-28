@@ -29,6 +29,9 @@ import org.eclipse.microprofile.rest.client.inject.RestClient;
  *       #expectedBy}).
  * </ul>
  *
+ * A branch has no door of its own here: {@link WaitSubjects.Kind#BRANCH} resolves to nothing, same
+ * as {@link WaitSubjects.Kind#OTHER} — its state comes only from the events it listens to.
+ *
  * Every failure is a {@link WaitSubjectResolver.Unresolvable} naming it in one sentence: a 404 is
  * "no such subject", another status is what the provider answered, a transport failure (a timeout,
  * a refused connection) is "did not answer". Each call carries the {@code qits} oidc client's bearer.
@@ -65,7 +68,9 @@ public class HttpWaitSubjectResolver implements WaitSubjectResolver {
       case RELEASE_REQUEST -> Optional.of(releaseRequest(ref, projectId));
       case WORK_ITEM, COMMENTS -> Optional.of(workItem(kind, ref));
       case CI_RUN -> Optional.of(run(ref));
-      case OTHER -> Optional.empty();
+      // BRANCH has no lookup door of its own yet: a branch wait's state comes only from the
+      // events it listens to.
+      case BRANCH, OTHER -> Optional.empty();
     };
   }
 

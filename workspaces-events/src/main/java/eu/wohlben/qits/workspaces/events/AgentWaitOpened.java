@@ -10,9 +10,9 @@ import java.util.UUID;
  * projectId} — the agent's project, so a project's pages can follow its agents — and the wait:
  * {@code waitId}, its {@code label} (the agent's own words, or the selection in one line),
  * {@code eventName}, and the subject the selection names ({@code subjectKind} one of {@code
- * RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS}, {@code OTHER};
- * {@code subjectRef} as written, absent for OTHER; {@code targetStates} the states it waits for,
- * empty when it names none). A desk's wait announces none of this.
+ * RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS}, {@code BRANCH},
+ * {@code OTHER}; {@code subjectRef} as written, absent for OTHER; {@code targetStates} the states
+ * it waits for, empty when it names none). A desk's wait announces none of this.
  */
 public record AgentWaitOpened(
     UUID eventId,
