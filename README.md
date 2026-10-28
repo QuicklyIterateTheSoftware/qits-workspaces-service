@@ -386,7 +386,8 @@ gone.
 for an idp mid-redeploy). A workspace is never launched half-credentialed. **A failed deletion never
 blocks a teardown** — it is logged, and `wiring/CommissionReconciler` asks qits-idp hourly (and at
 boot) what it is holding and gives back whatever no live workspace container claims: every workspace
-token no row holds, and every workspace idp client it still lists. That reconcile, not a TTL, is what
+token no row holds. It has no client arm any more (qits-1683): this service commissions no idp
+client (qits-876). That reconcile, not a TTL, is what
 answers a crash.
 
 ## Where it answers

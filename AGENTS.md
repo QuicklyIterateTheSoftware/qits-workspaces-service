@@ -142,9 +142,9 @@ exists as data at such a write site, set `causationId` explicitly — qits-ci pa
 client a container was commissioned with, and its secret. **No `ArchRulesTest` decision to make**:
 they are columns on an entity that is already a `CausedRow`, not a new entity, and the rule is about
 the entity. **Legacy since qits-876: nothing writes them any more** — every container holds a
-workspace token (`V13`) or no credential — and they stay only so a rollback still reads them; the
-commission reconcile spares a client an ACTIVE row still names there. Dropping them is a follow-up
-migration.
+workspace token (`V13`) or no credential. **Unmapped since qits-1683**: `Workspace` no longer
+names them and nothing reads them; they stay in the schema only so the old instance draining
+during a rolling deploy still finds them, and a follow-up migration (qits-1683) drops them.
 
 **`V5__workspace_subject.sql` adds two more**, `ticket_id` and `epic_id` — what a *dispatched*
 workspace is for, where qits-projects said so. Same shape and same non-decision: columns on an entity
@@ -415,9 +415,8 @@ literal and must carry `/workspaces` itself. Four do, each for its own reason:
   `qits:agent` and not `qits:system` may open only its own workspace's socket: `DaemonAgentBindingCheck`
   (an `HttpUpgradeCheck`, so the refusal is a real 403 before the upgrade) compares the token's `sub`
   with the row's `commissioned_token_subject` (qits-812; `Workspace.boundSubject`). A row holding no
-  token binds nobody, and the legacy `commissioned_client_id` column — no longer written (qits-876) —
-  binds nothing, so a client id never matches. Every TARGET row holds a token, and so does a DIRECT
-  admin row on an edge plane (qits-1084), whose daemon then dials
+  token binds nobody, and a client id never matches (qits-876). Every TARGET row holds a token, and
+  so does a DIRECT admin row on an edge plane (qits-1084), whose daemon then dials
   `wss://workspaces.qits.<domain>/workspaces/daemon/<id>` through the edge rather than the
   `ws://` qits-net address. `DaemonSocketBearerLifetime` drops the bearer's expiry on this path for a
   `tok-` subject only, so a token daemon's socket outlives the edge's 300 s JWT.
@@ -1403,12 +1402,13 @@ therefore sits beside `containers.rm`, itself an HTTP call and best-effort for t
 nobody and only discover it much later. The second logs and moves on, because everything after an
 accepted removal must not pretend it did not happen. **`CommissionReconciler` is what makes that
 safe**: hourly and at boot it asks qits-idp what it holds for this service and gives back every
-workspace token no ACTIVE row holds for a container, and every `workspace`/`workspace-admin` idp
-client it still lists that no ACTIVE row names in the legacy `commissioned_client_id` column — which
-nothing writes, so that is every one of them. It only ever deletes what a listing just returned, and
-an unreadable listing comes back empty, so a blip reaps nothing rather than everything. The port keeps
-`list()` and `decommission(clientId)` for that and for `targethost/LegacyRunnerClients`, which gives
-back the retired runner's clients once at boot; it has no verb that commissions a client.
+workspace token no ACTIVE row holds for a container (or no live agent holds). It only ever deletes
+what a listing just returned, and an unreadable listing comes back empty, so a blip reaps nothing
+rather than everything. **It has no client arm any more** (qits-1683): nothing commissions a client
+(qits-876), and the arm that gave back orphaned `workspace`/`workspace-admin` clients was retired
+once it had none left to reap. The port keeps `list()` and `decommission(clientId)` only for
+`targethost/LegacyRunnerClients`, which gives back the retired runner's clients at boot; it has no
+verb that commissions a client.
 
 **An ADMIN row mints kind `workspace-admin`, every other row `workspace`** (qits-628 follow-up).
 `commissionFor` reads `wt.admin` and passes it to `commissionToken`; `contextKindFor(admin)` picks
@@ -1459,9 +1459,10 @@ constraint.)
 - **Teardown** is the TARGET row's: `deleteDirectContainer` and the DIRECT arm of `doDiscard`
   delete the token (`deleteToken(clearToken(…))`); recreate, abandon and a failed provision go
   through `decommissionFor`. The reconcile reaps both token kinds by `isWorkspaceKind`.
-- **The `V3` columns stay** (`commissioned_client_id`/`_secret`): unwritten and read only by the
-  reconcile's client claim, so a rollback to a version that wrote them still reads them. Dropping
-  them is a follow-up migration.
+- **The `V3` columns** (`commissioned_client_id`/`_secret`) are unwritten and, since qits-1683,
+  unmapped: the entity no longer names them and the reconcile's client arm that read them is gone.
+  They stay in the schema for this release so the draining old instance still finds them; a
+  follow-up migration (qits-1683) drops them.
 
 **Absent is a supported configuration in two spellings and they behave identically**: no
 implementation of `CredentialCommissioner`, or one wired against no issuer. The switch is
