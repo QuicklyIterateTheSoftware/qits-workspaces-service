@@ -297,6 +297,13 @@ class GoldenMasterRecordingTest {
               null,
               Map.of(),
               "qits:agent"),
+          // Epic qits-1681: a project's ACTIVE agents with their OPEN waits and what each needs a
+          // person for — the landing app's attention list.
+          Interaction.read(
+              ProviderStates.A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION,
+              "listAgents",
+              WORKSPACES + "/agents?projectId={projectId}&state=ACTIVE",
+              "$.agents"),
           Interaction.write(
               ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES,
               "sweepBranches",

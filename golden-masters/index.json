@@ -99,6 +99,67 @@
       ]
     },
     {
+      "name": "a project with agents needing attention",
+      "slug": "a-project-with-agents-needing-attention",
+      "params": {
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "bugTicketQualifiedId": "contract-00000001-10",
+        "epicId": "00000000-0000-4000-8000-000000000006",
+        "featureId": "00000000-0000-4000-8000-000000000007",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000b",
+        "improvementTicketQualifiedId": "contract-00000001-11",
+        "projectId": "00000000-0000-4000-8000-00000000000f",
+        "repositoryId": "00000000-0000-4000-8000-000000000013",
+        "taskId": "00000000-0000-4000-8000-000000000011"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listAgents",
+          "method": "GET",
+          "path": "/workspaces/api/agents",
+          "query": {
+            "projectId": "{projectId}",
+            "state": "ACTIVE"
+          },
+          "status": 200,
+          "file": "a-project-with-agents-needing-attention/listAgents.json",
+          "frozen": {
+            "ids": [
+              "$.agents[*].agentId",
+              "$.agents[*].repositoryId",
+              "$.agents[*].workId",
+              "$.agents[*].ticketId",
+              "$.agents[*].waits[*].id",
+              "$.agents[*].waits[*].agentId",
+              "$.agents[*].waits[*].selection.when[*][*].value",
+              "$.agents[*].waits[*].subjectRef",
+              "$.agents[*].waits[*].subjectId",
+              "$.agents[*].attention.waitId",
+              "$.agents[*].epicId"
+            ],
+            "instants": [
+              "$.agents[*].waitingOnSince",
+              "$.agents[*].lastActivityAt",
+              "$.agents[*].createdAt",
+              "$.agents[*].waits[*].createdAt",
+              "$.agents[*].waits[*].subjectStateAt",
+              "$.agents[*].attention.since",
+              "$.agents[*].blockedAt",
+              "$.agents[*].deskAskedAt",
+              "$.agents[*].waitingSince",
+              "$.agents[*].waits[*].subjectExpectedBy"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.agents[*].workspaceRowId"
+            ],
+            "listFilteredTo": "$.agents"
+          }
+        }
+      ]
+    },
+    {
       "name": "a project with workspace slots hosting agents",
       "slug": "a-project-with-workspace-slots-hosting-agents",
       "params": {
@@ -128,12 +189,17 @@
               "$.agents[*].repositoryId",
               "$.agents[*].workId",
               "$.agents[*].ticketId",
+              "$.agents[*].waits[*].id",
+              "$.agents[*].waits[*].agentId",
+              "$.agents[*].waits[*].selection.when[*][*].value",
               "$.agents[*].epicId"
             ],
             "instants": [
               "$.agents[*].lastActivityAt",
               "$.agents[*].createdAt",
-              "$.agents[*].waitingOnSince"
+              "$.agents[*].waitingOnSince",
+              "$.agents[*].waits[*].createdAt",
+              "$.agents[*].waits[*].expiresAt"
             ],
             "strings": [],
             "numbers": [
@@ -415,12 +481,17 @@
               "$.agent.agentId",
               "$.agent.repositoryId",
               "$.agent.workId",
-              "$.agent.ticketId"
+              "$.agent.ticketId",
+              "$.agent.waits[*].id",
+              "$.agent.waits[*].agentId",
+              "$.agent.waits[*].selection.when[*][*].value"
             ],
             "instants": [
               "$.agent.waitingOnSince",
               "$.agent.lastActivityAt",
-              "$.agent.createdAt"
+              "$.agent.createdAt",
+              "$.agent.waits[*].createdAt",
+              "$.agent.waits[*].expiresAt"
             ],
             "strings": [],
             "numbers": [
@@ -479,12 +550,17 @@
               "$.agents[*].repositoryId",
               "$.agents[*].workId",
               "$.agents[*].ticketId",
+              "$.agents[*].waits[*].id",
+              "$.agents[*].waits[*].agentId",
+              "$.agents[*].waits[*].selection.when[*][*].value",
               "$.agents[*].epicId"
             ],
             "instants": [
               "$.agents[*].waitingOnSince",
               "$.agents[*].lastActivityAt",
-              "$.agents[*].createdAt"
+              "$.agents[*].createdAt",
+              "$.agents[*].waits[*].createdAt",
+              "$.agents[*].waits[*].expiresAt"
             ],
             "strings": [],
             "numbers": [
@@ -1035,12 +1111,17 @@
               "$.agents[*].agentId",
               "$.agents[*].repositoryId",
               "$.agents[*].workId",
-              "$.agents[*].ticketId"
+              "$.agents[*].ticketId",
+              "$.agents[*].waits[*].id",
+              "$.agents[*].waits[*].agentId",
+              "$.agents[*].waits[*].selection.when[*][*].value"
             ],
             "instants": [
               "$.agents[*].waitingOnSince",
               "$.agents[*].lastActivityAt",
-              "$.agents[*].createdAt"
+              "$.agents[*].createdAt",
+              "$.agents[*].waits[*].createdAt",
+              "$.agents[*].waits[*].expiresAt"
             ],
             "strings": [],
             "numbers": [

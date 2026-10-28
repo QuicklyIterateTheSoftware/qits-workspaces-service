@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.contracts;
 
 import eu.wohlben.qits.agents.ClaudeCodeAgent;
+import eu.wohlben.qits.workspaces.control.AgentAttentions;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.FakeTargetPlacement;
 import eu.wohlben.qits.workspaces.control.TargetPlacement;
@@ -97,6 +98,10 @@ public class ProviderStates {
   public static final String AN_AGENT_WAITING_ON_A_RELEASE_REQUEST =
       "an agent declaring a wait on a release request";
   public static final String AN_AGENT_WAITING_ON_A_CI_RUN = "an agent declaring a wait on a CI run";
+  // What a project's agents need a person for (epic qits-1681): one agent per attention code and a
+  // healthy one, their waits on every kind of subject.
+  public static final String A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION =
+      "a project with agents needing attention";
   public static final String REPOSITORIES_WITH_MERGED_BRANCHES =
       "repositories with merged branches";
   public static final String A_CONFIGURED_WORKSPACE_IMAGE = "a configured workspace image";
@@ -193,6 +198,7 @@ public class ProviderStates {
   @Inject AgentWorktreeRepository agentRows;
   @Inject AgentBranchRepository agentBranches;
   @Inject AgentWaitRepository agentWaits;
+  @Inject AgentAttentions attentions;
   @Inject WorkspaceService workspaceService;
   @Inject FakeRepositoryLookup repositories;
   @Inject FakeTargetPlacement targets;
@@ -225,6 +231,7 @@ public class ProviderStates {
         AN_AGENT_WITH_AN_OPEN_WAIT,
         AN_AGENT_WAITING_ON_A_RELEASE_REQUEST,
         AN_AGENT_WAITING_ON_A_CI_RUN,
+        A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION,
         REPOSITORIES_WITH_MERGED_BRANCHES,
         A_CONFIGURED_WORKSPACE_IMAGE,
         A_PROJECT_WITH_WORKSPACE_SLOTS,
@@ -261,6 +268,7 @@ public class ProviderStates {
       case AN_AGENT_WITH_AN_OPEN_WAIT -> agentWithAnOpenWait();
       case AN_AGENT_WAITING_ON_A_RELEASE_REQUEST -> agentDeclaringAWait("releaseRequestId", RELEASE_REQUEST_ID);
       case AN_AGENT_WAITING_ON_A_CI_RUN -> agentDeclaringAWait("runId", CI_RUN_ID);
+      case A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION -> agentsNeedingAttention();
       case REPOSITORIES_WITH_MERGED_BRANCHES -> mergedBranches();
       case A_CONFIGURED_WORKSPACE_IMAGE -> new Setup(new TreeMap<>(), List.of());
       case A_PROJECT_WITH_WORKSPACE_SLOTS -> slotsHostingAgents(false);
@@ -301,6 +309,8 @@ public class ProviderStates {
               workspaces.delete("workId in ?1", List.copyOf(WORK_IDS));
               workspaces.delete("repositoryId in ?1", GIT_REPOSITORIES);
               workspaces.delete("repositoryId = ?1", WAITING_REPOSITORY_ID);
+              agentRows.delete("repositoryId = ?1", ATTENTION_REPOSITORY_ID);
+              workspaces.delete("repositoryId = ?1", ATTENTION_REPOSITORY_ID);
             });
     targets.reset();
   }
@@ -589,6 +599,160 @@ public class ProviderStates {
     wait.createdAt = Instant.now();
     wait.expiresAt = wait.createdAt.plusSeconds(7200);
     agentWaits.persist(wait);
+  }
+
+  // --- attention (epic qits-1681) -----------------------------------------------------------------
+
+  /**
+   * The repository the attention state's agents stand in: a wrapper of {@link #PROJECT_ID} of its
+   * own, so the project its listing filters by is never one an earlier state remembered for the
+   * shared wrapper.
+   */
+  static final String ATTENTION_REPOSITORY_ID = "00000000-0000-4000-8000-000000000018";
+
+  static final String AGENT_PASSED_ID = "00000000-0000-4000-8000-0000000000a6";
+  static final String AGENT_BLOCKED_ID = "00000000-0000-4000-8000-0000000000a7";
+  static final String AGENT_IDLE_ID = "00000000-0000-4000-8000-0000000000a8";
+  static final String AGENT_OVERDUE_ID = "00000000-0000-4000-8000-0000000000a9";
+  static final String AGENT_HEALTHY_ID = "00000000-0000-4000-8000-0000000000aa";
+
+  static final String PASSED_WAIT_ID = "00000000-0000-4000-8000-0000000000b2";
+  static final String OVERDUE_WAIT_ID = "00000000-0000-4000-8000-0000000000b3";
+  static final String ITEM_WAIT_ID = "00000000-0000-4000-8000-0000000000b4";
+  static final String COMMENTS_WAIT_ID = "00000000-0000-4000-8000-0000000000b5";
+
+  static final Item FEATURE = new Item(FEATURE_ID, "contract-00000001-6", false, "PDF export");
+  static final Item TASK =
+      new Item(TASK_ID, "contract-00000001-5", false, "Download button on the invoice list");
+
+  /** When the passed request ended and the item waited on began implementing: fixed, so a reason is. */
+  static final Instant SUBJECT_STATE_AT = Instant.parse("2026-10-20T10:42:00Z");
+
+  /**
+   * The project's five ACTIVE agents, RUNNING in one slot of {@link #ATTENTION_REPOSITORY_ID}, newest
+   * first: the bug ticket's waits on a release request that FINALIZED ({@code WAIT_SUBJECT_PASSED});
+   * the epic's item is blocked explicitly by a person for 50 minutes, the desk asked before that
+   * ({@code BLOCKED_NO_DESK}); the feature's agent has been idle 42 minutes with nothing declared,
+   * its three nudges spent ({@code IDLE_NO_WAIT}); the task's waits on a run RUNNING 1 h 40 min,
+   * expected to take 35 ({@code WAIT_OVERDUE}); and the improvement ticket's is working, waiting on a
+   * work item to be VERIFIED and on the task's comments — nothing to see. The attention is evaluated
+   * by {@link AgentAttentions} as the scheduler would; the durations are offset by a few seconds so
+   * a pass in the middle of a recording writes the same minutes.
+   */
+  private Setup agentsNeedingAttention() {
+    repositories.registerWrapper(ATTENTION_REPOSITORY_ID, PROJECT_ID, "contract-qits");
+    Instant now = Instant.now();
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Workspace row = new Workspace();
+              row.repositoryId = ATTENTION_REPOSITORY_ID;
+              row.workspaceId = SLOT_LABEL;
+              row.status = WorkspaceStatus.ACTIVE;
+              row.runtimeStatus = WorkspaceRuntimeStatus.QUEUED;
+              row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
+              workspaces.persist(row);
+              workspaces.flush();
+              Long slot = row.id;
+              ids.add(slot);
+
+              AgentWorktree passed = attentionAgent(AGENT_PASSED_ID, slot, BUG_TICKET, now, 1);
+              agentWaits.persist(
+                  subjectWait(
+                      PASSED_WAIT_ID, passed, "release request contract-qits-rr-368 to end",
+                      "ReleaseRequestStateChanged", "releaseRequestId", RELEASE_REQUEST_ID,
+                      "RELEASE_REQUEST",
+                      "[\"FINALIZED\",\"REJECTED\",\"FAILED\",\"WITHDRAWN\",\"OBSOLETE\"]",
+                      "FINALIZED", SUBJECT_STATE_AT, now.minusSeconds(7200)));
+              agentWaits.flush();
+              AgentWait rr = agentWaits.findById(UUID.fromString(PASSED_WAIT_ID));
+              rr.subjectId = RELEASE_REQUEST_ID;
+              rr.subjectQualifiedId = "contract-qits-rr-368";
+
+              AgentWorktree blocked = attentionAgent(AGENT_BLOCKED_ID, slot, EPIC, now, 2);
+              blocked.entityBlocked = true;
+              blocked.blockSource = "EXPLICIT";
+              blocked.blockAuthor = "contract-person";
+              blocked.blockedAt = now.minusSeconds(50 * 60 + 5);
+              blocked.deskAskedAt = blocked.blockedAt.minusSeconds(2 * 3600);
+
+              AgentWorktree idle = attentionAgent(AGENT_IDLE_ID, slot, FEATURE, now, 3);
+              idle.waitingSince = now.minusSeconds(42 * 60 + 5);
+              // Its nudges are spent, so the scheduler leaves it idle for a person.
+              idle.nudgeCount = 3;
+              idle.nudgedAt = now.minusSeconds(3600);
+
+              AgentWorktree overdue = attentionAgent(AGENT_OVERDUE_ID, slot, TASK, now, 4);
+              AgentWait run =
+                  subjectWait(
+                      OVERDUE_WAIT_ID, overdue, "CI run 00000000 to end", "BuildStatusChanged",
+                      "runId", CI_RUN_ID, "CI_RUN",
+                      "[\"SUCCESS\",\"FAILED\",\"CANCELLED\",\"CONFIG_ERROR\",\"TIMED_OUT\"]",
+                      "RUNNING", now.minusSeconds(100 * 60 + 5), now.minusSeconds(110 * 60));
+              run.subjectId = CI_RUN_ID;
+              run.subjectExpectedBy = now.minusSeconds(65 * 60 + 5);
+              agentWaits.persist(run);
+
+              AgentWorktree healthy =
+                  attentionAgent(AGENT_HEALTHY_ID, slot, IMPROVEMENT_TICKET, now, 5);
+              AgentWait item =
+                  subjectWait(
+                      ITEM_WAIT_ID, healthy, "work contract-00000001-5 VERIFIED",
+                      "EntityTransitioned", "entities[].entityId", TASK_ID, "WORK_ITEM",
+                      "[\"VERIFIED\"]", "IMPLEMENTING", SUBJECT_STATE_AT, now.minusSeconds(1800));
+              item.subjectId = TASK_ID;
+              item.subjectQualifiedId = "contract-00000001-5";
+              agentWaits.persist(item);
+              agentWaits.persist(
+                  subjectWait(
+                      COMMENTS_WAIT_ID, healthy, "a comment on contract-00000001-5",
+                      "EntityCommented", "entityId", TASK_ID, "COMMENTS", "[]", null, null,
+                      now.minusSeconds(1700)));
+            });
+    for (String agent :
+        List.of(AGENT_PASSED_ID, AGENT_BLOCKED_ID, AGENT_IDLE_ID, AGENT_OVERDUE_ID, AGENT_HEALTHY_ID)) {
+      attentions.reevaluate(UUID.fromString(agent));
+    }
+    Map<String, String> params = params();
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /** An ACTIVE, RUNNING agent of the attention state, {@code age} minutes old: older is listed later. */
+  private AgentWorktree attentionAgent(String id, Long slot, Item item, Instant now, int age) {
+    agent(id, slot, AgentState.ACTIVE, AgentRunState.RUNNING, item, now.minusSeconds(60L * age));
+    AgentWorktree agent = agentRows.findById(UUID.fromString(id));
+    agent.repositoryId = ATTENTION_REPOSITORY_ID;
+    return agent;
+  }
+
+  /** An OPEN wait of {@code agent} on the subject {@code ref} names at {@code path}, looked up already. */
+  private static AgentWait subjectWait(
+      String id,
+      AgentWorktree agent,
+      String label,
+      String event,
+      String path,
+      String ref,
+      String kind,
+      String targetStates,
+      String state,
+      Instant stateAt,
+      Instant createdAt) {
+    AgentWait wait = new AgentWait();
+    wait.id = UUID.fromString(id);
+    wait.agentId = agent.id;
+    wait.label = label;
+    wait.selection = EventSelection.of(event, EventSelection.Condition.exact(path, ref)).toJson();
+    wait.eventName = event;
+    wait.createdAt = createdAt;
+    wait.subjectKind = kind;
+    wait.subjectRef = ref;
+    wait.targetStates = targetStates;
+    wait.subjectState = state;
+    wait.subjectStateAt = stateAt;
+    wait.subjectResolvedAt = createdAt;
+    return wait;
   }
 
   // --- the landing app's workspace pages (epic qits-1230) -----------------------------------------

@@ -1,0 +1,330 @@
+{
+  "agents": [
+    {
+      "agentId": "00000000-0000-4000-8000-0000000000a6",
+      "workspaceRowId": 1,
+      "repositoryId": "00000000-0000-4000-8000-000000000018",
+      "workId": "00000000-0000-4000-8000-000000000001",
+      "entityId": "contract-00000001-10",
+      "ticketId": "00000000-0000-4000-8000-000000000001",
+      "epicId": null,
+      "wrapperBranch": "ticket/contract-00000001-10",
+      "branches": [],
+      "state": "ACTIVE",
+      "runState": "RUNNING",
+      "admin": false,
+      "harness": "CLAUDE",
+      "sessionId": null,
+      "entityTitle": "Invoice totals are off by one cent",
+      "entityStatus": "IMPLEMENTING",
+      "entityBlocked": false,
+      "activity": null,
+      "waitingSince": null,
+      "waitingOn": "release request contract-qits-rr-368 to end",
+      "waitingOnSince": "2026-01-01T00:00:00Z",
+      "lastActivityAt": "2026-01-01T00:00:00Z",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "obsoleteAt": null,
+      "removedAt": null,
+      "startRefusal": null,
+      "startRefusedAt": null,
+      "waits": [
+        {
+          "id": "00000000-0000-4000-8000-0000000000b2",
+          "agentId": "00000000-0000-4000-8000-0000000000a6",
+          "label": "release request contract-qits-rr-368 to end",
+          "selection": {
+            "event": "ReleaseRequestStateChanged",
+            "when": [
+              [
+                {
+                  "path": "releaseRequestId",
+                  "op": "exact",
+                  "value": "00000000-0000-4000-8000-0000000000c1"
+                }
+              ]
+            ]
+          },
+          "state": "OPEN",
+          "createdAt": "2026-01-01T00:00:00Z",
+          "expiresAt": null,
+          "matchedEventId": null,
+          "closedAt": null,
+          "subjectKind": "RELEASE_REQUEST",
+          "subjectRef": "00000000-0000-4000-8000-0000000000c1",
+          "subjectId": "00000000-0000-4000-8000-0000000000c1",
+          "subjectQualifiedId": "contract-qits-rr-368",
+          "targetStates": [
+            "FINALIZED",
+            "REJECTED",
+            "FAILED",
+            "WITHDRAWN",
+            "OBSOLETE"
+          ],
+          "subjectState": "FINALIZED",
+          "subjectStateAt": "2026-01-01T00:00:00Z",
+          "subjectExpectedBy": null,
+          "subjectError": null
+        }
+      ],
+      "attention": {
+        "code": "WAIT_SUBJECT_PASSED",
+        "reason": "Waits on contract-qits-rr-368 to end; it is FINALIZED since 10:42",
+        "since": "2026-01-01T00:00:00Z",
+        "waitId": "00000000-0000-4000-8000-0000000000b2"
+      },
+      "blockedAt": null,
+      "deskAskedAt": null
+    },
+    {
+      "agentId": "00000000-0000-4000-8000-0000000000a7",
+      "workspaceRowId": 1,
+      "repositoryId": "00000000-0000-4000-8000-000000000018",
+      "workId": "00000000-0000-4000-8000-000000000006",
+      "entityId": "contract-00000001-2",
+      "ticketId": null,
+      "epicId": "00000000-0000-4000-8000-000000000006",
+      "wrapperBranch": "epic/contract-00000001-2",
+      "branches": [],
+      "state": "ACTIVE",
+      "runState": "RUNNING",
+      "admin": false,
+      "harness": "CLAUDE",
+      "sessionId": null,
+      "entityTitle": "Export invoices for the accountants",
+      "entityStatus": "IMPLEMENTING",
+      "entityBlocked": true,
+      "activity": null,
+      "waitingSince": null,
+      "waitingOn": null,
+      "waitingOnSince": null,
+      "lastActivityAt": "2026-01-01T00:00:00Z",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "obsoleteAt": null,
+      "removedAt": null,
+      "startRefusal": null,
+      "startRefusedAt": null,
+      "waits": [],
+      "attention": {
+        "code": "BLOCKED_NO_DESK",
+        "reason": "Blocked 50 min by contract-person, no @desk comment since",
+        "since": "2026-01-01T00:00:00Z",
+        "waitId": null
+      },
+      "blockedAt": "2026-01-01T00:00:00Z",
+      "deskAskedAt": "2026-01-01T00:00:00Z"
+    },
+    {
+      "agentId": "00000000-0000-4000-8000-0000000000a8",
+      "workspaceRowId": 1,
+      "repositoryId": "00000000-0000-4000-8000-000000000018",
+      "workId": "00000000-0000-4000-8000-000000000007",
+      "entityId": "contract-00000001-6",
+      "ticketId": "00000000-0000-4000-8000-000000000007",
+      "epicId": null,
+      "wrapperBranch": "ticket/contract-00000001-6",
+      "branches": [],
+      "state": "ACTIVE",
+      "runState": "RUNNING",
+      "admin": false,
+      "harness": "CLAUDE",
+      "sessionId": null,
+      "entityTitle": "PDF export",
+      "entityStatus": "IMPLEMENTING",
+      "entityBlocked": false,
+      "activity": null,
+      "waitingSince": "2026-01-01T00:00:00Z",
+      "waitingOn": null,
+      "waitingOnSince": null,
+      "lastActivityAt": "2026-01-01T00:00:00Z",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "obsoleteAt": null,
+      "removedAt": null,
+      "startRefusal": null,
+      "startRefusedAt": null,
+      "waits": [],
+      "attention": {
+        "code": "IDLE_NO_WAIT",
+        "reason": "Idle 42 min with no wait and no block",
+        "since": "2026-01-01T00:00:00Z",
+        "waitId": null
+      },
+      "blockedAt": null,
+      "deskAskedAt": null
+    },
+    {
+      "agentId": "00000000-0000-4000-8000-0000000000a9",
+      "workspaceRowId": 1,
+      "repositoryId": "00000000-0000-4000-8000-000000000018",
+      "workId": "00000000-0000-4000-8000-000000000011",
+      "entityId": "contract-00000001-5",
+      "ticketId": "00000000-0000-4000-8000-000000000011",
+      "epicId": null,
+      "wrapperBranch": "ticket/contract-00000001-5",
+      "branches": [],
+      "state": "ACTIVE",
+      "runState": "RUNNING",
+      "admin": false,
+      "harness": "CLAUDE",
+      "sessionId": null,
+      "entityTitle": "Download button on the invoice list",
+      "entityStatus": "IMPLEMENTING",
+      "entityBlocked": false,
+      "activity": null,
+      "waitingSince": null,
+      "waitingOn": "CI run 00000000 to end",
+      "waitingOnSince": "2026-01-01T00:00:00Z",
+      "lastActivityAt": "2026-01-01T00:00:00Z",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "obsoleteAt": null,
+      "removedAt": null,
+      "startRefusal": null,
+      "startRefusedAt": null,
+      "waits": [
+        {
+          "id": "00000000-0000-4000-8000-0000000000b3",
+          "agentId": "00000000-0000-4000-8000-0000000000a9",
+          "label": "CI run 00000000 to end",
+          "selection": {
+            "event": "BuildStatusChanged",
+            "when": [
+              [
+                {
+                  "path": "runId",
+                  "op": "exact",
+                  "value": "00000000-0000-4000-8000-0000000000c2"
+                }
+              ]
+            ]
+          },
+          "state": "OPEN",
+          "createdAt": "2026-01-01T00:00:00Z",
+          "expiresAt": null,
+          "matchedEventId": null,
+          "closedAt": null,
+          "subjectKind": "CI_RUN",
+          "subjectRef": "00000000-0000-4000-8000-0000000000c2",
+          "subjectId": "00000000-0000-4000-8000-0000000000c2",
+          "subjectQualifiedId": null,
+          "targetStates": [
+            "SUCCESS",
+            "FAILED",
+            "CANCELLED",
+            "CONFIG_ERROR",
+            "TIMED_OUT"
+          ],
+          "subjectState": "RUNNING",
+          "subjectStateAt": "2026-01-01T00:00:00Z",
+          "subjectExpectedBy": "2026-01-01T00:00:00Z",
+          "subjectError": null
+        }
+      ],
+      "attention": {
+        "code": "WAIT_OVERDUE",
+        "reason": "Run 00000000 RUNNING for 1 h 40 min, expected about 35 min",
+        "since": "2026-01-01T00:00:00Z",
+        "waitId": "00000000-0000-4000-8000-0000000000b3"
+      },
+      "blockedAt": null,
+      "deskAskedAt": null
+    },
+    {
+      "agentId": "00000000-0000-4000-8000-0000000000aa",
+      "workspaceRowId": 1,
+      "repositoryId": "00000000-0000-4000-8000-000000000018",
+      "workId": "00000000-0000-4000-8000-00000000000b",
+      "entityId": "contract-00000001-11",
+      "ticketId": "00000000-0000-4000-8000-00000000000b",
+      "epicId": null,
+      "wrapperBranch": "ticket/contract-00000001-11",
+      "branches": [],
+      "state": "ACTIVE",
+      "runState": "RUNNING",
+      "admin": false,
+      "harness": "CLAUDE",
+      "sessionId": null,
+      "entityTitle": "Remember the last export format",
+      "entityStatus": "IMPLEMENTING",
+      "entityBlocked": false,
+      "activity": null,
+      "waitingSince": null,
+      "waitingOn": "work contract-00000001-5 VERIFIED; a comment on contract-00000001-5",
+      "waitingOnSince": "2026-01-01T00:00:00Z",
+      "lastActivityAt": "2026-01-01T00:00:00Z",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "obsoleteAt": null,
+      "removedAt": null,
+      "startRefusal": null,
+      "startRefusedAt": null,
+      "waits": [
+        {
+          "id": "00000000-0000-4000-8000-0000000000b4",
+          "agentId": "00000000-0000-4000-8000-0000000000aa",
+          "label": "work contract-00000001-5 VERIFIED",
+          "selection": {
+            "event": "EntityTransitioned",
+            "when": [
+              [
+                {
+                  "path": "entities[].entityId",
+                  "op": "exact",
+                  "value": "00000000-0000-4000-8000-000000000011"
+                }
+              ]
+            ]
+          },
+          "state": "OPEN",
+          "createdAt": "2026-01-01T00:00:00Z",
+          "expiresAt": null,
+          "matchedEventId": null,
+          "closedAt": null,
+          "subjectKind": "WORK_ITEM",
+          "subjectRef": "00000000-0000-4000-8000-000000000011",
+          "subjectId": "00000000-0000-4000-8000-000000000011",
+          "subjectQualifiedId": "contract-00000001-5",
+          "targetStates": [
+            "VERIFIED"
+          ],
+          "subjectState": "IMPLEMENTING",
+          "subjectStateAt": "2026-01-01T00:00:00Z",
+          "subjectExpectedBy": null,
+          "subjectError": null
+        },
+        {
+          "id": "00000000-0000-4000-8000-0000000000b5",
+          "agentId": "00000000-0000-4000-8000-0000000000aa",
+          "label": "a comment on contract-00000001-5",
+          "selection": {
+            "event": "EntityCommented",
+            "when": [
+              [
+                {
+                  "path": "entityId",
+                  "op": "exact",
+                  "value": "00000000-0000-4000-8000-000000000011"
+                }
+              ]
+            ]
+          },
+          "state": "OPEN",
+          "createdAt": "2026-01-01T00:00:00Z",
+          "expiresAt": null,
+          "matchedEventId": null,
+          "closedAt": null,
+          "subjectKind": "COMMENTS",
+          "subjectRef": "00000000-0000-4000-8000-000000000011",
+          "subjectId": null,
+          "subjectQualifiedId": null,
+          "targetStates": [],
+          "subjectState": null,
+          "subjectStateAt": null,
+          "subjectExpectedBy": null,
+          "subjectError": null
+        }
+      ],
+      "attention": null,
+      "blockedAt": null,
+      "deskAskedAt": null
+    }
+  ]
+}

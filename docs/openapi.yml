@@ -89,6 +89,16 @@ components:
           type: string
         startRefusedAt:
           $ref: "#/components/schemas/Instant"
+        waits:
+          type: array
+          items:
+            $ref: "#/components/schemas/WaitView"
+        attention:
+          $ref: "#/components/schemas/Attention"
+        blockedAt:
+          $ref: "#/components/schemas/Instant"
+        deskAskedAt:
+          $ref: "#/components/schemas/Instant"
     AgentHarness:
       type: string
       enum:
@@ -169,6 +179,22 @@ components:
         messageCount:
           type: integer
           format: int32
+    Attention:
+      type: object
+      properties:
+        code:
+          type: string
+          enum:
+          - WAIT_SUBJECT_PASSED
+          - BLOCKED_NO_DESK
+          - IDLE_NO_WAIT
+          - WAIT_OVERDUE
+        reason:
+          type: string
+        since:
+          $ref: "#/components/schemas/Instant"
+        waitId:
+          type: string
     Branch:
       type: object
       properties:
@@ -1206,8 +1232,17 @@ paths:
   /workspaces/api/agents:
     get:
       summary: "Agents, newest first, each filter optional"
+      description: "Each agent carries its OPEN waits (`waits`, oldest first, with\
+        \ what each waits on) and what it needs a person for (`attention`, null when\
+        \ nothing)."
       operationId: listAgents
       parameters:
+      - description: "A project's uuid: only the agents whose repository is that project's.\
+          \ A repository whose project cannot be named is in none."
+        name: projectId
+        in: query
+        schema:
+          type: string
       - name: state
         in: query
         schema:
