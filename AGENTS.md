@@ -1261,6 +1261,26 @@ event name, optional expiry) and gets a turn when it happens:
   array). Before matching, every event of the wait's name that names its subject writes
   `subject_state` and `subject_state_at`, and a change is announced as `AgentWaitChanged`; the
   selection and the matching are untouched. A desk's wait records none of it.
+  **The subject is looked up once the wait is committed** (`WaitSubjectResolver`, a port; absent,
+  nothing is): outside the create's transaction, `wiring/HttpWaitSubjectResolver` asks qits-projects
+  for a release request (`getProjectReleaseRequest`, under the agent's project) or a work item
+  (`getWork`, for `WORK_ITEM` and `COMMENTS`), and qits-ci for a run (`getRun`, `wiring/CiRuns`).
+  It writes `subject_id`, `subject_qualified_id`, `subject_state` (a request's `state`, an item's
+  `status`, a run's `status`; comments have none) since `subject_state_at` (`updatedAt`; a run's
+  `finishedAt ?: startedAt ?: createdAt`), a run's `subject_expected_by`, `subject_resolved_at` and
+  no `subject_error`, and a state it moved is announced as `AgentWaitChanged`. A lookup older than
+  the state an event recorded (its `stateAt` before `subject_state_at`) leaves that state. A failure
+  — no such subject (404), another status, no answer within the client's timeouts, no project for
+  a request — writes one sentence to `subject_error` and fails neither the create, a match nor the
+  pass. **Every scheduler pass looks up again** the OPEN agent waits of a parsed kind with no
+  `subject_resolved_at` (`AgentWaits.resolveUnresolved`, right after the sweep): oldest first, each
+  at most once, at most 20 and for at most 10 s per pass, and a wait whose lookup failed not before
+  `qits.workspaces.waits.subject-retry-every` (PT1M) passed. **A run's expected finish**: with
+  qits-ci's `expectedStepDurationsMillis` non-empty, `(startedAt ?: now) + run-overdue-factor ×
+  Σ + run-overdue-grace`; otherwise `createdAt + run-unpredicted-after`
+  (`qits.workspaces.attention.run-overdue-factor` 2, `…run-overdue-grace` PT15M,
+  `…run-unpredicted-after` PT2H). The service suite's `FakeWaitSubjectResolver` resolves nothing;
+  the domain suite's is scripted per ref.
 - **Limits.** 8 OPEN waits per agent, timeout at most 30 days, label at most 200 characters (default:
   the selection in one line). The native image registers `EventSelection`, its `Condition` and `Op`
   on `AgentWaitController`.
@@ -1665,7 +1685,9 @@ backend of one component stay apart. Pact V4. Three test classes in `service/…
   it is what tells apart the rows that send the identical request. Since qits-1152: `dispatchAgent`,
   `createAgent`, `workspace-daemon:agent-branch-pushed` and `captureWork` (on an `@Operation(hidden =
   true)`, so in no document) — the last also files the ticket, `createWork` in state `a project with
-  no work`, with this service's own request body. The class javadoc traces each one from the call
+  no work`, with this service's own request body. `createAgentWait` (epic qits-1681) also looks the
+  wait's subject up: `getProjectReleaseRequest` in `a project with release requests in every state`
+  and `getWork` in `a bug ticket in detail`, through `HttpWaitSubjectResolver`. The class javadoc traces each one from the call
   site up; renaming an `operationId` renames a trigger in the pact.
 - `ProjectsConsumerPactTest` — a real `HttpRepositoryLookup` with the real generated REST clients
   against a pact-jvm mock server, one mock server per row. **A `@QuarkusTest`, by necessity**: the
@@ -1699,7 +1721,8 @@ pact-jvm upgrade stops writing it. `trigger` is required: a null one throws.
 
 **Published only on change.** `release.yml` declares one `contracts.pacts` entry per provider
 (`qits-events-service`, `qits-projects-service`, `qits-idp-service`, `qits-containers-service`,
-`qits-workspace-daemon`, and since qits-1481 `qits-system-service`), and
+`qits-workspace-daemon`, since qits-1481 `qits-system-service`, and since epic qits-1681
+`qits-ci-service`), and
 qits-ci packages each `pacts/qits-workspaces-service_<provider>.json` as
 `eu.wohlben.qits:qits-workspaces-service-pacts-<provider>`, published only when it changed since the
 newest published jar — there is no repository-side gate or module anymore; `pacts-jar/` and
@@ -1738,6 +1761,17 @@ minimal ensure body) are not used: they pact requests this service never sends.
 queued workspace lease`, `a running workspace lease`, `an unused workspace work volume`, `a declared
 target`). `OutboundCallsGuardTest`'s `PENDING_ROUTES` is the fallback for a row that waits. The runner's
 frame golden masters and message pacts (qits-950) went with the runner.
+
+**qits-ci (epic qits-1681)** is `wiring/CiContract`, bound to `qits.ci-golden-masters.version`, its
+file `pacts/qits-workspaces-service_qits-ci-service.json` (`release.yml`: `qits-ci-service`), run by
+`wiring/CiConsumerPactTest`. One call, `getRun`, from `createAgentWait` (and the pass's retry), in
+`a running run` (the `qits` bearer the state records; the answer's `id`, `status`, `createdAt` and
+`startedAt` bound — `finishedAt` and `expectedStepDurationsMillis` are null there and read as
+absent) and `no run with the given id` (a 404, read by its status, which becomes `subject_error`).
+The client is `wiring/CiRuns` on `quarkus.rest-client.qits-ci.url=${qits.ci.url}` (connect 2000 ms,
+read 5000 ms), and `qits.ci.url` is provided exactly as `qits.system.url` is: defaulted in
+`application.properties` to the qits-net alias `http://${QITS_ENVIRONMENT:dev}-qits-ci:8080` and
+declared as `env.QITS_CI_URL` in `.config/qits/configuration.yml`, with no deployer extra.
 
 ## Tests
 
