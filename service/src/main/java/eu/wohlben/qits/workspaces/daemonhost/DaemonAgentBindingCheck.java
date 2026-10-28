@@ -21,8 +21,8 @@ import org.jboss.logging.Logger;
  * workspace token ({@code commissioned_token_subject}, qits-625 — the {@code sub} the edge puts on
  * the JWT it mints for the token), which every TARGET row holds and a DIRECT admin or editor row
  * holds on an edge plane (qits-1084). Anything else is refused with 403 before the socket opens: a
- * row holding no token binds nobody, and another row's token never matches. The legacy {@code
- * commissioned_client_id} binds nothing ({@code Workspace.boundSubject}).
+ * row holding no token binds nobody, and another row's token never matches ({@code
+ * Workspace.boundSubject}).
  * (The pre-id label path, {@code LegacyDaemonControlSocket}, is gone with its label branch here:
  * qits-780, after a week with no daemon dialling it.)
  *

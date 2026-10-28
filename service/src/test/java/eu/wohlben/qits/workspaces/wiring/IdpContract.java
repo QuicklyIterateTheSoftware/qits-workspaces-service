@@ -44,10 +44,9 @@ import java.util.Optional;
  * <ul>
  *   <li>{@link IdpCredentialCommissioner} — the commission doors for a workspace's credential: a
  *       token ({@code /idp/api/tokens}, a workspace's or an agent's), minted when the scheduler
- *       starts a slot or places an agent ({@code AgentService.reconcile}); tokens and clients
- *       ({@code /idp/api/clients}, which nothing commissions any more, qits-876) listed and handed
- *       back by {@code CommissionReconciler.reconcile}, and a token handed back with its container ({@code
- *       deleteWorkspaceContainer}, {@code discardWorkspace}, {@code recreateWorkspaceContainer}, and
+ *       starts a slot or places an agent ({@code AgentService.reconcile}); tokens listed and handed
+ *       back by {@code CommissionReconciler.reconcile}, and a token handed back with its container
+ *       ({@code deleteWorkspaceContainer}, {@code discardWorkspace}, {@code recreateWorkspaceContainer}, and
  *       the scheduler's removal of a slot or an agent).
  *   <li>{@code targethost/LegacyRunnerClients} — the retired workspaces runners' clients and tokens
  *       (epic qits-1481), listed and given back once at boot through the same commissioner.
@@ -71,7 +70,6 @@ public final class IdpContract {
   static final String A_CLIENT = "a commissioned client";
   static final String A_TOKEN = "a commissioned token";
   static final String SIGNING_KEY = "a published signing key";
-  static final String NO_CLIENT = "no commissioned client with the given id";
   static final String NO_TOKEN = "no commissioned token with the given id";
   static final String PEER_CALLER = "a service client calling its peers";
 
@@ -136,26 +134,6 @@ public final class IdpContract {
                   }),
               ContractRow.of(
                   COMMISSIONS,
-                  A_CLIENT,
-                  "listClients",
-                  basic(null),
-                  List.of("$[*].clientId", "$[*].contextKind", "$[*].contextId"),
-                  (url, params) -> {
-                    List<CredentialCommissioner.Commission> held =
-                        commissionerAgainst(url, params).list();
-                    assertFalse(held.isEmpty(), "the recording holds a commission");
-                    held.forEach(c -> assertEquals(params.get("clientId"), c.clientId()));
-                  }),
-              ContractRow.of(
-                  COMMISSIONS,
-                  A_CLIENT,
-                  "decommissionClient",
-                  basic(null),
-                  List.of(),
-                  (url, params) ->
-                      commissionerAgainst(url, params).decommission(params.get("clientId"))),
-              ContractRow.of(
-                  COMMISSIONS,
                   A_TOKEN,
                   "listTokens",
                   basic(null),
@@ -183,8 +161,10 @@ public final class IdpContract {
               tokenHandback(Trigger.operation("recreateWorkspaceContainer")),
               tokenHandback(RECONCILE),
               // --- the retired runners' credentials (epic qits-1481) -------------------------
-              // LegacyRunnerClients lists both and gives back every one of the retired kinds: the
-              // reconcile's requests, told apart by their trigger.
+              // LegacyRunnerClients lists both and gives back every one of the retired kinds. Its
+              // client requests (/idp/api/clients) are the only ones this service still sends:
+              // nothing commissions a client any more (qits-876), and the reconcile's client arm is
+              // gone (qits-1683).
               ContractRow.of(
                   LEGACY_RUNNERS,
                   A_CLIENT,
@@ -234,9 +214,8 @@ public final class IdpContract {
                   }),
               // --- the peer bearer, and the 404s a handback reads as done ----------------------
               // The peer bearer: client_secret_basic, the client grant and the platform audience,
-              // exactly as the shipped `qits` client sends it. A handback (decommission, delete) of
-              // a credential qits-idp no longer holds answers 404, which the commissioners read as
-              // done.
+              // exactly as the shipped `qits` client sends it. A handback (delete) of a token
+              // qits-idp no longer holds answers 404, which the commissioner reads as done.
               ContractRow.of(
                   RECONCILE,
                   PEER_CALLER,
@@ -248,14 +227,6 @@ public final class IdpContract {
                     String token = mintAgainst(url, params);
                     assertFalse(token == null || token.isBlank(), "a bearer was minted");
                   }),
-              ContractRow.of(
-                  COMMISSIONS,
-                  NO_CLIENT,
-                  "decommissionClient",
-                  basic(null),
-                  List.of(),
-                  (url, params) ->
-                      commissionerAgainst(url, params).decommission(params.get("clientId"))),
               ContractRow.of(
                   COMMISSIONS,
                   NO_TOKEN,

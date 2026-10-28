@@ -15,9 +15,8 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
 /**
  * qits-idp's client commission API, {@code /api/clients} — read and given back, never asked for a
  * new client. Every container this service starts holds a workspace token ({@link IdpTokens}), so
- * what is left here is housekeeping: the listing {@code CommissionReconciler} reaps from and {@code
- * targethost/LegacyRunnerClients} gives the retired runner's clients back from, and the delete both
- * of them call.
+ * what is left here is housekeeping: the listing {@code targethost/LegacyRunnerClients} gives the
+ * retired runner's clients back from, and the delete it calls.
  *
  * <p><b>The path is a cross-repo contract.</b> {@code /api/clients} is served under qits-idp's own
  * {@code /idp} segment, which is what the configured base url carries — and that base is {@code

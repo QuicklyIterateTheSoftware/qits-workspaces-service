@@ -137,21 +137,6 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public String result;
 
   /**
-   * <b>Legacy, and no longer written.</b> The idp client a workspace's container was once
-   * commissioned, and its secret ({@code V3}). Every container this service starts now holds a
-   * workspace token (the three columns below) or no credential at all, so nothing sets these and
-   * nothing reads them as a credential; {@code WorkspaceRepository#liveCommissionedClientIds} still
-   * reads the id, for the commission reconcile, which gives back any client qits-idp still lists
-   * that no ACTIVE row names. The columns stay so that a rollback to a version that wrote them
-   * still reads them; dropping them is a follow-up migration.
-   */
-  @Column(name = "commissioned_client_id", columnDefinition = "text")
-  public String commissionedClientId;
-
-  @Column(name = "commissioned_client_secret", columnDefinition = "text")
-  public String commissionedClientSecret;
-
-  /**
    * The workspace token minted for this row's <em>current container</em> (qits-625, {@code V13}):
    * qits-idp's id for it, the {@code sub} the edge stamps on its JWT, and the value. A TARGET row's
    * container always holds one; a DIRECT (admin or editor) row's holds one whenever the deployment
@@ -185,9 +170,7 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
    * The principal this row's own container presents to the platform: its token's subject ({@code
    * tok-…}) when it {@link #holdsToken holds a token}, else null — which never matches a caller.
    * What the daemon socket's agent binding, the tunnel's dial-back and a dispatch's {@code
-   * agentIdentity} all compare a caller with. The legacy {@link #commissionedClientId} binds
-   * nothing: no container presents it any more, so a stale value left on a row must not admit
-   * whoever still holds that client.
+   * agentIdentity} all compare a caller with.
    */
   public String boundSubject() {
     return holdsToken() ? commissionedTokenSubject : null;

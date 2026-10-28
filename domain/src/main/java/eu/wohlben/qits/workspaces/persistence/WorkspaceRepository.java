@@ -126,23 +126,9 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
   }
 
   /**
-   * Every idp client id an ACTIVE workspace still names in its legacy {@code
-   * commissioned_client_id} column — what the commission reconcile keeps, decommissioning every
-   * other workspace client qits-idp lists. Nothing writes that column any more, so this answers
-   * empty on every row this version provisioned, and the reconcile gives back every workspace
-   * client it finds; a rollback to a version that wrote the column finds its own clients spared.
-   */
-  public List<String> liveCommissionedClientIds() {
-    return list("status = ?1 and commissionedClientId is not null", WorkspaceStatus.ACTIVE).stream()
-        .map(w -> w.commissionedClientId)
-        .toList();
-  }
-
-  /**
    * Every workspace token id an ACTIVE row currently holds for a container (qits-625, epic
-   * qits-1481) — {@link #liveCommissionedClientIds} for the token arm of the reconcile. A token no
-   * ACTIVE row names is an orphan, so is one a recreate replaced, and so is one a TARGET row holds
-   * with no live lease behind it.
+   * qits-1481) — what the commission reconcile keeps. A token no ACTIVE row names is an orphan, so
+   * is one a recreate replaced, and so is one a TARGET row holds with no live lease behind it.
    */
   public List<String> liveCommissionedTokenIds() {
     return list("status = ?1 and commissionedTokenId is not null", WorkspaceStatus.ACTIVE).stream()

@@ -120,8 +120,6 @@ public class DirectWorkspaceTokenTest {
     assertEquals(minted.token().tokenId(), row.commissionedTokenId);
     assertEquals(minted.token().subject(), row.commissionedTokenSubject);
     assertEquals(minted.token().token(), row.commissionedToken);
-    assertNull(row.commissionedClientId, "the legacy client columns are never written");
-    assertNull(row.commissionedClientSecret);
     assertEquals(minted.token().subject(), row.boundSubject(), "it is bound by the token subject");
 
     // The lookup the container factory composes the spec from answers the token.
@@ -148,8 +146,6 @@ public class DirectWorkspaceTokenTest {
     assertFalse(row.holdsToken(), "the row holds no token");
     assertNull(row.commissionedTokenSubject);
     assertNull(row.commissionedToken);
-    assertNull(row.commissionedClientId, "and no client");
-    assertNull(row.commissionedClientSecret);
     assertNull(row.boundSubject(), "so it binds nobody");
     assertEquals(WorkspaceRuntimeStatus.FAILED, row.runtimeStatus, "the row says it failed");
     assertTrue(row.runtimeError.contains(EdgePlaneUnconfigured.CODE), row.runtimeError);
@@ -186,8 +182,7 @@ public class DirectWorkspaceTokenTest {
     assertEquals(List.of(), commissioner.tokensMinted());
     Workspace row = read(rowId);
     assertFalse(row.holdsToken());
-    assertNull(row.commissionedClientId);
-    assertNull(row.commissionedClientSecret);
+    assertNull(row.boundSubject(), "so it binds nobody");
   }
 
   @Test

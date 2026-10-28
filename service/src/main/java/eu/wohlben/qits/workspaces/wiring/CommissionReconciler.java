@@ -27,30 +27,25 @@ import org.jboss.logging.Logger;
  * story. What all of those leave is a credential qits-idp still honours and nothing can use, and the
  * only way to see one is to ask the issuer what it is holding.
  *
- * <p><b>The client arm: every workspace client qits-idp still lists.</b> This service commissions
- * no client any more — every container holds a workspace token — so a {@code workspace} or {@code
- * workspace-admin} client in the listing is one a container no longer holds, and it is given back.
- * The claim is still compared by client id against the legacy {@code commissioned_client_id}
- * column ({@code WorkspaceRepository#liveCommissionedClientIds}), which nothing writes: it spares
- * nothing on rows this version provisioned, and a rollback to a version that wrote it finds its own
- * clients spared.
+ * <p><b>The workspace tokens</b> (qits-625, qits-802, epic qits-1481). A {@code workspace} token in
+ * the token listing is kept when an ACTIVE row names that exact {@code tokenId} as its {@code
+ * commissioned_token_id} for a container — a DIRECT row, a TARGET row with a live lease, or a TARGET
+ * row a retired runner still runs ({@code WorkspaceRepository#liveCommissionedTokenIds}) — or when an
+ * agent that is not REMOVED holds it (qits-1152), and deleted otherwise: its row resolved, its lease
+ * ended, its container was deleted or recreated (a newer token replaced it), or a crash lost it
+ * between the mint and the lease. A token younger than {@link #TOKEN_GRACE} is spared for that last
+ * window, the one a start holds open between the mint and the lease.
  *
  * <p><b>It only ever deletes what the issuer just listed.</b> A listing that could not be read comes
  * back empty, so a qits-idp blip reaps nothing rather than everything; and the kind filter means a
- * credential this service one day commissions for something else is not swept by the workspace rule.
- * The workspace rule covers BOTH workspace kinds, {@code workspace} and an admin row's {@code
- * workspace-admin} (qits-628 follow-up): an admin credential is reaped when orphaned and kept while
- * claimed, exactly as a regular one.
+ * token this service one day mints for something else is not swept by the workspace rule. The rule
+ * covers BOTH workspace kinds, {@code workspace} and an admin row's {@code workspace-admin} (qits-628
+ * follow-up): an admin token is reaped when orphaned and kept while claimed, exactly as a regular one.
  *
- * <p><b>And a second arm, for the workspace tokens</b> (qits-625, qits-802, epic qits-1481). A {@code
- * workspace} token in the token listing is kept when an ACTIVE row names that exact {@code tokenId}
- * as its {@code commissioned_token_id} for a container — a DIRECT row, a TARGET row with a live
- * lease, or a TARGET row a retired runner still runs ({@code WorkspaceRepository
- * #liveCommissionedTokenIds}) — and deleted otherwise: its row resolved, its lease ended, its
- * container was deleted or recreated (a newer token replaced it), or a crash lost it between the mint
- * and the lease. A token younger than {@link #TOKEN_GRACE} is spared for that last window, the one a
- * start holds open between the mint and the lease. The retired runners' own client and registration
- * kinds are {@code targethost/LegacyRunnerClients}' to give back, once, at boot.
+ * <p>There is no client arm. This service commissions no idp client any more (qits-876), and the
+ * arm that gave back orphaned {@code workspace} clients was retired once it had none left to reap
+ * (qits-1683). The retired runners' own client and registration kinds are {@code
+ * targethost/LegacyRunnerClients}' to give back, once, at boot.
  *
  * <p>At boot and hourly. Boot catches the crash that lost a decommission; the interval bounds how
  * long anything else lives. Both are best-effort in full: this must never fail a startup and never
@@ -98,7 +93,7 @@ public class CommissionReconciler {
       return 0;
     }
     Instant now = Instant.now();
-    return reapClients() + reapWorkspaceTokens(now);
+    return reapWorkspaceTokens(now);
   }
 
   /** The {@code workspace} arm of the token listing; see the class javadoc. */
@@ -130,55 +125,18 @@ public class CommissionReconciler {
       }
       return reaped;
     } catch (RuntimeException e) {
+      // A reconcile is housekeeping. It runs again at the next interval, and a failure here must
+      // cost neither a startup nor the scheduler's thread.
       LOG.warnf("Workspace token reconcile did not complete: %s", e.toString());
       return 0;
     }
   }
 
-  /** The client listing: the {@code workspace} arm. */
-  private int reapClients() {
-    try {
-      List<CredentialCommissioner.Commission> held = commissioner.get().list();
-      if (held.isEmpty()) {
-        return 0;
-      }
-      Set<String> claimed = Set.copyOf(claimedClientIds());
-      int reaped = 0;
-      for (CredentialCommissioner.Commission commission : held) {
-        // Both workspace kinds, regular and admin (qits-628 follow-up), by the one rule.
-        if (!CredentialCommissioner.isWorkspaceKind(commission.contextKind())) {
-          continue;
-        }
-        if (commission.clientId() == null || claimed.contains(commission.clientId())) {
-          continue;
-        }
-        LOG.infof(
-            "Decommissioning %s: no live workspace container claims it (context %s)",
-            commission.clientId(), commission.contextId());
-        commissioner.get().decommission(commission.clientId());
-        reaped++;
-      }
-      return reaped;
-    } catch (RuntimeException e) {
-      // A reconcile is housekeeping. It runs again at the next interval, and a failure here must
-      // cost neither a startup nor the scheduler's thread.
-      LOG.warnf("Commission reconcile did not complete: %s", e.toString());
-      return 0;
-    }
-  }
-
-  /**
-   * The client ids live workspaces claim, in a transaction of its own — this runs on a scheduler or
-   * a startup thread, where none stands. Opened explicitly rather than with {@code @Transactional},
-   * which a call from inside this bean would not go through an interceptor to reach.
-   */
-  List<String> claimedClientIds() {
-    return QuarkusTransaction.requiringNew().call(workspaces::liveCommissionedClientIds);
-  }
-
   /**
    * The workspace token ids ACTIVE rows hold, and the agent token ids ACTIVE and OBSOLETE agents
-   * hold (qits-1152), in a transaction of its own, as above.
+   * hold (qits-1152), in a transaction of its own — this runs on a scheduler or a startup thread,
+   * where none stands. Opened explicitly rather than with {@code @Transactional}, which a call from
+   * inside this bean would not go through an interceptor to reach.
    */
   List<String> claimedTokenIds() {
     return QuarkusTransaction.requiringNew()

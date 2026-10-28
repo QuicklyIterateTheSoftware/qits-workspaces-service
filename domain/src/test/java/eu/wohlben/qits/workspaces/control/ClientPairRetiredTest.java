@@ -83,9 +83,6 @@ class ClientPairRetiredTest {
     row.commissionedTokenId = "tok-id-7";
     row.commissionedTokenSubject = "tok-workspace-7";
     row.commissionedToken = "qits_tok_seven";
-    // A legacy client left in the columns a rollback still reads: never handed on.
-    row.commissionedClientId = "ws-7-a";
-    row.commissionedClientSecret = "s3cr3t";
     RunnerWorkspaceSpecs specs = new RunnerWorkspaceSpecs();
     specs.factory = WorkspaceContainerFactoryGoldenSpecTest.factory();
 

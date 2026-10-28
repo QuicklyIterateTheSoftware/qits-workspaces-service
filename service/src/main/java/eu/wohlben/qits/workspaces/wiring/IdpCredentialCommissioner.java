@@ -35,7 +35,7 @@ import org.jboss.logging.Logger;
  *
  * <p><b>It mints tokens and never a client.</b> The workspace token ({@link IdpTokens}) is the one
  * credential a container is given; the client half ({@link IdpClients}) is only listed and given
- * back — by {@link CommissionReconciler} and {@code targethost/LegacyRunnerClients}.
+ * back, by {@code targethost/LegacyRunnerClients}.
  *
  * <p><b>{@code @DefaultBean}, and keep it.</b> A test-scoped double must win, and two unqualified
  * beans of one type fail the build at {@code ArcProcessor#validate} — for every test at once. Same

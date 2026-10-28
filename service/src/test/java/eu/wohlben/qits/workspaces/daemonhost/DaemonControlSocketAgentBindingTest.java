@@ -30,10 +30,10 @@ import org.junit.jupiter.api.Test;
 /**
  * A {@code qits:agent} caller may open only the control socket of the workspace whose token it
  * holds; a {@code qits:system} caller keeps today's behaviour. The bound identity is the row's
- * workspace token subject on either placement (qits-812, qits-1084), and a client id never matches —
- * not even the legacy one a row's {@code commissioned_client_id} column may still name (qits-876). Real RS256 bearers against
- * the gate-on profile of {@link DaemonControlSocketMachineAuthTest}, so the roles and the {@code sub}
- * come out of a validated token rather than a test identity.
+ * workspace token subject on either placement (qits-812, qits-1084), and a client id never matches
+ * (qits-876). Real RS256 bearers against the gate-on profile of {@link
+ * DaemonControlSocketMachineAuthTest}, so the roles and the {@code sub} come out of a validated
+ * token rather than a test identity.
  */
 @QuarkusTest
 @TestProfile(DaemonControlSocketMachineAuthTest.GateOn.class)
@@ -130,7 +130,7 @@ class DaemonControlSocketAgentBindingTest {
 
   /**
    * Row A turned a regular RUNNER row (an admin row is never RUNNER), holding a workspace token
-   * with {@code subject} and a stale legacy client in its column.
+   * with {@code subject}.
    */
   private void runnerWithToken(Long rowId, String subject) {
     QuarkusTransaction.requiringNew()
@@ -139,7 +139,6 @@ class DaemonControlSocketAgentBindingTest {
               var row = workspaceRepository.findActiveById(rowId).orElseThrow();
               row.admin = false;
               row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
-              row.commissionedClientId = "dyn-workspace-" + rowId;
               row.commissionedTokenId = "tok-id-" + rowId;
               row.commissionedTokenSubject = subject;
               row.commissionedToken = "qits_tok_" + rowId;
@@ -156,7 +155,7 @@ class DaemonControlSocketAgentBindingTest {
   }
 
   @Test
-  void aRunnerRowRefusesAClientIdEvenTheOneItsColumnStillNames() throws Exception {
+  void aRunnerRowRefusesAClientId() throws Exception {
     runnerWithToken(rowA, "tok-workspace-" + rowA);
     String token =
         DaemonMachineTokens.tokenWithRoles("dyn-workspace-" + rowA, AGENT, PLATFORM_AUDIENCE);
@@ -207,29 +206,6 @@ class DaemonControlSocketAgentBindingTest {
             "/workspaces/daemon/" + rowA,
             DaemonMachineTokens.tokenWithRoles(
                 "tok-workspace-admin-somebody-else", AGENT, PLATFORM_AUDIENCE)));
-  }
-
-  /**
-   * A DIRECT row whose legacy {@code commissioned_client_id} still names a client — left by a version
-   * that wrote it — binds nothing by it: with no token the row admits nobody, the client included.
-   */
-  @Test
-  public void aDirectRowBindsNothingByALegacyClientItsColumnStillNames() throws Exception {
-    QuarkusTransaction.requiringNew()
-        .run(
-            () -> {
-              var row = workspaceRepository.findActiveById(rowB).orElseThrow();
-              row.commissionedClientId = "dyn-workspace-" + rowB;
-              row.commissionedTokenId = null;
-              row.commissionedTokenSubject = null;
-              row.commissionedToken = null;
-            });
-
-    assertEquals(
-        403,
-        connect(
-            "/workspaces/daemon/" + rowB,
-            DaemonMachineTokens.tokenWithRoles("dyn-workspace-" + rowB, AGENT, PLATFORM_AUDIENCE)));
   }
 
   /** 101 when the socket opened, else the status the upgrade was refused with. */

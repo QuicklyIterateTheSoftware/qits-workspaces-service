@@ -48,59 +48,17 @@ public class CommissionReconcilerTest {
     commissioner.reset();
   }
 
-  /**
-   * The client arm: this service commissions no client any more (qits-876), so every {@code
-   * workspace} or {@code workspace-admin} client qits-idp still lists for it is one no container
-   * holds, and it is given back — while a client of any other kind is not the workspace rule's.
-   */
-  @Test
-  public void everyWorkspaceClientTheIssuerStillListsIsReaped() {
-    commissioner.plant("ws-999-stray", CredentialCommissioner.CONTEXT_KIND, "999");
-    commissioner.plant("ws-998-admin-stray", CredentialCommissioner.ADMIN_CONTEXT_KIND, "998");
-    // Nothing commissions this kind. The filter is what keeps a client of another kind from being
-    // swept by a rule that was never about it.
-    commissioner.plant("run-3", "run", "3");
-
-    assertEquals(2, reconciler.reconcile(), "both workspace clients, one of each kind, go back");
-
-    assertEquals(
-        java.util.Set.of("ws-999-stray", "ws-998-admin-stray"),
-        java.util.Set.copyOf(commissioner.decommissioned()));
-    assertEquals(List.of("run-3"), commissioner.liveClientIds());
-    assertEquals(0, reconciler.reconcile(), "and a second pass finds nothing left");
-  }
-
-  /**
-   * A client an ACTIVE row still names in the legacy {@code commissioned_client_id} column is
-   * spared — the column nothing writes any more, kept so a rollback to a version that wrote it
-   * finds its own clients alive.
-   */
-  @Test
-  public void aClientALegacyRowStillNamesIsSpared() {
-    Long row = directAdminRowHolding("tok-legacy-row");
-    QuarkusTransaction.requiringNew()
-        .run(() -> workspaceRepository.findById(row).commissionedClientId = "ws-legacy");
-    commissioner.plant("ws-legacy", CredentialCommissioner.ADMIN_CONTEXT_KIND, row.toString());
-    try {
-      assertEquals(0, reconciler.reconcile());
-      assertEquals(List.of("ws-legacy"), commissioner.liveClientIds());
-    } finally {
-      QuarkusTransaction.requiringNew()
-          .run(
-              () ->
-                  workspaceRepository
-                      .findByIdOptional(row)
-                      .ifPresent(w -> w.status = WorkspaceStatus.ABANDONED));
-    }
-  }
-
   @Test
   public void withNoIssuerWiredThereIsNothingToReconcile() {
-    commissioner.plant("ws-999-stray", CredentialCommissioner.CONTEXT_KIND, "999");
+    commissioner.plantToken(
+        "tok-stray",
+        CredentialCommissioner.CONTEXT_KIND,
+        "999",
+        Instant.now().minus(Duration.ofHours(1)));
     commissioner.reset(); // back to the shipped posture
 
     assertEquals(0, reconciler.reconcile());
-    assertEquals(List.of(), commissioner.decommissioned());
+    assertEquals(List.of(), commissioner.tokensDeleted());
   }
 
   /**

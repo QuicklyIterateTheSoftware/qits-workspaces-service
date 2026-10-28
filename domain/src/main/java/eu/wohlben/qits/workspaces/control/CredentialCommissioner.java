@@ -109,17 +109,17 @@ public interface CredentialCommissioner {
   /**
    * Give an idp client back. This service commissions no client any more — every container it
    * starts holds a {@link #commissionToken workspace token} — so the clients this answers for are
-   * the ones qits-idp still lists for it: what {@code wiring/CommissionReconciler} reaps and what
-   * {@code targethost/LegacyRunnerClients} gives back for the retired runner.
+   * the ones qits-idp still lists for it: what {@code targethost/LegacyRunnerClients} gives back
+   * for the retired runner, once, at boot.
    *
    * <p>Best-effort by contract: an implementation reports a failure and never throws. A client a
-   * failure leaves behind is the reconcile's to reap at its next pass.
+   * failure leaves behind is given back at the next boot.
    */
   void decommission(String clientId);
 
   /**
-   * Every idp client this service currently owns, for the reconcile. Empty when nothing could be
-   * asked — a read failure must not be read as "nothing is out there", since that answer would
+   * Every idp client this service currently owns, for {@code targethost/LegacyRunnerClients}.
+   * Empty when nothing could be asked — a read failure must not be read as "nothing is out there", since that answer would
    * decommission nothing rather than everything.
    */
   List<Commission> list();
