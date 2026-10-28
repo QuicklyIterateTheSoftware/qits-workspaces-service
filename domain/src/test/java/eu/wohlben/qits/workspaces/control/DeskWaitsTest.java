@@ -116,7 +116,8 @@ public class DeskWaitsTest {
     UUID project = UUID.randomUUID();
     String request = "rr-" + UUID.randomUUID();
     AgentWaitDto wait = waits.createForDesk(project, "rr final", finalized(request), null);
-    Instant at = Instant.parse("2026-10-26T10:00:00Z");
+    // Dated after the wait: an older event would skip it (qits-1677).
+    Instant at = Instant.parse("2036-10-26T10:00:00Z");
     String payload = "{\"requestId\":\"" + request + "\"}";
 
     assertEquals(0, waits.onEvent("ev-other", "DeskTestRequestFinalized", at, "{\"requestId\":\"rr-x\"}"));
@@ -148,7 +149,7 @@ public class DeskWaitsTest {
             eu.wohlben.qits.eventstream.selection.EventSelectionEvaluator.parsePayload(payload)),
         event.turn());
     assertEquals(row.closedTurn, event.turn());
-    assertTrue(event.turn().startsWith("Your wait \"rr final\" matched: DeskTestRequestFinalized at 2026-10-26T10:00:00Z"));
+    assertTrue(event.turn().startsWith("Your wait \"rr final\" matched: DeskTestRequestFinalized at 2036-10-26T10:00:00Z"));
 
     // A repeat delivery finds the wait closed and announces nothing more.
     assertEquals(0, waits.onEvent("ev-desk-1", "DeskTestRequestFinalized", at, payload));
