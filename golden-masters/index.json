@@ -739,7 +739,8 @@
             "ids": [
               "$.id",
               "$.agentId",
-              "$.selection.when[*][*].value"
+              "$.selection.when[*][*].value",
+              "$.subjectRef"
             ],
             "instants": [
               "$.createdAt"
@@ -839,7 +840,8 @@
             "ids": [
               "$.id",
               "$.agentId",
-              "$.selection.when[*][*].value"
+              "$.selection.when[*][*].value",
+              "$.subjectRef"
             ],
             "instants": [
               "$.createdAt"
@@ -1200,7 +1202,8 @@
             "ids": [
               "$.id",
               "$.agentId",
-              "$.selection.when[*][*].value"
+              "$.selection.when[*][*].value",
+              "$.subjectRef"
             ],
             "instants": [
               "$.createdAt",

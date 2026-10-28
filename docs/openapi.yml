@@ -711,6 +711,43 @@ components:
           type: string
         closedAt:
           $ref: "#/components/schemas/Instant"
+        subjectKind:
+          type: string
+          description: What the selection waits on
+          enum:
+          - RELEASE_REQUEST
+          - CI_RUN
+          - WORK_ITEM
+          - COMMENTS
+          - OTHER
+        subjectRef:
+          type: string
+          description: The subject's id as the selection names it; null for OTHER
+        subjectId:
+          type: string
+          description: "The subject's uuid, once resolved"
+        subjectQualifiedId:
+          type: string
+          description: "The subject's qualified id, once resolved; null for a run"
+        targetStates:
+          type: array
+          items:
+            type: string
+          description: The states the selection waits for; empty when it names none
+        subjectState:
+          type: string
+          description: The subject's last known state
+        subjectStateAt:
+          $ref: "#/components/schemas/Instant"
+          description: When that state was seen to begin
+          type: string
+        subjectExpectedBy:
+          $ref: "#/components/schemas/Instant"
+          description: "Runs only: when the run should have finished"
+          type: string
+        subjectError:
+          type: string
+          description: The last failure to look the subject up
     WorkItemWorkspaceDto:
       type: object
       properties:
