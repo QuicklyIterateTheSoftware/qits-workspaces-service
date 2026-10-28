@@ -117,14 +117,15 @@
              targethost/TargetLeasePlacement calls (targethost/SystemContract). The same rule: a
              qits-maintenance bump moves it. -->
         <qits.system-golden-masters.version>2026.1027.185636</qits.system-golden-masters.version>
-        <!-- qits-ci's golden masters (epic qits-1681): the run read a declared wait on a run makes
-             (wiring/CiContract). The same rule: a qits-maintenance bump moves it. -->
-        <qits.ci-golden-masters.version>2026.1026.163551</qits.ci-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
              and ConsumerPactVerificationTest verifies consumers' pacts against this service.
              An external library, so it moves by hand, not by a maintenance bump. -->
         <pact-jvm.version>4.7.5</pact-jvm.version>
+        <!-- qits-ci's golden masters (epic qits-1681): the run read a declared wait on a run makes
+             (wiring/CiContract). The same rule: a qits-maintenance bump moves it. Kept apart from the
+             other golden-master pins so a bump of theirs and this line never share a merge hunk. -->
+        <qits.ci-golden-masters.version>2026.1026.163551</qits.ci-golden-masters.version>
         <!-- THE CONSUMER PACTS this provider verifies (epic qits-546): one jar per consumer, each
              carrying `pacts/<consumer>_qits-workspaces-service.json`, and
              ConsumerPactVerificationTest loads every such resource off the test classpath. Test
