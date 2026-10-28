@@ -1262,11 +1262,14 @@ event name, optional expiry) and gets a turn when it happens:
   `ReleaseRequestStateChanged` naming `releaseRequestQualifiedId` or `releaseRequestId`; `CI_RUN` from
   `BuildStatusChanged`, `BuildSuccessful` or `BuildFailed` naming `runId`; `WORK_ITEM` from
   `EntityTransitioned` naming `entities[].entityId`; `COMMENTS` from `EntityCommented` naming
-  `entityId`; else `OTHER`), `subject_ref` (the value, as written, and only when every group names
-  the same one with `exact`) and `target_states` (the state values the groups wait for, a JSON
-  array). Before matching, every event of the wait's name that names its subject writes
-  `subject_state` and `subject_state_at`, and a change is announced as `AgentWaitChanged`; the
-  selection and the matching are untouched. A desk's wait records none of it.
+  `entityId`; `BRANCH` from `BranchDeliveryChanged` naming `branch`, its target states the union of
+  `step` and `everywhere`'s exact values; else `OTHER`), `subject_ref` (the value, as written, and
+  only when every group names the same one with `exact`) and `target_states` (the state values the
+  groups wait for, a JSON array). Before matching, every event of the wait's name that names its
+  subject writes `subject_state` and `subject_state_at`, and a change is announced as
+  `AgentWaitChanged`; the selection and the matching are untouched. A desk's wait records none of
+  it. `qits wait branch <branch> [--repository <r>] --until joined|released|live|failed` is the
+  CLI's BRANCH preset, built the same way the release request and run presets are.
   **The subject is looked up once the wait is committed** (`WaitSubjectResolver`, a port; absent,
   nothing is): outside the create's transaction, `wiring/HttpWaitSubjectResolver` asks qits-projects
   for a release request (`getProjectReleaseRequest`, under the agent's project) or a work item

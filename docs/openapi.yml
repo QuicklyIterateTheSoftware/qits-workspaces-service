@@ -389,6 +389,7 @@ components:
           type: string
           examples:
           - ReleaseRequestStateChanged
+          - BranchDeliveryChanged
         when:
           type: array
           items:
@@ -745,6 +746,7 @@ components:
           - CI_RUN
           - WORK_ITEM
           - COMMENTS
+          - BRANCH
           - OTHER
         subjectRef:
           type: string
