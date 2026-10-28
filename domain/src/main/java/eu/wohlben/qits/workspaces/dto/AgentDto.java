@@ -6,6 +6,7 @@ import eu.wohlben.qits.workspaces.entity.AgentRunState;
 import eu.wohlben.qits.workspaces.entity.AgentState;
 import java.time.Instant;
 import java.util.List;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
 
 /**
  * An agent as the doors answer it (qits-1152): its work item, the workspace it runs in (null while
@@ -28,6 +29,13 @@ import java.util.List;
  *     said; null while no start is refused. The scheduler keeps trying; the next accepted start
  *     clears it
  * @param startRefusedAt when that refusal was first seen; null with it
+ * @param waits its OPEN declared waits, oldest first, with what each waits on (epic qits-1681);
+ *     empty when it waits on nothing
+ * @param attention what it needs a person for, as last evaluated (epic qits-1681); null when
+ *     nothing, and always null for an agent that is not ACTIVE
+ * @param blockedAt when its item's explicit block ({@code EXPLICIT} or {@code BOTH}) began; null
+ *     while there is none
+ * @param deskAskedAt when its item was last commented with an {@code @desk} mention; null when never
  */
 public record AgentDto(
     String agentId,
@@ -56,7 +64,28 @@ public record AgentDto(
     Instant obsoleteAt,
     Instant removedAt,
     String startRefusal,
-    Instant startRefusedAt) {
+    Instant startRefusedAt,
+    List<WaitView> waits,
+    Attention attention,
+    Instant blockedAt,
+    Instant deskAskedAt) {
+
+  /**
+   * What an ACTIVE agent needs a person for (epic qits-1681).
+   *
+   * @param code {@code WAIT_SUBJECT_PASSED}, {@code BLOCKED_NO_DESK}, {@code IDLE_NO_WAIT} or
+   *     {@code WAIT_OVERDUE}
+   * @param reason one line this service wrote, e.g. {@code Idle 42 min with no wait and no block}
+   * @param since since when it holds
+   * @param waitId the wait it is about, for {@code WAIT_SUBJECT_PASSED} and {@code WAIT_OVERDUE};
+   *     null otherwise
+   */
+  public record Attention(
+      @Schema(enumeration = {"WAIT_SUBJECT_PASSED", "BLOCKED_NO_DESK", "IDLE_NO_WAIT", "WAIT_OVERDUE"})
+          String code,
+      String reason,
+      Instant since,
+      String waitId) {}
 
   /** One branch the agent pushed. */
   public record Branch(String repositoryId, String branch, String sha, Instant pushedAt) {}

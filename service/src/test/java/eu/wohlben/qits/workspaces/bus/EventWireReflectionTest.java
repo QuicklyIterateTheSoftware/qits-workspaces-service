@@ -17,6 +17,7 @@ import eu.wohlben.qits.workspaces.events.AgentWaitOpened;
 import eu.wohlben.qits.workspaces.events.AgentWaitChanged;
 import eu.wohlben.qits.workspaces.events.AgentWaitClosed;
 import eu.wohlben.qits.workspaces.events.AgentActivityChanged;
+import eu.wohlben.qits.workspaces.events.AgentAttentionChanged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentPlaced;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
@@ -82,7 +83,9 @@ class EventWireReflectionTest {
             AgentWaitChanged.class,
             AgentWaitClosed.class,
             AgentActivityChanged.class,
+            AgentAttentionChanged.class,
             eu.wohlben.qits.workspaces.targethost.TargetLeaseChanged.class,
+            EntityCommented.class,
             EventEnvelope.class,
             EventFrame.class),
         Set.of(registration.targets()),

@@ -99,6 +99,14 @@
             <artifactId>quarkus-hibernate-validator</artifactId>
         </dependency>
         <dependency>
+            <!-- The openapi ANNOTATIONS only (epic qits-1681): `dto/WaitView` is answered both by the
+                 wait doors and inside every AgentDto, so it lives here with its @Schema. No scanner,
+                 no endpoint: `service`'s quarkus-smallrye-openapi reads this module's index. Version
+                 from the Quarkus BOM, the one `service` already resolves. -->
+            <groupId>org.eclipse.microprofile.openapi</groupId>
+            <artifactId>microprofile-openapi-api</artifactId>
+        </dependency>
+        <dependency>
             <!-- CausedRow + CausationStamp + @Uncaused, and NOTHING else out of this jar here: the
                  persistence vocabulary, not the bus. `Workspace` and `WorkspaceEvent` record the
                  event they were written because of in the platform's generic causation_id column;

@@ -9,6 +9,7 @@ import eu.wohlben.qits.workspaces.events.AgentWaitOpened;
 import eu.wohlben.qits.workspaces.events.AgentWaitChanged;
 import eu.wohlben.qits.workspaces.events.AgentWaitClosed;
 import eu.wohlben.qits.workspaces.events.AgentActivityChanged;
+import eu.wohlben.qits.workspaces.events.AgentAttentionChanged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentPlaced;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
@@ -39,7 +40,9 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
  *
  * <p><b>Why these types.</b> The fourteen lifecycle records and {@link DeskWaitClosed} (qits-1618)
  * are what {@link EventstreamLifecycleAnnouncer} publishes. {@link TargetLeaseChanged} is qits-system's, which {@code
- * targethost/TargetLeaseEvents} receives bound to that record (epic qits-1481). {@link EventEnvelope} is the PUT body. {@link EventFrame} is what arrives on {@code
+ * targethost/TargetLeaseEvents} receives bound to that record (epic qits-1481), and {@link
+ * EntityCommented} is qits-projects', which {@link DeskMentionListener} binds the same way (epic
+ * qits-1681). {@link EventEnvelope} is the PUT body. {@link EventFrame} is what arrives on {@code
  * /events/stream} for {@link AgentWaitListener}, which reads the frame's fields and hands the
  * payload on as a string — so it binds nothing else, but the frame itself is bound.
  *
@@ -69,7 +72,9 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
       AgentWaitChanged.class,
       AgentWaitClosed.class,
       AgentActivityChanged.class,
+      AgentAttentionChanged.class,
       TargetLeaseChanged.class,
+      EntityCommented.class,
       EventEnvelope.class,
       EventFrame.class
     },

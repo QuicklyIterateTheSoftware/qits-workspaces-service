@@ -143,6 +143,9 @@ public class AgentWaits {
   /** Where a wait's subject is looked up (epic qits-1681). Absent: nothing is resolved. */
   @Inject Instance<WaitSubjectResolver> subjectResolver;
 
+  /** What the agent needs a person for, evaluated again after each change to its waits (epic qits-1681). */
+  @Inject AgentAttentions attentions;
+
   /**
    * How long after a failed lookup a wait's subject is not asked again: a subject that does not
    * exist would otherwise be asked for on every scheduler pass. Zero: every pass.
@@ -276,6 +279,8 @@ public class AgentWaits {
     hint(List.of(Placed.of(agent)));
     relayWaits(agent, CAUSE_WAIT);
     catchUp(id, selection.event(), declaredAt);
+    // A declared wait ends IDLE_NO_WAIT, and its looked-up subject may have passed already.
+    attentions.reevaluate(agentId);
     return get(agentId, id);
   }
 
@@ -709,9 +714,14 @@ public class AgentWaits {
 
   /** {@link WaitingOn} per agent with an OPEN wait, from one read; agents with none are absent. */
   public Map<UUID, WaitingOn> waitingOn(Collection<UUID> agentIds) {
+    return waitingOnOf(waits.findOpenByAgents(agentIds));
+  }
+
+  /** {@link WaitingOn} per agent, from OPEN waits already read oldest first. */
+  static Map<UUID, WaitingOn> waitingOnOf(List<AgentWait> open) {
     Map<UUID, List<String>> labels = new LinkedHashMap<>();
     Map<UUID, Instant> since = new LinkedHashMap<>();
-    for (AgentWait wait : waits.findOpenByAgents(agentIds)) {
+    for (AgentWait wait : open) {
       labels.computeIfAbsent(wait.agentId, id -> new ArrayList<>()).add(wait.label);
       since.merge(wait.agentId, wait.createdAt, (a, b) -> a.isBefore(b) ? a : b);
     }
@@ -1279,6 +1289,17 @@ public class AgentWaits {
    * be read is announced nothing; nothing here fails the caller.
    */
   private void announceAll(List<Pending> pending) {
+    try {
+      announceEach(pending);
+    } finally {
+      // Every agent whose wait changed, opened, closed or was cancelled: its attention may have.
+      if (attentions != null && !pending.isEmpty()) {
+        attentions.reevaluate(pending.stream().map(Pending::agentId).toList());
+      }
+    }
+  }
+
+  private void announceEach(List<Pending> pending) {
     if (pending.isEmpty() || lifecycle == null || !lifecycle.isResolvable()) {
       return;
     }
