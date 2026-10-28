@@ -48,13 +48,28 @@ erDiagram
     text matched_event_id
     text selection "not null"
     enum state "not null"
+    text subject_error
+    instant subject_expected_by
+    text subject_id
+    text subject_kind
+    text subject_qualified_id
+    text subject_ref
+    instant subject_resolved_at
+    text subject_state
+    instant subject_state_at
+    text target_states
   }
   %% agent_worktree: eu.wohlben.qits.workspaces.entity.AgentWorktree (domain)
   agent_worktree {
     uuid id PK "not null"
     boolean admin "not null"
+    text attention_code
+    text attention_reason
+    instant attention_since
+    uuid attention_wait_id
     text block_author
     text block_source
+    instant blocked_at
     instant branch_consumed_at
     uuid causation_id
     instant cleanup_prompted_at
@@ -65,6 +80,7 @@ erDiagram
     text consumed_commit
     text consumed_version
     instant created_at "not null"
+    instant desk_asked_at
     boolean entity_blocked
     text entity_id
     text entity_status
@@ -107,8 +123,6 @@ erDiagram
     text adopted_volume
     string branch
     uuid causation_id
-    text commissioned_client_id
-    text commissioned_client_secret
     text commissioned_token
     string commissioned_token_id "length 64"
     string commissioned_token_subject "length 255"
