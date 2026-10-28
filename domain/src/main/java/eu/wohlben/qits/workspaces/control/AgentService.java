@@ -15,6 +15,7 @@ import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.events.AgentCleanupDeferred;
+import eu.wohlben.qits.workspaces.events.AgentActivityChanged;
 import eu.wohlben.qits.workspaces.events.AgentHarnessExited;
 import eu.wohlben.qits.workspaces.events.AgentNudged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
@@ -1095,7 +1096,7 @@ public class AgentService {
                     return null;
                   }
                   agent.waitingSince = awaitingInput ? when : null;
-                  return new String[] {agent.workId};
+                  return new String[] {agent.workId, idOf(agent.workspaceId), agent.repositoryId};
                 });
     if (wokeUp[0] != null) {
       announce(wokeUp[0]);
@@ -1103,6 +1104,17 @@ public class AgentService {
     if (relay != null) {
       // With an OPEN wait, a waiting agent is reported as waiting on it (qits-1153, W5).
       waits.relayActivity(relay[0], id, awaitingInput, hookEvent, sessionId, when);
+      // The same flip, announced (epic qits-1681); never on a frame that flipped nothing.
+      announce(
+          new AgentActivityChanged(
+              id.toString(),
+              relay[0],
+              relay[1],
+              relay[2],
+              waits.projectOf(relay[2]),
+              activityWord(id, awaitingInput),
+              awaitingInput ? when : null,
+              when));
     }
     if (Boolean.TRUE.equals(awaitingInput) || busyAgain.get()) {
       kick();
@@ -2771,6 +2783,25 @@ public class AgentService {
     return liveness.isResolvable() && liveness.get().isDaemonLive(workspaceId);
   }
 
+  /**
+   * The activity an {@link AgentActivityChanged} says: what the agent doors show for it ({@link
+   * AgentActivityView#reportedActivityOf}), else what the flip itself says — IDLE while it waits
+   * for input, BUSY once it does not.
+   */
+  private String activityWord(UUID id, boolean awaitingInput) {
+    if (activity.isResolvable()) {
+      try {
+        Optional<AgentActivityState> reported = activity.get().reportedActivityOf(id.toString());
+        if (reported.isPresent()) {
+          return reported.get().name();
+        }
+      } catch (RuntimeException unreadable) {
+        LOG.debugf("No activity reading for agent %s: %s", id, unreadable.getMessage());
+      }
+    }
+    return awaitingInput ? AgentActivityState.IDLE.name() : AgentActivityState.BUSY.name();
+  }
+
   /** {@code event} to the lifecycle port; call it only once the write it reports committed. */
   private void announce(QitsEvent event) {
     LifecycleAnnouncer.announce(lifecycle, event);
@@ -2977,7 +3008,8 @@ public class AgentService {
         defaultBranch);
   }
 
-  private String projectOf(String repositoryId) {
+  /** The project of {@code repositoryId}; null when qits-projects cannot name it. Never throws. */
+  String projectOf(String repositoryId) {
     try {
       return repositories.find(repositoryId).map(RepositoryLookup.RepositoryView::projectId).orElse(null);
     } catch (RuntimeException registryDidNotAnswer) {

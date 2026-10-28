@@ -1,6 +1,8 @@
 package eu.wohlben.qits.workspaces.control;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import eu.wohlben.qits.eventstream.QitsEvent;
 import eu.wohlben.qits.eventstream.control.EventFrame;
 import eu.wohlben.qits.eventstream.selection.EventSelection;
 import eu.wohlben.qits.eventstream.selection.EventSelectionEvaluator;
@@ -15,6 +17,9 @@ import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.ForbiddenException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
+import eu.wohlben.qits.workspaces.events.AgentWaitChanged;
+import eu.wohlben.qits.workspaces.events.AgentWaitClosed;
+import eu.wohlben.qits.workspaces.events.AgentWaitOpened;
 import eu.wohlben.qits.workspaces.events.DeskWaitClosed;
 import eu.wohlben.qits.workspaces.persistence.AgentWaitRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
@@ -26,13 +31,17 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -73,6 +82,14 @@ import org.jboss.logging.Logger;
  *   <li><b>The look-back</b> (qits-1668): a declared wait also replays the events of its name from
  *       {@code qits.workspaces.waits.lookback} before the declaration ({@link RecentEvents}), through
  *       the same matcher. So a wait on an outcome that already happened fires at once.
+ *   <li><b>The subject</b> (epic qits-1681, {@code V33}): an agent's wait records what it waits on,
+ *       parsed from its selection at declaration ({@link WaitSubjects}), and every event of its name
+ *       that names that subject writes the subject's state before matching. The selection and the
+ *       matching are untouched.
+ *   <li><b>The announcements</b> (epic qits-1681): an agent's wait opening, its subject's state
+ *       changing and its closing (match, timeout, cancel, or its agent leaving ACTIVE) are announced
+ *       as {@link AgentWaitOpened}, {@link AgentWaitChanged} and {@link AgentWaitClosed}, after the
+ *       write committed. A desk's waits announce none of them.
  * </ul>
  */
 @ApplicationScoped
@@ -116,6 +133,11 @@ public class AgentWaits {
 
   /** Where a desk wait's close is announced (qits-1618). Absent: nothing is, and rows stay unmarked. */
   @Inject Instance<LifecycleAnnouncer> lifecycle;
+
+  /** Each repository's project, once qits-projects named it: a repository never changes project. */
+  private final Map<String, String> projects = new ConcurrentHashMap<>();
+
+  private static final ObjectMapper JSON = new ObjectMapper();
 
   /** Desk waits whose announcement is handed on and not yet taken, so a sweep does not queue it twice. */
   private final Set<UUID> announcing = ConcurrentHashMap.newKeySet();
@@ -165,6 +187,7 @@ public class AgentWaits {
     String finalLabel = validated(label, selection, timeout);
     UUID id = UUID.randomUUID();
     Instant declaredAt = Instant.now();
+    WaitSubjects.Subject subject = WaitSubjects.parse(selection);
     AgentWorktree agent =
         QuarkusTransaction.requiringNew()
             .call(
@@ -195,6 +218,9 @@ public class AgentWaits {
                   wait.eventName = selection.event();
                   wait.createdAt = declaredAt;
                   wait.expiresAt = timeout == null ? null : wait.createdAt.plus(timeout);
+                  wait.subjectKind = subject.kind().name();
+                  wait.subjectRef = subject.ref();
+                  wait.targetStates = targetStatesJson(subject.targetStates());
                   waits.persist(wait);
                   // It said what it waits on: a later quiet period earns a fresh nudge (qits-1460).
                   row.nudgeCount = 0;
@@ -202,6 +228,20 @@ public class AgentWaits {
                 });
     addName(selection.event());
     LOG.infof("Agent %s waits on %s (%s)", agentId, finalLabel, id);
+    announce(
+        new AgentWaitOpened(
+            agent.id.toString(),
+            agent.workId,
+            idOf(agent.workspaceId),
+            agent.repositoryId,
+            projectOf(agent.repositoryId),
+            id.toString(),
+            finalLabel,
+            selection.event(),
+            subject.kind().name(),
+            subject.ref(),
+            subject.targetStates(),
+            declaredAt));
     hint(List.of(Placed.of(agent)));
     relayWaits(agent, CAUSE_WAIT);
     catchUp(id, selection.event(), declaredAt);
@@ -267,6 +307,7 @@ public class AgentWaits {
     if (closed) {
       refreshNames();
       LOG.infof("Agent %s's wait %s was cancelled", agentId, waitId);
+      announceAll(List.of(closedEvent(agentId, waitId, AgentWaitClosed.CANCELLED, null)));
       AgentWorktree agent = QuarkusTransaction.requiringNew().call(() -> agents.findById(agentId));
       if (agent != null) {
         hint(List.of(Placed.of(agent)));
@@ -427,6 +468,7 @@ public class AgentWaits {
     JsonNode tree = EventSelectionEvaluator.parsePayload(payload);
     List<Placed> closedFor = new ArrayList<>();
     List<DeskWaitClosed> deskClosed = new ArrayList<>();
+    List<Pending> announced = new ArrayList<>();
     List<Woken> woken =
         QuarkusTransaction.requiringNew()
             .call(
@@ -435,6 +477,12 @@ public class AgentWaits {
                   for (AgentWait wait : waits.findOpenByEventForUpdate(name)) {
                     if (only != null && !only.equals(wait.id)) {
                       continue;
+                    }
+                    if (!wait.isDeskWait()) {
+                      Pending changed = recordSubjectState(wait, name, occurredAt, tree);
+                      if (changed != null) {
+                        announced.add(changed);
+                      }
                     }
                     EventSelection selection;
                     try {
@@ -455,6 +503,8 @@ public class AgentWaits {
                       continue;
                     }
                     close(wait, AgentWaitState.MATCHED, eventId);
+                    announced.add(
+                        closedEvent(wait.agentId, wait.id, AgentWaitClosed.MATCHED, eventId));
                     AgentWorktree agent = wake(wait.agentId, turn);
                     closedFor.add(placedOf(wait.agentId));
                     if (agent != null) {
@@ -466,6 +516,7 @@ public class AgentWaits {
                   return out;
                 });
     hint(closedFor);
+    announceAll(announced);
     deskClosed.forEach(this::announceDesk);
     if (woken.isEmpty()) {
       if (!deskClosed.isEmpty()) {
@@ -493,6 +544,7 @@ public class AgentWaits {
     Instant now = Instant.now();
     List<Placed> closedFor = new ArrayList<>();
     List<DeskWaitClosed> deskClosed = new ArrayList<>();
+    List<Pending> announced = new ArrayList<>();
     List<Woken> woken =
         QuarkusTransaction.requiringNew()
             .call(
@@ -500,6 +552,8 @@ public class AgentWaits {
                   List<Woken> out = new ArrayList<>();
                   for (AgentWait wait : waits.findOpenOfInactiveAgentsForUpdate()) {
                     close(wait, AgentWaitState.CANCELLED, null);
+                    announced.add(
+                        closedEvent(wait.agentId, wait.id, AgentWaitClosed.CANCELLED, null));
                     closedFor.add(placedOf(wait.agentId));
                     LOG.infof("Agent %s is no longer active: its wait %s is cancelled", wait.agentId, wait.label);
                   }
@@ -512,6 +566,8 @@ public class AgentWaits {
                       continue;
                     }
                     close(wait, AgentWaitState.TIMED_OUT, null);
+                    announced.add(
+                        closedEvent(wait.agentId, wait.id, AgentWaitClosed.TIMED_OUT, null));
                     AgentWorktree agent = wake(wait.agentId, timedOutTurn(wait));
                     closedFor.add(placedOf(wait.agentId));
                     if (agent != null) {
@@ -522,6 +578,7 @@ public class AgentWaits {
                   return out;
                 });
     hint(closedFor);
+    announceAll(announced);
     deskClosed.forEach(this::announceDesk);
     refreshNames();
     for (Woken w : woken) {
@@ -922,6 +979,192 @@ public class AgentWaits {
         wait.createdAt,
         wait.expiresAt,
         wait.matchedEventId,
-        wait.closedAt);
+        wait.closedAt,
+        wait.subjectKind,
+        wait.subjectRef,
+        wait.subjectId,
+        wait.subjectQualifiedId,
+        targetStatesOf(wait.targetStates),
+        wait.subjectState,
+        wait.subjectStateAt,
+        wait.subjectExpectedBy,
+        wait.subjectError);
+  }
+
+  // --- the subject and the announcements (epic qits-1681) ------------------------------------------
+
+  /**
+   * An event of the wait's name arrived: when it names the wait's subject and says it is in another
+   * state than the one recorded, write that state and the event's time, in the caller's
+   * transaction, and answer the {@link AgentWaitChanged} to announce once it committed. Null when
+   * nothing changed: the wait names no subject (OTHER, a wait from before {@code V33}), the event
+   * names another one or carries no state, the state is the one recorded (its {@code
+   * subject_state_at} stays when that state began), or the event is older than the recorded state.
+   */
+  private static Pending recordSubjectState(
+      AgentWait wait, String name, Instant occurredAt, JsonNode payload) {
+    WaitSubjects.Kind kind = WaitSubjects.kindOf(wait.subjectKind);
+    if (kind == null || kind == WaitSubjects.Kind.OTHER) {
+      return null;
+    }
+    Optional<String> state =
+        WaitSubjects.stateIn(
+            name, payload, Arrays.asList(wait.subjectRef, wait.subjectId, wait.subjectQualifiedId));
+    if (state.isEmpty() || state.get().equals(wait.subjectState)) {
+      return null;
+    }
+    // As the column stores it, so the event and a later read say the same instant.
+    Instant at = (occurredAt == null ? Instant.now() : occurredAt).truncatedTo(ChronoUnit.MICROS);
+    if (wait.subjectStateAt != null && at.isBefore(wait.subjectStateAt)) {
+      return null;
+    }
+    wait.subjectState = state.get();
+    wait.subjectStateAt = at;
+    String waitId = wait.id.toString();
+    String ref = wait.subjectRef;
+    String qualifiedId = wait.subjectQualifiedId;
+    String subjectState = wait.subjectState;
+    LOG.infof("Agent %s's wait %s: its subject %s is %s", wait.agentId, wait.label, ref, subjectState);
+    return new Pending(
+        wait.agentId,
+        a ->
+            new AgentWaitChanged(
+                a.agentId(),
+                a.workId(),
+                a.workspaceId(),
+                a.repositoryId(),
+                a.projectId(),
+                waitId,
+                kind.name(),
+                ref,
+                qualifiedId,
+                subjectState,
+                at,
+                Instant.now()));
+  }
+
+  /** The {@link AgentWaitClosed} of an agent's wait, to announce once the close committed. */
+  private static Pending closedEvent(UUID agentId, UUID waitId, String state, String matchedEventId) {
+    Instant at = Instant.now();
+    return new Pending(
+        agentId,
+        a ->
+            new AgentWaitClosed(
+                a.agentId(),
+                a.workId(),
+                a.workspaceId(),
+                a.repositoryId(),
+                a.projectId(),
+                waitId.toString(),
+                state,
+                matchedEventId,
+                at));
+  }
+
+  /** The five ids every agent wait event carries. */
+  private record AgentIds(
+      String agentId, String workId, String workspaceId, String repositoryId, String projectId) {}
+
+  /** An announcement about one agent's wait, built from its ids once its write committed. */
+  private record Pending(UUID agentId, Function<AgentIds, QitsEvent> event) {}
+
+  /**
+   * Announce {@code pending}, in order, each with its agent's ids read after the write committed
+   * (never inside it: the wake's lock on the agent row must read the row first). An agent that cannot
+   * be read is announced nothing; nothing here fails the caller.
+   */
+  private void announceAll(List<Pending> pending) {
+    if (pending.isEmpty() || lifecycle == null || !lifecycle.isResolvable()) {
+      return;
+    }
+    Map<UUID, String[]> rows;
+    try {
+      rows =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () -> {
+                    Map<UUID, String[]> out = new HashMap<>();
+                    for (Pending p : pending) {
+                      if (p.agentId() != null && !out.containsKey(p.agentId())) {
+                        AgentWorktree agent = agents.findById(p.agentId());
+                        if (agent != null) {
+                          out.put(
+                              p.agentId(),
+                              new String[] {
+                                agent.workId, idOf(agent.workspaceId), agent.repositoryId
+                              });
+                        }
+                      }
+                    }
+                    return out;
+                  });
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "%d wait announcements not made: the agents could not be read", pending.size());
+      return;
+    }
+    for (Pending p : pending) {
+      String[] row = rows.get(p.agentId());
+      if (row == null) {
+        continue;
+      }
+      announce(
+          p.event()
+              .apply(new AgentIds(p.agentId().toString(), row[0], row[1], row[2], projectOf(row[2]))));
+    }
+  }
+
+  private void announce(QitsEvent event) {
+    LifecycleAnnouncer.announce(lifecycle, event);
+  }
+
+  /**
+   * The project of {@code repositoryId}, as {@link AgentService#projectOf} finds it, remembered once
+   * known: a repository never changes project. Null when it cannot be found; never throws.
+   */
+  String projectOf(String repositoryId) {
+    if (repositoryId == null) {
+      return null;
+    }
+    String known = projects.get(repositoryId);
+    if (known != null) {
+      return known;
+    }
+    String found;
+    try {
+      found = agentService.projectOf(repositoryId);
+    } catch (RuntimeException e) {
+      return null;
+    }
+    if (found != null) {
+      projects.put(repositoryId, found);
+    }
+    return found;
+  }
+
+  private static String idOf(Long id) {
+    return id == null ? null : id.toString();
+  }
+
+  /** The target states as stored: a JSON array of strings. */
+  static String targetStatesJson(List<String> states) {
+    try {
+      return JSON.writeValueAsString(states);
+    } catch (Exception e) {
+      throw new IllegalStateException("target states not writable", e);
+    }
+  }
+
+  /** The stored target states; null (a desk wait, a wait from before V33) stays null. */
+  static List<String> targetStatesOf(String stored) {
+    if (stored == null) {
+      return null;
+    }
+    try {
+      List<String> out = new ArrayList<>();
+      JSON.readTree(stored).forEach(node -> out.add(node.asText()));
+      return out;
+    } catch (Exception unreadable) {
+      return List.of();
+    }
   }
 }

@@ -114,7 +114,12 @@ public class AgentWaitController {
       @Schema(implementation = SelectionSchema.class, required = true) JsonNode selection,
       @Schema(example = "PT2H") String timeout) {}
 
-  /** A wait as the doors answer it. */
+  /**
+   * A wait as the doors answer it, with what it waits on (epic qits-1681). The subject fields are
+   * null for a desk's wait and for a wait declared before they existed; {@code subjectId}, {@code
+   * subjectQualifiedId}, {@code subjectExpectedBy} and {@code subjectError} stay null until the
+   * subject is looked up.
+   */
   public record WaitView(
       String id,
       String agentId,
@@ -124,7 +129,22 @@ public class AgentWaitController {
       Instant createdAt,
       Instant expiresAt,
       String matchedEventId,
-      Instant closedAt) {}
+      Instant closedAt,
+      @Schema(
+              description = "What the selection waits on",
+              enumeration = {"RELEASE_REQUEST", "CI_RUN", "WORK_ITEM", "COMMENTS", "OTHER"})
+          String subjectKind,
+      @Schema(description = "The subject's id as the selection names it; null for OTHER")
+          String subjectRef,
+      @Schema(description = "The subject's uuid, once resolved") String subjectId,
+      @Schema(description = "The subject's qualified id, once resolved; null for a run")
+          String subjectQualifiedId,
+      @Schema(description = "The states the selection waits for; empty when it names none")
+          List<String> targetStates,
+      @Schema(description = "The subject's last known state") String subjectState,
+      @Schema(description = "When that state was seen to begin") Instant subjectStateAt,
+      @Schema(description = "Runs only: when the run should have finished") Instant subjectExpectedBy,
+      @Schema(description = "The last failure to look the subject up") String subjectError) {}
 
   public record WaitList(List<WaitView> waits) {}
 
@@ -271,6 +291,15 @@ public class AgentWaitController {
         wait.createdAt(),
         wait.expiresAt(),
         wait.matchedEventId(),
-        wait.closedAt());
+        wait.closedAt(),
+        wait.subjectKind(),
+        wait.subjectRef(),
+        wait.subjectId(),
+        wait.subjectQualifiedId(),
+        wait.targetStates(),
+        wait.subjectState(),
+        wait.subjectStateAt(),
+        wait.subjectExpectedBy(),
+        wait.subjectError());
   }
 }
