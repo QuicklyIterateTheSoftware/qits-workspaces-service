@@ -112,6 +112,9 @@ public final class GoldenMasters {
   /** qits-system: the lease, work-volume and target doors (epic qits-1481). */
   public static final Provider SYSTEM = new Provider("qits-system-service", "qits-system");
 
+  /** qits-ci: the run read a declared wait on a run makes (epic qits-1681). */
+  public static final Provider CI = new Provider("qits-ci-service", "qits-ci");
+
   /** The provider, as the pact names it: the repository name, never the bare application name. */
   public static final String PROVIDER = PROJECTS.repository();
 

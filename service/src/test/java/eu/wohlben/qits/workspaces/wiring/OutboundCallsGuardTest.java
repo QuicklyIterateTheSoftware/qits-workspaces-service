@@ -42,8 +42,8 @@ import org.junit.jupiter.api.Test;
  *   <li><b>MicroProfile REST clients</b>: every {@code @RegisterRestClient} interface among this
  *       module's compiled classes, every method carrying an HTTP method — its {@code configKey}
  *       names the provider, its {@code @Path}s the route. It needs a row (live or pending) whose
- *       operation the provider records under that method and route, in {@link ProjectsContract} or
- *       {@link IdpContract}.
+ *       operation the provider records under that method and route, in {@link ProjectsContract},
+ *       {@link IdpContract}, {@code SystemContract} or {@link CiContract} (epic qits-1681).
  *   <li><b>{@code qits-containers-client}</b>: every {@link ContainersClient} method this module's
  *       compiled classes reference — read by the client kit's own {@link ClientUsage#scan}
  *       (qits-1163) — needs a {@link ContainersContract} row for its operation, and one the kit
@@ -73,6 +73,7 @@ class OutboundCallsGuardTest {
           "qits-idp", new Base(GoldenMasters.IDP, "/idp"),
           "qits-projects", new Base(GoldenMasters.PROJECTS, ""),
           "qits-system", new Base(GoldenMasters.SYSTEM, ""),
+          "qits-ci", new Base(GoldenMasters.CI, ""),
           "qits-events", new Base(EventsLogPactTest.EVENTS, ""));
 
   /**
@@ -292,6 +293,9 @@ class OutboundCallsGuardTest {
     }
     if (provider.equals(EventsLogPactTest.EVENTS)) {
       return List.of(EventsLogPactTest.OPERATION);
+    }
+    if (provider.equals(GoldenMasters.CI)) {
+      return CiContract.TABLE.rows().stream().map(ContractRow::operationId).toList();
     }
     if (provider.equals(GoldenMasters.SYSTEM)) {
       return eu.wohlben.qits.workspaces.targethost.SystemContract.TABLE.rows().stream()
