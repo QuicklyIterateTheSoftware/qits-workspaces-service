@@ -887,12 +887,22 @@ public class AgentService {
   }
 
   /**
+   * As {@link #discard(UUID, boolean, String)}, with no caller named ({@code discardedBy} null).
+   */
+  public AgentDto discard(UUID id, boolean force) {
+    return discard(id, force, null);
+  }
+
+  /**
    * A person removes an agent now (the agent page's discard). A busy harness refuses with 409
    * unless {@code force} (qits-1238); leftover work refuses with 409 and the cleanup check, unless
    * {@code force}; an unreachable daemon refuses too, unless {@code force}. A daemon that answers
    * it does not know the agent has nothing left to remove: no refusal (qits-1233).
+   *
+   * @param discardedBy the discarding caller's own principal — a person or the project's delivery
+   *     desk — named on the {@link AgentRemoved} this writes; null when unknown
    */
-  public AgentDto discard(UUID id, boolean force) {
+  public AgentDto discard(UUID id, boolean force, String discardedBy) {
     AgentWorktree agent = require(id);
     if (agent.state == AgentState.REMOVED) {
       return view(agent);
@@ -927,7 +937,7 @@ public class AgentService {
             port.remove(agent.workspaceId, id.toString(), true) == AgentDaemon.Outcome.OK;
       }
     }
-    markRemoved(id, AgentRemoved.DISCARDED, harnessStopped, "discarded by a person");
+    markRemoved(id, AgentRemoved.DISCARDED, harnessStopped, "discarded by a person", discardedBy);
     kick();
     return view(require(id));
   }
@@ -2803,6 +2813,17 @@ public class AgentService {
    * @param detail the sentence logged and announced
    */
   void markRemoved(UUID id, String reason, boolean harnessStopped, String detail) {
+    markRemoved(id, reason, harnessStopped, detail, null);
+  }
+
+  /**
+   * As {@link #markRemoved(UUID, String, boolean, String)}, naming the caller who discarded the
+   * agent.
+   *
+   * @param discardedBy the token subject of the caller who discarded the agent (only meaningful
+   *     for {@link AgentRemoved#DISCARDED}); null for every other reason and null when unknown
+   */
+  void markRemoved(UUID id, String reason, boolean harnessStopped, String detail, String discardedBy) {
     Removal removal =
         QuarkusTransaction.requiringNew()
             .call(
@@ -2839,6 +2860,7 @@ public class AgentService {
                           reason,
                           harnessStopped,
                           detail,
+                          discardedBy,
                           row.removedAt),
                       relay,
                       row.sessionId);

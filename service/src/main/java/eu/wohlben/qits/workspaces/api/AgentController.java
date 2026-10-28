@@ -5,6 +5,7 @@ import eu.wohlben.qits.workspaces.dto.AgentDto;
 import eu.wohlben.qits.workspaces.entity.AgentHarness;
 import eu.wohlben.qits.workspaces.entity.AgentState;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -42,6 +43,8 @@ public class AgentController {
   @Inject AgentService agents;
 
   @Inject DeskBinding desk;
+
+  @Inject SecurityIdentity identity;
 
   public static record ListAgentsRequest() {
     public record Response(List<AgentDto> agents) {}
@@ -170,7 +173,8 @@ public class AgentController {
   @Operation(operationId = "discardAgent")
   public AgentDto discard(@PathParam("id") String id, DiscardAgentRequest request) {
     desk.requireAgent(id);
-    return agents.discard(agentId(id), request != null && request.force());
+    String discardedBy = identity.getPrincipal() == null ? null : identity.getPrincipal().getName();
+    return agents.discard(agentId(id), request != null && request.force(), discardedBy);
   }
 
   static UUID agentId(String id) {
