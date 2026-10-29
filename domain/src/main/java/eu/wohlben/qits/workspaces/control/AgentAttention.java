@@ -73,7 +73,7 @@ public final class AgentAttention {
   /** The block sources that are a block somebody set, rather than one derived from the agent. */
   static final Set<String> EXPLICIT_SOURCES = Set.of("EXPLICIT", "BOTH");
 
-  private static final DateTimeFormatter HH_MM =
+  static final DateTimeFormatter HH_MM =
       DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneOffset.UTC);
 
   private AgentAttention() {}

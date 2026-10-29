@@ -6,7 +6,8 @@ import java.util.List;
 
 /**
  * A declared wait as the doors answer it (qits-1153, W8), with its subject (epic qits-1681, {@code
- * V33}). Every subject field is null for a desk's wait and for a wait declared before {@code V33}.
+ * V33}). Every subject field is null for a wait declared before {@code V33}, and for a desk's wait
+ * declared before qits-1668.
  *
  * @param selection qits-eventstream's {@code EventSelection}, in its JSON form
  * @param expiresAt when it times out; null = never

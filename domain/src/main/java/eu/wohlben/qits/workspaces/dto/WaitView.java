@@ -11,7 +11,7 @@ import org.eclipse.microprofile.openapi.annotations.media.Schema;
 
 /**
  * A wait as the doors answer it, with what it waits on (epic qits-1681). The subject fields are
- * null for a desk's wait and for a wait declared before they existed; {@code subjectId}, {@code
+ * null for a wait declared before they existed (a desk's: before qits-1668); {@code subjectId}, {@code
  * subjectQualifiedId}, {@code subjectExpectedBy} and {@code subjectError} stay null until the
  * subject is looked up.
  *

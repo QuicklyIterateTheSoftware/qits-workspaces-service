@@ -240,7 +240,7 @@ public final class WaitSubjects {
     };
   }
 
-  /** {@code kind} by its stored name; null (a desk wait, a wait from before V33) stays null. */
+  /** {@code kind} by its stored name; null (a wait from before V33, a desk's from before qits-1668) stays null. */
   public static Kind kindOf(String stored) {
     if (stored == null) {
       return null;

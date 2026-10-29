@@ -96,7 +96,8 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
   @Column(name = "announced_at")
   public Instant announcedAt;
 
-  // --- the subject (epic qits-1681, V33): parsed from the selection at declaration, agent waits only
+  // --- the subject (epic qits-1681, V33): parsed from the selection at declaration (a desk's too
+  // since qits-1668)
 
   /** {@code RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS}, {@code BRANCH} or {@code OTHER}. */
   @Column(name = "subject_kind", columnDefinition = "text")

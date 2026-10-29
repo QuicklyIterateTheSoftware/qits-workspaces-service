@@ -1267,13 +1267,15 @@ event name, optional expiry) and gets a turn when it happens:
   only when every group names the same one with `exact`) and `target_states` (the state values the
   groups wait for, a JSON array). Before matching, every event of the wait's name that names its
   subject writes `subject_state` and `subject_state_at`, and a change is announced as
-  `AgentWaitChanged`; the selection and the matching are untouched. A desk's wait records none of
-  it. `qits wait branch <branch> [--repository <r>] --until joined|released|live|failed` is the
+  `AgentWaitChanged`; the selection and the matching are untouched. A desk's wait records its kind,
+  ref and target states too since qits-1668, and is looked up below, but no event writes its state
+  and nothing about it is announced but its `DeskWaitClosed`. `qits wait branch <branch> [--repository <r>] --until joined|released|live|failed` is the
   CLI's BRANCH preset, built the same way the release request and run presets are.
   **The subject is looked up once the wait is committed** (`WaitSubjectResolver`, a port; absent,
   nothing is): outside the create's transaction, `wiring/HttpWaitSubjectResolver` asks qits-projects
   for a release request (`getProjectReleaseRequest`, under the agent's project) or a work item
   (`getWork`, for `WORK_ITEM` and `COMMENTS`), and qits-ci for a run (`getRun`, `wiring/CiRuns`).
+  A desk's request is read under the desk's own project (qits-1668).
   It writes `subject_id`, `subject_qualified_id`, `subject_state` (a request's `state`, an item's
   `status`, a run's `status`; comments have none) since `subject_state_at` (`updatedAt`; a run's
   `finishedAt ?: startedAt ?: createdAt`), a run's `subject_expected_by`, `subject_resolved_at` and
@@ -1281,7 +1283,18 @@ event name, optional expiry) and gets a turn when it happens:
   the state an event recorded (its `stateAt` before `subject_state_at`) leaves that state. A failure
   — no such subject (404), another status, no answer within the client's timeouts, no project for
   a request — writes one sentence to `subject_error` and fails neither the create, a match nor the
-  pass. **Every scheduler pass looks up again** the OPEN agent waits of a parsed kind with no
+  pass. **A looked-up target state closes the wait** (qits-1668): when the state a lookup wrote is
+  one of the wait's `target_states`, the wait is closed MATCHED in that write's transaction, on the
+  locked OPEN row exactly as an event's match closes it (so whichever comes second finds it closed),
+  with no `matched_event_id`, `AgentWaitClosed` MATCHED, the wake, the relay (`WaitMatched`) and a
+  kick — a desk's through `DeskWaitClosed`. It is what fires a wait whose subject got there before
+  the look-back reaches. The wake is the platform's own sentence: `Your wait "<label>" matched when
+  its subject was looked up: run 9677c59a is already SUCCESS since 10:42 UTC, as looked up. …` (the
+  subject named as Attention names it; no "since" when the provider gave no time). A final state
+  the wait does not wait for, comments and a lookup with no state close nothing — that is
+  `WAIT_SUBJECT_PASSED`'s. A declaration its lookup matched answers MATCHED and skips its
+  look-back. **Every scheduler pass looks up again** the OPEN waits (an agent's or, since
+  qits-1668, a desk's) of a parsed kind with no
   `subject_resolved_at` (`AgentWaits.resolveUnresolved`, right after the sweep): oldest first, each
   at most once, at most 20 and for at most 10 s per pass, and a wait whose lookup failed not before
   `qits.workspaces.waits.subject-retry-every` (PT1M) passed. **A run's expected finish**: with
