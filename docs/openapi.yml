@@ -116,6 +116,7 @@ components:
       - QUEUED
       - RUNNING
       - YIELDED
+      - STOPPED
     AgentState:
       type: string
       enum:
@@ -420,6 +421,15 @@ components:
       format: date-time
       examples:
       - 2022-03-10T16:15:50Z
+    Interrupt:
+      type: object
+      properties:
+        agentId:
+          type: string
+        interrupted:
+          type: boolean
+        detail:
+          type: string
     LaunchPin:
       type: object
       properties:
@@ -483,6 +493,16 @@ components:
           type: string
         result:
           type: string
+    PromptAgentRequest:
+      type: object
+      required:
+      - text
+      properties:
+        text:
+          type: string
+          pattern: \S
+        compactFirst:
+          type: boolean
     PromptAttachmentSource:
       type: string
       enum:
@@ -523,29 +543,29 @@ components:
     Response:
       type: object
       properties:
-        agents:
+        lines:
           type: array
           items:
-            $ref: "#/components/schemas/AgentDto"
+            type: string
     Response1:
       type: object
       properties:
-        entries:
+        sessions:
           type: array
           items:
-            $ref: "#/components/schemas/Entry"
+            $ref: "#/components/schemas/ArchivedSessionDto"
     Response10:
       type: object
       properties:
         workspace:
-          $ref: "#/components/schemas/WorkspaceHistoryDetailDto"
+          $ref: "#/components/schemas/WorkspaceDto"
+        technicalProcessId:
+          type: string
     Response11:
       type: object
       properties:
-        entries:
-          type: array
-          items:
-            $ref: "#/components/schemas/Entry2"
+        success:
+          type: boolean
     Response12:
       type: object
       properties:
@@ -554,17 +574,15 @@ components:
     Response13:
       type: object
       properties:
-        lines:
+        entries:
           type: array
           items:
-            type: string
+            $ref: "#/components/schemas/Entry2"
     Response14:
       type: object
       properties:
-        sessions:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArchivedSessionDto"
+        workspace:
+          $ref: "#/components/schemas/WorkspaceHistoryDetailDto"
     Response15:
       type: object
       properties:
@@ -598,6 +616,25 @@ components:
     Response2:
       type: object
       properties:
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentDto"
+    Response3:
+      type: object
+      properties:
+        technicalProcessId:
+          type: string
+    Response4:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/Entry"
+    Response5:
+      type: object
+      properties:
         commitHash:
           type: string
         hasConflicts:
@@ -606,30 +643,11 @@ components:
           type: string
         cleanedUp:
           type: boolean
-    Response3:
+    Response6:
       type: object
       properties:
         success:
           type: boolean
-    Response4:
-      type: object
-      properties:
-        workspace:
-          $ref: "#/components/schemas/WorkspaceDto"
-        technicalProcessId:
-          type: string
-    Response5:
-      type: object
-      properties:
-        entries:
-          type: array
-          items:
-            $ref: "#/components/schemas/Entry1"
-    Response6:
-      type: object
-      properties:
-        workspace:
-          $ref: "#/components/schemas/WorkspaceDto"
     Response7:
       type: object
       properties:
@@ -640,13 +658,15 @@ components:
     Response8:
       type: object
       properties:
-        success:
-          type: boolean
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/Entry1"
     Response9:
       type: object
       properties:
-        technicalProcessId:
-          type: string
+        workspace:
+          $ref: "#/components/schemas/WorkspaceDto"
     SavePromptDraftRequest:
       type: object
       required:
@@ -1216,7 +1236,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response1"
+                $ref: "#/components/schemas/Response4"
         "401":
           description: Not Authorized
         "403":
@@ -1264,7 +1284,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response"
+                $ref: "#/components/schemas/Response2"
         "401":
           description: Not Authorized
         "403":
@@ -1508,6 +1528,44 @@ paths:
         - qits:desk-admin
         - qits:system
         - qits:agent
+  /workspaces/api/agents/{id}/active-process:
+    get:
+      operationId: getAgentActiveProcess
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: "The technical process running against the agent's workspace,\
+            \ or null: none, or the agent has no workspace (QUEUED)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response3"
+        "404":
+          description: No such agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Active Process
+      tags:
+      - Agent Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:desk-admin
+        - qits:system
+        - qits:desk
+        - qits:agent
   /workspaces/api/agents/{id}/discard:
     post:
       operationId: discardAgent
@@ -1557,6 +1615,128 @@ paths:
         - qits:admin
         - qits:admin-agent
         - qits:desk-admin
+        - qits:desk
+  /workspaces/api/agents/{id}/interrupt:
+    post:
+      summary: Interrupt the agent's current turn
+      description: "ESC into its running TERMINAL harness, as a person at the terminal\
+        \ would press it. Never changes its run state."
+      operationId: interruptAgent
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: ESC was written into the agent's harness.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Interrupt"
+        "404":
+          description: No such agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: "AGENT_NOT_RUNNING (no running session) or AGENT_NOT_INTERRUPTIBLE\
+            \ (the daemon's own refusal: no harness, not a terminal, not started yet\
+            \ — or a daemon too old to interrupt). Nothing was sent."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: "AGENT_DAEMON_UNREACHABLE: the agent's workspace daemon does\
+            \ not answer."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the agent's project. Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Agent Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:desk-admin
+        - qits:system
+        - qits:desk
+  /workspaces/api/agents/{id}/prompt:
+    post:
+      summary: Say a turn to this agent
+      description: "The agent hears it once it is not busy, or after the launch window\
+        \ regardless. A STOPPED agent starts again with this turn."
+      operationId: promptAgent
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromptAgentRequest"
+        required: true
+      responses:
+        "200":
+          description: "Answered, as the work-item delivery door answers: `delivered`\
+            \ (queued for the running agent), `launched` (its first turn, once it\
+            \ starts) or `resumed` (a yielded or stopped agent runs again to hear\
+            \ it)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "400":
+          description: A blank text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No such agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: "AGENT_REMOVED: the agent was removed; nothing was said."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the agent's project. Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Agent Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:desk-admin
+        - qits:system
         - qits:desk
   /workspaces/api/agents/{id}/prompt-attachments:
     get:
@@ -1913,6 +2093,248 @@ paths:
         - qits:admin-agent
         - qits:desk-admin
         - qits:desk
+  /workspaces/api/agents/{id}/restart:
+    post:
+      summary: Restart the agent's harness
+      operationId: restartAgent
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: A RUNNING agent's harness is stopped and started again on its
+            session; a STOPPED or YIELDED one is handed back to the scheduler as YIELDED
+            (QUEUED without a workspace).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDto"
+        "404":
+          description: No such agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: "AGENT_REMOVED, or AGENT_NOT_STARTED: a QUEUED agent has nothing\
+            \ to restart."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: "AGENT_DAEMON_UNREACHABLE: a RUNNING agent's workspace daemon\
+            \ does not answer."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the agent's project. Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Agent Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:desk-admin
+        - qits:system
+        - qits:desk
+  /workspaces/api/agents/{id}/sessions:
+    get:
+      summary: The agent's harness sessions
+      operationId: listAgentSessions
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: "The agent's sessions, oldest first, read off the shared harness\
+            \ volume: they answer for a REMOVED agent too. An empty list is a valid\
+            \ answer."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response1"
+        "404":
+          description: No such agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Agent Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:desk-admin
+        - qits:system
+        - qits:desk
+        - qits:agent
+  /workspaces/api/agents/{id}/sessions/{sessionId}/transcript:
+    get:
+      summary: "One of the agent's sessions, raw"
+      operationId: getAgentTranscript
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: sessionId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: The session's raw JSONL lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response"
+        "404":
+          description: "No such agent, or a session that is not this agent's: answered\
+            \ exactly as one that never existed."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Agent Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:desk-admin
+        - qits:system
+        - qits:desk
+        - qits:agent
+  /workspaces/api/agents/{id}/stop:
+    post:
+      summary: Stop the agent
+      description: "The scheduler never places, resumes, nudges or drives a STOPPED\
+        \ agent. A wait that fires for it appends its turn, heard once it is restarted\
+        \ or prompted."
+      operationId: stopAgent
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: "STOPPED (already STOPPED: unchanged). A placed agent's harness\
+            \ is stopped on its daemon and its worktree and workspace stay; a QUEUED\
+            \ one gives up its place. A daemon that does not answer still leaves it\
+            \ STOPPED."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDto"
+        "404":
+          description: No such agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: "AGENT_REMOVED: the agent was removed."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
+            claim is not the agent's project. Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Agent Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:desk-admin
+        - qits:system
+        - qits:desk
+  /workspaces/api/agents/{id}/yield:
+    post:
+      summary: Give up the agent's workspace slot
+      description: An agent may yield its own slot.
+      operationId: yieldAgent
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: "YIELDED: the slot is free at once and the harness keeps running.\
+            \ Anything the agent should hear brings it back."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDto"
+        "404":
+          description: No such agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: "AGENT_NOT_RUNNING: only a running agent yields."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: "A `qits:agent` caller that is not this agent, or a desk caller\
+            \ of another project."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Agent Controller
+      security:
+      - SecurityScheme:
+        - qits:admin
+        - qits:admin-agent
+        - qits:desk-admin
+        - qits:system
+        - qits:desk
+        - qits:agent
   /workspaces/api/branches/cleanup:
     post:
       parameters:
@@ -1932,7 +2354,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response3"
+                $ref: "#/components/schemas/Response6"
         "400":
           description: "The branch is not eligible: uncommitted changes, unmerged\
             \ commits, or dependents."
@@ -1976,7 +2398,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response2"
+                $ref: "#/components/schemas/Response5"
         "400":
           description: "A blank, dash-leading or self-referential branch name."
           content:
@@ -2248,7 +2670,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response11"
+                $ref: "#/components/schemas/Response13"
         "401":
           description: Not Authorized
         "403":
@@ -2283,7 +2705,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response10"
+                $ref: "#/components/schemas/Response12"
         "403":
           description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
             claim is not the workspace's project (a workspace of no resolvable project
@@ -2318,7 +2740,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response12"
+                $ref: "#/components/schemas/Response14"
         "401":
           description: Not Authorized
         "403":
@@ -2348,7 +2770,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response14"
+                $ref: "#/components/schemas/Response1"
         "401":
           description: Not Authorized
         "403":
@@ -2383,7 +2805,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response13"
+                $ref: "#/components/schemas/Response"
         "401":
           description: Not Authorized
         "403":
@@ -2490,7 +2912,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response5"
+                $ref: "#/components/schemas/Response8"
         "401":
           description: Not Authorized
         "403":
@@ -2519,7 +2941,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response6"
+                $ref: "#/components/schemas/Response9"
         "404":
           description: No such ACTIVE workspace.
           content:
@@ -2555,7 +2977,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response9"
+                $ref: "#/components/schemas/Response3"
         "401":
           description: Not Authorized
         "403":
@@ -2632,7 +3054,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response8"
+                $ref: "#/components/schemas/Response11"
         "403":
           description: "A `qits:desk` caller whose token's `project` claim is not\
             \ the workspace's project, or a workspace that stands on a branch: discarding\
@@ -2671,7 +3093,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response7"
+                $ref: "#/components/schemas/Response10"
         "409":
           description: The workspace was stopped while it was starting and that start's
             process is still open. `code` is WORKSPACE_STOPPED_DURING_START and the
@@ -2715,7 +3137,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Response4"
+                $ref: "#/components/schemas/Response7"
         "403":
           description: A `qits:desk` or `qits:desk-admin` caller whose token's `project`
             claim is not the workspace's project (a workspace of no resolvable project

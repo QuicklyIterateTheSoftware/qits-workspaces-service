@@ -234,6 +234,11 @@ and what an agent needs to `agent_worktree` (`blocked_at`, backfilled with `now(
 blocks standing at migration, `desk_asked_at`, `attention_code`, `attention_reason`,
 `attention_since`, `attention_wait_id`). All nullable, on two `CausedRow`s, so no `ArchRulesTest`
 decision; see "Declared waits".
+**`V35__agent_stopped.sql`** (epic qits-1667) admits `STOPPED` in `run_state`: it drops V21's inline
+check by the name postgres gave it, `agent_worktree_run_state_check` (`<table>_<column>_check`, the
+rule V12 relied on for `workspace_runtime_status_check`), adds `ck_agent_worktree_run_state`, and
+rewrites `ck_agent_worktree_placed` to `run_state in ('QUEUED','STOPPED') or workspace_id is not
+null`: an agent stopped while queued has no workspace. `AgentSchemaTest` inserts both shapes.
 **`V30__workspace_leases.sql`** (epic qits-1481, qits-1532) retires the workspace runners: it first
 copies every row with a `runner_id` into `legacy_placement(row_id, old_runner_id, engine_id,
 hostname, runner_name)` — `engine_id` and `hostname` from the runner's `capabilities ->> 'engineId'`
@@ -1025,8 +1030,8 @@ daemon). A workspace hosts many agents, and each keeps its harness running while
 superproject's `agent-workspace-decoupling-plan.md`; `AgentService` holds the semantics.
 
 **The rows.** `agent_worktree` (`V21`, `AgentWorktree`, a `CausedRow`): work item, wrapper branch,
-slot, `state` ACTIVE → OBSOLETE → REMOVED, `run_state` QUEUED → RUNNING ⇄ YIELDED, session, the turn
-still to be said (`pending_text`), the agent's own token and Git refs. `agent_branch` (`@Uncaused`, a
+slot, `state` ACTIVE → OBSOLETE → REMOVED, `run_state` QUEUED → RUNNING ⇄ YIELDED (and STOPPED, a
+person's stop: epic qits-1667, below), session, the turn still to be said (`pending_text`), the agent's own token and Git refs. `agent_branch` (`@Uncaused`, a
 native upsert on the registry's thread) holds every (repository, branch) the daemon reported pushed:
 what the agent's views list, never what a release's resolution looks up.
 A unique index keeps one ACTIVE agent per work item. A workspace may hold several RUNNING agents:
@@ -1162,6 +1167,15 @@ Every pending thing is a row, so a restart loses nothing. What is in memory — 
 process started on the current daemon connection, the per-agent activity — is rebuilt by the next
 pass and the next frames: every placed agent, RUNNING or YIELDED, is started again (qits-1212).
 
+**STOPPED: a person stopped it** (epic qits-1667, `V35`). No step above ever places, resumes,
+nudges, repairs or drives a STOPPED agent, and it holds no slot: a workspace whose agents are all
+YIELDED with nothing to say, or STOPPED, takes a queued agent. A wait that fires for it is closed and
+its wake appended to `pending_text` as for any agent — heard once it is restarted or prompted, not
+before. It keeps its `workspace_id` when it had one; one stopped while still QUEUED has none (`V35`
+rewrote `ck_agent_worktree_placed` to admit that). Its attention is never `IDLE_NO_WAIT` (rule 3
+holds for RUNNING only). The old instance draining during a rolling deploy cannot read a STOPPED row
+(its enum lacks the word); a stop in that minute fails there and is the same click again.
+
 **The doors** (machine doors `{qits:admin, qits:admin-agent, qits:system}`, reads add `qits:agent`):
 
 - `POST /workspaces/api/agent-dispatches` `{repositoryId, wrapperBranch, workId, entityId,
@@ -1200,6 +1214,41 @@ pass and the next frames: every placed agent, RUNNING or YIELDED, is started aga
   `AGENT_HAS_LEFTOVER_WORK`, unless `force`; qits-1238).
 - The prompt draft and its images are the agent's: `/workspaces/api/agents/{id}/prompt-draft` and
   `/prompt-attachments` (`V22` re-keyed the tables; composition state was dropped, not migrated).
+- **An agent's controls** (epic qits-1667; `AgentController`, `AgentService.deliver(UUID, …)`,
+  `stop`, `restart`, `yieldSlot`, `interrupt`), `{qits:admin, qits:admin-agent, qits:system,
+  qits:desk-admin, qits:desk}` with the desk bound by `DeskBinding.requireAgent`:
+  `POST …/agents/{id}/prompt` `{text, compactFirst?}` → the delivery's answer — the work-item form
+  (`agent-dispatches/delivery`) resolves `findLiveByWorkId` and calls the UUID form; a REMOVED agent
+  is `409 AGENT_REMOVED`; a STOPPED one is handed back as YIELDED (QUEUED with no workspace), detail
+  "The agent was stopped; it starts again with this turn." `POST …/stop` → `AgentDto`: the row is
+  written STOPPED **first**, so no pass drives what is being stopped, then a placed RUNNING or
+  YIELDED agent's harness is stopped with the daemon's `POST agent-worktrees/{id}/yield`
+  (`AgentDaemon.yield`) — YIELDED too, because a yielded harness keeps running since qits-1212; no
+  daemon answering is a WARN and still STOPPED; QUEUED gives up its place with no daemon call;
+  STOPPED again is a no-op. `POST …/restart` → `AgentDto`: RUNNING is the daemon's yield, then the
+  next pass's start resumes `session_id` (no daemon is `503 AGENT_DAEMON_UNREACHABLE`); STOPPED or
+  YIELDED become YIELDED (QUEUED with no workspace) and go through the resume path; QUEUED is `409
+  AGENT_NOT_STARTED`. `POST …/yield` → `AgentDto`: the scheduler's own `writeYield` and
+  `AgentYielded` — no daemon call, the harness keeps running, the slot is free at once; anything but
+  RUNNING is `409 AGENT_NOT_RUNNING`. `qits:agent` is admitted here for its **own** agent only
+  (`AgentService.requireOwnAgent`: the token's subject, `DaemonAgentBindingCheck.subjectOf`, equals
+  `commissioned_token_subject`). `POST …/interrupt` → `{agentId, interrupted, detail}`: only a
+  RUNNING agent with a `command_id` (else `409 AGENT_NOT_RUNNING`), through the daemon's `POST
+  agent-worktrees/{id}/interrupt` (`AgentDaemon.interrupt`): its 409 sentence is answered as `409
+  AGENT_NOT_INTERRUPTIBLE`, a 404 "No such endpoint" (a daemon older than the route) as the same 409
+  saying to recreate the container, no daemon as 503; it never changes the run state. Unlike every
+  other door here, stop, restart and interrupt call a daemon on the request thread — a person waits
+  for the answer. Each write logs `Agent <id> <verb> by <principal> (workspace <row>, runState <before>
+  -> <after>)` at INFO.
+- **What anyone may read of an agent** (epic qits-1667), the roles above plus `qits:agent`, the desk
+  unbound (it reads everything): `GET …/agents/{id}/sessions` and `…/sessions/{sessionId}/transcript`
+  (`WorkspaceHistoryService.agentSessionsOf`/`agentTranscriptOf` over
+  `ArchivedAgentTranscripts.sessionsFor(AgentWorktree)`: the agent's own worktree directory,
+  attributed by `(wrapper_branch, created_at, removed_at)`, so a REMOVED agent answers too and another
+  agent's session is a 404), and `GET …/agents/{id}/active-process` (its workspace's, as
+  `WorkspaceController.activeProcess`; null with no workspace). An agent reads every other agent's
+  transcripts, read-only (the owner's ruling on qits-1575). `AgentControlAccessTest` pins role ×
+  door, own agent and another's.
 - `/work/workspaces` and `/work/{ref}/workspaces` keep their shape (the landing app's pact): one entry
   per placed agent, its slot's row id and label, the wrapper branch as `branch`, ACTIVE/INTEGRATED
   (obsolete)/ABANDONED; old-model rows follow.

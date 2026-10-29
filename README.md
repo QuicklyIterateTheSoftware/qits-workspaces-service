@@ -163,6 +163,27 @@ work item:
 A person's doors are `GET`/`POST /workspaces/api/agents` (an agent for an existing work item, with
 `admin` for the docker socket), `GET /workspaces/api/agents/{id}` and `POST …/{id}/discard`.
 
+**An agent's controls and reads, by its id** (epic qits-1667), under `/workspaces/api/agents/{id}/`.
+An unknown id, or one that is no UUID, is a 404. Each write logs one INFO line naming the caller,
+the workspace and the run state before and after.
+
+| Door | Answer | Who |
+|---|---|---|
+| `POST …/prompt` `{text, compactFirst?}` | the delivery door's `{agentId, delivered, launched, resumed, detail}`; a REMOVED agent is 409; a STOPPED one starts again with this turn | person, machine, desk |
+| `POST …/interrupt` | `{agentId, interrupted, detail}`: ESC into a RUNNING agent's TERMINAL harness; no running session, the daemon's own refusal, or a daemon too old for it is 409; no daemon 503 | person, machine, desk |
+| `POST …/stop` | `AgentDto`, `runState: STOPPED`: a placed agent's harness is stopped on its daemon (its worktree and workspace stay), a QUEUED one gives up its place; already STOPPED is unchanged; REMOVED is 409 | person, machine, desk |
+| `POST …/restart` | `AgentDto`: a RUNNING agent's harness is stopped and started again on its session; a STOPPED or YIELDED one goes back to the scheduler as YIELDED; QUEUED or REMOVED is 409 | person, machine, desk |
+| `POST …/yield` | `AgentDto`, `runState: YIELDED`: the slot is free at once, the harness keeps running; anything but RUNNING is 409 | person, machine, desk, the agent itself |
+| `GET …/sessions`, `…/sessions/{sessionId}/transcript` | `{sessions}`, `{lines}`: read off the shared harness volume, so a REMOVED agent answers too; another agent's session is a 404 | everyone, any agent included |
+| `GET …/active-process` | `{technicalProcessId}` of the agent's workspace, null without one | everyone |
+
+"Person, machine" is `qits:admin`, `qits:admin-agent` and `qits:system`; "desk" is `qits:desk-admin`
+and `qits:desk`, bound to their project as on every write. An agent (`qits:agent`) reads every
+agent's sessions and transcripts and yields only its own slot — its token's subject is the agent's
+own — and prompts, interrupts, stops and restarts nobody, itself included. The scheduler never
+places, resumes, nudges or drives a STOPPED agent; a wait that fires for it writes its turn, heard
+once it is restarted or prompted.
+
 **Declared waits** (qits-1153; `qits wait` is the caller). An agent says what event it waits on and
 gets a turn when it happens:
 
