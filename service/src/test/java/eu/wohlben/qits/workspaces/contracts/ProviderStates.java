@@ -919,6 +919,9 @@ public class ProviderStates {
               Long slot = slot(WorkspaceRuntimeStatus.RUNNING, true);
               ids.add(slot);
               agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
+              // Started there, so its worktree may be on the slot and the guard must ask about it:
+              // one that never started passes recreate untouched (qits-1750).
+              agentRows.findById(UUID.fromString(AGENT_ACTIVE_ID)).startedWorkspaceId = slot;
             });
     if (draft) {
       promptDrafts.saveDraft(UUID.fromString(AGENT_ACTIVE_ID), DRAFT_CONTENT, DRAFT_PROMPT);
