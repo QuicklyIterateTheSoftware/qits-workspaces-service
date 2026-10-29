@@ -66,7 +66,7 @@ public class TestAgents {
     return id;
   }
 
-  /** Every agent this bean wrote is REMOVED. */
+  /** Every agent {@link #placeOn} wrote is REMOVED. */
   public void retireAll() {
     List<UUID> ids;
     synchronized (written) {

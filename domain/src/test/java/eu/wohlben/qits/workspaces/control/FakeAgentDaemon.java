@@ -55,6 +55,7 @@ public class FakeAgentDaemon implements AgentDaemon {
   private volatile boolean startsUnanswered;
 
   public void reset() {
+    startsUnanswered = false;
     calls.clear();
     starts.clear();
     checks.clear();
@@ -64,7 +65,6 @@ public class FakeAgentDaemon implements AgentDaemon {
     harnesses.clear();
     turnAnswer = Outcome.OK;
     startRefusal = null;
-    startsUnanswered = false;
   }
 
   /** A daemon restart: every harness is gone; the next start of each agent launches one again. */
