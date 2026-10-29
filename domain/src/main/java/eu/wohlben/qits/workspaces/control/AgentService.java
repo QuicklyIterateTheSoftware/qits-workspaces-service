@@ -16,6 +16,7 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.DomainException;
+import eu.wohlben.qits.workspaces.error.ForbiddenException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.events.AgentCleanupDeferred;
 import eu.wohlben.qits.workspaces.events.AgentActivityChanged;
@@ -951,6 +952,23 @@ public class AgentService {
     }
     audit(agent, "interrupted", by, agent.runState, agent.runState);
     return new Interrupt(id.toString(), true, "ESC was sent to the agent's harness.");
+  }
+
+  /**
+   * The caller must be the agent itself: {@code subject} is its token's subject, and the agent's
+   * own credential states the same one (epic qits-1667, the yield door's "own agent").
+   *
+   * @throws NotFoundException no such agent
+   * @throws ForbiddenException another agent's credential, or none
+   */
+  public void requireOwnAgent(UUID id, String subject) {
+    AgentWorktree agent = require(id);
+    if (subject == null
+        || agent.commissionedTokenSubject == null
+        || !subject.equals(agent.commissionedTokenSubject)) {
+      throw new ForbiddenException(
+          "An agent may yield only its own slot; this credential is not agent " + id + "'s.");
+    }
   }
 
   /** The agent's row, locked, for a door that writes it; a REMOVED one is a 409. */

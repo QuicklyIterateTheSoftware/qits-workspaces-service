@@ -93,14 +93,30 @@ public class MountedClaudeTranscripts implements ArchivedAgentTranscripts {
     throw new NotFoundException("Agent session not found: " + sessionId);
   }
 
+  /** One agent's sessions, wherever it ran (epic qits-1667): its own directory and branch. */
+  @Override
+  public List<ArchivedSessionDto> sessionsFor(AgentWorktree agent) {
+    return agentArchive(agent.repositoryId, agent).sessionsFor(attribution(agent));
+  }
+
+  @Override
+  public List<String> transcriptOf(AgentWorktree agent, String sessionId) {
+    return agentArchive(agent.repositoryId, agent).transcriptOf(attribution(agent), sessionId);
+  }
+
   private List<AgentWorktree> agentsOf(Workspace workspace) {
     return QuarkusTransaction.requiringNew().call(() -> agents.findByWorkspace(workspace.id));
   }
 
   private ClaudeTranscriptArchive agentArchive(Workspace workspace, AgentWorktree agent) {
+    return agentArchive(workspace.repositoryId, agent);
+  }
+
+  /** The agent's worktree directory, keyed on the wrapper's name: where its harness ran. */
+  private ClaudeTranscriptArchive agentArchive(String wrapperRepositoryId, AgentWorktree agent) {
     String name;
     try {
-      name = repositories.find(workspace.repositoryId).map(RepositoryLookup.RepositoryView::name).orElse(null);
+      name = repositories.find(wrapperRepositoryId).map(RepositoryLookup.RepositoryView::name).orElse(null);
     } catch (RuntimeException registryDidNotAnswer) {
       name = null;
     }

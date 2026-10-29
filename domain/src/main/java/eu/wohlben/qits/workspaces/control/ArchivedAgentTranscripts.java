@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.control;
 
 import eu.wohlben.qits.workspaces.dto.ArchivedSessionDto;
+import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import java.util.List;
 
@@ -44,4 +45,18 @@ public interface ArchivedAgentTranscripts {
    * them.
    */
   List<String> transcriptOf(Workspace workspace, String sessionId);
+
+  /**
+   * One agent's sessions, oldest first (epic qits-1667): attributed by the agent's own wrapper
+   * branch and its {@code createdAt}/{@code removedAt} window, under its own worktree directory. The
+   * wrapper branch is {@code <prefix>/<workId>}, so it is that agent's alone; a REMOVED agent's
+   * sessions still answer, read off the shared volume.
+   */
+  List<ArchivedSessionDto> sessionsFor(AgentWorktree agent);
+
+  /**
+   * One of the agent's sessions, raw, under the rule {@link #transcriptOf(Workspace, String)} keeps:
+   * a session that does not attribute to the agent is a 404, as one that never existed.
+   */
+  List<String> transcriptOf(AgentWorktree agent, String sessionId);
 }

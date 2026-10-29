@@ -5,15 +5,19 @@ import eu.wohlben.qits.workspaces.dto.ArchivedSessionDto;
 import eu.wohlben.qits.workspaces.dto.WorkspaceEventDto;
 import eu.wohlben.qits.workspaces.dto.WorkspaceHistoryDetailDto;
 import eu.wohlben.qits.workspaces.dto.WorkspaceHistoryDto;
+import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspaceEvent;
+import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceEventRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Read/edit side of the workspace history: lists all workspaces (active + resolved) for a
@@ -34,6 +38,8 @@ public class WorkspaceHistoryService {
   @Inject WorkspaceRepository workspaceRepository;
 
   @Inject WorkspaceEventRepository workspaceEventRepository;
+
+  @Inject AgentWorktreeRepository agents;
 
   /**
    * Optional: the transcripts live on a mounted volume, not in this context's store. Absent yields
@@ -105,6 +111,47 @@ public class WorkspaceHistoryService {
       throw new NotFoundException("Agent session not found: " + sessionId);
     }
     return lines;
+  }
+
+  /**
+   * One agent's sessions, oldest first (epic qits-1667), wherever it ran: {@link
+   * ArchivedAgentTranscripts#sessionsFor(AgentWorktree)}. A REMOVED agent answers too. Empty is a
+   * valid answer, as for a workspace.
+   *
+   * @throws NotFoundException no such agent
+   */
+  public List<ArchivedSessionDto> agentSessionsOf(UUID agentId) {
+    AgentWorktree agent = requireAgent(agentId);
+    return archivedTranscripts.isResolvable()
+        ? archivedTranscripts.get().sessionsFor(agent)
+        : List.of();
+  }
+
+  /**
+   * One of the agent's sessions, raw, under {@link #agentTranscript}'s rules: a session that does
+   * not attribute to this agent is a 404, the same as one that never existed.
+   *
+   * @throws NotFoundException no such agent, or no such session of it
+   */
+  public List<String> agentTranscriptOf(UUID agentId, String sessionId) {
+    AgentWorktree agent = requireAgent(agentId);
+    if (!archivedTranscripts.isResolvable()) {
+      throw new NotFoundException("Agent session not found: " + sessionId);
+    }
+    List<String> lines = archivedTranscripts.get().transcriptOf(agent, sessionId);
+    if (lines.isEmpty()) {
+      throw new NotFoundException("Agent session not found: " + sessionId);
+    }
+    return lines;
+  }
+
+  private AgentWorktree requireAgent(UUID agentId) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                agents
+                    .findByIdOptional(agentId)
+                    .orElseThrow(() -> new NotFoundException("Agent not found: " + agentId)));
   }
 
   /** Edit the markdown narrative; null fields are left unchanged. */
