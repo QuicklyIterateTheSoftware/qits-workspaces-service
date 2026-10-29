@@ -1267,7 +1267,12 @@ event name, optional expiry) and gets a turn when it happens:
   only when every group names the same one with `exact`) and `target_states` (the state values the
   groups wait for, a JSON array). Before matching, every event of the wait's name that names its
   subject writes `subject_state` and `subject_state_at`, and a change is announced as
-  `AgentWaitChanged`; the selection and the matching are untouched. A desk's wait records its kind,
+  `AgentWaitChanged`; the selection and the matching are untouched. A `BRANCH` wait's state is
+  read at the path it targets (qits-1736): a selection with any `exact` `everywhere` group records
+  the event's `everywhere` (the branch's least advanced step across the project; none when it is
+  null), never one repository's `step` — so its early `step` groups (FAILED, CONFLICTED, WITHDRAWN)
+  still fire it but never show as its state; otherwise it records `step`, and when every group names
+  the same `repository` with `exact` (`--repository`), only that repository's events say it. A desk's wait records its kind,
   ref and target states too since qits-1668, and is looked up below, but no event writes its state
   and nothing about it is announced but its `DeskWaitClosed`. `qits wait branch <branch> [--repository <r>] --until joined|released|live|failed` is the
   CLI's BRANCH preset, built the same way the release request and run presets are.

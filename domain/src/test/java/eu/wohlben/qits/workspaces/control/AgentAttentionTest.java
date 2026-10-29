@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import eu.wohlben.qits.eventstream.selection.EventSelection;
+import eu.wohlben.qits.eventstream.selection.EventSelection.Condition;
 import eu.wohlben.qits.workspaces.control.AgentAttention.Attention;
 import eu.wohlben.qits.workspaces.control.AgentAttention.Code;
 import eu.wohlben.qits.workspaces.entity.AgentRunState;
@@ -121,6 +124,54 @@ class AgentAttentionTest {
     assertEquals(
         "Waits on run 9677c59a to end; it is FAILED since 10:42",
         evaluate(agent(), run).orElseThrow().reason());
+  }
+
+  /**
+   * qits-1736: {@code qits wait branch <b> --until live}, no repository. One of two repositories
+   * going LIVE records the branch's {@code everywhere} (PUSHED), not that repository's step, so the
+   * wait — rightly still OPEN — is not reported as passed; the branch LIVE everywhere is.
+   */
+  @Test
+  void anEverywhereBranchWaitIsNotPassedWhenOneRepositoryWentLive() throws Exception {
+    String branch = "ticket/qits-1736";
+    EventSelection selection =
+        new EventSelection(
+            "BranchDeliveryChanged",
+            List.of("LIVE", "FAILED", "CONFLICTED", "WITHDRAWN").stream()
+                .map(
+                    state ->
+                        List.of(
+                            Condition.exact("branch", branch),
+                            Condition.exact("LIVE".equals(state) ? "everywhere" : "step", state)))
+                .toList());
+    WaitSubjects.Subject subject = WaitSubjects.parse(selection);
+    ObjectMapper json = new ObjectMapper();
+    String targets = json.writeValueAsString(subject.targetStates());
+    Instant at = Instant.parse("2026-10-28T10:42:00Z");
+
+    String oneLive =
+        WaitSubjects.stateIn(
+                subject,
+                "BranchDeliveryChanged",
+                json.readTree(
+                    "{\"branch\":\"" + branch + "\",\"repository\":\"a\",\"step\":\"LIVE\",\"everywhere\":\"PUSHED\"}"),
+                List.of(branch))
+            .orElseThrow();
+    assertEquals("PUSHED", oneLive);
+    Optional<Attention> attention = evaluate(agent(), wait("BRANCH", branch, targets, oneLive, at));
+    assertTrue(attention.isEmpty(), attention.toString());
+
+    String allLive =
+        WaitSubjects.stateIn(
+                subject,
+                "BranchDeliveryChanged",
+                json.readTree(
+                    "{\"branch\":\"" + branch + "\",\"repository\":\"b\",\"step\":\"LIVE\",\"everywhere\":\"LIVE\"}"),
+                List.of(branch))
+            .orElseThrow();
+    assertEquals(
+        Code.WAIT_SUBJECT_PASSED,
+        evaluate(agent(), wait("BRANCH", branch, targets, allLive, at)).orElseThrow().code());
   }
 
   // --- 2. BLOCKED_NO_DESK -------------------------------------------------------------------------

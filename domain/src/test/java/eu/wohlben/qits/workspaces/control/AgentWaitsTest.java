@@ -682,6 +682,72 @@ public class AgentWaitsTest {
     assertEquals("rr-ev-4", closes.get(0).matchedEventId());
   }
 
+  /** {@code qits wait branch <branch> [--repository <r>] --until live}, as the CLI builds it (qits-1736). */
+  private static EventSelection branchLive(String branch, String repository) {
+    return new EventSelection(
+        "BranchDeliveryChanged",
+        List.of("LIVE", "FAILED", "CONFLICTED", "WITHDRAWN").stream()
+            .map(
+                step -> {
+                  boolean target = "LIVE".equals(step);
+                  return repository == null
+                      ? List.of(
+                          Condition.exact("branch", branch),
+                          Condition.exact(target ? "everywhere" : "step", step))
+                      : List.of(
+                          Condition.exact("branch", branch),
+                          Condition.exact("repository", repository),
+                          Condition.exact("step", step));
+                })
+            .toList());
+  }
+
+  private static String branchEvent(String branch, String repository, String step, String everywhere) {
+    return "{\"branch\":\""
+        + branch
+        + "\",\"repository\":\""
+        + repository
+        + "\",\"step\":\""
+        + step
+        + "\",\"everywhere\":"
+        + (everywhere == null ? "null" : "\"" + everywhere + "\"")
+        + "}";
+  }
+
+  @Test
+  void aBranchWaitRecordsTheStateAtThePathItTargets() {
+    UUID id = agent("w-branch-1736");
+    String branch = "ticket/qits-1736-" + id.toString().substring(0, 8);
+    AgentWaitDto everywhere = waits.create(id, null, branchLive(branch, null), null);
+    AgentWaitDto inA = waits.create(id, null, branchLive(branch, "repo-a"), null);
+    assertEquals("BRANCH", waitRow(everywhere.id()).subjectKind);
+
+    // repo-b went LIVE, the branch as a whole is PUSHED: no wait matches, and neither records LIVE.
+    waits.onEvent("br-ev-1", "BranchDeliveryChanged", Instant.now(), branchEvent(branch, "repo-b", "LIVE", "PUSHED"));
+    AgentWait whole = waitRow(everywhere.id());
+    assertEquals(AgentWaitState.OPEN, whole.state);
+    assertEquals("PUSHED", whole.subjectState);
+    AgentWait scoped = waitRow(inA.id());
+    assertEquals(AgentWaitState.OPEN, scoped.state);
+    assertNull(scoped.subjectState, "repo-b's step is not repo-a's");
+
+    // repo-a joined: the scoped wait reads its own step; everywhere is still PUSHED.
+    waits.onEvent("br-ev-2", "BranchDeliveryChanged", Instant.now(), branchEvent(branch, "repo-a", "JOINED", "PUSHED"));
+    assertEquals("PUSHED", waitRow(everywhere.id()).subjectState);
+    assertEquals("JOINED", waitRow(inA.id()).subjectState);
+
+    // No everywhere is no state: the recorded one stays.
+    waits.onEvent("br-ev-3", "BranchDeliveryChanged", Instant.now(), branchEvent(branch, "repo-b", "RELEASED", null));
+    assertEquals("PUSHED", waitRow(everywhere.id()).subjectState);
+
+    // LIVE everywhere matches the everywhere wait and records LIVE.
+    waits.onEvent("br-ev-4", "BranchDeliveryChanged", Instant.now(), branchEvent(branch, "repo-a", "LIVE", "LIVE"));
+    AgentWait closed = waitRow(everywhere.id());
+    assertEquals(AgentWaitState.MATCHED, closed.state);
+    assertEquals("LIVE", closed.subjectState);
+    assertEquals("LIVE", waitRow(inA.id()).subjectState);
+  }
+
   @Test
   void aCancelledWaitIsAnnouncedClosedAndAnUnparsedSelectionIsOther() {
     UUID id = agent("w-cancel-ann");

@@ -550,7 +550,7 @@ public class AgentWaits {
         EventFrame latest = null;
         for (EventFrame frame : named) {
           JsonNode tree = EventSelectionEvaluator.parsePayload(frame.payload());
-          if (WaitSubjects.stateIn(name, tree, refs).isPresent()) {
+          if (WaitSubjects.stateIn(subject, name, tree, refs).isPresent()) {
             latest = frame;
           }
         }
@@ -585,17 +585,22 @@ public class AgentWaits {
                 if (only != null && !only.equals(wait.id)) {
                   continue;
                 }
+                EventSelection selection;
+                String unreadableWhy = null;
+                try {
+                  selection = EventSelection.fromJson(wait.selection);
+                } catch (EventSelectionException unreadable) {
+                  selection = null;
+                  unreadableWhy = unreadable.getMessage();
+                }
                 if (!wait.isDeskWait()) {
-                  Pending changed = recordSubjectState(wait, name, occurredAt, tree);
+                  Pending changed = recordSubjectState(wait, selection, name, occurredAt, tree);
                   if (changed != null) {
                     closing.announced.add(changed);
                   }
                 }
-                EventSelection selection;
-                try {
-                  selection = EventSelection.fromJson(wait.selection);
-                } catch (EventSelectionException unreadable) {
-                  LOG.warnf("Wait %s has an unreadable selection; skipped: %s", wait.id, unreadable.getMessage());
+                if (selection == null) {
+                  LOG.warnf("Wait %s has an unreadable selection; skipped: %s", wait.id, unreadableWhy);
                   continue;
                 }
                 // A delivered event older than the wait never matches it (qits-1677); the
@@ -1148,16 +1153,24 @@ public class AgentWaits {
    * nothing changed: the wait names no subject (OTHER, a wait from before {@code V33}), the event
    * names another one or carries no state, the state is the one recorded (its {@code
    * subject_state_at} stays when that state began), or the event is older than the recorded state.
+   * The event is read as the wait's {@code selection} parses (qits-1736): a branch wait targeting
+   * {@code everywhere} records that, not one repository's {@code step}, and one naming a repository
+   * ignores another's events. An unreadable (null) selection reads a branch's {@code step}, as
+   * before.
    */
   private static Pending recordSubjectState(
-      AgentWait wait, String name, Instant occurredAt, JsonNode payload) {
+      AgentWait wait, EventSelection selection, String name, Instant occurredAt, JsonNode payload) {
     WaitSubjects.Kind kind = WaitSubjects.kindOf(wait.subjectKind);
     if (kind == null || kind == WaitSubjects.Kind.OTHER) {
       return null;
     }
+    WaitSubjects.Subject subject = selection == null ? null : WaitSubjects.parse(selection);
     Optional<String> state =
         WaitSubjects.stateIn(
-            name, payload, Arrays.asList(wait.subjectRef, wait.subjectId, wait.subjectQualifiedId));
+            subject,
+            name,
+            payload,
+            Arrays.asList(wait.subjectRef, wait.subjectId, wait.subjectQualifiedId));
     if (state.isEmpty() || state.get().equals(wait.subjectState)) {
       return null;
     }

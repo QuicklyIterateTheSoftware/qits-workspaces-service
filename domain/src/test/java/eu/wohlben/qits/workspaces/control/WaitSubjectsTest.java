@@ -209,7 +209,9 @@ class WaitSubjectsTest {
                     Condition.exact("repository", "qits-workspaces-service"),
                     Condition.exact("step", "LIVE"))));
     Subject subject = WaitSubjects.parse(withRepository);
-    assertEquals(new Subject(Kind.BRANCH, "ticket/qits-1615", List.of("LIVE")), subject);
+    assertEquals(
+        new Subject(Kind.BRANCH, "ticket/qits-1615", List.of("LIVE"), "step", "qits-workspaces-service"),
+        subject);
   }
 
   @Test
@@ -222,7 +224,8 @@ class WaitSubjectsTest {
                     Condition.exact("branch", "ticket/qits-1615"),
                     Condition.exact("everywhere", "LIVE"))));
     assertEquals(
-        new Subject(Kind.BRANCH, "ticket/qits-1615", List.of("LIVE")), WaitSubjects.parse(selection));
+        new Subject(Kind.BRANCH, "ticket/qits-1615", List.of("LIVE"), "everywhere", null),
+        WaitSubjects.parse(selection));
   }
 
   @Test
@@ -234,7 +237,7 @@ class WaitSubjectsTest {
                 List.of(Condition.exact("branch", "ticket/qits-1615"), Condition.exact("step", "JOINED")),
                 List.of(Condition.exact("branch", "ticket/qits-1615"), Condition.exact("step", "CONFLICTED"))));
     assertEquals(
-        new Subject(Kind.BRANCH, "ticket/qits-1615", List.of("JOINED", "CONFLICTED")),
+        new Subject(Kind.BRANCH, "ticket/qits-1615", List.of("JOINED", "CONFLICTED"), "step", null),
         WaitSubjects.parse(selection));
   }
 
@@ -247,7 +250,7 @@ class WaitSubjectsTest {
                 List.of(Condition.exact("branch", "ticket/qits-1615"), Condition.exact("step", "JOINED")),
                 List.of(Condition.exact("branch", "ticket/qits-1615"), Condition.exact("everywhere", "LIVE"))));
     assertEquals(
-        new Subject(Kind.BRANCH, "ticket/qits-1615", List.of("JOINED", "LIVE")),
+        new Subject(Kind.BRANCH, "ticket/qits-1615", List.of("JOINED", "LIVE"), "everywhere", null),
         WaitSubjects.parse(selection));
   }
 
@@ -271,6 +274,108 @@ class WaitSubjectsTest {
     assertEquals(
         Optional.empty(),
         WaitSubjects.stateIn("BranchDeliveryChanged", event, List.of("ticket/other")));
+  }
+
+  /** The CLI's {@code qits wait branch <b> --until live} with no repository (qits-1736). */
+  private static EventSelection liveEverywhere(String branch) {
+    return new EventSelection(
+        "BranchDeliveryChanged",
+        List.of(
+            List.of(Condition.exact("branch", branch), Condition.exact("everywhere", "LIVE")),
+            List.of(Condition.exact("branch", branch), Condition.exact("step", "FAILED")),
+            List.of(Condition.exact("branch", branch), Condition.exact("step", "CONFLICTED")),
+            List.of(Condition.exact("branch", branch), Condition.exact("step", "WITHDRAWN"))));
+  }
+
+  /** The CLI's {@code qits wait branch <b> --repository <r> --until live} (qits-1736). */
+  private static EventSelection liveIn(String branch, String repository) {
+    return new EventSelection(
+        "BranchDeliveryChanged",
+        List.of("LIVE", "FAILED", "CONFLICTED", "WITHDRAWN").stream()
+            .map(
+                step ->
+                    List.of(
+                        Condition.exact("branch", branch),
+                        Condition.exact("repository", repository),
+                        Condition.exact("projectId", "p-1"),
+                        Condition.exact("step", step)))
+            .toList());
+  }
+
+  @Test
+  void anEverywhereWaitReadsEverywhereNotOneRepositorysStep() throws Exception {
+    Subject subject = WaitSubjects.parse(liveEverywhere("ticket/qits-1736"));
+    assertEquals("everywhere", subject.statePath());
+    assertNull(subject.repository());
+    assertEquals(List.of("LIVE", "FAILED", "CONFLICTED", "WITHDRAWN"), subject.targetStates());
+    List<String> refs = List.of("ticket/qits-1736");
+
+    // One of two repositories went LIVE: the branch as a whole is still only PUSHED.
+    JsonNode oneLive =
+        json("{\"branch\":\"ticket/qits-1736\",\"repository\":\"a\",\"step\":\"LIVE\",\"everywhere\":\"PUSHED\"}");
+    assertEquals(Optional.of("PUSHED"), WaitSubjects.stateIn(subject, "BranchDeliveryChanged", oneLive, refs));
+
+    JsonNode allLive =
+        json("{\"branch\":\"ticket/qits-1736\",\"repository\":\"b\",\"step\":\"LIVE\",\"everywhere\":\"LIVE\"}");
+    assertEquals(Optional.of("LIVE"), WaitSubjects.stateIn(subject, "BranchDeliveryChanged", allLive, refs));
+
+    JsonNode noEverywhere =
+        json("{\"branch\":\"ticket/qits-1736\",\"repository\":\"a\",\"step\":\"FAILED\",\"everywhere\":null}");
+    assertEquals(Optional.empty(), WaitSubjects.stateIn(subject, "BranchDeliveryChanged", noEverywhere, refs));
+    JsonNode missingEverywhere =
+        json("{\"branch\":\"ticket/qits-1736\",\"repository\":\"a\",\"step\":\"LIVE\"}");
+    assertEquals(
+        Optional.empty(), WaitSubjects.stateIn(subject, "BranchDeliveryChanged", missingEverywhere, refs));
+
+    // Another branch still says nothing.
+    assertEquals(
+        Optional.empty(), WaitSubjects.stateIn(subject, "BranchDeliveryChanged", allLive, List.of("ticket/other")));
+  }
+
+  @Test
+  void aRepositoryScopedWaitReadsOnlyItsRepositorysStep() throws Exception {
+    Subject subject = WaitSubjects.parse(liveIn("ticket/qits-1736", "a"));
+    assertEquals("step", subject.statePath());
+    assertEquals("a", subject.repository());
+    List<String> refs = List.of("ticket/qits-1736");
+
+    JsonNode inB =
+        json("{\"branch\":\"ticket/qits-1736\",\"repository\":\"b\",\"step\":\"LIVE\",\"everywhere\":\"PUSHED\"}");
+    assertEquals(Optional.empty(), WaitSubjects.stateIn(subject, "BranchDeliveryChanged", inB, refs));
+
+    JsonNode inA =
+        json("{\"branch\":\"ticket/qits-1736\",\"repository\":\"a\",\"step\":\"JOINED\",\"everywhere\":\"PUSHED\"}");
+    assertEquals(Optional.of("JOINED"), WaitSubjects.stateIn(subject, "BranchDeliveryChanged", inA, refs));
+  }
+
+  @Test
+  void groupsDisagreeingOnTheRepositoryLeaveNoRepositoryFilter() throws Exception {
+    EventSelection twoRepositories =
+        new EventSelection(
+            "BranchDeliveryChanged",
+            List.of(
+                List.of(
+                    Condition.exact("branch", "ticket/qits-1736"),
+                    Condition.exact("repository", "a"),
+                    Condition.exact("step", "LIVE")),
+                List.of(
+                    Condition.exact("branch", "ticket/qits-1736"),
+                    Condition.exact("repository", "b"),
+                    Condition.exact("step", "LIVE"))));
+    Subject subject = WaitSubjects.parse(twoRepositories);
+    assertEquals("step", subject.statePath());
+    assertNull(subject.repository());
+    JsonNode inB = json("{\"branch\":\"ticket/qits-1736\",\"repository\":\"b\",\"step\":\"LIVE\"}");
+    assertEquals(
+        Optional.of("LIVE"), WaitSubjects.stateIn(subject, "BranchDeliveryChanged", inB, List.of("ticket/qits-1736")));
+  }
+
+  @Test
+  void otherKindsCarryNoBranchReading() {
+    Subject subject =
+        WaitSubjects.parse(perState("BuildStatusChanged", "runId", "r-1", "status", "SUCCESS"));
+    assertNull(subject.statePath());
+    assertNull(subject.repository());
   }
 
   @Test

@@ -41,11 +41,22 @@ import java.util.Set;
  * path's {@code exact} values across the groups, in their order; {@code []} when it names none. A
  * BRANCH wait's target path is {@code step}, but a group may instead (or additionally) name {@code
  * everywhere} with {@code exact}: both contribute to the same union, in the order their groups
- * appear, and a selection mixing the two is still BRANCH rather than OTHER.
+ * appear, and a selection mixing the two is still BRANCH rather than OTHER. Its {@link
+ * Subject#statePath} and {@link Subject#repository} say how an event is read for it, below.
  *
  * <p><b>Reading an event</b> ({@link #stateIn}): what state an event says the subject is in, when it
- * names this subject at all. For BRANCH that is always the event's {@code step} — {@code
- * everywhere} is only ever a way to name a target state, never what is reported back.
+ * names this subject at all. For BRANCH it is read at the path the wait targets (qits-1736), the
+ * subject's {@link Subject#statePath}: {@code everywhere} — the branch's least advanced step across
+ * the project's repositories — when any group names an {@code exact} {@code everywhere}, else
+ * {@code step}. An {@code everywhere} wait's state is therefore the event's {@code everywhere}, and
+ * an event with none says no state; reading {@code step} there would record one repository going
+ * LIVE as the whole branch being LIVE, while the wait — rightly — still waits. The early {@code
+ * step} groups such a wait carries (FAILED, CONFLICTED, WITHDRAWN in any repository) still fire it
+ * through the matcher, but they never show as its subject state. When every group names the same
+ * {@code repository} with {@code exact} ({@link Subject#repository}, as {@code qits wait branch
+ * --repository} writes it), an event of another repository says no state either: a step there is
+ * not this wait's. Groups that disagree on it, or a group naming none, leave no repository filter —
+ * such a wait listens to more than one repository, so no single one's events can be ruled out.
  *
  * <p><b>Final states</b> ({@link #isFinal}), which the attention evaluation reads: a request is done
  * FINALIZED, WITHDRAWN or OBSOLETE; a run is done in anything but QUEUED and RUNNING; an item DONE or
@@ -68,10 +79,20 @@ public final class WaitSubjects {
    *
    * @param ref the value the selection names, as written; null for {@link Kind#OTHER}
    * @param targetStates the state values the selection waits for; empty when it names none
+   * @param statePath BRANCH only (qits-1736): the event path its state is read at, {@code step} or
+   *     {@code everywhere}; null for every other kind
+   * @param repository BRANCH only (qits-1736): the repository every group names with {@code exact},
+   *     whose events alone say its state; null when the groups name none or disagree
    */
-  public record Subject(Kind kind, String ref, List<String> targetStates) {
+  public record Subject(
+      Kind kind, String ref, List<String> targetStates, String statePath, String repository) {
     public Subject {
       targetStates = List.copyOf(targetStates);
+    }
+
+    /** A subject with no BRANCH state path and no repository: every kind but BRANCH. */
+    public Subject(Kind kind, String ref, List<String> targetStates) {
+      this(kind, ref, targetStates, null, null);
     }
 
     static final Subject OTHER = new Subject(Kind.OTHER, null, List.of());
@@ -119,6 +140,11 @@ public final class WaitSubjects {
 
   private static final String EVERYWHERE = "everywhere";
 
+  private static final String REPOSITORY = "repository";
+
+  /** How {@link #stateIn(String, JsonNode, Collection)} reads a branch: its step, in any repository. */
+  private static final Subject ANY_BRANCH_STEP = new Subject(Kind.BRANCH, null, List.of(), STEP, null);
+
   /**
    * Per event: the kind, the ref paths and the target path(s) (empty: none). BRANCH is the only
    * kind with two — {@code step} and {@code everywhere} both contribute to the one union of target
@@ -159,9 +185,25 @@ public final class WaitSubjects {
     }
     String ref = null;
     LinkedHashSet<String> targets = new LinkedHashSet<>();
+    boolean targetsEverywhere = false;
+    // Every group's exact repository, or none (null in the set) for a group naming none.
+    Set<String> repositories = new LinkedHashSet<>();
     for (List<Condition> group : selection.when()) {
       String groupRef = null;
+      String groupRepository = null;
       for (Condition condition : group) {
+        if (REPOSITORY.equals(condition.path())
+            && condition.op() == Op.EXACT
+            && condition.value() != null
+            && groupRepository == null) {
+          groupRepository = condition.value();
+        }
+        if (EVERYWHERE.equals(condition.path())
+            && rule.targetPaths().contains(EVERYWHERE)
+            && condition.op() == Op.EXACT
+            && condition.value() != null) {
+          targetsEverywhere = true;
+        }
         if (rule.refPaths().contains(condition.path())) {
           if (condition.op() != Op.EXACT || condition.value() == null) {
             return Subject.OTHER;
@@ -180,8 +222,14 @@ public final class WaitSubjects {
         return Subject.OTHER;
       }
       ref = groupRef;
+      repositories.add(groupRepository);
     }
-    return new Subject(rule.kind(), ref, new ArrayList<>(targets));
+    if (rule.kind() != Kind.BRANCH) {
+      return new Subject(rule.kind(), ref, new ArrayList<>(targets));
+    }
+    String repository = repositories.size() == 1 ? repositories.iterator().next() : null;
+    return new Subject(
+        rule.kind(), ref, new ArrayList<>(targets), targetsEverywhere ? EVERYWHERE : STEP, repository);
   }
 
   /**
@@ -192,9 +240,23 @@ public final class WaitSubjects {
    * #SUCCESS} and {@code BuildFailed} {@link #FAILED}; an {@code EntityTransitioned} answers the
    * status of the entity whose id is a ref. {@code EntityCommented} carries no state, so it is
    * always empty. {@code BranchDeliveryChanged} answers its {@code step} when its {@code branch} is
-   * a ref — {@code everywhere} is never read back, only matched against as a target state.
+   * a ref, in any repository — the reading of a subject that targets {@code step} and names no
+   * repository; a wait's own reading is {@link #stateIn(Subject, String, JsonNode, Collection)}.
    */
   public static Optional<String> stateIn(String eventName, JsonNode payload, Collection<String> refs) {
+    return stateIn(ANY_BRANCH_STEP, eventName, payload, refs);
+  }
+
+  /**
+   * {@link #stateIn(String, JsonNode, Collection)}, as {@code subject} reads it: the same for every
+   * kind but BRANCH, whose {@code BranchDeliveryChanged} answers the value at the subject's {@link
+   * Subject#statePath} — {@code everywhere} for a wait targeting it, where a null or missing {@code
+   * everywhere} is no state, else {@code step} — and nothing for an event of another repository than
+   * the subject's {@link Subject#repository}, when it names one (qits-1736). A null {@code subject},
+   * or one of another kind, reads a branch's {@code step} in any repository.
+   */
+  public static Optional<String> stateIn(
+      Subject subject, String eventName, JsonNode payload, Collection<String> refs) {
     if (eventName == null || payload == null || !payload.isObject()) {
       return Optional.empty();
     }
@@ -218,10 +280,7 @@ public final class WaitSubjects {
       case BUILD_FAILED ->
           known.contains(text(payload, "runId")) ? Optional.of(FAILED) : Optional.empty();
       case ENTITY_TRANSITIONED -> entityStatus(payload.get("entities"), known);
-      case BRANCH_DELIVERY_CHANGED ->
-          known.contains(text(payload, "branch"))
-              ? Optional.ofNullable(text(payload, STEP))
-              : Optional.empty();
+      case BRANCH_DELIVERY_CHANGED -> branchState(subject, payload, known);
       default -> Optional.empty();
     };
   }
@@ -250,6 +309,19 @@ public final class WaitSubjects {
     } catch (IllegalArgumentException unknown) {
       return Kind.OTHER;
     }
+  }
+
+  private static Optional<String> branchState(Subject subject, JsonNode payload, Set<String> refs) {
+    if (!refs.contains(text(payload, "branch"))) {
+      return Optional.empty();
+    }
+    boolean branchSubject = subject != null && subject.kind() == Kind.BRANCH;
+    String repository = branchSubject ? subject.repository() : null;
+    if (repository != null && !repository.equals(text(payload, REPOSITORY))) {
+      return Optional.empty();
+    }
+    String path = branchSubject && subject.statePath() != null ? subject.statePath() : STEP;
+    return Optional.ofNullable(text(payload, path));
   }
 
   private static Optional<String> entityStatus(JsonNode entities, Set<String> refs) {
