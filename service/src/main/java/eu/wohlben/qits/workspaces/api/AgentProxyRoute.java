@@ -42,6 +42,8 @@ import org.jboss.logging.Logger;
  *       YIELDED or STOPPED agent is fine, while its workspace is live)
  *   <li>{@code files[/…]?q}, {@code detection}, {@code component-map} → {@code
  *       <base>agent-worktrees/{agentId}/…}, a workspace
+ *   <li>{@code prompt-refinements} → {@code <base>prompt-refinements}, a workspace: the rewrite of
+ *       a draft by the harness of the agent's container, so the agent page needs no slot id
  * </ul>
  *
  * Anything else is 404 "No such agent route"; an agent with no workspace 409 "The agent is waiting
@@ -108,7 +110,9 @@ public class AgentProxyRoute {
     /** {@code log}: any command, on a live workspace. */
     LOG(false, false),
     /** {@code files[/…]}, {@code detection}, {@code component-map}: the agent's worktree. */
-    WORKTREE(false, false);
+    WORKTREE(false, false),
+    /** {@code prompt-refinements}: the container's harness rewrites a draft, on a live workspace. */
+    PROMPT_REFINEMENTS(false, false);
 
     final boolean webSocket;
     final boolean needsRunning;
@@ -169,6 +173,8 @@ public class AgentProxyRoute {
         return upgrade ? null : new Target(Kind.LOG, rest, query);
       case "files", "detection", "component-map":
         return upgrade ? null : new Target(Kind.WORKTREE, rest, query);
+      case "prompt-refinements":
+        return upgrade ? null : new Target(Kind.PROMPT_REFINEMENTS, rest, query);
       default:
         if (!upgrade && rest.startsWith("files/")) {
           return new Target(Kind.WORKTREE, rest, query);
@@ -291,7 +297,9 @@ public class AgentProxyRoute {
       return Outcome.answer(409, WAITING);
     }
     if ((target.kind().needsRunning && !running)
-        || (target.kind() != Kind.WORKTREE && agent.commandId() == null)) {
+        || (target.kind() != Kind.WORKTREE
+            && target.kind() != Kind.PROMPT_REFINEMENTS
+            && agent.commandId() == null)) {
       return notRunning(agent);
     }
     String base = ContainerProxyPath.base(agent.workspaceId());
@@ -302,6 +310,7 @@ public class AgentProxyRoute {
           case CHAT -> base + "chat/commands/" + agent.commandId() + query;
           case LOG -> base + "commands/" + agent.commandId() + "/log" + query;
           case WORKTREE -> base + "agent-worktrees/" + agentId + "/" + target.rest() + query;
+          case PROMPT_REFINEMENTS -> base + "prompt-refinements" + query;
         };
     return Outcome.forward(forwarder.resolve(agent.workspaceId()), uri);
   }

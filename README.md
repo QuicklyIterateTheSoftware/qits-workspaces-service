@@ -483,7 +483,8 @@ and forwards under that workspace's `ContainerProxyPath.base` — so an agent mo
 workspace is reached there with no caller change. Unlike the container route it **maps** its path:
 `WS terminal` → `<base>terminal/commands/{commandId}` and `WS chat` → `<base>chat/commands/{commandId}`
 (RUNNING with a command), `GET log?…` → `<base>commands/{commandId}/log?…` (any command, on a live
-workspace), `files[/…]?…`, `detection`, `component-map` → `<base>agent-worktrees/{agentId}/…`.
+workspace), `files[/…]?…`, `detection`, `component-map` → `<base>agent-worktrees/{agentId}/…`,
+and `POST prompt-refinements` → `<base>prompt-refinements` (the container's harness rewrites a draft).
 Anything else is 404 "No such agent route"; an unknown, non-UUID or REMOVED agent 404; no workspace
 409 "The agent is waiting for a workspace"; a socket on an agent that is not RUNNING 409 "The agent
 has no running session (runState X)". `qits:system`, `qits:admin`, `qits:admin-agent` reach every

@@ -462,7 +462,7 @@ literal and must carry `/workspaces` itself. Five do, each for its own reason:
   under `/workspaces/api/agents`; epic qits-1667): the daemon of the workspace an agent is placed in
   **now**, addressed by the agent. It is the one hop that **does** rewrite a path, and it is not the
   exception the container route's rule forbids: its own sub-paths (`terminal`, `chat`, `log`,
-  `files[/…]`, `detection`, `component-map`) are not the daemon's address, and each is mapped onto
+  `files[/…]`, `detection`, `component-map`, `prompt-refinements`) are not the daemon's address, and each is mapped onto
   the daemon's own path under `ContainerProxyPath.base(agent.workspaceId)` — the daemon still sees
   only `/workspaces/container/{id}/…`. The forwarding half (`resolve`, `route`, the hand-rolled
   upgrade, the pipe, `bearer`, `hostRewrite`) lives in `DaemonForwarder`, which both routes call with

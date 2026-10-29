@@ -146,6 +146,20 @@ class AgentProxyRouteTest {
   }
 
   @Test
+  void aPromptRefinementIsTheContainersHarnessWhateverTheAgentsRunState() {
+    UUID agent = fixture.agent(fixture.rowA, AgentRunState.YIELDED, null, null);
+
+    given()
+        .header("Authorization", ADMIN)
+        .contentType("application/json")
+        .body("{\"text\":\"tidy this\"}")
+        .post(agentPath(agent, "prompt-refinements"))
+        .then()
+        .statusCode(200)
+        .body(equalTo("daemon:" + daemonBase(fixture.rowA) + "prompt-refinements"));
+  }
+
+  @Test
   void aCallerSuppliedAuthorizationNeverReachesTheDaemon() {
     UUID agent = fixture.agent(fixture.rowA, AgentRunState.RUNNING, "cmd-6", null);
 
