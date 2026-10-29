@@ -149,6 +149,8 @@ public final class AgentAttention {
 
   private static Optional<Attention> idleNoWait(
       AgentWorktree agent, List<AgentWait> open, Instant now, Config config) {
+    // RUNNING only: a YIELDED agent gave its slot up, and a STOPPED one was stopped by a person
+    // (epic qits-1667) — neither is a stall to report.
     if (agent.runState != AgentRunState.RUNNING
         || agent.waitingSince == null
         || !open.isEmpty()

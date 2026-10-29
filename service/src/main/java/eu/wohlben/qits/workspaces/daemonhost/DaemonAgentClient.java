@@ -248,6 +248,56 @@ public class DaemonAgentClient implements AgentDaemon {
     return outcome;
   }
 
+  /**
+   * The daemon stops the agent's harness and keeps its worktree (epic qits-1667): {@code 200
+   * {"agentId", "yielded": bool}} — {@code yielded} false when no harness ran, which is still done.
+   */
+  @Override
+  public Outcome yield(Long workspaceRowId, String agentId) {
+    return simple(workspaceRowId, HttpMethod.POST, path(agentId, "yield"), new JsonObject());
+  }
+
+  /** ESC into the agent's running TERMINAL harness (epic qits-1667). */
+  @Override
+  public Interrupted interrupt(Long workspaceRowId, String agentId) {
+    Route route = route(workspaceRowId);
+    if (route == null) {
+      return new Interrupted(Outcome.UNREACHABLE, "the daemon is not connected");
+    }
+    Answer answer = send(route, HttpMethod.POST, path(agentId, "interrupt"), new JsonObject());
+    if (answer == null) {
+      return new Interrupted(Outcome.UNREACHABLE, "the daemon did not answer");
+    }
+    return interruptedOf(answer.status(), answer.body());
+  }
+
+  /** What a daemon from before the interrupt route answers is told as this sentence. */
+  static final String NO_INTERRUPT = "This workspace's daemon cannot interrupt; recreate the container.";
+
+  /**
+   * An interrupt's answer read (epic qits-1667). 200 is done. 409 is the daemon's refusal, its
+   * sentence in {@code error}. A 404 is a daemon that predates the route when its body says "No
+   * such endpoint" (a refusal, with {@link #NO_INTERRUPT}), else the daemon not knowing the agent.
+   * A 5xx or anything else is unreachable. Package-private for its test.
+   */
+  static Interrupted interruptedOf(int status, String body) {
+    if (status >= 200 && status < 300) {
+      return new Interrupted(Outcome.OK, null);
+    }
+    JsonObject json = json(body);
+    if (status == 404) {
+      return json != null && NO_SUCH_ENDPOINT.equals(json.getString("message"))
+          ? new Interrupted(Outcome.REFUSED, NO_INTERRUPT)
+          : new Interrupted(Outcome.UNKNOWN_AGENT, "the daemon does not know the agent");
+    }
+    if (status == 409) {
+      String error = json == null ? null : blankToNull(json.getString("error"));
+      return new Interrupted(
+          Outcome.REFUSED, error == null ? "The daemon refused the interrupt." : error);
+    }
+    return new Interrupted(Outcome.UNREACHABLE, "the daemon answered " + status);
+  }
+
   /** The cleanup check's body, or null when it is not one. Package-private for its test. */
   static CleanupCheck cleanupCheckOf(JsonObject json) {
     if (json == null || json.getValue("clean") == null) {

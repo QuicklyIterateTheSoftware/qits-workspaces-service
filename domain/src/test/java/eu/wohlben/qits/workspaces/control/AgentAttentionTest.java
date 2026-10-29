@@ -271,6 +271,11 @@ class AgentAttentionTest {
     yielded.runState = AgentRunState.YIELDED;
     assertTrue(evaluate(yielded).isEmpty(), "not RUNNING");
 
+    // Epic qits-1667: a person stopped it, so its idleness is nobody's surprise.
+    AgentWorktree stopped = idle(90);
+    stopped.runState = AgentRunState.STOPPED;
+    assertTrue(evaluate(stopped).isEmpty(), "STOPPED");
+
     AgentWorktree working = agent();
     assertTrue(evaluate(working).isEmpty(), "no waitingSince");
 

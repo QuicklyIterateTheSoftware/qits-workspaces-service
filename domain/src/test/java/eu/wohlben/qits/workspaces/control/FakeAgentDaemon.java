@@ -61,6 +61,7 @@ public class FakeAgentDaemon implements AgentDaemon {
     harnesses.clear();
     turnAnswer = Outcome.OK;
     startRefusal = null;
+    interruptAnswer = null;
   }
 
   /** A daemon restart: every harness is gone; the next start of each agent launches one again. */
@@ -173,5 +174,33 @@ public class FakeAgentDaemon implements AgentDaemon {
     }
     harnesses.remove(agentId);
     return Outcome.OK;
+  }
+
+  /** Stops the harness, as the daemon's yield does; the next start launches one again. */
+  @Override
+  public Outcome yield(Long workspaceRowId, String agentId) {
+    calls.add("yield " + workspaceRowId + " " + agentId);
+    if (unreachable.contains(workspaceRowId)) {
+      return Outcome.UNREACHABLE;
+    }
+    if (forgotten.contains(agentId)) {
+      return Outcome.UNKNOWN_AGENT;
+    }
+    harnesses.remove(agentId);
+    return Outcome.OK;
+  }
+
+  /** What the next interrupts answer; null: OK. */
+  private volatile Interrupted interruptAnswer;
+
+  public void interruptsAnswer(Interrupted answer) {
+    interruptAnswer = answer;
+  }
+
+  @Override
+  public Interrupted interrupt(Long workspaceRowId, String agentId) {
+    calls.add("interrupt " + workspaceRowId + " " + agentId);
+    Interrupted scripted = interruptAnswer;
+    return scripted != null ? scripted : new Interrupted(Outcome.OK, null);
   }
 }

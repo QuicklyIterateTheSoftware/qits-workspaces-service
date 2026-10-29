@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 /**
  * The agent tables (qits-1152, {@code V21}) as the schema keeps them: one ACTIVE agent per work
  * item, any number of RUNNING agents per workspace (qits-1212, {@code V24}), a QUEUED agent in no
- * workspace, and a pushed branch recorded once per (agent, repository, branch).
+ * workspace, a STOPPED one in its workspace or none (epic qits-1667, {@code V35}), and a pushed branch recorded once per (agent, repository, branch).
  */
 @QuarkusTest
 public class AgentSchemaTest {
@@ -97,10 +97,30 @@ public class AgentSchemaTest {
   }
 
   @Test
-  void onlyAQueuedAgentHasNoWorkspace() {
+  void onlyAQueuedOrStoppedAgentHasNoWorkspace() {
     assertThrows(
         RuntimeException.class,
         () -> insert("schema-" + UUID.randomUUID(), a -> a.runState = AgentRunState.YIELDED));
+    // V35 (epic qits-1667): an agent stopped while still QUEUED gave up its queue place.
+    assertDoesNotThrow(
+        () -> insert("schema-" + UUID.randomUUID(), a -> a.runState = AgentRunState.STOPPED));
+  }
+
+  @Test
+  void aStoppedAgentKeepsItsWorkspace() {
+    // V35 replaced V21's inline run_state check (agent_worktree_run_state_check): STOPPED is a
+    // run state the column takes, placed or not.
+    Long slot = slot();
+    UUID id =
+        insert(
+            "schema-" + UUID.randomUUID(),
+            a -> {
+              a.workspaceId = slot;
+              a.runState = AgentRunState.STOPPED;
+            });
+    AgentWorktree stored = QuarkusTransaction.requiringNew().call(() -> agents.findById(id));
+    assertEquals(AgentRunState.STOPPED, stored.runState);
+    assertEquals(slot, stored.workspaceId);
   }
 
   @Test

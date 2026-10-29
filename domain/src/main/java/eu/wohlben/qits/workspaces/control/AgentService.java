@@ -15,6 +15,7 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
+import eu.wohlben.qits.workspaces.error.DomainException;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.events.AgentCleanupDeferred;
 import eu.wohlben.qits.workspaces.events.AgentActivityChanged;
@@ -222,6 +223,12 @@ public class AgentService {
    */
   public record Delivery(
       String agentId, boolean delivered, boolean launched, boolean resumed, String detail) {}
+
+  /**
+   * The interrupt door's answer (epic qits-1667): the ESC reached the agent's harness. A refusal is
+   * an exception, never {@code interrupted: false}.
+   */
+  public record Interrupt(String agentId, boolean interrupted, String detail) {}
 
   /** The entity and blocked doors' answer: the agent the facts are stored on, and whether it heard them live. */
   public record EntityMark(String agentId, boolean applied) {}
@@ -663,8 +670,7 @@ public class AgentService {
    * and that agent is still the one working on it, with its session.
    */
   public Delivery deliver(String workId, String text, boolean compactFirst) {
-    String said = trimmed(text);
-    if (said == null) {
+    if (trimmed(text) == null) {
       throw new BadRequestException("A turn needs text.");
     }
     Optional<AgentWorktree> found =
@@ -673,7 +679,30 @@ public class AgentService {
       return new Delivery(
           null, false, false, false, "No agent works on work item " + workId + "; nothing was said.");
     }
-    UUID id = found.get().id;
+    return deliver(found.get().id, text, compactFirst);
+  }
+
+  /** {@link #deliver(UUID, String, boolean, String)} with no caller to name in the log. */
+  public Delivery deliver(UUID id, String text, boolean compactFirst) {
+    return deliver(id, text, compactFirst, null);
+  }
+
+  /**
+   * <b>Say this to the agent</b> (epic qits-1667, {@code POST /agents/{id}/prompt}; the work-item
+   * form above resolves the item's agent and comes here). A REMOVED agent has nobody to tell: 409.
+   * A STOPPED agent goes back to the scheduler as a YIELDED one (QUEUED, when it was stopped before
+   * it had a workspace): it starts again with this turn.
+   *
+   * @param by the caller's principal, for the audit line; null logs none (the machine door)
+   * @throws NotFoundException no such agent
+   * @throws ConflictException the agent was removed
+   */
+  public Delivery deliver(UUID id, String text, boolean compactFirst, String by) {
+    String said = trimmed(text);
+    if (said == null) {
+      throw new BadRequestException("A turn needs text.");
+    }
+    AgentRunState[] before = new AgentRunState[1];
     AgentWorktree agent =
         QuarkusTransaction.requiringNew()
             .call(
@@ -683,13 +712,34 @@ public class AgentService {
                   AgentWorktree row =
                       agents
                           .findByIdOptional(id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
-                          .orElseThrow();
+                          .orElseThrow(() -> new NotFoundException("Agent not found: " + id));
+                  if (row.state == AgentState.REMOVED) {
+                    throw new ConflictException(
+                        "AGENT_REMOVED", "The agent was removed; nothing was said.");
+                  }
+                  before[0] = row.runState;
                   appendTurn(row, said, compactFirst);
+                  if (row.runState == AgentRunState.STOPPED) {
+                    // Back to the scheduler, as a yielded agent is: the resume runs it for this turn.
+                    row.runState =
+                        row.workspaceId == null ? AgentRunState.QUEUED : AgentRunState.YIELDED;
+                  }
                   return row;
                 });
+    if (by != null) {
+      audit(agent, "prompted", by, before[0], agent.runState);
+    }
     bringUp(agent);
     kick();
     String agentId = id.toString();
+    if (before[0] == AgentRunState.STOPPED) {
+      return new Delivery(
+          agentId,
+          false,
+          agent.runState == AgentRunState.QUEUED,
+          agent.runState == AgentRunState.YIELDED,
+          "The agent was stopped; it starts again with this turn.");
+    }
     return switch (agent.runState) {
       case RUNNING ->
           started.containsKey(id)
@@ -723,7 +773,233 @@ public class AgentService {
               true,
               false,
               "The agent waits for a workspace slot; this is part of its first turn.");
+      // Unreachable: a STOPPED agent was handed back to the scheduler above.
+      case STOPPED ->
+          new Delivery(
+              agentId, false, false, false, "The agent was stopped; it starts again with this turn.");
     };
+  }
+
+  // --- a person's controls (epic qits-1667) -------------------------------------------------------
+
+  /**
+   * <b>Stop the agent</b> ({@code POST /agents/{id}/stop}). Its run state becomes STOPPED, which the
+   * scheduler never places, resumes, nudges or drives; a placed agent's harness is stopped on its
+   * daemon ({@link AgentDaemon#yield}) — a RUNNING one, and a YIELDED one too, whose harness keeps
+   * running since qits-1212 — and its worktree and workspace stay. A QUEUED agent gives up its queue
+   * place. A STOPPED agent is a no-op. A daemon that does not answer still leaves the row STOPPED:
+   * nothing will start the harness again, and the next start resumes its session. The container is
+   * never touched.
+   *
+   * @throws NotFoundException no such agent
+   * @throws ConflictException the agent was removed
+   */
+  public AgentDto stop(UUID id, String by) {
+    AgentRunState[] before = new AgentRunState[1];
+    AgentWorktree stopped =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  AgentWorktree row = lockedLive(id);
+                  before[0] = row.runState;
+                  row.runState = AgentRunState.STOPPED;
+                  return row;
+                });
+    // The row first, so no pass drives the harness the daemon is about to stop.
+    started.remove(id);
+    pendingSince.remove(id);
+    if (before[0] != AgentRunState.STOPPED
+        && before[0] != AgentRunState.QUEUED
+        && stopped.workspaceId != null) {
+      AgentDaemon.Outcome outcome = yieldOnDaemon(stopped);
+      if (outcome == AgentDaemon.Outcome.UNREACHABLE) {
+        LOG.warnf(
+            "Agent %s is STOPPED, but workspace %s's daemon did not stop its harness: no daemon"
+                + " answered",
+            id,
+            stopped.workspaceId);
+      }
+    }
+    audit(stopped, "stopped", by, before[0], AgentRunState.STOPPED);
+    if (before[0] != AgentRunState.STOPPED) {
+      settled(stopped);
+    }
+    return view(require(id));
+  }
+
+  /**
+   * <b>Restart the agent</b> ({@code POST /agents/{id}/restart}). A RUNNING agent's harness is
+   * stopped on its daemon and started again by the next pass, resuming its session (the start
+   * carries {@code agent.sessionId}). A STOPPED or YIELDED agent goes back to the scheduler as
+   * YIELDED (QUEUED, when it has no workspace), through the resume path, so the placement rules
+   * hold: it is started again, and runs once it has something to hear.
+   *
+   * @throws NotFoundException no such agent
+   * @throws ConflictException the agent was removed, or is QUEUED: not started yet
+   * @throws DomainException 503: a RUNNING agent's daemon does not answer
+   */
+  public AgentDto restart(UUID id, String by) {
+    AgentWorktree agent = require(id);
+    if (agent.state == AgentState.REMOVED) {
+      throw removed();
+    }
+    switch (agent.runState) {
+      case QUEUED ->
+          throw new ConflictException(
+              "AGENT_NOT_STARTED", "The agent is not started yet; there is nothing to restart.");
+      case RUNNING -> {
+        if (agent.workspaceId == null || yieldOnDaemon(agent) == AgentDaemon.Outcome.UNREACHABLE) {
+          throw unreachable(agent);
+        }
+        // The next pass starts it again: the drive's start resumes agent.sessionId.
+        started.remove(id);
+        audit(agent, "restarted", by, AgentRunState.RUNNING, AgentRunState.RUNNING);
+      }
+      case STOPPED, YIELDED -> {
+        AgentRunState[] before = new AgentRunState[1];
+        AgentWorktree row =
+            QuarkusTransaction.requiringNew()
+                .call(
+                    () -> {
+                      AgentWorktree locked = lockedLive(id);
+                      before[0] = locked.runState;
+                      if (locked.runState == AgentRunState.STOPPED
+                          || locked.runState == AgentRunState.YIELDED) {
+                        locked.runState =
+                            locked.workspaceId == null
+                                ? AgentRunState.QUEUED
+                                : AgentRunState.YIELDED;
+                      }
+                      return locked;
+                    });
+        audit(row, "restarted", by, before[0], row.runState);
+        bringUp(row);
+        settled(row);
+      }
+      default -> throw new IllegalStateException("run state " + agent.runState);
+    }
+    kick();
+    return view(require(id));
+  }
+
+  /**
+   * <b>Yield the agent's slot</b> ({@code POST /agents/{id}/yield}): the scheduler's own yield
+   * ({@link #writeYield}) — RUNNING becomes YIELDED, the slot is free at once, and the harness keeps
+   * running (qits-1212). Resumable: anything it should hear brings it back, as for any yield.
+   *
+   * @throws NotFoundException no such agent
+   * @throws ConflictException the agent is not RUNNING
+   */
+  public AgentDto yieldSlot(UUID id, String by) {
+    AgentWorktree agent = require(id);
+    if (agent.state == AgentState.REMOVED
+        || agent.runState != AgentRunState.RUNNING
+        || !writeYield(id)) {
+      AgentWorktree now = require(id);
+      throw new ConflictException(
+          "AGENT_NOT_RUNNING",
+          "Only a running agent yields; this one is "
+              + (now.state == AgentState.REMOVED ? "REMOVED" : now.runState)
+              + ".");
+    }
+    audit(agent, "yielded", by, AgentRunState.RUNNING, AgentRunState.YIELDED);
+    announce(
+        new AgentYielded(
+            agent.id.toString(),
+            agent.workId,
+            idOf(agent.workspaceId),
+            agent.repositoryId,
+            Instant.now()));
+    settled(agent);
+    kick();
+    return view(require(id));
+  }
+
+  /**
+   * <b>Interrupt the agent's turn</b> ({@code POST /agents/{id}/interrupt}): ESC into its running
+   * TERMINAL harness, as a person at the terminal would press it. Never changes its run state.
+   *
+   * @throws NotFoundException no such agent
+   * @throws ConflictException no running session, or the daemon refused (its own sentence), or the
+   *     daemon predates the route
+   * @throws DomainException 503: the daemon does not answer
+   */
+  public Interrupt interrupt(UUID id, String by) {
+    AgentWorktree agent = require(id);
+    if (agent.state == AgentState.REMOVED
+        || agent.runState != AgentRunState.RUNNING
+        || agent.commandId == null
+        || agent.workspaceId == null) {
+      throw new ConflictException(
+          "AGENT_NOT_RUNNING",
+          "The agent has no running session (runState "
+              + (agent.state == AgentState.REMOVED ? "REMOVED" : agent.runState)
+              + ").");
+    }
+    if (!daemon.isResolvable()) {
+      throw unreachable(agent);
+    }
+    AgentDaemon.Interrupted answer = daemon.get().interrupt(agent.workspaceId, id.toString());
+    switch (answer.outcome()) {
+      case OK -> {}
+      case REFUSED -> throw new ConflictException("AGENT_NOT_INTERRUPTIBLE", answer.detail());
+      case UNKNOWN_AGENT ->
+          throw new ConflictException(
+              "AGENT_NOT_INTERRUPTIBLE",
+              "The agent's workspace daemon does not know it: it has no running harness.");
+      default -> throw unreachable(agent);
+    }
+    audit(agent, "interrupted", by, agent.runState, agent.runState);
+    return new Interrupt(id.toString(), true, "ESC was sent to the agent's harness.");
+  }
+
+  /** The agent's row, locked, for a door that writes it; a REMOVED one is a 409. */
+  private AgentWorktree lockedLive(UUID id) {
+    AgentWorktree row =
+        agents
+            .findByIdOptional(id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+            .orElseThrow(() -> new NotFoundException("Agent not found: " + id));
+    if (row.state == AgentState.REMOVED) {
+      throw removed();
+    }
+    return row;
+  }
+
+  private static ConflictException removed() {
+    return new ConflictException("AGENT_REMOVED", "The agent was removed.");
+  }
+
+  private static DomainException unreachable(AgentWorktree agent) {
+    return new DomainException(
+        503,
+        "AGENT_DAEMON_UNREACHABLE",
+        "The agent's workspace daemon does not answer"
+            + (agent.workspaceId == null ? "" : " (workspace " + agent.workspaceId + ")")
+            + "; try again once it is connected.");
+  }
+
+  /** The daemon's yield of a placed agent: its harness stops, its worktree stays. */
+  private AgentDaemon.Outcome yieldOnDaemon(AgentWorktree agent) {
+    if (!daemon.isResolvable() || agent.workspaceId == null) {
+      return AgentDaemon.Outcome.UNREACHABLE;
+    }
+    return daemon.get().yield(agent.workspaceId, agent.id.toString());
+  }
+
+  /** What a control door changed is shown: the workspace's agents, and the agent's attention. */
+  private void settled(AgentWorktree agent) {
+    if (agent.workspaceId != null) {
+      changePublisher.fire(agent.repositoryId, agent.workspaceId, WorkspaceChangeHint.Topic.AGENTS);
+    }
+    attentions.reevaluate(agent.id);
+  }
+
+  /** The one INFO line every write door of an agent logs (epic qits-1667). */
+  private static void audit(
+      AgentWorktree agent, String verb, String by, AgentRunState before, AgentRunState after) {
+    LOG.infof(
+        "Agent %s %s by %s (workspace %s, runState %s -> %s)",
+        agent.id, verb, by == null ? "an unnamed caller" : by, agent.workspaceId, before, after);
   }
 
   /**
@@ -1514,7 +1790,12 @@ public class AgentService {
   }
 
   private static boolean allYielded(List<AgentWorktree> live) {
-    return live.stream().allMatch(a -> a.runState == AgentRunState.YIELDED && a.pendingText == null);
+    // A STOPPED agent holds no slot (epic qits-1667), whatever is pending on its row.
+    return live.stream()
+        .allMatch(
+            a ->
+                a.runState == AgentRunState.STOPPED
+                    || (a.runState == AgentRunState.YIELDED && a.pendingText == null));
   }
 
   /**

@@ -513,6 +513,266 @@ public class AgentServiceTest {
     assertFalse(delivery.delivered() || delivery.launched() || delivery.resumed());
   }
 
+  // --- a person's controls (epic qits-1667) -------------------------------------------------------
+
+  @Test
+  void aDeliveryByAgentIdReachesTheAgentAndTheWorkIdFormIsTheSameCall() {
+    AgentService.Dispatch dispatched = dispatch("w-by-id", true, null);
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+
+      AgentService.Delivery byId = service.deliver(id, "by id", false, "alice");
+      assertEquals(agentId, byId.agentId());
+      assertTrue(byId.delivered());
+      service.reconcile();
+      assertTrue(daemon.callsFor(agentId).contains("turn " + slot + " " + agentId + " by id"));
+
+      AgentService.Delivery byWork = service.deliver("w-by-id", "by work", false);
+      assertEquals(byId.detail(), byWork.detail(), "the work-item form delegates");
+      service.reconcile();
+      assertTrue(daemon.callsFor(agentId).contains("turn " + slot + " " + agentId + " by work"));
+
+      assertThrows(BadRequestException.class, () -> service.deliver(id, " ", false));
+      assertThrows(
+          eu.wohlben.qits.workspaces.error.NotFoundException.class, () -> service.deliver(UUID.randomUUID(), "anyone?", false));
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aRemovedAgentHearsNothing() {
+    UUID id = agentIn(runnerSlot(), false, AgentRunState.RUNNING);
+    service.markRemoved(id, AgentRemoved.DISCARDED, false, "gone");
+
+    ConflictException refused =
+        assertThrows(ConflictException.class, () -> service.deliver(id, "hello?", false, "alice"));
+    assertEquals("AGENT_REMOVED", refused.code());
+    assertNull(row(id.toString()).pendingText, "nothing was said");
+    assertThrows(ConflictException.class, () -> service.stop(id, "alice"));
+    assertThrows(ConflictException.class, () -> service.restart(id, "alice"));
+    assertThrows(ConflictException.class, () -> service.yieldSlot(id, "alice"));
+    assertThrows(ConflictException.class, () -> service.interrupt(id, "alice"));
+  }
+
+  @Test
+  void aStoppedAgentIsLeftAloneByTheSchedulerAndAPromptStartsItAgain() {
+    AgentService.Dispatch dispatched = dispatch("w-stop", true, "go");
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      assertTrue(service.isStarted(id));
+      service.awaitSchedulerIdle();
+
+      AgentDto stopped = service.stop(id, "alice");
+      assertEquals(AgentRunState.STOPPED, stopped.runState());
+      assertEquals(slot, stopped.workspaceRowId(), "it keeps its workspace");
+      assertTrue(
+          daemon.callsFor(agentId).contains("yield " + slot + " " + agentId),
+          "its harness is stopped on the daemon");
+      assertFalse(service.isStarted(id));
+      service.awaitSchedulerIdle();
+
+      // Stopped again: a no-op, and no second daemon call.
+      List<String> before = daemon.callsFor(agentId);
+      assertEquals(AgentRunState.STOPPED, service.stop(id, "alice").runState());
+      assertEquals(before, daemon.callsFor(agentId));
+
+      // Never nudged, however long it has been quiet, on an item mid-phase.
+      QuarkusTransaction.requiringNew()
+          .run(() -> agents.findById(id).entityStatus = "IMPLEMENTING");
+      backdateQuiet(agentId, Duration.ofHours(5));
+      service.nudgeIdle(Duration.ofMinutes(1), 3);
+      assertNull(row(agentId).pendingText, "a stopped agent is not nudged");
+
+      // A wait that fires for it is marked fired, and its turn waits on the row.
+      waits.create(id, "ci run 1667", EventSelection.of("BuildStatusChanged"), null);
+      assertEquals(1, waits.onEvent("ev-stopped", "BuildStatusChanged", Instant.now(), "{}"));
+      String wake = row(agentId).pendingText;
+      assertNotNull(wake, "the wake is appended to the pending turn");
+      long starts = startsOf(agentId);
+      service.reconcile();
+      assertEquals(AgentRunState.STOPPED, row(agentId).runState, "not resumed by the wake");
+      assertEquals(starts, startsOf(agentId), "not started");
+      assertFalse(
+          daemon.callsFor(agentId).stream().anyMatch(c -> c.startsWith("turn ")
+              && c.contains("ci run 1667")),
+          "not driven");
+      assertEquals(wake, row(agentId).pendingText);
+
+      // Prompted, it goes back to the scheduler and starts again, its session resumed.
+      AgentService.Delivery delivery = service.deliver(id, "carry on", false, "alice");
+      assertEquals("The agent was stopped; it starts again with this turn.", delivery.detail());
+      assertTrue(delivery.resumed(), "handed back as a yielded agent with a turn to hear");
+      service.reconcile();
+      service.awaitSchedulerIdle();
+      assertEquals(AgentRunState.RUNNING, row(agentId).runState);
+      AgentDaemon.Start again = lastStartOf(agentId);
+      assertEquals("session-" + agentId, again.sessionId(), "its session is resumed");
+      assertTrue(again.instruction().contains("carry on"), again.instruction());
+      assertTrue(again.instruction().contains("ci run 1667"), "the wake is heard now");
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aStoppedAgentFreesItsSlotForAQueuedOne() {
+    service.awaitSchedulerIdle();
+    Long slot = runnerSlot();
+    UUID stopped = agentIn(slot, false, AgentRunState.RUNNING);
+    service.stop(stopped, "alice");
+    service.awaitSchedulerIdle();
+    UUID queued = agentIn(null, false, AgentRunState.QUEUED);
+
+    service.placeQueued();
+
+    AgentWorktree placed = row(queued.toString());
+    assertEquals(AgentRunState.RUNNING, placed.runState);
+    assertEquals(slot, placed.workspaceId, "the stopped agent holds no slot");
+    assertEquals(AgentRunState.STOPPED, row(stopped.toString()).runState);
+  }
+
+  @Test
+  void aQueuedAgentStoppedGivesUpItsPlaceAndARestartQueuesItAgain() {
+    service.awaitSchedulerIdle();
+    UUID id = agentIn(null, false, AgentRunState.QUEUED);
+
+    ConflictException notStarted =
+        assertThrows(ConflictException.class, () -> service.restart(id, "alice"));
+    assertEquals("AGENT_NOT_STARTED", notStarted.code());
+
+    assertEquals(AgentRunState.STOPPED, service.stop(id, "alice").runState());
+    assertNull(row(id.toString()).workspaceId);
+    assertTrue(daemon.callsFor(id.toString()).isEmpty(), "nothing ran, so nothing was stopped");
+    service.awaitSchedulerIdle();
+    service.placeQueued();
+    assertEquals(AgentRunState.STOPPED, row(id.toString()).runState, "not placed");
+
+    assertEquals(AgentRunState.QUEUED, service.restart(id, "alice").runState());
+  }
+
+  @Test
+  void aStopWithNoDaemonAnsweringStillStops() {
+    AgentService.Dispatch dispatched = dispatch("w-stop-unreachable", true, null);
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      daemon.disconnect(slot);
+      assertEquals(AgentRunState.STOPPED, service.stop(id, "alice").runState());
+      assertEquals(AgentRunState.STOPPED, row(agentId).runState);
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void aRestartOfARunningAgentStartsItsHarnessAgainOnItsSession() {
+    AgentService.Dispatch dispatched = dispatch("w-restart", true, "go");
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      long starts = startsOf(agentId);
+
+      AgentDto restarted = service.restart(id, "alice");
+      assertEquals(AgentRunState.RUNNING, restarted.runState());
+      assertTrue(daemon.callsFor(agentId).contains("yield " + slot + " " + agentId));
+      service.reconcile();
+      assertEquals(starts + 1, startsOf(agentId), "started again");
+      assertEquals("session-" + agentId, lastStartOf(agentId).sessionId());
+
+      // Stopped, a restart hands it back to the scheduler as YIELDED: started, not yet running.
+      service.stop(id, "alice");
+      assertEquals(AgentRunState.YIELDED, service.restart(id, "alice").runState());
+      service.reconcile();
+      assertEquals(starts + 2, startsOf(agentId), "its harness is started again");
+      assertEquals(AgentRunState.YIELDED, row(agentId).runState, "nothing to hear, so not running");
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void onlyARunningAgentYieldsAndItsHarnessKeepsRunning() {
+    AgentService.Dispatch dispatched = dispatch("w-yield-door", true, null);
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      service.awaitSchedulerIdle();
+      List<String> before = daemon.callsFor(agentId);
+
+      assertEquals(AgentRunState.YIELDED, service.yieldSlot(id, "agent-self").runState());
+      assertEquals(before, daemon.callsFor(agentId), "the scheduler's own yield: no daemon call");
+      assertTrue(service.isStarted(id), "the harness keeps running");
+
+      ConflictException again =
+          assertThrows(ConflictException.class, () -> service.yieldSlot(id, "agent-self"));
+      assertEquals("Only a running agent yields; this one is YIELDED.", again.getMessage());
+
+      // Resumable: a turn brings it back.
+      service.deliver(id, "your answer", false, "alice");
+      service.reconcile();
+      assertEquals(AgentRunState.RUNNING, row(agentId).runState);
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  @Test
+  void anInterruptReachesARunningHarnessAndNeverChangesItsRunState() {
+    AgentService.Dispatch dispatched = dispatch("w-interrupt", true, "go");
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      UUID yielded = agentIn(runnerSlot(), false, AgentRunState.YIELDED);
+      ConflictException noSession =
+          assertThrows(ConflictException.class, () -> service.interrupt(yielded, "alice"));
+      assertEquals("The agent has no running session (runState YIELDED).", noSession.getMessage());
+
+      service.reconcile();
+      AgentService.Interrupt interrupted = service.interrupt(id, "alice");
+      assertTrue(interrupted.interrupted());
+      assertEquals(agentId, interrupted.agentId());
+      assertTrue(daemon.callsFor(agentId).contains("interrupt " + slot + " " + agentId));
+      assertEquals(AgentRunState.RUNNING, row(agentId).runState);
+
+      daemon.interruptsAnswer(
+          new AgentDaemon.Interrupted(
+              AgentDaemon.Outcome.REFUSED, "The harness has not started yet."));
+      ConflictException refused =
+          assertThrows(ConflictException.class, () -> service.interrupt(id, "alice"));
+      assertEquals("The harness has not started yet.", refused.getMessage());
+
+      daemon.interruptsAnswer(
+          new AgentDaemon.Interrupted(AgentDaemon.Outcome.UNREACHABLE, "no answer"));
+      eu.wohlben.qits.workspaces.error.DomainException down =
+          assertThrows(
+              eu.wohlben.qits.workspaces.error.DomainException.class,
+              () -> service.interrupt(id, "alice"));
+      assertEquals(503, down.statusCode());
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
   /**
    * qits-1603, shape A: a scheduler transaction that changes other columns only — here the start
    * refusal, as {@code recordRefusal} writes it — read the row before a delivery committed its turn

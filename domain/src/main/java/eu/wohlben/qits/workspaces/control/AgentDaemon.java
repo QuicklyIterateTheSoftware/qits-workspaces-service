@@ -136,6 +136,15 @@ public interface AgentDaemon {
     }
   }
 
+  /**
+   * An interrupt's answer (epic qits-1667): {@link Outcome#OK}, the ESC was written; {@link
+   * Outcome#REFUSED} with the daemon's own sentence (no running harness, a harness that is not a
+   * terminal, one not started yet) — or, for a daemon that predates the route, the sentence that
+   * says so; {@link Outcome#UNKNOWN_AGENT}, the daemon does not know the agent; {@link
+   * Outcome#UNREACHABLE}, no tunnel or no answer.
+   */
+  record Interrupted(Outcome outcome, String detail) {}
+
   /** Whether the workspace's daemon can be reached at all (its tunnel is up). */
   boolean reachable(Long workspaceRowId);
 
@@ -157,4 +166,18 @@ public interface AgentDaemon {
    * {@link Outcome#UNKNOWN_AGENT} means there is nothing to remove.
    */
   Outcome remove(Long workspaceRowId, String agentId, boolean force);
+
+  /**
+   * {@code POST agent-worktrees/{id}/yield} (epic qits-1667): the daemon stops the agent's harness
+   * and keeps its worktree; the next start resumes its session. {@link Outcome#UNKNOWN_AGENT}: the
+   * daemon does not know the agent, so nothing runs. The scheduler's own yield makes no daemon call
+   * (qits-1212); this is a person's stop or restart.
+   */
+  Outcome yield(Long workspaceRowId, String agentId);
+
+  /**
+   * {@code POST agent-worktrees/{id}/interrupt} (epic qits-1667): ESC into the running TERMINAL
+   * harness. Never changes what runs.
+   */
+  Interrupted interrupt(Long workspaceRowId, String agentId);
 }
