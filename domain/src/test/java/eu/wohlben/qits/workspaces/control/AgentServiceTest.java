@@ -23,6 +23,7 @@ import eu.wohlben.qits.workspaces.events.AgentCleanupDeferred;
 import eu.wohlben.qits.workspaces.events.AgentNudged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
+import eu.wohlben.qits.workspaces.events.AgentRequeued;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
@@ -1493,6 +1494,62 @@ public class AgentServiceTest {
     Instant first = row(startedThere.toString()).startRefusedAt;
     service.reconcile();
     assertEquals(first, row(startedThere.toString()).startRefusedAt, "said once, not every pass");
+  }
+
+  @Test
+  void anAgentThatNeverStartedOnAFailedWorkspaceWhoseDaemonIsLiveIsQueuedForAnother() {
+    // qits-1750 (ws-6054): the daemon connected and stayed registered, but its clone hung and its
+    // API never bound, so every start went unanswered and the agent sat placed and silent.
+    Long failed = failedSlot();
+    UUID id = agentIn(failed, true, AgentRunState.RUNNING);
+    createdAgents.add(id);
+    String agentId = id.toString();
+    daemon.leaveStartsUnanswered();
+    liveness.markLive(failed);
+    try {
+      service.reconcile();
+
+      AgentWorktree requeued = row(agentId);
+      assertEquals(AgentRunState.QUEUED, requeued.runState);
+      assertNull(requeued.workspaceId, "taken out of the workspace that never came up");
+      assertNotNull(requeued.startRefusal, "its view says why it does not run");
+      assertTrue(requeued.startRefusal.contains("did not come up"), requeued.startRefusal);
+      List<AgentRequeued> events =
+          announced.of(AgentRequeued.class, e -> e.agentId().equals(agentId));
+      assertEquals(1, events.size());
+      assertEquals(AgentRequeued.WORKSPACE_FAILED, events.get(0).reason());
+    } finally {
+      daemon.acceptStarts();
+      liveness.markDead(failed);
+    }
+  }
+
+  @Test
+  void anAgentThatStartedOnAFailedWorkspaceWhoseDaemonIsLiveStaysPlaced() {
+    // qits-1750: a live daemon on the FAILED slot may still hold this agent's worktree.
+    Long failed = failedSlot();
+    UUID id = agentIn(failed, true, AgentRunState.RUNNING);
+    createdAgents.add(id);
+    String agentId = id.toString();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              agents.findById(id).startedWorkspaceId = failed;
+              agents.findById(id).commandId = "cmd-earlier";
+            });
+    daemon.leaveStartsUnanswered();
+    liveness.markLive(failed);
+    try {
+      service.reconcile();
+
+      AgentWorktree placed = row(agentId);
+      assertEquals(failed, placed.workspaceId, "it stays where its worktree is");
+      assertEquals(AgentRunState.RUNNING, placed.runState);
+      assertTrue(announced.of(AgentRequeued.class, e -> e.agentId().equals(agentId)).isEmpty());
+    } finally {
+      daemon.acceptStarts();
+      liveness.markDead(failed);
+    }
   }
 
   @Test

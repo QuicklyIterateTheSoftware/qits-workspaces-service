@@ -51,7 +51,11 @@ public class FakeAgentDaemon implements AgentDaemon {
   /** The refusal every start answers with; null: starts are accepted. */
   private volatile String startRefusal;
 
+  /** Every start goes unanswered (qits-1750: a daemon connected whose API never bound). */
+  private volatile boolean startsUnanswered;
+
   public void reset() {
+    startsUnanswered = false;
     calls.clear();
     starts.clear();
     checks.clear();
@@ -76,6 +80,15 @@ public class FakeAgentDaemon implements AgentDaemon {
 
   public void acceptStarts() {
     startRefusal = null;
+    startsUnanswered = false;
+  }
+
+  /**
+   * Every start answers {@link Outcome#UNREACHABLE} though the workspace stays {@linkplain
+   * #reachable reachable}, until {@link #acceptStarts} (qits-1750).
+   */
+  public void leaveStartsUnanswered() {
+    startsUnanswered = true;
   }
 
   public void leftover(String agentId, CleanupCheck check) {
@@ -117,6 +130,9 @@ public class FakeAgentDaemon implements AgentDaemon {
   public Started start(Long workspaceRowId, Start start) {
     calls.add("start " + workspaceRowId + " " + start.agentId() + " " + start.instruction());
     starts.add(start);
+    if (startsUnanswered) {
+      return Started.of(Outcome.UNREACHABLE, "the daemon did not answer");
+    }
     String refusal = startRefusal;
     if (refusal != null) {
       return Started.of(Outcome.REFUSED, refusal);
