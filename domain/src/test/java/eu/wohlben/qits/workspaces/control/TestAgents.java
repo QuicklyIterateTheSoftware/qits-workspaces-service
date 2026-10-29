@@ -27,8 +27,24 @@ public class TestAgents {
 
   private final List<UUID> written = Collections.synchronizedList(new ArrayList<>());
 
-  /** An ACTIVE agent of a fresh work item {@code entityId}, placed on {@code workspaceRowId}. */
+  /**
+   * An ACTIVE agent of a fresh work item {@code entityId}, placed on {@code workspaceRowId} and
+   * started there, so its worktree may live on the slot and the guard asks about it (qits-1750).
+   */
   public UUID placeOn(String repositoryId, Long workspaceRowId, String entityId) {
+    return write(repositoryId, workspaceRowId, entityId, workspaceRowId);
+  }
+
+  /**
+   * {@link #placeOn}, but never started there: no start recorded and no command id, so nothing of
+   * it is on the slot (qits-1750).
+   */
+  public UUID placeUnstartedOn(String repositoryId, Long workspaceRowId, String entityId) {
+    return write(repositoryId, workspaceRowId, entityId, null);
+  }
+
+  private UUID write(
+      String repositoryId, Long workspaceRowId, String entityId, Long startedWorkspaceId) {
     UUID id = UUID.randomUUID();
     QuarkusTransaction.requiringNew()
         .run(
@@ -40,6 +56,7 @@ public class TestAgents {
               row.entityId = entityId;
               row.wrapperBranch = "ticket/w-" + id;
               row.workspaceId = workspaceRowId;
+              row.startedWorkspaceId = startedWorkspaceId;
               row.runState = AgentRunState.RUNNING;
               row.createdAt = Instant.now();
               row.gitRefs = "[]";

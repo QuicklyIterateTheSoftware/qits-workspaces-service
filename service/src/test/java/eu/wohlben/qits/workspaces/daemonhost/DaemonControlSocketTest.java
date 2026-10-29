@@ -399,6 +399,80 @@ class DaemonControlSocketTest {
   }
 
   /**
+   * qits-1750 (ws-6054): a clone that hung past the start's timeout and then finished reports a
+   * {@code Provisioned} no slot waits for. It is not adopted — no slot is made for it — but it is
+   * said, at WARN, naming the workspace.
+   */
+  @Test
+  void aProvisionedWithNoSlotIsDroppedWithAWarning() throws Exception {
+    List<java.util.logging.LogRecord> records =
+        java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+    java.util.logging.Handler handler =
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(java.util.logging.LogRecord record) {
+            records.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger(WorkspaceDaemonRegistry.class.getName());
+    logger.addHandler(handler);
+    try (FakePeer peer = connect()) {
+      await(() -> registry.isDaemonLive(WORKSPACE_ROW_ID));
+      assertFalse(registry.hasProvisionSlot(WORKSPACE_ROW_ID));
+      peer.ws()
+          .writeTextMessage(
+              codec.encode(
+                  new eu.wohlben.qits.workspacedaemon.protocol.Provisioned(
+                      WORKSPACE_ID, "cafebabe")));
+      await(
+          () -> {
+            synchronized (records) {
+              return records.stream()
+                  .anyMatch(
+                      r ->
+                          r.getLevel().intValue() == java.util.logging.Level.WARNING.intValue()
+                              && String.valueOf(formatted(r))
+                                  .contains("after its start was given up"));
+            }
+          });
+      String warning;
+      synchronized (records) {
+        warning =
+            records.stream()
+                .map(DaemonControlSocketTest::formatted)
+                .filter(m -> m.contains("after its start was given up"))
+                .findFirst()
+                .orElseThrow();
+      }
+      assertTrue(warning.contains("workspace " + WORKSPACE_ROW_ID), warning);
+      assertTrue(warning.contains("not adopted"), warning);
+      assertFalse(registry.hasProvisionSlot(WORKSPACE_ROW_ID), "no slot is made for it");
+    } finally {
+      logger.removeHandler(handler);
+    }
+  }
+
+  private static String formatted(java.util.logging.LogRecord record) {
+    Object[] params = record.getParameters();
+    String message = record.getMessage();
+    if (params == null || params.length == 0) {
+      return message;
+    }
+    try {
+      return String.format(message, params);
+    } catch (java.util.IllegalFormatException e) {
+      return java.text.MessageFormat.format(message, params);
+    }
+  }
+
+  /**
    * A start that ends without awaiting forgets its slot, and only its own: a newer start's slot
    * replaces an older one (waking an await still parked on it), survives the older handle's forget,
    * and never carries the older start's outcome.

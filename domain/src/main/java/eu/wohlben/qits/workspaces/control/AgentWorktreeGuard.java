@@ -26,7 +26,8 @@ import java.util.Optional;
  * (no tunnel, no {@link AgentDaemon} bean, a check that went unanswered) is a refusal, because an
  * unknowable worktree is not a safe basis for destroying a container. A slot with no live agent has
  * nothing to lose and passes whatever its daemon's state. An agent the daemon does not know (404)
- * has no worktree there, so it holds nothing either. A harness still busy in the background is a
+ * has no worktree there, so it holds nothing either, and one that never started on the slot ({@link
+ * #mayHoldWorktree}) is not asked at all (qits-1750). A harness still busy in the background is a
  * refusal too: tearing its container down kills that work mid-flight.
  *
  * <p>"Live" is ACTIVE <em>and</em> OBSOLETE: an obsolete agent's worktree stays on the slot until
@@ -93,6 +94,11 @@ public class AgentWorktreeGuard {
     List<String> busy = new ArrayList<>();
     List<String> unchecked = new ArrayList<>();
     for (AgentWorktree agent : live) {
+      if (!mayHoldWorktree(agent, workspaceRowId)) {
+        // Never started here (qits-1750): nothing of it is on the slot, so its daemon need not be
+        // asked — and one that connected but never answered must not hold the slot hostage.
+        continue;
+      }
       AgentDaemon.CleanupAnswer answer = check(workspaceRowId, agent.id.toString());
       if (answer.isUnknownAgent()) {
         continue;
@@ -141,6 +147,18 @@ public class AgentWorktreeGuard {
                   + ", first."));
     }
     return Optional.empty();
+  }
+
+  /**
+   * Whether the agent's worktree may live in workspace {@code workspaceRowId}'s volume (qits-1233):
+   * a start was accepted there last, or — a row from before {@code started_workspace_id} — it was
+   * started somewhere (it holds a command id) and no start was recorded since. The one rule both
+   * this guard and {@link AgentService}'s FAILED-slot requeue read (qits-1750).
+   */
+  static boolean mayHoldWorktree(AgentWorktree agent, Long workspaceRowId) {
+    return agent.startedWorkspaceId == null
+        ? agent.commandId != null
+        : agent.startedWorkspaceId.equals(workspaceRowId);
   }
 
   /** The agent as a person finds it: its id and its work item. */
