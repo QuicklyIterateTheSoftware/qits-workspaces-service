@@ -2,6 +2,7 @@ package eu.wohlben.qits.workspaces.contracts;
 
 import eu.wohlben.qits.agents.ClaudeCodeAgent;
 import eu.wohlben.qits.workspaces.control.AgentAttentions;
+import eu.wohlben.qits.workspaces.control.AgentService;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.FakeTargetPlacement;
 import eu.wohlben.qits.workspaces.control.TargetPlacement;
@@ -201,6 +202,7 @@ public class ProviderStates {
   @Inject AgentBranchRepository agentBranches;
   @Inject AgentWaitRepository agentWaits;
   @Inject AgentAttentions attentions;
+  @Inject AgentService agentService;
   @Inject WorkspaceService workspaceService;
   @Inject FakeRepositoryLookup repositories;
   @Inject FakeTargetPlacement targets;
@@ -296,6 +298,9 @@ public class ProviderStates {
 
   /** Removes every row a state writes, and tears down every workspace a git-backed state made. */
   public void cleanUp() {
+    // A pass the last interaction kicked (a stop, a restart, a discard) must be over before the
+    // next state writes its rows, or it places that state's queued agent mid-recording (qits-1667).
+    agentService.awaitSchedulerIdle();
     bearers.reset();
     endStartingProcess();
     endLeftoverProcesses();

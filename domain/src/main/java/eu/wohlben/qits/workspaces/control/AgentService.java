@@ -1647,9 +1647,11 @@ public class AgentService {
    * scheduler's own thread, and a test that hand-writes rows after a kicking door would otherwise
    * race that pass. The scheduler is one thread, first in first out, so a no-op through it returns
    * once every pass submitted before it has finished; a pass that kicked again in the meantime is
-   * waited out the same way. Takes neither lock, so a pass it waits on never waits on it.
+   * waited out the same way. Takes neither lock, so a pass it waits on never waits on it. Public for
+   * the contract states, which settle it between states (qits-1667): a pass one interaction kicked
+   * must not place the next state's queued agent while that state is being recorded.
    */
-  void awaitSchedulerIdle() {
+  public void awaitSchedulerIdle() {
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
     do {
       try {
@@ -1765,8 +1767,16 @@ public class AgentService {
             QuarkusTransaction.requiringNew()
                 .call(
                     () -> {
-                      AgentWorktree row = agents.findById(agent.id);
-                      if (row.state != AgentState.ACTIVE || row.runState != AgentRunState.QUEUED) {
+                      // Locked (qits-1667), as markRemoved is: read unlocked, a discard committing
+                      // between this check and the write below left a REMOVED agent RUNNING.
+                      AgentWorktree row =
+                          agents
+                              .findByIdOptional(
+                                  agent.id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                              .orElse(null);
+                      if (row == null
+                          || row.state != AgentState.ACTIVE
+                          || row.runState != AgentRunState.QUEUED) {
                         return false;
                       }
                       // Checked again where it is written: an agent of the slot may have woken
@@ -3223,7 +3233,11 @@ public class AgentService {
         QuarkusTransaction.requiringNew()
             .call(
                 () -> {
-                  AgentWorktree row = agents.findById(id);
+                  // Locked, so a placement in flight either lands first or sees REMOVED (qits-1667).
+                  AgentWorktree row =
+                      agents
+                          .findByIdOptional(id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                          .orElse(null);
                   if (row == null || row.state == AgentState.REMOVED) {
                     return null;
                   }
