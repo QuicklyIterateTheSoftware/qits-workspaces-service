@@ -1277,6 +1277,59 @@
         "references": {
           "qits-call": {
             "app": "qits-workspace-daemon",
+            "operationId": "interruptAgent"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "interruptAgent"
+          }
+        }
+      },
+      "description": "interruptAgent: interruptAgent",
+      "key": "1e629d2d",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a workspace daemon with an agent running",
+          "params": {
+            "agentId": "00000000-0000-4000-8000-0000000000a1",
+            "commandId": "00000000-0000-4000-8000-000000000100",
+            "workspaceRowId": "1"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {},
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/workspaces/container/${workspaceRowId}/agent-worktrees/${agentId}/interrupt",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "method": "POST",
+        "path": "/workspaces/container/1/agent-worktrees/00000000-0000-4000-8000-0000000000a1/interrupt"
+      },
+      "response": {
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-workspace-daemon",
             "operationId": "yieldAgent"
           },
           "qits-trigger": {

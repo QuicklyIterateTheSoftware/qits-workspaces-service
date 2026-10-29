@@ -56,9 +56,9 @@ import org.junit.jupiter.api.Test;
  *       the tenant its signing-key row, in {@link IdpContract}.
  * </ul>
  *
- * <p><b>Named exclusions</b>, each with its reason: {@code ContainerProxyRoute} (the proxy hands a
- * caller's own request to a daemon verbatim, so the caller's pact against qits-workspace-daemon is
- * that call's contract); {@code WorkspaceTunnels} (the byte tunnel under every daemon call, and no
+ * <p><b>Named exclusions</b>, each with its reason: {@code DaemonForwarder} (the forwarding half of
+ * the container and agent proxy routes hands a caller's own request to a daemon, so the caller's
+ * pact against qits-workspace-daemon is that call's contract); {@code WorkspaceTunnels} (the byte tunnel under every daemon call, and no
  * call of its own); {@link AgentDaemon#reachable} (asks the tunnel registry, never the daemon); and
  * {@code ContainersClient.touch} (WorkspaceContainers keeps the verb, but nothing has called it since
  * the editor keepalive left, qits-1152). Not seen by this guard, because the call is made inside a
@@ -124,8 +124,8 @@ class OutboundCallsGuardTest {
           "eu/wohlben/qits/workspaces/containers/ContainersClientProducer",
               "builds ContainersClient: ContainersContract",
           "eu/wohlben/qits/workspaces/daemonhost/DaemonAgentClient", "WorkspaceDaemonContract",
-          "eu/wohlben/qits/workspaces/api/ContainerProxyRoute",
-              "excluded: a caller's own daemon request, proxied verbatim",
+          "eu/wohlben/qits/workspaces/api/DaemonForwarder",
+              "excluded: a caller's own daemon request, proxied for the container and agent routes",
           "eu/wohlben/qits/workspaces/daemonhost/WorkspaceTunnels",
               "excluded: the tunnel transport, no call of its own");
 

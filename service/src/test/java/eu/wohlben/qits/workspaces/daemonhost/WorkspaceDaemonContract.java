@@ -215,20 +215,18 @@ public final class WorkspaceDaemonContract {
                   call(
                       (client, row, agentId) ->
                           assertEquals(AgentDaemon.Outcome.OK, client.yield(row, agentId)))),
-              // ESC into the running harness. Waits for qits-workspace-daemon to record
-              // interruptAgent (its route ships in the same epic, and the daemon releases first).
+              // ESC into the running harness (qits-1667).
               ContractRow.of(
-                      Trigger.operation("interruptAgent"),
-                      AGENT_RUNNING,
-                      "interruptAgent",
-                      Request.json(emptyBody()),
-                      List.of(),
-                      call(
-                          (client, row, agentId) ->
-                              assertEquals(
-                                  AgentDaemon.Outcome.OK,
-                                  client.interrupt(row, agentId).outcome())))
-                  .waiting(),
+                  Trigger.operation("interruptAgent"),
+                  AGENT_RUNNING,
+                  "interruptAgent",
+                  Request.json(emptyBody()),
+                  List.of(),
+                  call(
+                      (client, row, agentId) ->
+                          assertEquals(
+                              AgentDaemon.Outcome.OK,
+                              client.interrupt(row, agentId).outcome()))),
               // A person's forced discard (discardAgent with force) removes whatever is left.
               ContractRow.of(
                   Trigger.operation("discardAgent"),
