@@ -212,6 +212,12 @@ class GoldenMasterRecordingTest {
                   + "\"ticketId\":\"{ticketId}\","
                   + "\"instruction\":\"Fix contract-00000001-10.\"}")
               .fixing("$.agentIdentity", "contract-agent-token-subject"),
+          // `qits agents <verb> --work qits-N` finds the item's agent this way (qits-1667).
+          Interaction.read(
+              ProviderStates.AN_AGENT_ON_A_TICKET,
+              "listAgents",
+              WORKSPACES + "/agents?workId={ticketId}&state=ACTIVE",
+              "$.agents"),
           Interaction.write(
               ProviderStates.AN_AGENT_ON_A_TICKET,
               "markAgentDispatchEntity",

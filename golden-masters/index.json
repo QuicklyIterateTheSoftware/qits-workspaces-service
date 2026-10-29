@@ -1557,6 +1557,34 @@
           }
         },
         {
+          "operationId": "listAgents",
+          "method": "GET",
+          "path": "/workspaces/api/agents",
+          "query": {
+            "workId": "{ticketId}",
+            "state": "ACTIVE"
+          },
+          "status": 200,
+          "file": "an-agent-working-on-a-ticket/listAgents.json",
+          "frozen": {
+            "ids": [
+              "$.agents[*].agentId",
+              "$.agents[*].repositoryId",
+              "$.agents[*].workId",
+              "$.agents[*].ticketId"
+            ],
+            "instants": [
+              "$.agents[*].lastActivityAt",
+              "$.agents[*].createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.agents[*].workspaceRowId"
+            ],
+            "listFilteredTo": "$.agents"
+          }
+        },
+        {
           "operationId": "markAgentDispatchBlocked",
           "method": "POST",
           "path": "/workspaces/api/agent-dispatches/blocked",

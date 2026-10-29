@@ -1,0 +1,37 @@
+{
+  "agents": [
+    {
+      "agentId": "00000000-0000-4000-8000-0000000000a1",
+      "workspaceRowId": 1,
+      "repositoryId": "00000000-0000-4000-8000-000000000013",
+      "workId": "00000000-0000-4000-8000-000000000001",
+      "entityId": "contract-00000001-10",
+      "ticketId": "00000000-0000-4000-8000-000000000001",
+      "epicId": null,
+      "wrapperBranch": "ticket/contract-00000001-10",
+      "branches": [],
+      "state": "ACTIVE",
+      "runState": "RUNNING",
+      "admin": false,
+      "harness": "CLAUDE",
+      "sessionId": null,
+      "entityTitle": "Invoice totals are off by one cent",
+      "entityStatus": "IMPLEMENTING",
+      "entityBlocked": false,
+      "activity": null,
+      "waitingSince": null,
+      "waitingOn": null,
+      "waitingOnSince": null,
+      "lastActivityAt": "2026-01-01T00:00:00Z",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "obsoleteAt": null,
+      "removedAt": null,
+      "startRefusal": null,
+      "startRefusedAt": null,
+      "waits": [],
+      "attention": null,
+      "blockedAt": null,
+      "deskAskedAt": null
+    }
+  ]
+}
