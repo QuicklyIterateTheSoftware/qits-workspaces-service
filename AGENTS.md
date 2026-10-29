@@ -1113,13 +1113,13 @@ makes every daemon call, one pass at a time, kicked after each door and every
    left alone — so a start after a lost `started` map never gives an agent a second harness.
    A refused start (409) is stored on the row once per distinct detail (`start_refusal`,
    `start_refused_at`, `AgentDto.startRefusal`/`startRefusedAt`) and tried again every pass; the
-   next accepted start clears it (qits-1217). A RUNNING agent whose workspace is FAILED with no
-   daemon (it never came up: `TargetLeaseStates.awaitDaemon`, or a FAILED lease) is queued for another
-   workspace, the reason stored as its start refusal; `WorkspaceUnqueued` kicks the pass that does
+   next accepted start clears it (qits-1217). A RUNNING agent whose workspace is FAILED (it never
+   came up: `TargetLeaseStates.awaitDaemon`, or a FAILED lease) is queued for another workspace —
+   whether or not its daemon is live, since one can connect and never answer (qits-1750) — the reason stored as its start refusal; `WorkspaceUnqueued` kicks the pass that does
    it, and a FAILED workspace is never offered as a slot. Only an agent that never started there:
    `started_workspace_id` (`V26`) records where a start was last accepted, which is where the
-   worktree lives, and an agent whose worktree is in the FAILED volume stays placed and waits for
-   that workspace, the reason stored once. A row from before `V26` (null) with a command id counts
+   worktree lives, and an agent whose worktree is in the FAILED volume stays placed and, with no
+   daemon, waits for that workspace, the reason stored once. A row from before `V26` (null) with a command id counts
    as started where it is placed. A second failure in a row holds the agent
    back from placement 1 min, doubling to 30 min, until an accepted start (qits-1233).
 6. **Obsolete** (qits-1276, qits-1605) — an ACTIVE agent becomes OBSOLETE once its item is closed
@@ -1444,7 +1444,8 @@ no `GitStatus` frame since protocol 10, so there is no slot-wide clean/dirty any
 container — recreate (both placements), abandon, integrate's source check, branch cleanup, a
 release's resolution (which only logs) — asks the cleanup check of each live (ACTIVE or OBSOLETE)
 agent on the slot, the check an agent's discard asks. A slot with no live agent passes whatever its
-daemon's state; an agent the daemon does not know (404) holds nothing. Leftover work, a busy harness
+daemon's state; an agent the daemon does not know (404) holds nothing, and one that never started
+on the slot (`AgentWorktreeGuard.mayHoldWorktree`, qits-1750) is not asked at all. Leftover work, a busy harness
 and a live agent whose daemon cannot be asked refuse with a 400 naming the agent, `code`
 `AGENT_HAS_LEFTOVER_WORK`, `AGENT_BUSY` or `AGENT_DAEMON_UNREACHABLE` — 400 and not discard's 409,
 because recreate has always refused with 400 and qits-landing-app's pact pins it. Abandon,

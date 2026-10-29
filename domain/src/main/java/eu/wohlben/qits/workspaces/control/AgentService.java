@@ -116,9 +116,10 @@ import org.jboss.logging.Logger;
  *       YIELDED agent is started too when this process has not started it on its daemon's current
  *       connection — after a reconnect or a restart of this service — but only started: it stays
  *       YIELDED and hears nothing until it is RUNNING again (qits-1212). A RUNNING agent whose
- *       workspace is FAILED with no daemon — it never came up — is queued for another workspace,
- *       the reason stored as its start refusal, unless it started there: then its worktree is in
- *       that volume and it waits for the workspace (qits-1233).
+ *       workspace is FAILED — it never came up — is queued for another workspace, the reason
+ *       stored as its start refusal, unless it started there: then its worktree is in that volume
+ *       and, with no daemon, it waits for the workspace (qits-1233). A live daemon on the FAILED
+ *       slot does not keep a never-started agent there (qits-1750).
  *   <li><b>Obsolete the dropped</b> (qits-1276): an ACTIVE agent whose work item is DROPPED is
  *       made OBSOLETE, released or not. A dropped item's branch is never released, so without this
  *       its agent would hold its worktree and slot for good.
@@ -2045,8 +2046,14 @@ public class AgentService {
               Instant.now()));
       return;
     }
-    if (workspace.runtimeStatus == WorkspaceRuntimeStatus.FAILED && !daemonLive(workspace.id)) {
-      if (mayHoldWorktree(agent, workspace)) {
+    if (workspace.runtimeStatus == WorkspaceRuntimeStatus.FAILED) {
+      if (!AgentWorktreeGuard.mayHoldWorktree(agent, workspace.id)) {
+        // Live daemon or not (qits-1750): a FAILED slot's daemon can stay registered and never
+        // answer, so its start comes back UNREACHABLE every pass and nothing else moves the agent.
+        requeueFromFailed(agent, workspace);
+        return;
+      }
+      if (!daemonLive(workspace.id)) {
         // Its worktree is in that volume: moving the agent would let the empty slot be discarded
         // with it. It waits for the workspace, which a person or a restart brings back.
         recordRefusal(
@@ -2056,10 +2063,8 @@ public class AgentService {
                 + workspace.id
                 + " failed to start again; the agent's worktree is there, so it waits for that"
                 + " workspace.");
-      } else {
-        requeueFromFailed(agent, workspace);
+        return;
       }
-      return;
     }
     if (!daemonLive(workspace.id) || !daemon.isResolvable()) {
       return;
@@ -2121,19 +2126,10 @@ public class AgentService {
   }
 
   /**
-   * Whether the agent's worktree may live in {@code workspace}'s volume (qits-1233): a start was
-   * accepted there last, or — a row from before {@code started_workspace_id} — it was started
-   * somewhere (it holds a command id) and no start was recorded since.
-   */
-  private static boolean mayHoldWorktree(AgentWorktree agent, Workspace workspace) {
-    return agent.startedWorkspaceId == null
-        ? agent.commandId != null
-        : agent.startedWorkspaceId.equals(workspace.id);
-  }
-
-  /**
-   * The agent's workspace never came up: FAILED, with no daemon, and the agent never started there
-   * ({@link #mayHoldWorktree}), so nothing of it is in its volume (qits-1233).
+   * The agent's workspace never came up: FAILED, and the agent never started there ({@link
+   * AgentWorktreeGuard#mayHoldWorktree}), so nothing of it is in its volume (qits-1233). Whether a
+   * daemon is live does not matter (qits-1750): one can connect and then never answer, its API
+   * bound only after a provisioning that hung.
    * Nothing will ever start the agent there — the scheduler does not restart a FAILED workspace,
    * and nobody else is told — so it is queued for another one, as for a workspace that is gone, and
    * the reason is stored as its start refusal for its view to show. The empty FAILED slot is then

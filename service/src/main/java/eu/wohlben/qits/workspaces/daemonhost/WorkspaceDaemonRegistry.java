@@ -839,11 +839,27 @@ public class WorkspaceDaemonRegistry
    * restart, a start that already ended) and is dropped rather than retained: {@code
    * computeIfAbsent} here would create an entry no awaiter ever removes, leaking the map, and hand
    * the next start a stale outcome. A duplicate on an already-completed future is a harmless no-op.
+   *
+   * <p>Dropped, but not silently (qits-1750): a successful provision with no slot is logged at WARN,
+   * because it is the one a person looks for — a clone that hung past the start's timeout and then
+   * finished, on a row already FAILED that this does not adopt or change. A failure with no slot is
+   * only DEBUG; the row says that much already.
    */
   private void completeProvision(Long workspaceId, ProvisionResult result) {
     PendingProvision pending = provisions.get(workspaceId);
     if (pending != null) {
       pending.future.complete(result);
+    } else if (result.ok()) {
+      LOG.warnf(
+          "workspace %s: provisioning finished (head %s) after its start was given up; not adopted,"
+              + " the workspace keeps the state its start left it in",
+          workspaceId,
+          result.head());
+    } else {
+      LOG.debugf(
+          "workspace %s: provisioning failed after its start was given up: %s",
+          workspaceId,
+          result.message());
     }
   }
 

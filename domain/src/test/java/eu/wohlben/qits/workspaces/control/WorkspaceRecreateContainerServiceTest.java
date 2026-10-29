@@ -284,6 +284,30 @@ public class WorkspaceRecreateContainerServiceTest {
         "a rejected recreate leaves the container untouched");
   }
 
+  /**
+   * qits-1750 (ws-6054): an agent placed on the slot that never started there has nothing in the
+   * container, so a daemon that cannot be asked about it does not stand in the recreate's way.
+   */
+  @Test
+  public void recreateRunsPastAnAgentThatNeverStartedOnTheSlotWithItsDaemonDisconnected()
+      throws Exception {
+    String repoId = clonedRepo();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
+    ensureRunning(repoId, "feat");
+    Long rowId = workspaceIds.of(repoId, "feat");
+    UUID unstarted = agents.placeUnstartedOn(repoId, rowId, "qits-11");
+    agentDaemon.disconnect(rowId);
+
+    workspaceService.beginRecreateContainer(rowId);
+
+    assertTrue(
+        startedRecorder.awaitCount(repoId, "feat", 1, 5_000),
+        "an agent with no worktree on the slot does not hold the recreate");
+    assertTrue(
+        agentDaemon.callsFor(unstarted.toString()).isEmpty(),
+        agentDaemon.callsFor(unstarted.toString()).toString());
+  }
+
   @Test
   public void recreateThrows404ForAnUnknownWorkspace() throws Exception {
     clonedRepo();

@@ -340,6 +340,8 @@ public class WorkspaceControllerTest {
               agent.entityId = "qits-1263";
               agent.wrapperBranch = "ticket/w-" + agentId;
               agent.workspaceId = rowId;
+              // Started there (qits-1750): an agent that never did holds nothing to ask about.
+              agent.startedWorkspaceId = rowId;
               agent.runState = eu.wohlben.qits.workspaces.entity.AgentRunState.RUNNING;
               agent.createdAt = java.time.Instant.now();
               agent.gitRefs = "[]";
