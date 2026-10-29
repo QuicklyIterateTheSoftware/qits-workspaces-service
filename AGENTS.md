@@ -302,7 +302,7 @@ stand-in, because the released jar predates them; the comment there says when to
 **Layer 2 is `DbRetry` at read seams, and it is placement-sensitive.** Layer 1 cannot help a request
 whose connection died *after* statements ran; a plain `DbRetry.call` re-runs the block, which is
 safe for a read and not for an arbitrary write, so it is explicit and rare. Today there is exactly
-one: `ContainerProxyRoute.resolve`, the daemon lookup that
+one: `DaemonForwarder.resolve` (both proxy routes call it), the daemon lookup that
 backs the proxy's 404s — the only path to a workspace-daemon's API, so a blip there takes the file
 browser, the terminals and the coding-agent surface down and calls a live workspace missing.
 
@@ -417,7 +417,7 @@ edge or on `qits-net`. `README.md` has the table.
 
 The one thing to know before you add a route: **`quarkus.rest.path` moves the JAX-RS routes and
 nothing else.** A raw Vert.x route or a `@WebSocket` path registers straight onto the router with a
-literal and must carry `/workspaces` itself. Four do, each for its own reason:
+literal and must carry `/workspaces` itself. Five do, each for its own reason:
 
 - `DaemonControlSocket` — `/workspaces/daemon/{id}`, and a **cross-repo contract**:
   `WorkspaceContainerFactory` injects `ws://<host>:<port>/workspaces/daemon/<id>` as
@@ -458,6 +458,23 @@ literal and must carry `/workspaces` itself. Four do, each for its own reason:
   frames**: re-framing would break the terminal's close semantics.
   A stub origin that accepts any handshake shows neither defect, which is why
   `ContainerProxyRouteTest` rejects on a bad bearer and parks a reader mid-flood.
+- `AgentProxyRoute` — `AgentProxyPath.PREFIX`, `/workspaces/agent/` (singular, so it shadows nothing
+  under `/workspaces/api/agents`; epic qits-1667): the daemon of the workspace an agent is placed in
+  **now**, addressed by the agent. It is the one hop that **does** rewrite a path, and it is not the
+  exception the container route's rule forbids: its own sub-paths (`terminal`, `chat`, `log`,
+  `files[/…]`, `detection`, `component-map`) are not the daemon's address, and each is mapped onto
+  the daemon's own path under `ContainerProxyPath.base(agent.workspaceId)` — the daemon still sees
+  only `/workspaces/container/{id}/…`. The forwarding half (`resolve`, `route`, the hand-rolled
+  upgrade, the pipe, `bearer`, `hostRewrite`) lives in `DaemonForwarder`, which both routes call with
+  `(rc, resolved, daemonUri)`: the container route passes the inbound URI, so its behaviour is the
+  one it always had. The agent row is read off the event loop in `QuarkusTransaction.requiringNew()`
+  inside `DbRetry.call`, as the container route reads its binding. Admission: `qits:system`,
+  `qits:admin`, `qits:admin-agent` every agent and route; `qits:agent` its **own** agent only
+  (`DaemonAgentBindingCheck.subjectOf` equals `commissioned_token_subject` — not the workspace's
+  `boundSubject`, the rule qits-1575 calls too wide); `qits:desk`/`qits:desk-admin` the GET routes of
+  every agent and no socket; else 403, logged with subject, roles and agent id.
+  `quarkus.http.auth.permission.agent-proxy` keeps anonymous out. `AgentProxyRouteTest` pins the map,
+  `AgentProxyAuthorizationTest` the roles.
 - `DaemonStreamRoute` — `WorkspaceTunnels.STREAM_PATH_PREFIX`, `/workspaces/daemon/stream/`, where a
   daemon's reverse-tunnel dial-back lands. It shares a prefix with `DaemonControlSocket` and does not
   collide (`{id}` matches one segment, so no daemon can be named `stream`), and it is a **raw** route
