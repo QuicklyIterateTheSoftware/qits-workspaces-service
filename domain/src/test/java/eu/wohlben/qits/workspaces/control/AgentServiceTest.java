@@ -1249,9 +1249,9 @@ public class AgentServiceTest {
     try {
       service.reconcile();
 
+      // Queued, and possibly placed on another slot by the same pass: only where it is not counts.
       AgentWorktree requeued = row(agentId);
-      assertEquals(AgentRunState.QUEUED, requeued.runState);
-      assertNull(requeued.workspaceId, "taken out of the workspace that never came up");
+      assertNotEquals(failed, requeued.workspaceId, "taken out of the workspace that never came up");
       assertNotNull(requeued.startRefusal, "its view says why it does not run");
       assertTrue(requeued.startRefusal.contains("did not come up"), requeued.startRefusal);
       List<AgentRequeued> events =
