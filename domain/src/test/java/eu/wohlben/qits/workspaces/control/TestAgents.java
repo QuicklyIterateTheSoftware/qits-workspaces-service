@@ -49,6 +49,20 @@ public class TestAgents {
     return id;
   }
 
+  /** This one agent is REMOVED now. */
+  public void remove(UUID id) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                agents
+                    .findByIdOptional(id)
+                    .ifPresent(
+                        row -> {
+                          row.state = AgentState.REMOVED;
+                          row.removedAt = Instant.now();
+                        }));
+  }
+
   /** Every agent {@link #placeOn} wrote is REMOVED. */
   public void retireAll() {
     List<UUID> ids;

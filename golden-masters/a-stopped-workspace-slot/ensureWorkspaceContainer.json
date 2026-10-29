@@ -27,7 +27,8 @@
     "placement": "TARGET",
     "leaseId": "00000000-0000-4000-8000-000000000100",
     "targetId": null,
-    "queuedAt": "2026-01-01T00:00:00Z"
+    "queuedAt": "2026-01-01T00:00:00Z",
+    "affectedAgentIds": null
   },
   "technicalProcessId": "00000000-0000-4000-8000-000000000101"
 }

@@ -124,6 +124,8 @@ public class ProviderStates {
   public static final String AN_AGENT_WHOSE_DAEMON_IS_NOT_CONNECTED =
       "an agent whose workspace daemon is not connected";
   public static final String AN_AGENT_WITH_LEFTOVER_WORK = "an agent with leftover work";
+  // An agent's interrupt (epic qits-1667): a harness mid-turn whose daemon answers the ESC.
+  public static final String AN_AGENT_IN_THE_MIDDLE_OF_A_TURN = "an agent in the middle of a turn";
   public static final String A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION =
       "a resolved workspace slot with an archived agent session";
   // The slot's container buttons on a lease (epic qits-1481).
@@ -243,6 +245,7 @@ public class ProviderStates {
         AN_AGENT_WAITING_FOR_A_SLOT,
         AN_AGENT_WHOSE_DAEMON_IS_NOT_CONNECTED,
         AN_AGENT_WITH_LEFTOVER_WORK,
+        AN_AGENT_IN_THE_MIDDLE_OF_A_TURN,
         A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION,
         A_SLOT_RUNNING_ON_A_TARGET,
         A_STOPPED_SLOT,
@@ -278,6 +281,7 @@ public class ProviderStates {
       case AN_AGENT_WITH_NO_PROMPT_DRAFT, AN_AGENT_WHOSE_DAEMON_IS_NOT_CONNECTED ->
           agentInARunningSlot(false, false);
       case AN_AGENT_WITH_LEFTOVER_WORK -> agentInARunningSlot(false, true);
+      case AN_AGENT_IN_THE_MIDDLE_OF_A_TURN -> agentInTheMiddleOfATurn();
       case NO_AGENT_WITH_THAT_ID -> noSuchAgent();
       case AN_AGENT_WAITING_FOR_A_SLOT -> agentWaitingForASlot();
       case A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION -> resolvedSlotWithAnArchivedSession();
@@ -527,7 +531,10 @@ public class ProviderStates {
     return new Setup(params, List.copyOf(ids));
   }
 
-  /** One ACTIVE agent on the bug ticket, holding a slot whose lease waits. */
+  /**
+   * One ACTIVE agent on the bug ticket, holding a slot whose lease waits. {@code agentId} names it
+   * for the controls addressed by the agent (epic qits-1667).
+   */
   private Setup agentOnATicket() {
     List<Long> ids = new ArrayList<>();
     QuarkusTransaction.requiringNew()
@@ -538,6 +545,7 @@ public class ProviderStates {
               agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
             });
     Map<String, String> params = new TreeMap<>();
+    params.put("agentId", AGENT_ACTIVE_ID);
     params.put("ticketId", BUG_TICKET_ID);
     return new Setup(params, List.copyOf(ids));
   }
@@ -934,6 +942,34 @@ public class ProviderStates {
     return new Setup(params, List.copyOf(ids));
   }
 
+  /** The daemon command a mid-turn agent's harness runs as. */
+  static final String MID_TURN_COMMAND_ID = "contract-command-1";
+
+  /**
+   * The bug ticket's agent, RUNNING in the wrapper's slot with its harness started (a command id),
+   * and the slot's daemon answering through its tunnel: the stub {@link #leftoverDaemonPort} daemon,
+   * which takes an interrupt.
+   */
+  private Setup agentInTheMiddleOfATurn() {
+    repositories.register(WRAPPER_REPOSITORY_ID);
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Long slot = slot(WorkspaceRuntimeStatus.RUNNING, true);
+              ids.add(slot);
+              agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
+              agentRows.findById(UUID.fromString(AGENT_ACTIVE_ID)).commandId = MID_TURN_COMMAND_ID;
+            });
+    long slot = ids.get(0);
+    StubDaemonTunnels.install(vertx, leftoverDaemonPort(), row -> row == slot);
+    Map<String, String> params = new TreeMap<>();
+    params.put("agentId", AGENT_ACTIVE_ID);
+    params.put("bugTicketId", BUG_TICKET_ID);
+    params.put("workspaceId", String.valueOf(slot));
+    return new Setup(params, List.copyOf(ids));
+  }
+
   /** No agent row at all for {@link #AGENT_UNKNOWN_ID}. */
   private Setup noSuchAgent() {
     Map<String, String> params = new TreeMap<>();
@@ -1119,8 +1155,9 @@ public class ProviderStates {
   }
 
   /**
-   * The port of a stub workspace daemon whose cleanup check finds leftover work for any agent, and
-   * which knows no other agent verb (404, as a daemon answers for an agent it does not know).
+   * The port of a stub workspace daemon whose cleanup check finds leftover work for any agent, which
+   * takes an interrupt for any agent (200), and which knows no other agent verb (404, as a daemon
+   * answers for an agent it does not know).
    */
   private int leftoverDaemonPort() {
     HttpServer server = leftoverDaemon;
@@ -1135,6 +1172,15 @@ public class ProviderStates {
                     .requestHandler(
                         request -> {
                           boolean check = request.path().endsWith("/cleanup-check");
+                          if (request.method() == io.vertx.core.http.HttpMethod.POST
+                              && request.path().endsWith("/interrupt")) {
+                            request
+                                .response()
+                                .setStatusCode(200)
+                                .putHeader("Content-Type", "application/json")
+                                .end("{}");
+                            return;
+                          }
                           request
                               .response()
                               .setStatusCode(check ? 200 : 404)

@@ -1,9 +1,12 @@
 package eu.wohlben.qits.workspaces.api;
 
+import eu.wohlben.qits.workspaces.control.AgentService;
 import eu.wohlben.qits.workspaces.control.WorkspaceProcessTracker;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
+import eu.wohlben.qits.workspaces.dto.AgentDto;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
 import eu.wohlben.qits.workspaces.mapper.WorkspaceMapper;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
@@ -21,6 +24,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.jboss.logging.Logger;
 
 /**
  * Workspaces, addressed by their own id.
@@ -52,6 +56,8 @@ public class WorkspaceController {
    * none): the discard deletes that branch on the git host, which is a push, and the delivery desk
    * holds no push right (qits-1596).
    */
+  private static final Logger LOG = Logger.getLogger(WorkspaceController.class);
+
   static final String DESK_DISCARD_DELETES_BRANCH =
       "The delivery desk may not discard a workspace that stands on a branch: the discard deletes"
           + " that branch on the git host, which is a push.";
@@ -61,6 +67,10 @@ public class WorkspaceController {
   @Inject WorkspaceMapper workspaceMapper;
 
   @Inject DeskBinding desk;
+
+  @Inject AgentService agents;
+
+  @Inject SecurityIdentity identity;
 
   /**
    * Optional, like everywhere else this context touches the technical-process framework: with no
@@ -130,6 +140,37 @@ public class WorkspaceController {
   @Operation(operationId = "getWorkspace")
   public GetWorkspaceRequest.Response get(@PathParam("id") Long id) {
     return new GetWorkspaceRequest.Response(workspaceService.getWorkspace(id));
+  }
+
+  public static record ListWorkspaceAgentsRequest() {
+    public record Response(List<AgentDto> agents) {}
+  }
+
+  /**
+   * The workspace's view of its agents (qits-1745): the live (not REMOVED) agents placed in this
+   * row, oldest first, each the same {@link AgentDto} {@code GET /agents} serves — its open waits
+   * and attention included. The roles are {@code GET /agents}'s. 404 only when no such workspace
+   * row exists.
+   */
+  @jakarta.annotation.security.RolesAllowed({
+    "qits:admin",
+    "qits:admin-agent",
+    "qits:desk-admin",
+    "qits:system",
+    "qits:agent"
+  })
+  @GET
+  @Path("/{id}/agents")
+  @APIResponse(responseCode = "200", description = "The live agents on the workspace.")
+  @APIResponse(
+      responseCode = "404",
+      description = "No such workspace.",
+      content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(
+      operationId = "listWorkspaceAgents",
+      summary = "The live agents placed in a workspace, oldest first")
+  public ListWorkspaceAgentsRequest.Response agents(@PathParam("id") Long id) {
+    return new ListWorkspaceAgentsRequest.Response(agents.listLiveInWorkspace(id));
   }
 
   // POST /workspaces (the ad-hoc create) is gone (qits-1152): a workspace is a slot the agent
@@ -209,7 +250,8 @@ public class WorkspaceController {
   /**
    * Gracefully stop the workspace's container: its branch is pushed to origin first (so committed
    * work survives), then the container is removed and the workspace is left ACTIVE/STOPPED for lazy
-   * recreate. Returns the refreshed workspace.
+   * recreate. Returns the refreshed workspace, its {@code affectedAgentIds} the live agents the slot
+   * hosted, read before the container went (qits-1745).
    */
   @POST
   @Path("/{id}/stop-container")
@@ -222,8 +264,10 @@ public class WorkspaceController {
   public WorkspaceDto stopContainer(
       @PathParam("id") Long id) {
     desk.requireWorkspace(id);
+    List<String> affected = workspaceService.liveAgentIds(id);
     workspaceService.stopContainer(id);
-    return workspaceService.getWorkspace(id);
+    logVerb(id, "stop-container", affected);
+    return workspaceService.getWorkspace(id).withAffectedAgentIds(affected);
   }
 
   /**
@@ -231,8 +275,9 @@ public class WorkspaceController {
    * workspace row — the destructive counterpart to the graceful {@link #stopContainer}, which
    * pauses in place. Reclaims the (stopped) container and any uncommitted changes in it; the next
    * Start re-clones a fresh container from the durable branch. Does NOT delete the branch — that is
-   * {@code discard} (Abandon). Returns the refreshed workspace; 404 only when the workspace is
-   * unknown.
+   * {@code discard} (Abandon). Returns the refreshed workspace, its {@code affectedAgentIds} the
+   * live agents the slot hosted, read before the container went (qits-1745); 404 only when the
+   * workspace is unknown.
    */
   @POST
   @Path("/{id}/delete-container")
@@ -245,16 +290,21 @@ public class WorkspaceController {
   public WorkspaceDto deleteContainer(
       @PathParam("id") Long id) {
     desk.requireWorkspace(id);
+    List<String> affected = workspaceService.liveAgentIds(id);
     workspaceService.deleteContainer(id);
-    return workspaceService.getWorkspace(id);
+    logVerb(id, "delete-container", affected);
+    return workspaceService.getWorkspace(id).withAffectedAgentIds(affected);
   }
 
   public static record RecreateContainerRequest() {
     /**
      * The workspace's state at submit time plus the technical process streaming the recreate —
      * watch it live at {@code /workspaces/api/technical-processes/{technicalProcessId}/events}.
+     * {@code affectedAgentIds} are the live agents the slot hosted, read before the container went
+     * (qits-1745).
      */
-    public record Response(WorkspaceDto workspace, String technicalProcessId) {}
+    public record Response(
+        WorkspaceDto workspace, String technicalProcessId, List<String> affectedAgentIds) {}
   }
 
   /**
@@ -279,9 +329,21 @@ public class WorkspaceController {
   public RecreateContainerRequest.Response recreateContainer(
       @PathParam("id") Long id) {
     desk.requireWorkspace(id);
+    List<String> affected = workspaceService.liveAgentIds(id);
     String technicalProcessId = workspaceService.beginRecreateContainer(id);
+    logVerb(id, "recreate-container", affected);
     return new RecreateContainerRequest.Response(
-        workspaceService.getWorkspace(id), technicalProcessId);
+        workspaceService.getWorkspace(id), technicalProcessId, affected);
+  }
+
+  /** The one audit line each container verb writes (qits-1745). */
+  private void logVerb(Long id, String verb, List<String> affected) {
+    String principal = identity.getPrincipal() == null ? null : identity.getPrincipal().getName();
+    // Formatted here, so the record's message is the line itself.
+    LOG.info(
+        String.format(
+            "Workspace %s %s by %s; affected agents [%s]",
+            id, verb, principal, String.join(", ", affected)));
   }
 
   // POST /{workspaceId}/fast-forward and /{workspaceId}/update-from-parent used to live here. Both

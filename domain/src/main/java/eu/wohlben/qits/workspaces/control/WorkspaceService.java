@@ -999,7 +999,8 @@ public class WorkspaceService {
                   wt.placement,
                   wt.leaseId,
                   wt.targetId,
-                  wt.queuedAt);
+                  wt.queuedAt,
+                  null);
             })
         .toList();
   }
@@ -1066,6 +1067,21 @@ public class WorkspaceService {
       return null;
     }
     return info.buildTime().isBefore(latest.buildTime()) ? Boolean.TRUE : null;
+  }
+
+  /**
+   * The ids of the live (not REMOVED) agents placed in this workspace row, oldest first: the agents
+   * a container verb affects, read before the container goes (qits-1745). Empty for an unknown row.
+   */
+  public List<String> liveAgentIds(Long workspaceRowId) {
+    if (workspaceRowId == null) {
+      return List.of();
+    }
+    return QuarkusTransaction.joiningExisting()
+        .call(() -> agentWorktrees.findLiveByWorkspace(workspaceRowId))
+        .stream()
+        .map(a -> a.id.toString())
+        .toList();
   }
 
   /** A single active workspace's current DTO (runtime status computed live), or 404. */
@@ -2085,6 +2101,8 @@ public class WorkspaceService {
     String workspaceId = resolved.workspaceId;
     Long rowId = resolved.id;
     requireCleanForRecreate(workspaceId, rowId);
+    // Read before the container goes (qits-1745): the agents this recreate affects.
+    List<String> agentIds = liveAgentIds(rowId);
     // Registered as a start like any other, so a stop during the recreate overtakes it the same
     // way (qits-1076) — and so a recreate after a stop is simply the newest start, owing the stop
     // nothing.
@@ -2106,7 +2124,7 @@ public class WorkspaceService {
             // Settle live services gracefully so their disappearance reads as deliberate, not a
             // crash
             // the restart policy would resurrect — the same courtesy stopContainer/discard extend.
-            containerEvents.fireStopping(repoId, workspaceId, rowId, true);
+            containerEvents.fireStopping(repoId, workspaceId, rowId, true, agentIds);
             stopBeforeRemove(containers.containerName(workspaceId, repoId));
             containers.rm(containers.containerName(workspaceId, repoId));
             // Container now absent → ensureContainer's provision path re-clones on the current
@@ -2452,7 +2470,8 @@ public class WorkspaceService {
     // reads as a deliberate STOPPED (graceful: signal + grace) instead of a crash the restart
     // policy
     // would resurrect. Synchronous — completes while the container is still running.
-    containerEvents.fireStopping(repoId, workspaceId, workspace.id, true);
+    containerEvents.fireStopping(
+        repoId, workspaceId, workspace.id, true, liveAgentIds(workspace.id));
     containers.stop(containers.containerName(workspaceId, repoId));
     workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
   }
@@ -2507,7 +2526,7 @@ public class WorkspaceService {
    */
   private void tearDownDirect(String repoId, String workspaceId, Long rowId) {
     String container = containers.containerName(workspaceId, repoId);
-    containerEvents.fireStopping(repoId, workspaceId, rowId, false);
+    containerEvents.fireStopping(repoId, workspaceId, rowId, false, liveAgentIds(rowId));
     stopBeforeRemove(container);
     containers.rm(container);
     containers.removeWorkspaceVolume(workspaceId);
@@ -3030,7 +3049,8 @@ public class WorkspaceService {
       // --remote-control) only archives its claude.ai session on SIGTERM, and an rm straight to
       // SIGKILL leaves that session dangling. stopBeforeRemove gives it the chance; the rm follows
       // regardless of whether the stop lands.
-      containerEvents.fireStopping(repoId, workspace.workspaceId, workspace.id, false);
+      containerEvents.fireStopping(
+          repoId, workspace.workspaceId, workspace.id, false, liveAgentIds(workspace.id));
       stopBeforeRemove(containers.containerName(workspace.workspaceId, repoId));
       containers.rm(containers.containerName(workspace.workspaceId, repoId));
       containers.removeWorkspaceVolume(workspace.workspaceId);

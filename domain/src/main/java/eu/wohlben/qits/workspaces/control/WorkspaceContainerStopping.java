@@ -9,6 +9,18 @@ package eu.wohlben.qits.workspaces.control;
  *
  * <p>{@code graceful} distinguishes the two callers: {@code stopContainer} passes {@code true} (a
  * graceful stop), a discard passes {@code false} (the work is being thrown away).
+ *
+ * <p>{@code agentIds} names the live (not REMOVED) agents on the slot, read before the container
+ * goes: the agents the removal affects (qits-1745). Empty, never null, when the slot hosts none.
  */
 public record WorkspaceContainerStopping(
-    String repoId, String workspaceId, Long workspaceRowId, boolean graceful) {}
+    String repoId,
+    String workspaceId,
+    Long workspaceRowId,
+    boolean graceful,
+    java.util.List<String> agentIds) {
+
+  public WorkspaceContainerStopping {
+    agentIds = agentIds == null ? java.util.List.of() : java.util.List.copyOf(agentIds);
+  }
+}

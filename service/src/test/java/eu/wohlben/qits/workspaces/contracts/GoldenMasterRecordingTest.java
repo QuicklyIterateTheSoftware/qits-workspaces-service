@@ -351,6 +351,49 @@ class GoldenMasterRecordingTest {
               "getWorkspaceActiveProcess",
               WORKSPACES + "/workspaces/{workspaceId}/active-process",
               null),
+          // The slot's own view of its agents (qits-1745), and an agent's view of its slot's start.
+          Interaction.read(
+              ProviderStates.A_WORKSPACE_SLOT_HOSTING_AGENTS,
+              "listWorkspaceAgents",
+              WORKSPACES + "/workspaces/{workspaceId}/agents",
+              null),
+          Interaction.read(
+              ProviderStates.A_WORKSPACE_SLOT_HOSTING_AGENTS,
+              "getAgentActiveProcess",
+              WORKSPACES + "/agents/{agentId}/active-process",
+              null),
+          // An agent's controls, addressed by the agent (epic qits-1667).
+          Interaction.write(
+              ProviderStates.AN_AGENT_ON_A_TICKET,
+              "promptAgent",
+              WORKSPACES + "/agents/{agentId}/prompt",
+              200,
+              "{\"text\":\"Check the rounding first.\",\"compactFirst\":false}"),
+          Interaction.write(
+              ProviderStates.AN_AGENT_ON_A_TICKET,
+              "stopAgent",
+              WORKSPACES + "/agents/{agentId}/stop",
+              200,
+              null),
+          Interaction.write(
+              ProviderStates.AN_AGENT_ON_A_TICKET,
+              "yieldAgent",
+              WORKSPACES + "/agents/{agentId}/yield",
+              200,
+              null),
+          // A yielded agent's restart goes through the resume path: no daemon is asked.
+          Interaction.write(
+              ProviderStates.A_STOPPED_SLOT,
+              "restartAgent",
+              WORKSPACES + "/agents/{agentId}/restart",
+              200,
+              null),
+          Interaction.write(
+              ProviderStates.AN_AGENT_IN_THE_MIDDLE_OF_A_TURN,
+              "interruptAgent",
+              WORKSPACES + "/agents/{agentId}/interrupt",
+              200,
+              null),
           // An item's agent page while its slot's container comes up: the item's agents, the slot
           // and the start it follows.
           Interaction.read(
@@ -514,6 +557,17 @@ class GoldenMasterRecordingTest {
               ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION,
               "getWorkspaceAgentTranscript",
               WORKSPACES + "/history/{workspaceId}/agent-sessions/{sessionId}/transcript",
+              null),
+          // The same session, read by its agent (epic qits-1667): a REMOVED agent answers too.
+          Interaction.read(
+              ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION,
+              "listAgentSessions",
+              WORKSPACES + "/agents/{agentId}/sessions",
+              null),
+          Interaction.read(
+              ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION,
+              "getAgentTranscript",
+              WORKSPACES + "/agents/{agentId}/sessions/{sessionId}/transcript",
               null));
 
   /**

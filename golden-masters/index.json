@@ -306,6 +306,20 @@
       "dependsOn": [],
       "operations": [
         {
+          "operationId": "getAgentTranscript",
+          "method": "GET",
+          "path": "/workspaces/api/agents/{agentId}/sessions/{sessionId}/transcript",
+          "status": 200,
+          "file": "a-resolved-workspace-slot-with-an-archived-agent-session/getAgentTranscript.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
           "operationId": "getWorkspaceAgentTranscript",
           "method": "GET",
           "path": "/workspaces/api/history/{workspaceId}/agent-sessions/{sessionId}/transcript",
@@ -335,6 +349,25 @@
             "numbers": [
               "$.workspace.id"
             ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "listAgentSessions",
+          "method": "GET",
+          "path": "/workspaces/api/agents/{agentId}/sessions",
+          "status": 200,
+          "file": "a-resolved-workspace-slot-with-an-archived-agent-session/listAgentSessions.json",
+          "frozen": {
+            "ids": [
+              "$.sessions[*].sessionId"
+            ],
+            "instants": [
+              "$.sessions[*].startedAt",
+              "$.sessions[*].endedAt"
+            ],
+            "strings": [],
+            "numbers": [],
             "listFilteredTo": null
           }
         },
@@ -387,6 +420,30 @@
             "strings": [],
             "numbers": [
               "$.workspace.id"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "restartAgent",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/restart",
+          "status": 200,
+          "file": "a-stopped-workspace-slot/restartAgent.json",
+          "frozen": {
+            "ids": [
+              "$.agentId",
+              "$.repositoryId",
+              "$.workId",
+              "$.ticketId"
+            ],
+            "instants": [
+              "$.lastActivityAt",
+              "$.createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.workspaceRowId"
             ],
             "listFilteredTo": null
           }
@@ -501,6 +558,20 @@
           }
         },
         {
+          "operationId": "getAgentActiveProcess",
+          "method": "GET",
+          "path": "/workspaces/api/agents/{agentId}/active-process",
+          "status": 200,
+          "file": "a-workspace-slot-hosting-agents/getAgentActiveProcess.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
           "operationId": "getWorkspace",
           "method": "GET",
           "path": "/workspaces/api/workspaces/{workspaceId}",
@@ -559,6 +630,37 @@
               "$.agents[*].waitingOnSince",
               "$.agents[*].lastActivityAt",
               "$.agents[*].createdAt",
+              "$.agents[*].waits[*].createdAt",
+              "$.agents[*].waits[*].expiresAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.agents[*].workspaceRowId"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "listWorkspaceAgents",
+          "method": "GET",
+          "path": "/workspaces/api/workspaces/{workspaceId}/agents",
+          "status": 200,
+          "file": "a-workspace-slot-hosting-agents/listWorkspaceAgents.json",
+          "frozen": {
+            "ids": [
+              "$.agents[*].agentId",
+              "$.agents[*].repositoryId",
+              "$.agents[*].workId",
+              "$.agents[*].epicId",
+              "$.agents[*].ticketId",
+              "$.agents[*].waits[*].id",
+              "$.agents[*].waits[*].agentId",
+              "$.agents[*].waits[*].selection.when[*][*].value"
+            ],
+            "instants": [
+              "$.agents[*].lastActivityAt",
+              "$.agents[*].createdAt",
+              "$.agents[*].waitingOnSince",
               "$.agents[*].waits[*].createdAt",
               "$.agents[*].waits[*].expiresAt"
             ],
@@ -634,7 +736,8 @@
           "frozen": {
             "ids": [
               "$.leaseId",
-              "$.targetId"
+              "$.targetId",
+              "$.affectedAgentIds[*]"
             ],
             "instants": [
               "$.createdAt"
@@ -922,6 +1025,34 @@
             "instants": [
               "$.createdAt"
             ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "an agent in the middle of a turn",
+      "slug": "an-agent-in-the-middle-of-a-turn",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "interruptAgent",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/interrupt",
+          "status": 200,
+          "file": "an-agent-in-the-middle-of-a-turn/interruptAgent.json",
+          "frozen": {
+            "ids": [
+              "$.agentId"
+            ],
+            "instants": [],
             "strings": [],
             "numbers": [],
             "listFilteredTo": null
@@ -1399,6 +1530,7 @@
       "name": "an agent working on a ticket",
       "slug": "an-agent-working-on-a-ticket",
       "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
         "ticketId": "00000000-0000-4000-8000-000000000001"
       },
       "dependsOn": [],
@@ -1463,6 +1595,74 @@
             "instants": [],
             "strings": [],
             "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "promptAgent",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/prompt",
+          "body": {
+            "text": "Check the rounding first.",
+            "compactFirst": false
+          },
+          "status": 200,
+          "file": "an-agent-working-on-a-ticket/promptAgent.json",
+          "frozen": {
+            "ids": [
+              "$.agentId"
+            ],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "stopAgent",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/stop",
+          "status": 200,
+          "file": "an-agent-working-on-a-ticket/stopAgent.json",
+          "frozen": {
+            "ids": [
+              "$.agentId",
+              "$.repositoryId",
+              "$.workId",
+              "$.ticketId"
+            ],
+            "instants": [
+              "$.lastActivityAt",
+              "$.createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.workspaceRowId"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "yieldAgent",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/yield",
+          "status": 200,
+          "file": "an-agent-working-on-a-ticket/yieldAgent.json",
+          "frozen": {
+            "ids": [
+              "$.agentId",
+              "$.repositoryId",
+              "$.workId",
+              "$.ticketId"
+            ],
+            "instants": [
+              "$.lastActivityAt",
+              "$.createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.workspaceRowId"
+            ],
             "listFilteredTo": null
           }
         }

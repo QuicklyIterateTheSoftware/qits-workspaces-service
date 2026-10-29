@@ -269,6 +269,23 @@ Three things hold the rule, from the schema in:
   it reaches `ContainerRuntime`, and a regular row there is an ERROR `direct placement refused for
   regular workspace <id>` and an `IllegalStateException`, never a container on the platform host.
 
+### The container verbs and the agents they affect (qits-1745)
+
+`POST /workspaces/api/workspaces/{id}/stop-container`, `…/delete-container` and
+`…/recreate-container` act on the slot, and so on every agent placed in it. Each reads the ids of
+the slot's live (not REMOVED) agents **before** the container goes, answers them as
+`affectedAgentIds` (stop and delete: on the returned `WorkspaceDto`; recreate: beside `workspace`
+and `technicalProcessId`; an empty list when the slot hosts none), and logs one INFO line `Workspace
+<rowId> <verb> by <principal>; affected agents [<ids>]`. `WorkspaceDto.affectedAgentIds` is `null`
+on every other read. The synchronous `WorkspaceContainerStopping` event carries the same ids as
+`agentIds`.
+
+`GET /workspaces/api/workspaces/{id}/agents` (`listWorkspaceAgents`) is the slot's own view of
+them: `{agents: AgentDto[]}`, the live agents whose `workspaceRowId` is this row, oldest first,
+each as `GET /workspaces/api/agents` serves it (open `waits` and `attention` included). An unknown
+row is 404. Roles as `GET /agents`: `qits:admin`, `qits:admin-agent`, `qits:desk-admin`,
+`qits:system`, `qits:agent`.
+
 ### TARGET workspaces: a lease from qits-system (epic qits-1481)
 
 A TARGET row's container runs under a **WORKSPACE lease** qits-system grants on an execution target
@@ -426,6 +443,7 @@ edge or on `qits-net`.
 | `/workspaces/q/…` | `openapi`, `swagger-ui` — what the framework serves, not application code | `quarkus.http.non-application-root-path` |
 | `/workspaces/daemon/{id}` | the daemon's dial-home control socket | `DaemonControlSocket`, literal |
 | `/workspaces/container/{id}/*` | the workspace-daemon reverse proxy | `ContainerProxyPath.PREFIX`, literal |
+| `/workspaces/agent/{agentId}/*` | the agent proxy: an agent's terminal, chat, log and worktree on the daemon of the workspace it is placed in now (epic qits-1667) | `AgentProxyPath.PREFIX`, literal |
 | `/workspaces/daemon/stream/{nonce}` | where a daemon's tunnel dial-back lands | `WorkspaceTunnels.STREAM_PATH_PREFIX`, literal |
 | anything else — `/`, `/workspaces`, `/workspaces/` included | **404**. The SPA that answered here is gone (qits-1245); the workspace pages are qits-landing-app's, at `/projects/<slug>/workspaces…` on the apex domain | — |
 
@@ -458,6 +476,20 @@ request. The daemon is deliberately **not** a gateway route — one process per 
 one container lifetime, has no stable address to configure — and `container` rather than `daemon`
 because the control socket already owns that segment and its literal is baked into running
 containers. `ContainerProxyPath` carries the argument; `DaemonProxyTargets` does the lookup.
+
+`/workspaces/agent/{agentId}/*` (epic qits-1667, `AgentProxyRoute`) is the same proxy addressed by
+**agent** rather than by workspace: it reads the agent row, finds the workspace it is placed in now,
+and forwards under that workspace's `ContainerProxyPath.base` — so an agent moved to another
+workspace is reached there with no caller change. Unlike the container route it **maps** its path:
+`WS terminal` → `<base>terminal/commands/{commandId}` and `WS chat` → `<base>chat/commands/{commandId}`
+(RUNNING with a command), `GET log?…` → `<base>commands/{commandId}/log?…` (any command, on a live
+workspace), `files[/…]?…`, `detection`, `component-map` → `<base>agent-worktrees/{agentId}/…`.
+Anything else is 404 "No such agent route"; an unknown, non-UUID or REMOVED agent 404; no workspace
+409 "The agent is waiting for a workspace"; a socket on an agent that is not RUNNING 409 "The agent
+has no running session (runState X)". `qits:system`, `qits:admin`, `qits:admin-agent` reach every
+agent; `qits:agent` only its own (`commissioned_token_subject`, not the workspace's bound subject);
+`qits:desk`/`qits:desk-admin` the GET routes of every agent and no socket; anyone else 403. The
+forwarding is `DaemonForwarder`, shared with `ContainerProxyRoute`.
 
 **The reverse tunnel is the only way to a daemon.** A daemon at
 `DaemonProtocol.TUNNEL_CAPABILITY_VERSION` or above binds `127.0.0.1` and has no address on

@@ -50,7 +50,12 @@ public class WorkspaceContainerEventPublisher {
 
   /** Synchronous by design — observers must finish before the caller's {@code containers.rm}. */
   public void fireStopping(
-      String repoId, String workspaceId, Long workspaceRowId, boolean graceful) {
-    stopping.fire(new WorkspaceContainerStopping(repoId, workspaceId, workspaceRowId, graceful));
+      String repoId,
+      String workspaceId,
+      Long workspaceRowId,
+      boolean graceful,
+      java.util.List<String> agentIds) {
+    stopping.fire(
+        new WorkspaceContainerStopping(repoId, workspaceId, workspaceRowId, graceful, agentIds));
   }
 }

@@ -1281,6 +1281,25 @@ public class AgentService {
     return views(rows);
   }
 
+  /**
+   * The live (not REMOVED) agents placed in this workspace row, oldest first, viewed as {@link
+   * #list} views them — waits and attention included (qits-1745). 404 for a row that does not
+   * exist; a resolved row answers whatever live agents still name it.
+   */
+  public List<AgentDto> listLiveInWorkspace(Long workspaceRowId) {
+    List<AgentWorktree> rows =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  if (workspaceRowId == null
+                      || workspaceRepository.findByIdOptional(workspaceRowId).isEmpty()) {
+                    throw new NotFoundException("Workspace not found: " + workspaceRowId);
+                  }
+                  return agents.findLiveByWorkspace(workspaceRowId);
+                });
+    return views(rows);
+  }
+
   /** Every agent of these work items, whatever its state, newest first. */
   public List<AgentDto> referencing(Collection<String> workIds) {
     List<AgentWorktree> rows =

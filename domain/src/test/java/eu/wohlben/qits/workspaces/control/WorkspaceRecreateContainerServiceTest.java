@@ -39,6 +39,7 @@ public class WorkspaceRecreateContainerServiceTest {
   @Inject ContainerRuntime containers;
   @Inject FakeContainerRuntime fakeContainers;
   @Inject WorkspaceContainerStartedRecorder startedRecorder;
+  @Inject WorkspaceContainerStoppingRecorder stoppingRecorder;
   @Inject FakeAgentDaemon agentDaemon;
   @Inject TestAgents agents;
 
@@ -196,6 +197,41 @@ public class WorkspaceRecreateContainerServiceTest {
     assertTrue(
         agentDaemon.callsFor(unknown.toString()).contains("cleanup-check " + rowId + " " + unknown),
         agentDaemon.callsFor(unknown.toString()).toString());
+  }
+
+  /**
+   * qits-1745: the stopping edge names the live agents on the slot, read before the container goes;
+   * a REMOVED agent is not among them.
+   */
+  @Test
+  public void recreateNamesTheSlotsLiveAgentsOnItsStoppingEvent() throws Exception {
+    String repoId = clonedRepo();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
+    ensureRunning(repoId, "feat");
+    Long rowId = workspaceIds.of(repoId, "feat");
+    UUID first = agents.placeOn(repoId, rowId, "qits-11");
+    UUID second = agents.placeOn(repoId, rowId, "qits-12");
+    UUID removed = agents.placeOn(repoId, rowId, "qits-13");
+    agents.remove(removed);
+    assertEquals(
+        List.of(first.toString(), second.toString()), workspaceService.liveAgentIds(rowId));
+    stoppingRecorder.clear();
+
+    workspaceService.beginRecreateContainer(rowId);
+    assertTrue(startedRecorder.awaitCount(repoId, "feat", 1, 5_000), "recreate re-provisions");
+
+    var seen = stoppingRecorder.forKey(repoId, "feat");
+    assertEquals(1, seen.size(), seen.toString());
+    assertEquals(List.of(first.toString(), second.toString()), seen.get(0).event().agentIds());
+  }
+
+  @Test
+  public void liveAgentIdsIsEmptyForASlotWithNoAgentAndForAnUnknownRow() throws Exception {
+    String repoId = clonedRepo();
+    workspaceService.createWorkspace(repoId, "feat", "master", "feat", null, false, false, true);
+    assertEquals(List.of(), workspaceService.liveAgentIds(workspaceIds.of(repoId, "feat")));
+    assertEquals(List.of(), workspaceService.liveAgentIds(-1L));
+    assertEquals(List.of(), workspaceService.liveAgentIds(null));
   }
 
   @Test

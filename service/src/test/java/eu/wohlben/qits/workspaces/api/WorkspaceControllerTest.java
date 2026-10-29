@@ -364,6 +364,218 @@ public class WorkspaceControllerTest {
     }
   }
 
+  /** An ACTIVE agent row placed on {@code rowId}, RUNNING, as the scheduler leaves one. */
+  private java.util.UUID placeAgent(String repoId, Long rowId, String entityId) {
+    java.util.UUID agentId = java.util.UUID.randomUUID();
+    io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              eu.wohlben.qits.workspaces.entity.AgentWorktree agent =
+                  new eu.wohlben.qits.workspaces.entity.AgentWorktree();
+              agent.id = agentId;
+              agent.repositoryId = repoId;
+              agent.workId = "w-" + agentId;
+              agent.entityId = entityId;
+              agent.wrapperBranch = "ticket/w-" + agentId;
+              agent.workspaceId = rowId;
+              agent.runState = eu.wohlben.qits.workspaces.entity.AgentRunState.RUNNING;
+              agent.createdAt = java.time.Instant.now();
+              agent.gitRefs = "[]";
+              agentWorktrees.persist(agent);
+            });
+    return agentId;
+  }
+
+  private void removeAgents(java.util.UUID... ids) {
+    io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              for (java.util.UUID id : ids) {
+                agentWorktrees
+                    .findByIdOptional(id)
+                    .ifPresent(
+                        a -> {
+                          a.state = eu.wohlben.qits.workspaces.entity.AgentState.REMOVED;
+                          a.removedAt = java.time.Instant.now();
+                        });
+              }
+            });
+  }
+
+  /** Captures what {@link WorkspaceController} logs at INFO while {@code body} runs. */
+  private java.util.List<String> controllerLog(Runnable body) {
+    java.util.List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
+    java.util.logging.Handler capture =
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(java.util.logging.LogRecord logged) {
+            if (logged.getLevel().intValue() >= java.util.logging.Level.INFO.intValue()) {
+              lines.add(logged.getMessage());
+            }
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger(WorkspaceController.class.getName());
+    logger.addHandler(capture);
+    try {
+      body.run();
+    } finally {
+      logger.removeHandler(capture);
+    }
+    return lines;
+  }
+
+  /**
+   * qits-1745: the workspace's view of its agents — the live ones placed on the row, oldest first,
+   * each the AgentDto {@code GET /agents} serves; a REMOVED one is not among them.
+   */
+  @Test
+  public void listWorkspaceAgentsAnswersTheLiveAgentsOnTheRow() {
+    String repoId = createProjectAndRepository();
+    createWorkspace(repoId, "wa-list", "master", "wa-list-branch");
+    Long rowId = workspaceIds.of(repoId, "wa-list");
+    java.util.UUID first = placeAgent(repoId, rowId, "qits-1745a");
+    java.util.UUID second = placeAgent(repoId, rowId, "qits-1745b");
+    java.util.UUID removed = placeAgent(repoId, rowId, "qits-1745c");
+    removeAgents(removed);
+    try {
+      given()
+          .when()
+          .get("/workspaces/api/workspaces/" + rowId + "/agents")
+          .then()
+          .statusCode(Response.Status.OK.getStatusCode())
+          .body("agents.agentId", contains(first.toString(), second.toString()))
+          .body("agents[0].workspaceRowId", equalTo(rowId.intValue()))
+          .body("agents[0].entityId", equalTo("qits-1745a"))
+          .body("agents[0].state", equalTo("ACTIVE"))
+          .body("agents[0].waits", empty());
+    } finally {
+      removeAgents(first, second);
+    }
+  }
+
+  @Test
+  public void listWorkspaceAgentsIsEmptyForASlotWithNoAgentAnd404ForAnUnknownOne() {
+    String repoId = createProjectAndRepository();
+    createWorkspace(repoId, "wa-empty", "master", "wa-empty-branch");
+    given()
+        .when()
+        .get("/workspaces/api/workspaces/" + workspaceIds.of(repoId, "wa-empty") + "/agents")
+        .then()
+        .statusCode(Response.Status.OK.getStatusCode())
+        .body("agents", empty());
+    given()
+        .when()
+        .get("/workspaces/api/workspaces/999999/agents")
+        .then()
+        .statusCode(Response.Status.NOT_FOUND.getStatusCode());
+  }
+
+  /**
+   * qits-1745: stop-container answers the live agents the slot hosted, read before the container
+   * went, and logs one line naming them; every other read of the shape leaves the field null.
+   */
+  @Test
+  public void stopContainerNamesTheAffectedAgents() {
+    String repoId = createProjectAndRepository();
+    createWorkspace(repoId, "wa-stop", "master", "wa-stop-branch");
+    Long rowId = workspaceIds.of(repoId, "wa-stop");
+    java.util.UUID agent = placeAgent(repoId, rowId, "qits-1745d");
+    java.util.UUID gone = placeAgent(repoId, rowId, "qits-1745e");
+    removeAgents(gone);
+    try {
+      java.util.List<String> logged =
+          controllerLog(
+              () ->
+                  given()
+                      .contentType(ContentType.JSON)
+                      .when()
+                      .post("/workspaces/api/workspaces/" + rowId + "/stop-container")
+                      .then()
+                      .statusCode(Response.Status.OK.getStatusCode())
+                      .body("affectedAgentIds", contains(agent.toString())));
+      org.junit.jupiter.api.Assertions.assertTrue(
+          logged.stream()
+              .anyMatch(
+                  l ->
+                      l.startsWith("Workspace " + rowId + " stop-container by ")
+                          && l.endsWith("; affected agents [" + agent + "]")),
+          logged.toString());
+      given()
+          .when()
+          .get("/workspaces/api/workspaces/" + rowId)
+          .then()
+          .statusCode(Response.Status.OK.getStatusCode())
+          .body("workspace", hasKey("affectedAgentIds"))
+          .body("workspace.affectedAgentIds", nullValue());
+    } finally {
+      removeAgents(agent);
+    }
+  }
+
+  @Test
+  public void deleteContainerNamesTheAffectedAgents() {
+    String repoId = createProjectAndRepository();
+    createWorkspace(repoId, "wa-delete", "master", "wa-delete-branch");
+    Long rowId = workspaceIds.of(repoId, "wa-delete");
+    java.util.UUID first = placeAgent(repoId, rowId, "qits-1745f");
+    java.util.UUID second = placeAgent(repoId, rowId, "qits-1745g");
+    try {
+      java.util.List<String> logged =
+          controllerLog(
+              () ->
+                  given()
+                      .contentType(ContentType.JSON)
+                      .when()
+                      .post("/workspaces/api/workspaces/" + rowId + "/delete-container")
+                      .then()
+                      .statusCode(Response.Status.OK.getStatusCode())
+                      .body("affectedAgentIds", contains(first.toString(), second.toString())));
+      org.junit.jupiter.api.Assertions.assertTrue(
+          logged.stream()
+              .anyMatch(
+                  l ->
+                      l.startsWith("Workspace " + rowId + " delete-container by ")
+                          && l.endsWith("; affected agents [" + first + ", " + second + "]")),
+          logged.toString());
+    } finally {
+      removeAgents(first, second);
+    }
+  }
+
+  /** A slot with no agent: recreate runs, and its answer names nobody — an empty list, not null. */
+  @Test
+  public void recreateContainerAnswersNoAffectedAgentsForASlotWithNone() {
+    String repoId = createProjectAndRepository();
+    createWorkspace(repoId, "wa-recreate", "master", "wa-recreate-branch");
+    Long rowId = workspaceIds.of(repoId, "wa-recreate");
+    java.util.List<String> logged =
+        controllerLog(
+            () ->
+                given()
+                    .contentType(ContentType.JSON)
+                    .when()
+                    .post("/workspaces/api/workspaces/" + rowId + "/recreate-container")
+                    .then()
+                    .statusCode(Response.Status.OK.getStatusCode())
+                    .body("affectedAgentIds", empty())
+                    .body("workspace.affectedAgentIds", nullValue()));
+    org.junit.jupiter.api.Assertions.assertTrue(
+        logged.stream()
+            .anyMatch(
+                l ->
+                    l.startsWith("Workspace " + rowId + " recreate-container by ")
+                        && l.endsWith("; affected agents []")),
+        logged.toString());
+    awaitProvisioned(repoId, "wa-recreate");
+  }
+
   @Test
   public void recreateContainerIs404ForAnUnknownWorkspace() {
     createProjectAndRepository();

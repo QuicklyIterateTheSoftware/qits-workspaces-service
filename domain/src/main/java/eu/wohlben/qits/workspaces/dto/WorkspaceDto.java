@@ -5,6 +5,7 @@ import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -99,6 +100,10 @@ import java.util.UUID;
  * @param queuedAt when a TARGET workspace was last asked to start, while its lease waits for a slot
  *     ({@code runtimeStatus} {@code QUEUED}, with the lease's {@code detail} — why it waits — in
  *     {@code runtimeError}); null otherwise
+ * @param affectedAgentIds the ids of the live (not REMOVED) agents the slot hosted when a container
+ *     verb ran, read before the container went (qits-1745): set only on the answers of {@code
+ *     stop-container} and {@code delete-container} (empty when the slot hosted none), {@code null}
+ *     on every other read of this shape
  */
 public record WorkspaceDto(
     Long id,
@@ -128,4 +133,40 @@ public record WorkspaceDto(
     WorkspacePlacement placement,
     UUID leaseId,
     UUID targetId,
-    Instant queuedAt) {}
+    Instant queuedAt,
+    List<String> affectedAgentIds) {
+
+  /** This view, answering a container verb that affected these agents. */
+  public WorkspaceDto withAffectedAgentIds(List<String> agentIds) {
+    return new WorkspaceDto(
+        id,
+        workspaceId,
+        parent,
+        branch,
+        repositoryMainBranch,
+        ahead,
+        behind,
+        conflictsWithParent,
+        status,
+        runtimeStatus,
+        runtimeError,
+        clean,
+        agentActivity,
+        preamble,
+        ticketId,
+        epicId,
+        result,
+        createdAt,
+        resolvedAt,
+        daemonConnectedAt,
+        daemonVersion,
+        daemonBuildTime,
+        daemonOutdated,
+        admin,
+        placement,
+        leaseId,
+        targetId,
+        queuedAt,
+        agentIds == null ? List.of() : List.copyOf(agentIds));
+  }
+}
