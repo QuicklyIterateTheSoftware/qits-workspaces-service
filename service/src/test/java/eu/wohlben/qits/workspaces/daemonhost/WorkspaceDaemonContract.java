@@ -26,9 +26,11 @@ import java.util.Map;
  * table {@code WorkspaceDaemonConsumerPactTest} runs and {@code ConsumerPactFilesTest} writes to
  * {@code pacts/qits-workspaces-service_qits-workspace-daemon.json}.
  *
- * <p><b>One trigger.</b> Every daemon call is the scheduler's ({@code AgentService.reconcile}): the
- * doors write rows, and the pass after them drives the daemons — start, turn, entity facts, the
- * cleanup check and the removal.
+ * <p><b>The scheduler's trigger, and a person's.</b> Almost every daemon call is the scheduler's
+ * ({@code AgentService.reconcile}): the doors write rows, and the pass after them drives the daemons
+ * — start, turn, entity facts, the cleanup check and the removal. The exceptions are a person's:
+ * a forced discard, and since epic qits-1667 a stop or restart (the daemon's yield) and an
+ * interrupt, each made by its own door.
  *
  * <p><b>Every answer the client branches on is a row</b>: an accepted call ({@code OK}), a start
  * refused because nobody signed the harness in ({@code REFUSED}), an agent the daemon does not know
@@ -192,6 +194,41 @@ public final class WorkspaceDaemonContract {
                   List.of("$.clean", "$.busy"),
                   (client, row, agentId) ->
                       assertEquals(AgentDaemon.Outcome.BUSY, client.remove(row, agentId, false))),
+              // --- a person's controls (epic qits-1667) ----------------------------------------
+              // A stop and a restart of a running agent stop its harness on the daemon; the
+              // scheduler's own yield makes no daemon call (qits-1212).
+              ContractRow.of(
+                  Trigger.operation("stopAgent"),
+                  AGENT_RUNNING,
+                  "yieldAgent",
+                  Request.json(emptyBody()),
+                  List.of(),
+                  call(
+                      (client, row, agentId) ->
+                          assertEquals(AgentDaemon.Outcome.OK, client.yield(row, agentId)))),
+              ContractRow.of(
+                  Trigger.operation("restartAgent"),
+                  AGENT_RUNNING,
+                  "yieldAgent",
+                  Request.json(emptyBody()),
+                  List.of(),
+                  call(
+                      (client, row, agentId) ->
+                          assertEquals(AgentDaemon.Outcome.OK, client.yield(row, agentId)))),
+              // ESC into the running harness. Waits for qits-workspace-daemon to record
+              // interruptAgent (its route ships in the same epic, and the daemon releases first).
+              ContractRow.of(
+                      Trigger.operation("interruptAgent"),
+                      AGENT_RUNNING,
+                      "interruptAgent",
+                      Request.json(emptyBody()),
+                      List.of(),
+                      call(
+                          (client, row, agentId) ->
+                              assertEquals(
+                                  AgentDaemon.Outcome.OK,
+                                  client.interrupt(row, agentId).outcome())))
+                  .waiting(),
               // A person's forced discard (discardAgent with force) removes whatever is left.
               ContractRow.of(
                   Trigger.operation("discardAgent"),
@@ -290,6 +327,11 @@ public final class WorkspaceDaemonContract {
         .stringType("repositoryPath", AGENT_CONFIG_REPOSITORY_PATH)
         .closeObject();
     return body;
+  }
+
+  /** The {@code {}} a yield and an interrupt send: the daemon reads nothing of it. */
+  private static DslPart emptyBody() {
+    return new PactDslJsonBody();
   }
 
   private static DslPart turnBody() {

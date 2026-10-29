@@ -112,7 +112,9 @@ class OutboundCallsGuardTest {
           "turn", "deliverAgentTurn",
           "entity", "setAgentEntity",
           "cleanupCheck", "agentCleanupCheck",
-          "remove", "removeAgentWorktree");
+          "remove", "removeAgentWorktree",
+          "yield", "yieldAgent",
+          "interrupt", "interruptAgent");
 
   private static final Set<String> DAEMON_EXCLUDED = Set.of("reachable");
 

@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
  * {clean, dirty: [repository], unpushed: [{repository, branch|null, commits}], busy?}}, what its
  * status says (qits-1233): 200 a check, 404 an agent the daemon does not know, anything else none;
  * an accepted start's {@code launched} flag (qits-1225); and a start's own body, with and without
- * the agent-config checkout (qits-1382).
+ * the agent-config checkout (qits-1382); and an interrupt's answer (epic qits-1667).
  */
 class DaemonAgentClientAnswersTest {
 
@@ -172,5 +172,47 @@ class DaemonAgentClientAnswersTest {
     return new AgentDaemon.Start(
         "a1", "w1", "e1", "ticket/w1", "CLAUDE", null, Map.of(), "Work the ticket.", null, null,
         agentConfig);
+  }
+
+  // --- an interrupt's answer (epic qits-1667) ----------------------------------------------------
+
+  @Test
+  void anAcceptedInterruptIsDone() {
+    AgentDaemon.Interrupted answer =
+        DaemonAgentClient.interruptedOf(200, "{\"agentId\":\"a-1\",\"interrupted\":true}");
+    assertEquals(AgentDaemon.Outcome.OK, answer.outcome());
+    assertNull(answer.detail());
+  }
+
+  @Test
+  void aRefusedInterruptCarriesTheDaemonsOwnSentence() {
+    AgentDaemon.Interrupted answer =
+        DaemonAgentClient.interruptedOf(409, "{\"error\":\"This harness cannot be interrupted.\"}");
+    assertEquals(AgentDaemon.Outcome.REFUSED, answer.outcome());
+    assertEquals("This harness cannot be interrupted.", answer.detail());
+
+    AgentDaemon.Interrupted bare = DaemonAgentClient.interruptedOf(409, "not json");
+    assertEquals(AgentDaemon.Outcome.REFUSED, bare.outcome());
+    assertEquals("The daemon refused the interrupt.", bare.detail());
+  }
+
+  @Test
+  void aDaemonWithoutTheRouteIsToldApartFromAnUnknownAgent() {
+    AgentDaemon.Interrupted old =
+        DaemonAgentClient.interruptedOf(404, "{\"message\":\"No such endpoint\"}");
+    assertEquals(AgentDaemon.Outcome.REFUSED, old.outcome());
+    assertEquals(DaemonAgentClient.NO_INTERRUPT, old.detail());
+
+    AgentDaemon.Interrupted unknown =
+        DaemonAgentClient.interruptedOf(404, "{\"message\":\"No such agent: a-1\"}");
+    assertEquals(AgentDaemon.Outcome.UNKNOWN_AGENT, unknown.outcome());
+  }
+
+  @Test
+  void aFailingDaemonIsUnreachable() {
+    assertEquals(
+        AgentDaemon.Outcome.UNREACHABLE, DaemonAgentClient.interruptedOf(502, "").outcome());
+    assertEquals(
+        AgentDaemon.Outcome.UNREACHABLE, DaemonAgentClient.interruptedOf(401, "{}").outcome());
   }
 }
