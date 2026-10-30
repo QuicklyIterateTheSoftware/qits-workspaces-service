@@ -73,18 +73,22 @@ resources: postgresql:db, postgresql:eventstream:qits_workspaces_eventstream, id
 #                                                   repository cannot state a literal private volume
 #                                                   name, which is what stops one application
 #                                                   mounting another's storage. It holds the
-#                                                   per-repository git mirrors, the merge worktrees
-#                                                   and the workspace metadata
+#                                                   per-repository git mirrors, the merge worktrees,
+#                                                   the workspace metadata and the transcript store
+#                                                   the workspace-daemons ship agent sessions into
 #                                                   (QITS_WORKSPACES_DATA_DIR=/data/workspaces).
 #
 #   shared:qits_shared_dot_claude:/claude-home:ro   a PLATFORM volume, named explicitly because it is
 #                                                   not this application's to derive — qits-containers
-#                                                   creates it at boot for the whole estate. Every
+#                                                   creates it at boot for the whole estate. A DIRECT
 #                                                   workspace container writes its agent transcripts
 #                                                   here, and resolving a workspace never touches it,
-#                                                   so this is what makes a resolved workspace's
+#                                                   so this is what makes such a workspace's
 #                                                   conversation readable after its own container and
-#                                                   volume are destroyed. READ-ONLY because this
+#                                                   volume are destroyed. A TARGET workspace writes on
+#                                                   its execution target instead and its daemon ships
+#                                                   the sessions (qits-1752), so for those this is
+#                                                   only the fallback. READ-ONLY because this
 #                                                   service only reads them back, and the same volume
 #                                                   carries the estate-wide harness credential.
 #

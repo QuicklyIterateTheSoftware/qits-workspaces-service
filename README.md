@@ -174,7 +174,7 @@ the workspace and the run state before and after.
 | `POST …/stop` | `AgentDto`, `runState: STOPPED`: a placed agent's harness is stopped on its daemon (its worktree and workspace stay), a QUEUED one gives up its place; already STOPPED is unchanged; REMOVED is 409 | person, machine, desk |
 | `POST …/restart` | `AgentDto`: a RUNNING agent's harness is stopped and started again on its session; a STOPPED or YIELDED one goes back to the scheduler as YIELDED; QUEUED or REMOVED is 409 | person, machine, desk |
 | `POST …/yield` | `AgentDto`, `runState: YIELDED`: the slot is free at once, the harness keeps running; anything but RUNNING is 409 | person, machine, desk, the agent itself |
-| `GET …/sessions`, `…/sessions/{sessionId}/transcript` | `{sessions}`, `{lines}`: read off the shared harness volume, so a REMOVED agent answers too; another agent's session is a 404 | everyone, any agent included |
+| `GET …/sessions`, `…/sessions/{sessionId}/transcript` | `{sessions}`, `{lines}`: what the agent's daemon shipped into the transcript store, then the shared harness volume as fallback (qits-1752), so a REMOVED agent answers too; another agent's session is a 404 | everyone, any agent included |
 | `GET …/active-process` | `{technicalProcessId}` of the agent's workspace, null without one | everyone |
 
 "Person, machine" is `qits:admin`, `qits:admin-agent` and `qits:system`; "desk" is `qits:desk-admin`
