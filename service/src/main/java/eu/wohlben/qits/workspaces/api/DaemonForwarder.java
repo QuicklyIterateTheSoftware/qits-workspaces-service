@@ -4,6 +4,7 @@ import eu.wohlben.qits.db.DbRetry;
 import eu.wohlben.qits.workspaces.control.ContainerProxyPath;
 import eu.wohlben.qits.workspaces.control.DaemonProxyTargets;
 import eu.wohlben.qits.workspaces.daemonhost.WorkspaceTunnels;
+import io.vertx.core.Context;
 import io.vertx.core.Future;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
@@ -13,6 +14,7 @@ import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.http.RequestOptions;
+import io.vertx.core.http.impl.HttpServerRequestInternal;
 import io.vertx.core.net.HostAndPort;
 import io.vertx.core.net.NetSocket;
 import io.vertx.ext.web.RoutingContext;
@@ -258,6 +260,16 @@ class DaemonForwarder {
    * <p>A refusal is forwarded with its own status and body rather than flattened into a 502: the
    * daemon answers 401 for a bad bearer and 404 for a command that is not running, and those say
    * what to do. {@code vertx-http-proxy} answers the status alone with no body at all.
+   *
+   * <p>The handoff is handed to {@link UpgradePipe#marry} straight after {@code netSocket()}, on
+   * the daemon response's context and before anything else runs there, and the browser's {@code
+   * toNetSocket()} is called on {@code inboundContext}, the request's own: each side has a window
+   * in which an event reaches a socket with no handler and is dropped, and that class says how the
+   * two are closed. {@code inboundContext} comes straight off {@code inbound} rather than being
+   * threaded down from {@code handle} through both {@link ContainerProxyRoute} and {@link
+   * AgentProxyRoute}: {@code HttpServerRequestInternal.context()} answers the same context {@code
+   * Vertx.currentContext()} would give the route's own {@code handle}, and reading it here — at
+   * the one place this class needs it — keeps both routes' call chains untouched.
    */
   private void completeUpgrade(
       RoutingContext rc, HttpServerRequest inbound, HttpClientResponse response) {
@@ -278,54 +290,8 @@ class DaemonForwarder {
     out.setStatusCode(101);
     out.headers().addAll(response.headers());
     NetSocket daemon = response.netSocket();
-    inbound
-        .toNetSocket()
-        .onFailure(
-            failure -> {
-              LOG.debugf("could not take over the browser socket: %s", String.valueOf(failure));
-              daemon.close();
-            })
-        .onSuccess(browser -> pipe(browser, daemon));
-  }
-
-  /**
-   * Pump bytes both ways with a bound on each queue — the mirror of {@code DaemonStreamRoute.pipe},
-   * and it has to be, because it is the same pipe one hop closer to the browser.
-   *
-   * <p><b>Raw bytes, not frames.</b> Neither end is decoded: what the browser sends is what the
-   * daemon receives, frame boundaries, fragmentation, ping/pong and close codes included. That is
-   * the property that lets the terminal's own close semantics (a bare 1000 meaning "detached, the
-   * process survives") arrive intact, and it is why this is a {@code NetSocket} pipe rather than a
-   * WebSocket client that would re-frame everything it forwarded.
-   *
-   * <p>The backpressure is the point. A write into a full queue is buffered on the heap without
-   * complaint, so the reader on the other side has to be paused until it drains — otherwise a dev
-   * server printing faster than a browser reads is an unbounded allocation in this process. Every
-   * close, end and exception path closes the other side, so neither socket outlives its peer.
-   */
-  private static void pipe(NetSocket browser, NetSocket daemon) {
-    browser.handler(
-        buffer -> {
-          daemon.write(buffer);
-          if (daemon.writeQueueFull()) {
-            browser.pause();
-            daemon.drainHandler(drained -> browser.resume());
-          }
-        });
-    daemon.handler(
-        buffer -> {
-          browser.write(buffer);
-          if (browser.writeQueueFull()) {
-            daemon.pause();
-            browser.drainHandler(drained -> daemon.resume());
-          }
-        });
-    browser.endHandler(end -> daemon.close());
-    daemon.endHandler(end -> browser.close());
-    browser.closeHandler(closed -> daemon.close());
-    daemon.closeHandler(closed -> browser.close());
-    browser.exceptionHandler(failure -> daemon.close());
-    daemon.exceptionHandler(failure -> browser.close());
+    Context inboundContext = ((HttpServerRequestInternal) inbound).context();
+    UpgradePipe.marry(daemon, inboundContext, inbound::toNetSocket);
   }
 
   /**
