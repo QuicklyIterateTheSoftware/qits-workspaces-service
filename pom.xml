@@ -66,7 +66,7 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1030.80103</qits.workspace-daemon-protocol.version>
+        <qits.workspace-daemon-protocol.version>2026.1030.124906</qits.workspace-daemon-protocol.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -104,7 +104,7 @@
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1029.125110</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1030.84548</qits.projects-golden-masters.version>
         <!-- The other providers' golden masters (qits-1149), the same rule: qits-idp's for the
              commission doors, the peer token mint and the tenant's discovery and keys
              (wiring/IdpContract); qits-containers' for the place and volume doors
@@ -133,13 +133,13 @@
              qits-maintenance bumps it when the consumer releases a changed pact. -->
         <qits.landing-app-pacts-qits-workspaces-service.version>2026.1029.233746</qits.landing-app-pacts-qits-workspaces-service.version>
         <!-- qits-projects' consumer pact against this service (qits-1152). -->
-        <qits.projects-service-pacts-qits-workspaces-service.version>2026.1028.230057</qits.projects-service-pacts-qits-workspaces-service.version>
+        <qits.projects-service-pacts-qits-workspaces-service.version>2026.1030.110448</qits.projects-service-pacts-qits-workspaces-service.version>
         <!-- qits-artifacts', qits-orchestrator's and the qits CLI's consumer pacts against this
              service (qits-1149). qits-bootstrap-cli's is gone: it calls this service no more
              (qits-bootstrap-cli-rr-60). -->
         <qits.artifacts-service-pacts-qits-workspaces-service.version>2026.1024.160449</qits.artifacts-service-pacts-qits-workspaces-service.version>
         <qits.orchestrator-service-pacts-qits-workspaces-service.version>2026.1023.105608</qits.orchestrator-service-pacts-qits-workspaces-service.version>
-        <qits.platform-access-cli-pacts-qits-workspaces-service.version>2026.1030.726</qits.platform-access-cli-pacts-qits-workspaces-service.version>
+        <qits.platform-access-cli-pacts-qits-workspaces-service.version>2026.1030.112950</qits.platform-access-cli-pacts-qits-workspaces-service.version>
         <qits.maven.repository.url>https://registry.qits.wohlben.eu/artifacts/maven/maven</qits.maven.repository.url>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
