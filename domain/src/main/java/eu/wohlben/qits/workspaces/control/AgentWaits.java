@@ -91,6 +91,9 @@ import org.jboss.logging.Logger;
  *       a wait on its final states, a comment from before the declaration does not fire a wait on
  *       the next one, and a selection naming no subject replays nothing older than itself. The
  *       live path holds the same line: an event delivered late, older than the wait, skips it.
+ *   <li><b>The waiter's own comment</b> (qits-1759, {@code V36}): a wait records who waits ({@code
+ *       waiter_subject}), and an {@code EntityCommented} that waiter wrote never matches it, live
+ *       or looked back ({@link #ownComment}); it stays OPEN for somebody else's.
  *   <li><b>The subject</b> (epic qits-1681, {@code V33}): an agent's wait records what it waits on,
  *       parsed from its selection at declaration ({@link WaitSubjects}), and every event of its name
  *       that names that subject writes the subject's state before matching. The selection and the
@@ -257,6 +260,8 @@ public class AgentWaits {
                   AgentWait wait = new AgentWait();
                   wait.id = id;
                   wait.agentId = agentId;
+                  // The agent waits, even when an admin declares for it (qits-1759).
+                  wait.waiterSubject = row.commissionedTokenSubject;
                   wait.label = finalLabel;
                   wait.selection = selection.toJson();
                   wait.eventName = selection.event();
@@ -378,11 +383,12 @@ public class AgentWaits {
    * qits-projects — so the caller's authorization is what binds the id. The wait's subject is, as an
    * agent's is, and one already in a target state answers MATCHED (qits-1668).
    *
+   * @param waiterSubject the declaring principal; its own comments never match the wait (qits-1759)
    * @throws ConflictException {@code TOO_MANY_WAITS}
    * @throws BadRequestException a missing selection, or a bad timeout
    */
   public AgentWaitDto createForDesk(
-      UUID projectId, String label, EventSelection selection, Duration timeout) {
+      UUID projectId, String label, EventSelection selection, Duration timeout, String waiterSubject) {
     String finalLabel = validated(label, selection, timeout);
     UUID id = UUID.randomUUID();
     Instant declaredAt = Instant.now();
@@ -403,6 +409,7 @@ public class AgentWaits {
               AgentWait wait = new AgentWait();
               wait.id = id;
               wait.deskProjectId = projectId;
+              wait.waiterSubject = waiterSubject;
               wait.label = finalLabel;
               wait.selection = selection.toJson();
               wait.eventName = selection.event();
@@ -571,6 +578,26 @@ public class AgentWaits {
         && occurredAt.truncatedTo(ChronoUnit.MICROS).plus(1, ChronoUnit.MICROS).isBefore(createdAt);
   }
 
+  /**
+   * Whether {@code name}/{@code tree} is the waiter's own comment (qits-1759): an {@code
+   * EntityCommented} whose {@code changedBy} is the wait's {@link AgentWait#waiterSubject}, or, for
+   * an agent's wait, whose {@code author} is the agent's id (an agent's comment is authored by its
+   * uuid). Such a comment never matches the wait, which stays OPEN. Only comments: a state event
+   * the waiter caused still matches. A wait with no waiter subject (before {@code V36}) is held to
+   * the author check alone.
+   */
+  static boolean ownComment(AgentWait wait, String name, JsonNode tree) {
+    if (!"EntityCommented".equals(name) || tree == null) {
+      return false;
+    }
+    if (wait.waiterSubject != null && wait.waiterSubject.equals(tree.path("changedBy").asText(null))) {
+      return true;
+    }
+    return !wait.isDeskWait()
+        && wait.agentId != null
+        && wait.agentId.toString().equals(tree.path("author").asText(null));
+  }
+
   /** {@link #onEvent}, for every OPEN wait of the name, or only the wait {@code only} when not null. */
   private int match(String eventId, String name, Instant occurredAt, String payload, UUID only) {
     if (name == null || name.isBlank()) {
@@ -606,6 +633,10 @@ public class AgentWaits {
                 // A delivered event older than the wait never matches it (qits-1677); the
                 // look-back ({@code only}) chose its frame by that rule already.
                 if (only == null && occurredBefore(occurredAt, wait.createdAt)) {
+                  continue;
+                }
+                if (ownComment(wait, name, tree)) {
+                  LOG.debugf("Wait %s skips %s %s: the waiter's own comment", wait.id, name, eventId);
                   continue;
                 }
                 if (!EventSelectionEvaluator.matches(selection, name, tree)) {

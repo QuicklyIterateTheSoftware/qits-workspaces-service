@@ -69,7 +69,7 @@ public class DeskWaitsTest {
   @Test
   void aDeskDeclaresListsAndCancelsItsWaits() {
     UUID project = UUID.randomUUID();
-    AgentWaitDto wait = waits.createForDesk(project, "rr 1 final", finalized("rr-1"), Duration.ofHours(2));
+    AgentWaitDto wait = waits.createForDesk(project, "rr 1 final", finalized("rr-1"), Duration.ofHours(2), null);
 
     assertEquals(AgentWaitState.OPEN, wait.state());
     assertNull(wait.agentId());
@@ -91,31 +91,81 @@ public class DeskWaitsTest {
   void aDeskHoldsAtMostEightOpenWaitsAndATimeoutOfAtMostThirtyDays() {
     UUID project = UUID.randomUUID();
     for (int i = 0; i < AgentWaits.MAX_OPEN_PER_AGENT; i++) {
-      waits.createForDesk(project, "w" + i, EventSelection.of("DeskTestBuildStatusChanged"), null);
+      waits.createForDesk(project, "w" + i, EventSelection.of("DeskTestBuildStatusChanged"), null, null);
     }
     ConflictException full =
         assertThrows(
             ConflictException.class,
-            () -> waits.createForDesk(project, "one more", EventSelection.of("DeskTestBuildStatusChanged"), null));
+            () -> waits.createForDesk(project, "one more", EventSelection.of("DeskTestBuildStatusChanged"), null, null));
     assertTrue(full.getMessage().contains("8 open waits"), full.getMessage());
     // Another project's desk is counted on its own.
     assertDoesNotThrow(
-        () -> waits.createForDesk(UUID.randomUUID(), "x", EventSelection.of("DeskTestBuildStatusChanged"), null));
+        () -> waits.createForDesk(UUID.randomUUID(), "x", EventSelection.of("DeskTestBuildStatusChanged"), null, null));
 
     assertThrows(
         BadRequestException.class,
-        () -> waits.createForDesk(UUID.randomUUID(), "x", EventSelection.of("X"), Duration.ofDays(31)));
+        () -> waits.createForDesk(UUID.randomUUID(), "x", EventSelection.of("X"), Duration.ofDays(31), null));
     assertThrows(
         BadRequestException.class,
-        () -> waits.createForDesk(UUID.randomUUID(), "x", EventSelection.of("X"), Duration.ZERO));
-    assertThrows(BadRequestException.class, () -> waits.createForDesk(UUID.randomUUID(), "x", null, null));
+        () -> waits.createForDesk(UUID.randomUUID(), "x", EventSelection.of("X"), Duration.ZERO, null));
+    assertThrows(BadRequestException.class, () -> waits.createForDesk(UUID.randomUUID(), "x", null, null, null));
+  }
+
+  /** {@code qits wait work --comment}'s shape: a comment on item {@code number} of {@code project}. */
+  private static EventSelection commentedOn(UUID project, int number) {
+    return EventSelection.of(
+        "EntityCommented",
+        Condition.exact("projectId", project.toString()),
+        Condition.exact("number", Integer.toString(number)));
+  }
+
+  private static String comment(UUID project, int number, String changedBy) {
+    return "{\"projectId\":\""
+        + project
+        + "\",\"number\":"
+        + number
+        + ",\"author\":\""
+        + changedBy
+        + "\",\"changedBy\":\""
+        + changedBy
+        + "\"}";
+  }
+
+  @Test
+  void theDesksOwnCommentNeverFiresItsWait() {
+    UUID project = UUID.randomUUID();
+    String desk = "tok-desk-delivery-" + UUID.randomUUID();
+    AgentWaitDto wait = waits.createForDesk(project, "a reply on 7", commentedOn(project, 7), null, desk);
+    assertEquals(desk, waitRow(wait.id()).waiterSubject);
+    Instant at = Instant.parse("2036-10-26T10:00:00Z");
+
+    // The desk commented itself (qits-1759): the wait stays OPEN.
+    assertEquals(0, waits.onEvent("c-own", "EntityCommented", at, comment(project, 7, desk)));
+    assertEquals(AgentWaitState.OPEN, waitRow(wait.id()).state);
+
+    // Somebody else's comment fires it.
+    assertEquals(1, waits.onEvent("c-other", "EntityCommented", at, comment(project, 7, "alice")));
+    assertEquals(AgentWaitState.MATCHED, waitRow(wait.id()).state);
+    assertEquals("c-other", waitRow(wait.id()).matchedEventId);
+  }
+
+  @Test
+  void aWaitWithNoWaiterSubjectMatchesAnyComment() {
+    UUID project = UUID.randomUUID();
+    AgentWaitDto wait = waits.createForDesk(project, "a reply on 8", commentedOn(project, 8), null, null);
+
+    assertEquals(
+        1,
+        waits.onEvent(
+            "c-any", "EntityCommented", Instant.parse("2036-10-26T10:00:00Z"), comment(project, 8, "tok-desk-x")));
+    assertEquals(AgentWaitState.MATCHED, waitRow(wait.id()).state);
   }
 
   @Test
   void aMatchClosesTheDeskWaitAndAnnouncesTheAgentsTurn() {
     UUID project = UUID.randomUUID();
     String request = "rr-" + UUID.randomUUID();
-    AgentWaitDto wait = waits.createForDesk(project, "rr final", finalized(request), null);
+    AgentWaitDto wait = waits.createForDesk(project, "rr final", finalized(request), null, null);
     // Dated after the wait: an older event would skip it (qits-1677).
     Instant at = Instant.parse("2036-10-26T10:00:00Z");
     String payload = "{\"requestId\":\"" + request + "\"}";
@@ -160,7 +210,7 @@ public class DeskWaitsTest {
   void aTimeoutClosesTheDeskWaitAndAnnouncesIt() {
     UUID project = UUID.randomUUID();
     AgentWaitDto wait =
-        waits.createForDesk(project, "ci run 9", EventSelection.of("DeskTestBuildStatusChanged"), Duration.ofHours(2));
+        waits.createForDesk(project, "ci run 9", EventSelection.of("DeskTestBuildStatusChanged"), Duration.ofHours(2), null);
     expire(wait.id());
 
     waits.sweep();
@@ -183,7 +233,7 @@ public class DeskWaitsTest {
   @Test
   void theSweepNeverCancelsADeskWait() {
     AgentWaitDto wait =
-        waits.createForDesk(UUID.randomUUID(), "open", EventSelection.of("DeskTestBuildStatusChanged"), null);
+        waits.createForDesk(UUID.randomUUID(), "open", EventSelection.of("DeskTestBuildStatusChanged"), null, null);
 
     waits.sweep();
     waits.sweep();
@@ -195,7 +245,7 @@ public class DeskWaitsTest {
   @Test
   void anAnnouncementTheBusNeverTookIsPublishedAgainUnderTheSameId() {
     AgentWaitDto wait =
-        waits.createForDesk(UUID.randomUUID(), "again", EventSelection.of("DeskTestBuildStatusChanged"), Duration.ofHours(2));
+        waits.createForDesk(UUID.randomUUID(), "again", EventSelection.of("DeskTestBuildStatusChanged"), Duration.ofHours(2), null);
     expire(wait.id());
     waits.sweep();
     UUID eventId = waitRow(wait.id()).closedEventId;

@@ -54,6 +54,14 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
   @Column(name = "desk_project_id")
   public UUID deskProjectId;
 
+  /**
+   * The principal that waits (qits-1759, {@code V36}): the agent's commissioned token subject, or
+   * the subject that declared a desk's wait. Its own {@code EntityCommented} never matches the wait.
+   * Null on a wait declared before {@code V36}.
+   */
+  @Column(name = "waiter_subject", columnDefinition = "text")
+  public String waiterSubject;
+
   /** What the agent calls it; the selection's one-line description when it named none. */
   @Column(nullable = false, columnDefinition = "text")
   public String label;

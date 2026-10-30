@@ -58,6 +58,7 @@ erDiagram
     text subject_state
     instant subject_state_at
     text target_states
+    text waiter_subject
   }
   %% agent_worktree: eu.wohlben.qits.workspaces.entity.AgentWorktree (domain)
   agent_worktree {

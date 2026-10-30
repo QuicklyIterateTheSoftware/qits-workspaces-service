@@ -149,7 +149,7 @@ public class AgentWaitLookbackTest {
     String run = run("run-3");
     log.add("ev-desk", EVENT, Instant.now().minusSeconds(10), payload(run, "FAILED"));
 
-    AgentWaitDto wait = waits.createForDesk(project, "run-3 failed", failed(run), null);
+    AgentWaitDto wait = waits.createForDesk(project, "run-3 failed", failed(run), null, null);
 
     assertEquals(AgentWaitState.MATCHED, wait.state());
     assertEquals("ev-desk", waitRow(wait.id()).matchedEventId);
@@ -176,7 +176,7 @@ public class AgentWaitLookbackTest {
     log.add("rr-pending", REQUEST, now.minusSeconds(30), requestPayload(request, "PENDING"));
 
     AgentWaitDto agentWait = waits.create(id, null, requestEnds(request), Duration.ofHours(1));
-    AgentWaitDto deskWait = waits.createForDesk(UUID.randomUUID(), null, requestEnds(request), null);
+    AgentWaitDto deskWait = waits.createForDesk(UUID.randomUUID(), null, requestEnds(request), null, null);
 
     assertEquals("RELEASE_REQUEST", waitRow(agentWait.id()).subjectKind);
     assertEquals(AgentWaitState.OPEN, agentWait.state());
@@ -217,7 +217,7 @@ public class AgentWaitLookbackTest {
     EventSelection commented = EventSelection.of(COMMENTED, Condition.exact("entityId", entity));
 
     AgentWaitDto agentWait = waits.create(id, null, commented, Duration.ofHours(1));
-    AgentWaitDto deskWait = waits.createForDesk(UUID.randomUUID(), null, commented, null);
+    AgentWaitDto deskWait = waits.createForDesk(UUID.randomUUID(), null, commented, null, null);
 
     assertEquals("COMMENTS", waitRow(agentWait.id()).subjectKind);
     assertEquals(AgentWaitState.OPEN, agentWait.state());
@@ -227,6 +227,48 @@ public class AgentWaitLookbackTest {
         2, waits.onEvent("c-new", COMMENTED, Instant.now(), "{\"entityId\":\"" + entity + "\"}"));
     assertEquals(AgentWaitState.MATCHED, waitRow(agentWait.id()).state);
     assertEquals(AgentWaitState.MATCHED, waitRow(deskWait.id()).state);
+  }
+
+  @Test
+  void aLookedBackCommentFiresOnlyTheWaitsThatDidNotWriteIt() {
+    UUID id = agent();
+    String subject = "tok-workspace-agent-" + id;
+    String desk = "tok-desk-" + UUID.randomUUID();
+    String entity = "e-" + UUID.randomUUID();
+    // Logged at the declaration's own instant or later, as a comment written right after it would be.
+    Instant soon = Instant.now().plusSeconds(5);
+    log.add(
+        "c-agent", COMMENTED, soon, "{\"entityId\":\"" + entity + "\",\"changedBy\":\"" + subject + "\"}");
+    log.add(
+        "c-desk", COMMENTED, soon, "{\"entityId\":\"" + entity + "\",\"changedBy\":\"" + desk + "\"}");
+    EventSelection commented = EventSelection.of(COMMENTED, Condition.exact("entityId", entity));
+
+    AgentWaitDto agentWait = waits.create(id, null, commented, Duration.ofHours(1));
+    AgentWaitDto deskWait = waits.createForDesk(UUID.randomUUID(), null, commented, null, desk);
+
+    // Each skips its own comment (qits-1759) and takes the other's.
+    assertEquals(AgentWaitState.MATCHED, agentWait.state());
+    assertEquals("c-desk", waitRow(agentWait.id()).matchedEventId);
+    assertEquals(AgentWaitState.MATCHED, deskWait.state());
+    assertEquals("c-agent", waitRow(deskWait.id()).matchedEventId);
+  }
+
+  @Test
+  void theWaitersOwnLookedBackCommentLeavesItsWaitOpen() {
+    UUID id = agent();
+    String subject = "tok-workspace-agent-" + id;
+    String entity = "e-" + UUID.randomUUID();
+    log.add(
+        "c-own",
+        COMMENTED,
+        Instant.now().plusSeconds(5),
+        "{\"entityId\":\"" + entity + "\",\"changedBy\":\"" + subject + "\"}");
+
+    AgentWaitDto wait =
+        waits.create(id, null, EventSelection.of(COMMENTED, Condition.exact("entityId", entity)), Duration.ofHours(1));
+
+    assertEquals(AgentWaitState.OPEN, wait.state());
+    assertNull(QuarkusTransaction.requiringNew().call(() -> agents.findById(id).pendingText));
   }
 
   @Test
@@ -255,7 +297,7 @@ public class AgentWaitLookbackTest {
     log.add("r-failed", EVENT, now.minusSeconds(60), payload(run, "FAILED"));
 
     AgentWaitDto agentWait = waits.create(id, null, failed(run), Duration.ofHours(1));
-    AgentWaitDto deskWait = waits.createForDesk(UUID.randomUUID(), null, failed(run), null);
+    AgentWaitDto deskWait = waits.createForDesk(UUID.randomUUID(), null, failed(run), null, null);
 
     assertEquals(AgentWaitState.MATCHED, agentWait.state());
     assertEquals("r-failed", waitRow(agentWait.id()).matchedEventId);

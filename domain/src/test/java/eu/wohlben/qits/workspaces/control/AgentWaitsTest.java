@@ -881,6 +881,48 @@ public class AgentWaitsTest {
   }
 
   @Test
+  void anAgentsOwnCommentNeverFiresItsWait() {
+    UUID id = agent("w-own-comment");
+    String entity = "e-" + UUID.randomUUID();
+    EventSelection commented = EventSelection.of("EntityCommented", Condition.exact("entityId", entity));
+    AgentWaitDto wait = waits.create(id, "a reply", commented, null);
+    String subject = row(id).commissionedTokenSubject;
+    assertEquals(subject, waitRow(wait.id()).waiterSubject, "the agent waits (qits-1759)");
+    Instant at = Instant.parse("2036-10-10T10:00:00Z");
+    String base = "{\"entityId\":\"" + entity + "\",";
+
+    // Its own comment, by its token subject or authored as its id: the wait stays OPEN.
+    assertEquals(
+        0,
+        waits.onEvent("c-own-1", "EntityCommented", at, base + "\"author\":\"x\",\"changedBy\":\"" + subject + "\"}"));
+    assertEquals(
+        0,
+        waits.onEvent("c-own-2", "EntityCommented", at, base + "\"author\":\"" + id + "\",\"changedBy\":\"svc\"}"));
+    assertEquals(AgentWaitState.OPEN, waitRow(wait.id()).state);
+    assertNull(row(id).pendingText);
+
+    // Another author's fires it.
+    assertEquals(
+        1,
+        waits.onEvent("c-other", "EntityCommented", at, base + "\"author\":\"bob\",\"changedBy\":\"bob\"}"));
+    assertEquals(AgentWaitState.MATCHED, waitRow(wait.id()).state);
+    assertEquals("c-other", waitRow(wait.id()).matchedEventId);
+  }
+
+  @Test
+  void aStateEventTheAgentCausedStillFiresItsWait() {
+    UUID id = agent("w-own-transition");
+    AgentWaitDto wait = waits.create(id, "e-1 verified", verified(), null);
+    String payload =
+        "{\"entities\":[{\"entityId\":\"e-1\",\"status\":\"VERIFIED\"}],\"changedBy\":\""
+            + row(id).commissionedTokenSubject
+            + "\"}";
+
+    assertEquals(1, waits.onEvent("t-own", "EntityTransitioned", Instant.parse("2036-10-10T10:00:00Z"), payload));
+    assertEquals(AgentWaitState.MATCHED, waitRow(wait.id()).state);
+  }
+
+  @Test
   void anUnknownAgentIsNotFound() {
     assertThrows(
         eu.wohlben.qits.workspaces.error.NotFoundException.class,

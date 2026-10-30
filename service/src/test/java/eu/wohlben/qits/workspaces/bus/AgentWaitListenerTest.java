@@ -87,6 +87,7 @@ class AgentWaitListenerTest {
             project,
             "desk ci run 8",
             EventSelection.of("DeskListenerBuildStatusChanged", EventSelection.Condition.exact("runId", "8")),
+            null,
             null);
 
     assertTrue(listener.selects(frame("d-1", "DeskListenerBuildStatusChanged", "{}")));
