@@ -38,6 +38,8 @@ import eu.wohlben.qits.workspacedaemon.protocol.PullBranch;
 import eu.wohlben.qits.workspacedaemon.protocol.RunCommand;
 import eu.wohlben.qits.workspacedaemon.protocol.Stream;
 import eu.wohlben.qits.workspacedaemon.protocol.StreamTarget;
+import eu.wohlben.qits.workspacedaemon.protocol.TranscriptChunk;
+import eu.wohlben.qits.workspacedaemon.protocol.TranscriptResync;
 import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceChanged;
 import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceInfo;
 import io.quarkus.scheduler.Scheduled;
@@ -227,9 +229,31 @@ public class WorkspaceDaemonRegistry
             return thread;
           });
 
+  /**
+   * The transcript store's writer (qits-1752): every {@link TranscriptChunk} is resolved to its
+   * agent and appended on {@link #transcriptDispatch}.
+   */
+  @Inject TranscriptIngest transcriptIngest;
+
+  /**
+   * One ordered thread for transcript chunks, apart from {@link #sinkDispatch}: a daemon that
+   * reconnects re-ships whole files, and that backlog must not hold up the agent frames queued
+   * behind it. Single-threaded because order is the append rule — chunks of one file processed out
+   * of arrival order would each start somewhere other than where the store ends, and be answered
+   * with resyncs instead of appended.
+   */
+  private final java.util.concurrent.ExecutorService transcriptDispatch =
+      java.util.concurrent.Executors.newSingleThreadExecutor(
+          runnable -> {
+            Thread thread = new Thread(runnable, "daemon-transcript-ingest");
+            thread.setDaemon(true);
+            return thread;
+          });
+
   @jakarta.annotation.PreDestroy
   void shutdownDispatch() {
     sinkDispatch.shutdownNow();
+    transcriptDispatch.shutdownNow();
   }
 
   /** The label a connected daemon announced for itself, or null when it has not said Hello yet. */
@@ -376,6 +400,9 @@ public class WorkspaceDaemonRegistry
       // qits-1236: a harness exit frame (capability 11) — relayed to the agent row's own event.
       case AgentHarnessExit exit -> onAgentHarnessExit(workspaceId, exit);
       case WorkspaceChanged changed -> onWorkspaceChanged(workspaceId, client, changed);
+      // qits-1752: a transcript chunk (capability 13) into the store, answered when it is not
+      // where the store ends.
+      case TranscriptChunk chunk -> onTranscriptChunk(workspaceId, connection, chunk);
       // Everything else is ignored: qits -> workspace-daemon requests are never received here; a
       // GitStatus frame is sent by no daemon since protocol 10 (qits-1152), and the per-agent
       // cleanup check replaced what it carried (qits-1263); and a pre-qits-947 daemon's service
@@ -385,6 +412,51 @@ public class WorkspaceDaemonRegistry
       // those records leave the sealed interface.
       default -> {}
     }
+  }
+
+  /**
+   * A transcript chunk, appended on {@link #transcriptDispatch} by {@link TranscriptIngest} — which
+   * also decides whether this workspace may write it at all — and answered with a {@link
+   * TranscriptResync} when it did not start where the store ends. The answer goes out on the
+   * connection the chunk came in on, without awaiting, as {@link #requestStream} sends: a lost one
+   * is only a resync the next chunk asks for again. A failure is logged and dropped, as every sink
+   * here is: it must not close the control socket.
+   */
+  private void onTranscriptChunk(
+      Long workspaceId, WebSocketConnection connection, TranscriptChunk chunk) {
+    transcriptDispatch.execute(
+        () -> {
+          try {
+            transcriptIngest
+                .accept(workspaceId, chunk)
+                .ifPresent(resync -> sendResync(workspaceId, connection, resync));
+          } catch (RuntimeException e) {
+            LOG.warnf(e, "could not store a transcript chunk (workspace %s)", workspaceId);
+          }
+        });
+  }
+
+  private void sendResync(
+      Long workspaceId, WebSocketConnection connection, TranscriptResync resync) {
+    WebSocketConnection target = connection;
+    if (target == null) {
+      DaemonConnection client = clients.get(workspaceId);
+      target = client == null ? null : client.connection;
+    }
+    if (target == null || !target.isOpen()) {
+      LOG.debugf("transcript resync for workspace %s dropped: no daemon connected", workspaceId);
+      return;
+    }
+    target
+        .sendText(codec.encode(resync))
+        .subscribe()
+        .with(
+            ignored -> {},
+            failure ->
+                LOG.debugf(
+                    "could not send a transcript resync to workspace %s: %s",
+                    workspaceId,
+                    failure));
   }
 
   /**

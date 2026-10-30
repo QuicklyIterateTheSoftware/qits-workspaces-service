@@ -6,8 +6,14 @@ import eu.wohlben.qits.workspaces.entity.Workspace;
 import java.util.List;
 
 /**
- * The agent sessions that ran in a workspace, read back from the shared harness volume after the
- * workspace itself is gone.
+ * The agent sessions that ran in a workspace, read back after the workspace itself is gone.
+ *
+ * <p><b>Two sources since qits-1752.</b> A workspace-daemon ships each of its own agents'
+ * transcripts over the control socket into this service's transcript store, which is the only
+ * record of a TARGET workspace's sessions (its harness writes to its execution target's volume,
+ * which this service cannot mount). The shared harness volume below is the fallback: DIRECT
+ * workspaces and sessions from before the daemon shipped them. The implementation answers both,
+ * deduplicated by session id with the shipped copy winning; what follows describes the fallback.
  *
  * <p>Resolving a workspace destroys its container and its {@code /workspace} volume; the shared
  * {@code qits_shared_dot_claude} volume is never touched, so the harness's own JSONL transcripts

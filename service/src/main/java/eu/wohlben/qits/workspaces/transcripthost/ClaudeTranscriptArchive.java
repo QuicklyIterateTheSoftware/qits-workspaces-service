@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 import org.jboss.logging.Logger;
 
@@ -92,6 +93,16 @@ import org.jboss.logging.Logger;
  * second time here is how the reader and the writer drift apart over a CLI upgrade, so the directory
  * below is <em>derived</em> from those methods rather than composed from a literal.
  *
+ * <h2>The second mode: a directory that is already one agent's (qits-1752)</h2>
+ *
+ * <p>{@link #ofDirectory} reads a directory in which <em>every</em> session belongs — the
+ * transcript store's {@code <root>/<agentId>/}, which {@link TranscriptStore} fills from what an
+ * agent's own workspace-daemon shipped. The daemon attributed those sessions when it chose to ship
+ * them, so there is no branch, window or mtime rule to apply: {@link #sessions()} lists them all,
+ * and {@link #transcriptOf(String)} still resolves the requested id against that listing rather
+ * than joining it onto a path. The scan, the sidechain markers and the DTOs are the ones the
+ * mounted mode uses, so a shipped session reads exactly like a mounted one.
+ *
  * <h2>Failure is always an empty answer</h2>
  *
  * <p>A missing archive root, an unreadable directory, an unreadable file and a line that is not JSON
@@ -162,6 +173,12 @@ public final class ClaudeTranscriptArchive {
   /** The harness working directory the transcripts are keyed on. */
   private final String cwd;
 
+  /**
+   * The directory of {@link #ofDirectory}, where every session belongs; null for the mounted
+   * harness volume, where the path is derived from {@link #cwd} and sessions are attributed.
+   */
+  private final Path sessionsDirectory;
+
   public ClaudeTranscriptArchive(Path archiveRoot) {
     this(archiveRoot, CONTAINER_CWD);
   }
@@ -172,30 +189,55 @@ public final class ClaudeTranscriptArchive {
    * transcripts on the escaped cwd.
    */
   public ClaudeTranscriptArchive(Path archiveRoot, String cwd) {
+    this(archiveRoot, cwd, null);
+  }
+
+  private ClaudeTranscriptArchive(Path archiveRoot, String cwd, Path sessionsDirectory) {
     this.cwd = cwd == null || cwd.isBlank() ? CONTAINER_CWD : cwd;
     this.archiveRoot = archiveRoot;
+    this.sessionsDirectory = sessionsDirectory;
   }
 
   /**
-   * Say, once, that there is no archive to read — naming the path, so the answer is actionable.
-   *
-   * <p><b>This exists because its absence cost a verification.</b> An unmounted volume and a
-   * workspace whose sessions genuinely do not attribute produce the identical answer, an empty list,
-   * and with nothing in the log the two could only be told apart by reading the platform's stored
-   * configuration. That is a long way to go to learn that a directory is missing, and nobody
-   * diagnosing this later should have to go it.
-   *
-   * <p>WARN and not ERROR: a deployment without the mount is a supported configuration — every read
-   * answers empty and nothing fails — so this is a capability that is switched off, not a fault.
+   * An archive over one directory whose every session belongs to the asker: {@code
+   * <sessionId>.jsonl} files, each with its sidechains under {@code <sessionId>/subagents/}. Read
+   * with {@link #sessions()} and {@link #transcriptOf(String)}; see the class javadoc.
    */
-  private static void sayTheArchiveIsAbsent(Path projects) {
+  public static ClaudeTranscriptArchive ofDirectory(Path directory) {
+    return new ClaudeTranscriptArchive(directory, CONTAINER_CWD, directory);
+  }
+
+  /**
+   * Say that the mounted archive answered nothing for {@code projects}, at the level the cause
+   * deserves.
+   *
+   * <p><b>A WARN only when the archive ROOT is missing</b> — the volume is not mounted at all — and
+   * then once per process: that is a deployment's standing shape, and an unmounted volume and a
+   * workspace whose sessions genuinely do not attribute produce the identical empty answer, so the
+   * log line is the only way to tell the two apart without reading the platform's configuration.
+   * WARN and not ERROR: the mount is only the fallback now.
+   *
+   * <p>A missing directory UNDER a present root is DEBUG. It is the normal answer for every agent
+   * whose harness never wrote to this volume — every TARGET workspace's, whose sessions the
+   * workspace-daemon ships into the transcript store instead (qits-1752) — and a WARN telling an
+   * operator to mount a volume that is mounted would send them the wrong way.
+   */
+  private void sayTheMountedArchiveHoldsNothing(Path projects) {
+    if (archiveRoot != null && Files.isDirectory(archiveRoot)) {
+      LOG.debugf(
+          "The mounted agent-transcript archive holds nothing at %s. Sessions of TARGET workspaces"
+              + " come from the transcript store their workspace-daemons ship to; this mount is only"
+              + " the fallback for DIRECT workspaces and sessions shipped before qits-1752.",
+          projects);
+      return;
+    }
     if (ARCHIVE_ABSENT_LOGGED.compareAndSet(false, true)) {
       LOG.warnf(
-          "No agent-transcript archive at %s, so every resolved workspace will report no sessions."
-              + " The shared harness volume is not mounted into this service; attach it as"
-              + " qits_shared_dot_claude at the archive root (read-only) and recreate the service:"
-              + " a mount is applied on create, never on a service update.",
-          projects);
+          "No agent-transcript archive mounted at %s, so the mounted fallback finds no sessions."
+              + " Sessions of TARGET workspaces come from the transcript store their"
+              + " workspace-daemons ship to and are unaffected; only DIRECT workspaces and sessions"
+              + " from before qits-1752 are read from this mount.",
+          archiveRoot);
     }
   }
 
@@ -218,23 +260,90 @@ public final class ClaudeTranscriptArchive {
     }
     Path projects = projectsDir();
     if (!Files.isDirectory(projects)) {
-      sayTheArchiveIsAbsent(projects);
+      sayTheMountedArchiveHoldsNothing(projects);
       return List.of();
     }
     Instant from = attribution.createdAt();
     Instant to = attribution.resolvedAt() == null ? Instant.now() : attribution.resolvedAt();
+    return list(
+        projects,
+        path -> writtenNoEarlierThan(path, from),
+        scan -> attributes(scan, attribution.branch(), from, to));
+  }
 
+  /**
+   * Every session in an {@link #ofDirectory} archive, oldest first: no attribution, because the
+   * directory is already one agent's. Empty when the directory does not exist; never throws.
+   *
+   * @throws IllegalStateException on the mounted harness volume, which holds every workspace's and
+   *     every project's sessions and must never be listed whole
+   */
+  public List<ArchivedSessionDto> sessions() {
+    requireDirectoryMode();
+    if (!Files.isDirectory(sessionsDirectory)) {
+      return List.of();
+    }
+    return list(sessionsDirectory, path -> true, scan -> true);
+  }
+
+  /**
+   * The session's raw JSONL: the harness's own lines verbatim, then each sidechain introduced by a
+   * synthetic {@link #AGENT_META_TYPE} marker line.
+   *
+   * <p><b>{@code sessionId} never reaches a path.</b> It is resolved against what {@link
+   * #sessionsFor} returned for this workspace, and the path that is then opened is rebuilt from the
+   * attributed session's own id. That is not belt-and-braces: this volume is the estate's shared
+   * harness home, holding every other project's transcripts and the harness credential beside them,
+   * so a string concatenated into a path here is a read of all of it. Anything that does not
+   * attribute is a 404 — the same answer a session that never existed gets, so the door tells a
+   * caller nothing about what else is on the volume.
+   */
+  public List<String> transcriptOf(Attribution attribution, String sessionId) {
+    return linesOf(find(sessionsFor(attribution), sessionId));
+  }
+
+  /**
+   * One session of an {@link #ofDirectory} archive, raw, as {@link #transcriptOf(Attribution,
+   * String)} renders it — and under its rule: the id is resolved against {@link #sessions()}, never
+   * joined onto a path, and an unlisted one is a 404.
+   */
+  public List<String> transcriptOf(String sessionId) {
+    return linesOf(find(sessions(), sessionId));
+  }
+
+  private static ArchivedSessionDto find(List<ArchivedSessionDto> sessions, String sessionId) {
+    return sessions.stream()
+        .filter(candidate -> candidate.sessionId().equals(sessionId))
+        .findFirst()
+        .orElseThrow(() -> new NotFoundException("Agent session not found: " + sessionId));
+  }
+
+  private List<String> linesOf(ArchivedSessionDto session) {
+    List<String> lines = new ArrayList<>(readLines(transcriptFile(session.sessionId())));
+    for (ArchivedSubagentDto subagent : session.subagents()) {
+      lines.add(metaLine(subagentsDir(session.sessionId()), subagent));
+      lines.addAll(readLines(sidechainFile(session.sessionId(), subagent.agentId())));
+    }
+    return List.copyOf(lines);
+  }
+
+  /**
+   * The sessions in {@code directory}, oldest first: each {@code .jsonl} file {@code worthOpening}
+   * lets through is scanned once, and kept when its scan {@code belongs}.
+   */
+  private List<ArchivedSessionDto> list(
+      Path directory, Predicate<Path> worthOpening, Predicate<Scan> belongs) {
     List<ArchivedSessionDto> sessions = new ArrayList<>();
-    try (Stream<Path> entries = Files.list(projects)) {
+    try (Stream<Path> entries = Files.list(directory)) {
       List<Path> candidates =
           entries
               .filter(path -> path.getFileName().toString().endsWith(JSONL))
               .filter(Files::isRegularFile)
-              .filter(path -> writtenNoEarlierThan(path, from))
+              .filter(worthOpening)
               .toList();
       for (Path candidate : candidates) {
         Scan scan = scan(candidate);
-        if (scan == null || !attributes(scan, attribution.branch(), from, to)) {
+        if (scan == null || !belongs.test(scan)) {
           continue;
         }
         String sessionId = stripSuffix(candidate.getFileName().toString());
@@ -252,31 +361,11 @@ public final class ClaudeTranscriptArchive {
     return List.copyOf(sessions);
   }
 
-  /**
-   * The session's raw JSONL: the harness's own lines verbatim, then each sidechain introduced by a
-   * synthetic {@link #AGENT_META_TYPE} marker line.
-   *
-   * <p><b>{@code sessionId} never reaches a path.</b> It is resolved against what {@link
-   * #sessionsFor} returned for this workspace, and the path that is then opened is rebuilt from the
-   * attributed session's own id. That is not belt-and-braces: this volume is the estate's shared
-   * harness home, holding every other project's transcripts and the harness credential beside them,
-   * so a string concatenated into a path here is a read of all of it. Anything that does not
-   * attribute is a 404 — the same answer a session that never existed gets, so the door tells a
-   * caller nothing about what else is on the volume.
-   */
-  public List<String> transcriptOf(Attribution attribution, String sessionId) {
-    ArchivedSessionDto session =
-        sessionsFor(attribution).stream()
-            .filter(candidate -> candidate.sessionId().equals(sessionId))
-            .findFirst()
-            .orElseThrow(() -> new NotFoundException("Agent session not found: " + sessionId));
-
-    List<String> lines = new ArrayList<>(readLines(transcriptFile(session.sessionId())));
-    for (ArchivedSubagentDto subagent : session.subagents()) {
-      lines.add(metaLine(subagentsDir(session.sessionId()), subagent));
-      lines.addAll(readLines(sidechainFile(session.sessionId(), subagent.agentId())));
+  private void requireDirectoryMode() {
+    if (sessionsDirectory == null) {
+      throw new IllegalStateException(
+          "Only a directory archive is listed whole; the mounted volume is attributed");
     }
-    return List.copyOf(lines);
   }
 
   // --- the rule ----------------------------------------------------------------------------------
@@ -494,14 +583,27 @@ public final class ClaudeTranscriptArchive {
    * than composed, so the escaping rule stays the library's alone.
    */
   private Path projectsDir() {
+    if (sessionsDirectory != null) {
+      return sessionsDirectory;
+    }
     return configDir().resolve(new ClaudeCodeAgent().transcriptPath(cwd, "probe").getParent());
   }
 
   private Path transcriptFile(String sessionId) {
+    if (sessionsDirectory != null) {
+      return sessionsDirectory.resolve(sessionId + JSONL);
+    }
     return configDir().resolve(new ClaudeCodeAgent().transcriptPath(cwd, sessionId));
   }
 
+  /**
+   * In an {@link #ofDirectory} archive, {@code <dir>/<sessionId>/subagents}: the store's layout,
+   * which is the harness's own relative one ({@link TranscriptStore} says why).
+   */
   private Path subagentsDir(String sessionId) {
+    if (sessionsDirectory != null) {
+      return sessionsDirectory.resolve(sessionId).resolve(TranscriptStore.SUBAGENTS);
+    }
     return configDir().resolve(new ClaudeCodeAgent().subagentsDir(cwd, sessionId));
   }
 

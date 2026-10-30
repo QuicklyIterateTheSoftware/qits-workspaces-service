@@ -73,14 +73,14 @@ public class WorkspaceHistoryController {
   }
 
   /**
-   * The agent sessions that ran in this workspace, oldest first, read off the shared harness volume
-   * rather than out of this context's store — which is why they answer for a resolved workspace at
-   * all: the container and its {@code /workspace} volume are destroyed on resolution, the shared
-   * volume is not.
+   * The agent sessions that ran in this workspace, oldest first: what its agents' workspace-daemon
+   * shipped to this service's transcript store (qits-1752), and what the shared harness volume
+   * holds — neither is the container or its {@code /workspace} volume, which is why they answer for
+   * a resolved workspace at all.
    *
    * <p><b>An empty list is a valid 200.</b> A workspace where no agent ever ran, and one resolved
-   * before the volume was mounted here, both legitimately have no sessions; neither is an error to
-   * report and neither is distinguishable from the other.
+   * before either source held its sessions, both legitimately have no sessions; neither is an error
+   * to report and neither is distinguishable from the other.
    */
   @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:agent"})
   @GET
