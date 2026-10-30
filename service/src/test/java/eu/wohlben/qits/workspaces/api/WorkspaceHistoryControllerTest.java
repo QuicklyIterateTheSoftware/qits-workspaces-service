@@ -10,6 +10,16 @@ import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
+import eu.wohlben.qits.workspaces.entity.AgentRunState;
+import eu.wohlben.qits.workspaces.entity.AgentWorktree;
+import eu.wohlben.qits.workspaces.entity.Workspace;
+import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
+import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
+import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
+import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import eu.wohlben.qits.workspaces.transcripthost.ShippedClaudeTranscripts;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.path.json.JsonPath;
 import jakarta.inject.Inject;
@@ -19,6 +29,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
@@ -43,6 +54,12 @@ public class WorkspaceHistoryControllerTest {
   @Inject WorkspaceIds workspaceIds;
 
   @Inject WorkspaceService workspaceService;
+
+  @Inject WorkspaceRepository workspaceRepository;
+
+  @Inject AgentWorktreeRepository agentRepository;
+
+  @Inject ShippedClaudeTranscripts shippedTranscripts;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -170,5 +187,88 @@ public class WorkspaceHistoryControllerTest {
   public void anUnknownWorkspaceIsNotFound() {
     given().get(sessionsUrl(9_999_999L)).then().statusCode(404);
     given().get(sessionsUrl(9_999_999L) + "/whatever/transcript").then().statusCode(404);
+  }
+
+  /**
+   * qits-1752's case: a TARGET slot's agent, whose harness wrote to a volume this service never
+   * mounts, so the only record of its session is what its daemon shipped into the transcript store.
+   * Both doors serve it — the agent's own and the slot's history — as the same DTOs and lines a
+   * mounted session gets, with nothing at all on the mounted volume for it.
+   */
+  @Test
+  public void aTargetSlotAgentsShippedSessionIsServedOnBothDoors() throws Exception {
+    Long slot = targetSlot();
+    UUID agent = slotAgent(slot);
+    String sessionId = UUID.randomUUID().toString();
+    Instant at = Instant.parse("2026-10-30T10:00:00Z");
+    String user = turn("user", "shipped turn", "ticket/irrelevant", at);
+    String assistant = turn("assistant", "shipped answer", "ticket/irrelevant", at.plusSeconds(30));
+    String sidechain = turn("assistant", "subagent says", "ticket/irrelevant", at.plusSeconds(5));
+    shippedTranscripts.store().append(agent, sessionId, "main", 0, user + "\n" + assistant + "\n");
+    shippedTranscripts
+        .store()
+        .append(agent, sessionId, "subagents/agent-s1.jsonl", 0, sidechain + "\n");
+
+    for (String url :
+        List.of("/workspaces/api/agents/" + agent + "/sessions", sessionsUrl(slot))) {
+      JsonPath answer = given().get(url).then().statusCode(200).extract().jsonPath();
+      assertThat(url, answer.getList("sessions"), hasSize(1));
+      assertEquals(sessionId, answer.getString("sessions[0].sessionId"));
+      assertEquals(at, Instant.parse(answer.getString("sessions[0].startedAt")));
+      assertThat(answer.getInt("sessions[0].messageCount"), is(2));
+      assertEquals("s1", answer.getString("sessions[0].subagents[0].agentId"));
+    }
+
+    List<String> expected =
+        List.of(user, assistant, "{\"type\":\"qits_agent_meta\",\"agentId\":\"s1\"}", sidechain);
+    for (String url :
+        List.of(
+            "/workspaces/api/agents/" + agent + "/sessions/" + sessionId + "/transcript",
+            sessionsUrl(slot) + "/" + sessionId + "/transcript")) {
+      JsonPath answer = given().get(url).then().statusCode(200).extract().jsonPath();
+      assertEquals(expected, answer.getList("lines", String.class), url);
+    }
+    given()
+        .get("/workspaces/api/agents/" + agent + "/sessions/not-shipped/transcript")
+        .then()
+        .statusCode(404);
+  }
+
+  /** A resolved TARGET slot: no branch, so its sessions are its agents'. */
+  private Long targetSlot() {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              Workspace workspace = new Workspace();
+              String label = "h" + UUID.randomUUID().toString().substring(0, 8);
+              workspace.workspaceId = label;
+              workspace.repositoryId = "repo-" + label;
+              workspace.status = WorkspaceStatus.ABANDONED;
+              workspace.resolvedAt = Instant.now();
+              workspace.placement = WorkspacePlacement.TARGET;
+              workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+              workspaceRepository.persist(workspace);
+              workspaceRepository.flush();
+              return workspace.id;
+            });
+  }
+
+  private UUID slotAgent(Long slot) {
+    UUID id = UUID.randomUUID();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = new AgentWorktree();
+              row.id = id;
+              row.repositoryId = "repo-shipped";
+              row.workId = "w-" + id;
+              row.wrapperBranch = "ticket/w-" + id;
+              row.workspaceId = slot;
+              row.runState = AgentRunState.STOPPED;
+              row.createdAt = Instant.now();
+              row.gitRefs = "[]";
+              agentRepository.persist(row);
+            });
+    return id;
   }
 }

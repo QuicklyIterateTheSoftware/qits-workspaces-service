@@ -62,6 +62,23 @@ public class AgentWorktreeRepository implements PanacheRepositoryBase<AgentWorkt
     return list("workspaceId = ?1 order by createdAt", workspaceId);
   }
 
+  /**
+   * The agent whose harness command {@code commandId} is, among those placed in or last started in
+   * this workspace (qits-1752: a daemon names a transcript's agent by its command when it names no
+   * agent id). Empty for a command no such agent runs.
+   */
+  public Optional<AgentWorktree> findByCommandInWorkspace(String commandId, Long workspaceId) {
+    if (commandId == null || commandId.isBlank() || workspaceId == null) {
+      return Optional.empty();
+    }
+    return find(
+            "commandId = ?1 and (workspaceId = ?2 or startedWorkspaceId = ?2)"
+                + " order by createdAt desc",
+            commandId,
+            workspaceId)
+        .firstResultOptional();
+  }
+
   /** The agents in a workspace that are not REMOVED. */
   public List<AgentWorktree> findLiveByWorkspace(Long workspaceId) {
     return list(

@@ -1260,9 +1260,10 @@ holds for RUNNING only). The old instance draining during a rolling deploy canno
 - **What anyone may read of an agent** (epic qits-1667), the roles above plus `qits:agent`, the desk
   unbound (it reads everything): `GET …/agents/{id}/sessions` and `…/sessions/{sessionId}/transcript`
   (`WorkspaceHistoryService.agentSessionsOf`/`agentTranscriptOf` over
-  `ArchivedAgentTranscripts.sessionsFor(AgentWorktree)`: the agent's own worktree directory,
-  attributed by `(wrapper_branch, created_at, removed_at)`, so a REMOVED agent answers too and another
-  agent's session is a 404), and `GET …/agents/{id}/active-process` (its workspace's, as
+  `ArchivedAgentTranscripts.sessionsFor(AgentWorktree)`: what the agent's daemon shipped, then its own
+  worktree directory on the mounted volume, attributed by `(wrapper_branch, created_at, removed_at)` —
+  see "Agent transcripts" below — so a REMOVED agent answers too and another agent's session is a
+  404), and `GET …/agents/{id}/active-process` (its workspace's, as
   `WorkspaceController.activeProcess`; null with no workspace). An agent reads every other agent's
   transcripts, read-only (the owner's ruling on qits-1575). `AgentControlAccessTest` pins role ×
   door, own agent and another's.
@@ -1283,6 +1284,35 @@ counts it claimed while the agent is not REMOVED. The slot keeps its own token f
 session id and waiting flip are stored on the agent, and a flip is relayed to qits-projects
 (`AgentWaitingReporter`, per agent now); `AgentBranchPushed {agentId, repository name, branch, sha}` —
 the name is mapped to a repository id through the agent's project and upserted into `agent_branch`.
+
+**Agent transcripts** (qits-1752; `transcripthost/`, `daemonhost/TranscriptIngest`). A TARGET
+workspace's harness writes its JSONL to the execution target's `/claude-home`, which this service
+cannot mount, so the session doors answered empty for every TARGET agent. A daemon at capability 13
+ships its own agents' files as `TranscriptChunk {agentId?, commandId, sessionId, file, offset,
+data}`:
+
+- **Ingest.** `WorkspaceDaemonRegistry` hands each chunk to `TranscriptIngest` on a single thread of
+  its own (`daemon-transcript-ingest`, apart from `sinkDispatch`: a reconnecting daemon re-ships whole
+  files, and order is the append rule). The agent is the frame's `agentId`, else the agent whose
+  `command_id` it names; it is accepted only when that agent's `workspace_id` or
+  `started_workspace_id` is the socket's workspace row, else dropped and logged (WARN for a named
+  agent, DEBUG for no agent: the sign-in terminal) and never written.
+- **The store** (`TranscriptStore`, framework-free; `ShippedClaudeTranscripts` the bean) is
+  `qits.workspace.transcript-store-root` (`${qits.workspaces.data-dir}/transcripts`, on `/data`):
+  `<root>/<agentId>/<sessionId>.jsonl` and `<root>/<agentId>/<sessionId>/subagents/agent-<id>.jsonl`.
+  A chunk is appended only when its `offset` (UTF-8 bytes) equals the size held, per file under a
+  striped lock; anything else is answered with `TranscriptResync {sessionId, file, size}` on the same
+  socket, and the held size never goes down. A chunk need not end in a newline (one long line is
+  split across chunks). The agent segment is a UUID and the session id and file are checked against
+  the protocol's `TranscriptFiles` again before they become a path. Nothing prunes the store yet.
+- **The read.** `AgentTranscripts` is the one `ArchivedAgentTranscripts`: per agent, shipped ∪
+  mounted (`MountedClaudeTranscripts`, the fallback for DIRECT workspaces and pre-qits-1752
+  sessions), deduplicated by session id with the shipped copy winning; a slot's history iterates its
+  agents, an old-model branch workspace keeps the mounted read. The store is read by
+  `ClaudeTranscriptArchive.ofDirectory` — the same scan, DTOs and sidechain markers, every session in
+  the directory belonging — and a requested id is still resolved against the listing. The daemon
+  ships no `agent-<id>.meta.json`, so a shipped sidechain's marker carries no `agentType`,
+  `description` or `toolUseId`.
 
 **Declared waits** (qits-1153, W1–W8; `AgentWaits`, `AgentWaitController`, `bus/AgentWaitListener`).
 An agent says which event it waits on (`agent_wait`: label, qits-eventstream `EventSelection` JSON,
@@ -1532,8 +1562,8 @@ releases it, at VERIFIED, behind manual-review approval — the same gate every 
 gets.
 
 **Known limits.** The person door derives the wrapper branch from what it is told; it does
-not read the work item. `MountedClaudeTranscripts` reads a slot's sessions per agent directory, keyed
-on the wrapper's name.
+not read the work item. `MountedClaudeTranscripts` (the fallback) reads a slot's sessions per agent
+directory, keyed on the wrapper's name.
 
 ## The credential a workspace container holds
 
