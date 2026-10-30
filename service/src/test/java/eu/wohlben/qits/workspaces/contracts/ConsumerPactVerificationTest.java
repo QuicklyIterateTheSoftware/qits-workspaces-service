@@ -261,6 +261,11 @@ class ConsumerPactVerificationTest {
     return states.params(ProviderStates.AN_AGENT_WITH_LEFTOVER_WORK);
   }
 
+  @State(ProviderStates.AN_AGENT_IN_THE_MIDDLE_OF_A_TURN)
+  Map<String, String> anAgentInTheMiddleOfATurn() {
+    return states.params(ProviderStates.AN_AGENT_IN_THE_MIDDLE_OF_A_TURN);
+  }
+
   @State(ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION)
   Map<String, String> aResolvedSlotWithAnArchivedSession() {
     return states.params(ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION);
