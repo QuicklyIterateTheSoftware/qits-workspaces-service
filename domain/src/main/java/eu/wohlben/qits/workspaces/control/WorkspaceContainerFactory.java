@@ -416,7 +416,7 @@ public class WorkspaceContainerFactory {
   /** The edge address containers use for Git; direct githost traffic is Bearer-only. */
   @ConfigProperty(
       name = "qits.workspace.container-git-url",
-      defaultValue = "http://${QITS_ENVIRONMENT:dev}-qits-edge:8080")
+      defaultValue = "http://githost.${QITS_ENVIRONMENT:dev}.internal:8080")
   String containerGitUrl;
 
   /**
