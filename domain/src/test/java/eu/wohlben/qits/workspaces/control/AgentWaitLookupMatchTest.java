@@ -242,7 +242,7 @@ public class AgentWaitLookupMatchTest {
         request,
         new WaitSubjectResolver.Resolved(UUID.randomUUID().toString(), request, "FINALIZED", finalizedAt, null));
     try {
-      AgentWaitDto wait = waits.createForDesk(project, "rr ends", requestEnds(request), null);
+      AgentWaitDto wait = waits.createForDesk(project, "rr ends", requestEnds(request), null, null);
 
       assertEquals(AgentWaitState.MATCHED, wait.state());
       assertNull(wait.matchedEventId());
@@ -279,7 +279,7 @@ public class AgentWaitLookupMatchTest {
         request,
         new WaitSubjectResolver.Resolved(UUID.randomUUID().toString(), request, "PENDING", Instant.now(), null));
     try {
-      AgentWaitDto wait = waits.createForDesk(project, null, requestEnds(request), null);
+      AgentWaitDto wait = waits.createForDesk(project, null, requestEnds(request), null, null);
       assertEquals(AgentWaitState.OPEN, wait.state());
       assertEquals("PENDING", wait.subjectState());
       assertTrue(announced.of(DeskWaitClosed.class, e -> e.waitId().equals(wait.id())).isEmpty());

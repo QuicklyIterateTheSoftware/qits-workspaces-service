@@ -99,7 +99,8 @@ public class DeskWaitController {
             project,
             request == null ? null : request.label(),
             AgentWaitController.selectionOf(request),
-            AgentWaitController.timeoutOf(request));
+            AgentWaitController.timeoutOf(request),
+            identity.getPrincipal() == null ? null : identity.getPrincipal().getName());
     return Response.status(Response.Status.CREATED)
         .entity(AgentWaitController.view(json, created))
         .build();

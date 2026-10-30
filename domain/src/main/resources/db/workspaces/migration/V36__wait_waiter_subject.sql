@@ -1,0 +1,11 @@
+-- A WAIT NEVER FIRES ON THE WAITER'S OWN COMMENT (qits-1759).
+--
+-- A desk that waited on EntityCommented for an item and then commented on it had its own comment
+-- close the wait: the selection matched, and nothing knew who was waiting. waiter_subject records
+-- the principal that holds the wait — an agent's commissioned token subject (even when an admin
+-- declared for it), the desk's declaring subject — and an EntityCommented whose changedBy is that
+-- subject skips the wait, which stays OPEN.
+--
+-- Nullable: a wait declared before this migration has none and matches as before. Not shown by any
+-- door. A column on agent_wait, an entity that is already a CausedRow: no ArchRulesTest decision.
+alter table agent_wait add column waiter_subject text;

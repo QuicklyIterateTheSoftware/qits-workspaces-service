@@ -239,6 +239,9 @@ check by the name postgres gave it, `agent_worktree_run_state_check` (`<table>_<
 rule V12 relied on for `workspace_runtime_status_check`), adds `ck_agent_worktree_run_state`, and
 rewrites `ck_agent_worktree_placed` to `run_state in ('QUEUED','STOPPED') or workspace_id is not
 null`: an agent stopped while queued has no workspace. `AgentSchemaTest` inserts both shapes.
+**`V36__wait_waiter_subject.sql`** (qits-1759) adds `agent_wait.waiter_subject` (nullable): the
+principal that waits, whose own `EntityCommented` never matches the wait. Not shown by any door. A
+column on a `CausedRow`, so no `ArchRulesTest` decision; see "Declared waits".
 **`V30__workspace_leases.sql`** (epic qits-1481, qits-1532) retires the workspace runners: it first
 copies every row with a `runner_id` into `legacy_placement(row_id, old_runner_id, engine_id,
 hostname, runner_name)` — `engine_id` and `hostname` from the runner's `capabilities ->> 'engineId'`
@@ -1404,6 +1407,12 @@ event name, optional expiry) and gets a turn when it happens:
   (`qits.workspaces.attention.run-overdue-factor` 2, `…run-overdue-grace` PT15M,
   `…run-unpredicted-after` PT2H). The service suite's `FakeWaitSubjectResolver` resolves nothing;
   the domain suite's is scripted per ref.
+- **The waiter's own comment** (qits-1759, `V36`). A wait records who waits in `waiter_subject`:
+  an agent's commissioned token subject (also when an admin declares for it), or the principal
+  that declared a desk's wait. An `EntityCommented` whose `changedBy` is that subject — or, for an
+  agent's wait, whose `author` is the agent's id — skips the wait, which stays OPEN, live and on
+  the look-back alike (`AgentWaits.ownComment`). Only comments: a state event the waiter caused
+  still matches. A wait from before `V36` has no subject and is held to the author check alone.
 - **Limits.** 8 OPEN waits per agent, timeout at most 30 days, label at most 200 characters (default:
   the selection in one line). The native image registers `EventSelection`, its `Condition` and `Op`
   on `AgentWaitController`.
