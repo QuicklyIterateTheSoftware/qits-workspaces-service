@@ -2890,7 +2890,7 @@ public class AgentService {
     return status != null && BETWEEN_PHASES.contains(status.toUpperCase(Locale.ROOT));
   }
 
-  private static boolean isClosed(String status) {
+  static boolean isClosed(String status) {
     return status != null && CLOSING_STATUSES.contains(status.toUpperCase(Locale.ROOT));
   }
 

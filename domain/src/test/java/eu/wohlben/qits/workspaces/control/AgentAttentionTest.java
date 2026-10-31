@@ -258,6 +258,28 @@ class AgentAttentionTest {
     assertTrue(evaluate(a).isEmpty());
   }
 
+  /** qits-1776: a closed item's agent is not idle either, whichever closing status it carries. */
+  @ParameterizedTest(name = "closed: {0}")
+  @CsvSource({"VERIFIED", "DONE", "DROPPED", "verified"})
+  void anAgentOnAClosedItemIsNotIdle(String status) {
+    AgentWorktree a = idle(90);
+    a.entityStatus = status;
+    assertTrue(evaluate(a).isEmpty());
+  }
+
+  /** qits-1776: closed is an idleness exemption only — the other three rules still apply to it. */
+  @Test
+  void aClosedItemStillGetsTheOtherAttentionRules() {
+    AgentWorktree blockedAndClosed = blocked("EXPLICIT", 50);
+    blockedAndClosed.entityStatus = "VERIFIED";
+    assertEquals(Code.BLOCKED_NO_DESK, evaluate(blockedAndClosed).orElseThrow().code());
+
+    AgentWorktree a = agent();
+    a.entityStatus = "VERIFIED";
+    AgentWait w = wait("WORK_ITEM", "item-uuid", "[\"VERIFIED\"]", "VERIFIED", NOW.minusSeconds(60));
+    assertEquals(Code.WAIT_SUBJECT_PASSED, evaluate(a, w).orElseThrow().code());
+  }
+
   @Test
   void anIdleAgentIsExcusedByAPendingTurnAWaitABlockOrNotRunning() {
     AgentWorktree pending = idle(90);
