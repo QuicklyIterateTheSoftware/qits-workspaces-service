@@ -1496,7 +1496,7 @@ payload's top-level fields:
 | `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs, as stored when it consumed the branch if the item closed later; both absent for a dropped item, and for a closed item whose branch was gone or merged with no release) — one per agent | |
 | `AgentCleanupDeferred` | the four, `reason`, `detail` | `ITEM_NOT_CLOSED`, `RECENTLY_ACTIVE`, `TURN_PENDING`, `HARNESS_BUSY`, `DAEMON_NOT_CONNECTED`, `NO_DAEMON_CLIENT`, `CHECK_UNANSWERED`, `BUSY_IN_BACKGROUND`, `REMOVAL_UNANSWERED`, `LEFTOVER_WORK_PROMPTED`, `IN_RELEASE` |
 | `AgentRemoved` | the four, `reason`, `harnessStopped`, `detail`, `discardedBy` (qits-1694: the discarding caller's own principal, present only for `DISCARDED` and only when known) | `OBSOLETE_NEVER_PLACED`, `OBSOLETE_WORKSPACE_GONE`, `UNKNOWN_TO_DAEMON`, `RELEASED_IDLE_CLEAN`, `DROPPED_IDLE_CLEAN`, `DISCARDED` |
-| `AgentHarnessExited` | the four, `commandId`, `status`, `exitCode`, `stoppedBy` | `stoppedBy`: `DAEMON_REMOVE`, `DAEMON_YIELD`, `KILLED`, `SELF` |
+| `AgentHarnessExited` | the four, `commandId`, `status`, `exitCode`, `stoppedBy`, `remoteSession`, `remoteArchive` (qits-1779: a claude harness's Remote Control session and its last archive outcome, absent for everything else and for a daemon older than capability 14) | `stoppedBy`: `DAEMON_REMOVE`, `DAEMON_YIELD`, `KILLED`, `SELF` |
 | `WorkspaceStarted` | `workspaceId`, `repositoryId` | |
 | `WorkspaceFailed` | `workspaceId`, `repositoryId`, `runtimeError` | |
 | `WorkspaceRemoved` | `workspaceId`, `repositoryId`, `reason` | `NO_AGENT_LEFT` |
@@ -1534,7 +1534,10 @@ The rules they keep:
   `WorkspaceDaemonRegistry.onMessage` dispatches it to `AgentService.onHarnessExited` on
   `sinkDispatch`, never the socket thread, skipping a null `agentId` (the sign-in terminal, which no
   agent of this service owns). An older daemon simply never sends the frame, so the event never
-  fires for it — nothing here falls back to inferring an exit any other way.
+  fires for it — nothing here falls back to inferring an exit any other way. `remoteSession` and
+  `remoteArchive` (qits-1779, capability 14) ride the same frame and the same pass-through: a daemon
+  older than 14 never names the keys, so both decode null and the event carries them as absent,
+  exactly as the four fields before them.
 - **Off the caller's thread, in order.** `EventstreamLifecycleAnnouncer` reads the causation scope on
   the caller's thread and publishes on one thread of its own (qits-ci's `RunnerLifecycleAnnouncer`),
   with a request context activated for the outbox's fallback. `bus/EventWireReflection` registers

@@ -601,7 +601,9 @@ public class WorkspaceDaemonRegistry
   /**
    * A harness's exit (qits-1236, capability 11), recorded on {@link #sinkDispatch} like every other
    * agent frame — never the socket thread. Skipped for a null {@code agentId}: that is the sign-in
-   * terminal, which no agent of this service owns.
+   * terminal, which no agent of this service owns. {@code remoteSession}/{@code remoteArchive}
+   * (qits-1779, capability 14) pass straight through: null on a frame from a daemon that never
+   * learned the keys, or a harness that ran without claude.ai Remote Control.
    */
   private void onAgentHarnessExit(Long workspaceId, AgentHarnessExit exit) {
     if (exit.agentId() == null) {
@@ -617,7 +619,9 @@ public class WorkspaceDaemonRegistry
                 exit.status(),
                 exit.exitCode(),
                 exit.stoppedBy(),
-                exit.at() == null ? 0 : exit.at().toEpochMilli());
+                exit.at() == null ? 0 : exit.at().toEpochMilli(),
+                exit.remoteSession(),
+                exit.remoteArchive());
           } catch (RuntimeException e) {
             LOG.warnf(
                 e,

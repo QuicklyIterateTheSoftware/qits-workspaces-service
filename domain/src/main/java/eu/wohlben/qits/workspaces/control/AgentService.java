@@ -1477,6 +1477,8 @@ public class AgentService {
    * An agent's harness ended in {@code workspaceId}'s container, as its daemon reported it:
    * announced as {@link AgentHarnessExited}, and nothing else — the row is not written. An agent
    * this service does not know is not announced. {@code stoppedBy} is one of that event's words.
+   * {@code remoteSession}/{@code remoteArchive} (qits-1779) are the daemon frame's own, both null
+   * for a harness that ran without claude.ai Remote Control or a daemon older than capability 14.
    */
   public void onHarnessExited(
       Long workspaceId,
@@ -1485,7 +1487,9 @@ public class AgentService {
       String status,
       Integer exitCode,
       String stoppedBy,
-      long at) {
+      long at,
+      String remoteSession,
+      String remoteArchive) {
     UUID id = parse(agentId);
     if (id == null) {
       return;
@@ -1504,6 +1508,8 @@ public class AgentService {
             status,
             exitCode,
             stoppedBy,
+            remoteSession,
+            remoteArchive,
             at > 0 ? Instant.ofEpochMilli(at) : Instant.now()));
   }
 

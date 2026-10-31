@@ -13,6 +13,16 @@ import java.util.UUID;
  * #DAEMON_REMOVE} — the daemon stopped it removing the agent; {@link #DAEMON_YIELD} — the daemon
  * stopped it for a yield; {@link #KILLED} — something outside the harness killed it (the OOM killer,
  * a signal); {@link #SELF} — it exited on its own. Everything else is {@link AgentPlaced}'s.
+ *
+ * <p><b>A claude harness's remote-control session</b> (qits-1779): {@code remoteSession} is the
+ * claude.ai Remote Control session ({@code cse_…}) the harness's debug log last named, and {@code
+ * remoteArchive} the status of the last archive of that session the log records, as the log wrote
+ * it ({@code "200"}, {@code "401"}, …), or {@link #NO_ARCHIVE} when the log records no archive
+ * attempt at all. Both ride {@code AgentRemoved#discardedBy}'s rule — absent keys, not nulls, under
+ * {@code CanonicalJson}'s {@code NON_NULL} inclusion — when the harness ran without remote control,
+ * or when the daemon that sent the frame is older than its capability 14 and never names them at
+ * all; an old consumer that has never seen the keys ignores them exactly as it ignores any other
+ * absent field.
  */
 public record AgentHarnessExited(
     UUID eventId,
@@ -24,6 +34,8 @@ public record AgentHarnessExited(
     String status,
     Integer exitCode,
     String stoppedBy,
+    String remoteSession,
+    String remoteArchive,
     Instant occurredAt)
     implements QitsEvent {
 
@@ -38,6 +50,12 @@ public record AgentHarnessExited(
 
   /** Exited on its own. */
   public static final String SELF = "SELF";
+
+  /**
+   * {@link #remoteArchive} for a remote-control log that records no archive attempt at all — the
+   * same word {@code AgentHarnessExit.NO_ARCHIVE} carries on the daemon's own frame.
+   */
+  public static final String NO_ARCHIVE = "NONE";
 
   public AgentHarnessExited {
     if (eventId == null) {
@@ -55,7 +73,38 @@ public record AgentHarnessExited(
       String status,
       Integer exitCode,
       String stoppedBy,
+      String remoteSession,
+      String remoteArchive,
       Instant occurredAt) {
-    this(null, agentId, workId, workspaceId, repositoryId, commandId, status, exitCode, stoppedBy, occurredAt);
+    this(
+        null,
+        agentId,
+        workId,
+        workspaceId,
+        repositoryId,
+        commandId,
+        status,
+        exitCode,
+        stoppedBy,
+        remoteSession,
+        remoteArchive,
+        occurredAt);
+  }
+
+  /**
+   * The constructor a publisher used before qits-1779: no remote-control outcome on the wire at
+   * all, {@code remoteSession} and {@code remoteArchive} both absent.
+   */
+  public AgentHarnessExited(
+      String agentId,
+      String workId,
+      String workspaceId,
+      String repositoryId,
+      String commandId,
+      String status,
+      Integer exitCode,
+      String stoppedBy,
+      Instant occurredAt) {
+    this(agentId, workId, workspaceId, repositoryId, commandId, status, exitCode, stoppedBy, null, null, occurredAt);
   }
 }
