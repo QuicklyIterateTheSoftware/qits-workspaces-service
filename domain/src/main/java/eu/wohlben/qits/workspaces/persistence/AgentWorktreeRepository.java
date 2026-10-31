@@ -50,6 +50,22 @@ public class AgentWorktreeRepository implements PanacheRepositoryBase<AgentWorkt
     return out;
   }
 
+  /**
+   * Every REMOVED agent of a work item, newest first (qits-1779): a removed agent's own view (its
+   * {@code entityStatus}, title and blocked flag) must keep following the item after it is gone,
+   * not freeze at whatever {@link #findLiveAllByWorkId} last wrote. Same shape as that query's
+   * OBSOLETE half, and no costlier: neither is backed by an index on {@code work_id} alone (only
+   * {@code uq_agent_worktree_active_work}, a partial index on the ACTIVE rows), so this reads the
+   * same table scan the existing call already pays for every mark.
+   */
+  public List<AgentWorktree> findRemovedByWorkId(String workId) {
+    if (workId == null || workId.isBlank()) {
+      return List.of();
+    }
+    return list(
+        "workId = ?1 and state = ?2 order by createdAt desc", workId.trim(), AgentState.REMOVED);
+  }
+
   /** Every agent of these work items, whatever its state, newest first. */
   public List<AgentWorktree> findByWorkIds(Collection<String> workIds) {
     if (workIds == null || workIds.isEmpty()) {

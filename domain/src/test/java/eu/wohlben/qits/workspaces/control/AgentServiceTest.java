@@ -2157,6 +2157,35 @@ public class AgentServiceTest {
   }
 
   @Test
+  void aRemovedAgentsEntityStatusFollowsALaterItemStatusChange() {
+    // qits-1779: GET /workspaces/api/agents/{id} used to keep a REMOVED agent's entityStatus
+    // frozen at the last value it saw while live, so an agent removed as VERIFIED still read
+    // VERIFIED long after its item went DONE. mark() must write a removed agent's facts too, but
+    // must not drive it: no daemon call, no place in the answer.
+    AgentService.Dispatch dispatched = dispatch("w-removed-view", true, null);
+    String agentId = dispatched.agent().agentId();
+    Long slot = dispatched.agent().workspaceRowId();
+    UUID id = UUID.fromString(agentId);
+    service.awaitSchedulerIdle();
+
+    service.markRemoved(id, AgentRemoved.DISCARDED, false, "removed for the test");
+    assertEquals(AgentState.REMOVED, row(agentId).state);
+    assertEquals(
+        "REFINED", row(agentId).entityStatus, "its last live status, before the item moves on");
+
+    List<String> callsBefore = daemon.callsFor(agentId);
+    AgentService.EntityMark mark =
+        service.markEntity("w-removed-view", new EntityFacts("A title", "DONE", false), null, null);
+    service.awaitSchedulerIdle();
+
+    assertNull(mark.agentId(), "no live agent of the item: the answer names none");
+    assertEquals("DONE", row(agentId).entityStatus, "the removed agent's view follows its item too");
+    assertEquals(
+        callsBefore, daemon.callsFor(agentId), "a REMOVED agent triggers no daemon call");
+    liveness.markDead(slot);
+  }
+
+  @Test
   void aStaleOlderObsoleteRowIsHealedByTheItemsCurrentStatus() {
     // qits-1219: judged by the item's CURRENT status (the newest live row), not the agent's own
     // possibly-frozen entityStatus.
