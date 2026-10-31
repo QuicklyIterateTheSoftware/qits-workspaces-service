@@ -77,6 +77,35 @@ class WorkspaceDaemonRegistryHarnessExitTest {
     assertEquals(0, event.exitCode());
     assertEquals(AgentHarnessExit.SELF, event.stoppedBy());
     assertEquals(at, event.occurredAt());
+    // No remote-control outcome on this frame (qits-1779): both null.
+    assertEquals(null, event.remoteSession());
+    assertEquals(null, event.remoteArchive());
+  }
+
+  @Test
+  void aHarnessExitFrameWithRemoteFieldsAnnouncesThem() throws Exception {
+    UUID agentId = agent("repo-harness-exit-remote", "w-harness-exit-remote");
+    Instant at = Instant.parse("2026-10-14T09:00:00Z");
+
+    registry.onMessage(
+        42L,
+        null,
+        new AgentHarnessExit(
+            agentId.toString(),
+            "cmd-9",
+            "claude",
+            "EXITED",
+            0,
+            AgentHarnessExit.SELF,
+            at,
+            "cse_abc123",
+            "200"));
+
+    AgentHarnessExited event = await(AgentHarnessExited.class);
+    assertEquals(agentId.toString(), event.agentId());
+    assertEquals("cmd-9", event.commandId());
+    assertEquals("cse_abc123", event.remoteSession());
+    assertEquals("200", event.remoteArchive());
   }
 
   @Test

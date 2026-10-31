@@ -212,6 +212,15 @@ class LifecycleEventsContractTest {
         CanonicalJson.payload(
             new AgentHarnessExited(
                 AGENT, WORK, "385", REPO, "cmd-1", "KILLED", null, AgentHarnessExited.KILLED, AT)));
+    // A claude harness with Remote Control on (qits-1779): both new keys present.
+    assertEquals(
+        "{\"agentId\":\"" + AGENT + "\",\"commandId\":\"cmd-1\",\"exitCode\":0,\"remoteArchive\":\"200\","
+            + "\"remoteSession\":\"cse_abc123\",\"repositoryId\":\"" + REPO + "\",\"status\":\"EXITED\","
+            + "\"stoppedBy\":\"SELF\",\"workId\":\"" + WORK + "\",\"workspaceId\":\"385\"}",
+        CanonicalJson.payload(
+            new AgentHarnessExited(
+                AGENT, WORK, "385", REPO, "cmd-1", "EXITED", 0, AgentHarnessExited.SELF, "cse_abc123",
+                "200", AT)));
   }
 
   /**
@@ -286,7 +295,14 @@ class LifecycleEventsContractTest {
     }
   }
 
-  /** The reason words, spelled once: each constant is its own name, upper case. */
+  /**
+   * The reason words, spelled once: each constant is its own name, upper case. {@code
+   * AgentHarnessExited.NO_ARCHIVE} is excepted — it is not a reason word but a sentinel for {@code
+   * remoteArchive}'s "no archive attempt logged" case, spelled {@code "NONE"} to match the harness
+   * library's {@code RemoteControlLog.NO_ARCHIVE} and the daemon's own {@code
+   * AgentHarnessExit.NO_ARCHIVE} (qits-1779), both of which carry the same value under the same
+   * name mismatch.
+   */
   @Test
   void theReasonWordsAreTheirOwnNames() throws Exception {
     for (Class<?> type :
@@ -300,7 +316,8 @@ class LifecycleEventsContractTest {
             WorkspaceRemoved.class)) {
       for (var field : type.getDeclaredFields()) {
         if (java.lang.reflect.Modifier.isStatic(field.getModifiers())
-            && field.getType() == String.class) {
+            && field.getType() == String.class
+            && !field.getName().equals("NO_ARCHIVE")) {
           assertEquals(field.getName(), field.get(null), type.getSimpleName());
         }
       }
@@ -327,6 +344,7 @@ class LifecycleEventsContractTest {
             AgentHarnessExited.DAEMON_YIELD,
             AgentHarnessExited.KILLED,
             AgentHarnessExited.SELF));
+    assertEquals("NONE", AgentHarnessExited.NO_ARCHIVE);
   }
 
   /** Attention cleared is an absent code, and its since is the ISO-8601 instant (epic qits-1681). */
