@@ -1071,6 +1071,14 @@ public class AgentService {
    * OBSOLETE agents must not leave the older one's facts frozen. The answer and the live daemon
    * notification still name the primary row — ACTIVE, else the newest OBSOLETE — the same row
    * {@code findLiveByWorkId} picks.
+   *
+   * <p>A REMOVED agent of the item gets the same facts written to its row (qits-1779: {@code GET
+   * …/agents/{id}} used to keep a removed agent's {@code entityStatus} frozen at whatever it last
+   * saw while live, so an agent removed as VERIFIED still read VERIFIED long after its item went
+   * DONE). It is written in the same transaction as the live rows, but takes no further part below:
+   * it is not in {@code stored}, so it is never the primary row, never reevaluated for attention,
+   * never the target of a daemon call, and never counted toward {@code applied} — a REMOVED agent
+   * triggers no daemon call and no announcement, only a row update.
    */
   private EntityMark mark(
       String workId, EntityFacts facts, String blockSource, String blockedBy, boolean blockedOnly) {
@@ -1080,14 +1088,10 @@ public class AgentService {
                 () -> {
                   List<AgentWorktree> live = agents.findLiveAllByWorkId(workId);
                   for (AgentWorktree agent : live) {
-                    if (blockedOnly) {
-                      agent.entityBlocked = facts.blocked();
-                      agent.blockSource = trimmed(blockSource);
-                      agent.blockAuthor = trimmed(blockedBy);
-                      stampBlockTime(agent, Instant.now());
-                    } else {
-                      applyFacts(agent, facts, blockSource, blockedBy);
-                    }
+                    applyMark(agent, facts, blockSource, blockedBy, blockedOnly);
+                  }
+                  for (AgentWorktree removed : agents.findRemovedByWorkId(workId)) {
+                    applyMark(removed, facts, blockSource, blockedBy, blockedOnly);
                   }
                   return live;
                 });
@@ -3395,6 +3399,25 @@ public class AgentService {
     return repository.mainBranch() == null || repository.mainBranch().isBlank()
         ? "master"
         : repository.mainBranch();
+  }
+
+  /**
+   * {@link #mark}'s one row-write, shared by a live agent and a REMOVED one (qits-1779): the
+   * blocked-only branch writes the three block columns directly, as {@link #markBlocked} always
+   * did, else {@link #applyFacts} writes title, status and the block together. Callers decide
+   * separately whether the row also gets a daemon call, an attention reevaluation or a place in the
+   * answer — this only ever writes the row.
+   */
+  private static void applyMark(
+      AgentWorktree agent, EntityFacts facts, String blockSource, String blockedBy, boolean blockedOnly) {
+    if (blockedOnly) {
+      agent.entityBlocked = facts.blocked();
+      agent.blockSource = trimmed(blockSource);
+      agent.blockAuthor = trimmed(blockedBy);
+      stampBlockTime(agent, Instant.now());
+    } else {
+      applyFacts(agent, facts, blockSource, blockedBy);
+    }
   }
 
   /**
