@@ -66,7 +66,7 @@
 
              qits-platform-maintenance moves them like any internal pin, on maintenance/dependencies,
              gated here. Do not hand-edit one to chase a release. -->
-        <qits.workspace-daemon-protocol.version>2026.1031.132924</qits.workspace-daemon-protocol.version>
+        <qits.workspace-daemon-protocol.version>2026.1031.145237</qits.workspace-daemon-protocol.version>
         <!-- The shared coding-agent harness library, released out of qits-coding-agents and pinned
              here at the same version qits-workspace-daemon pins. It is consumed for ONE thing: the
              path maths of a harness's on-disk transcript, so the cwd-escaping rule that decides
@@ -131,7 +131,7 @@
              ConsumerPactVerificationTest loads every such resource off the test classpath. Test
              scope at the declaration site; a pin in <properties> like every other qits jar, so
              qits-maintenance bumps it when the consumer releases a changed pact. -->
-        <qits.landing-app-pacts-qits-workspaces-service.version>2026.1029.233746</qits.landing-app-pacts-qits-workspaces-service.version>
+        <qits.landing-app-pacts-qits-workspaces-service.version>2026.1031.144201</qits.landing-app-pacts-qits-workspaces-service.version>
         <!-- qits-projects' consumer pact against this service (qits-1152). -->
         <qits.projects-service-pacts-qits-workspaces-service.version>2026.1030.110448</qits.projects-service-pacts-qits-workspaces-service.version>
         <!-- qits-artifacts', qits-orchestrator's and the qits CLI's consumer pacts against this
