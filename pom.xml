@@ -125,7 +125,7 @@
         <!-- qits-ci's golden masters (epic qits-1681): the run read a declared wait on a run makes
              (wiring/CiContract). The same rule: a qits-maintenance bump moves it. Kept apart from the
              other golden-master pins so a bump of theirs and this line never share a merge hunk. -->
-        <qits.ci-golden-masters.version>2026.1026.163551</qits.ci-golden-masters.version>
+        <qits.ci-golden-masters.version>2026.1031.93847</qits.ci-golden-masters.version>
         <!-- THE CONSUMER PACTS this provider verifies (epic qits-546): one jar per consumer, each
              carrying `pacts/<consumer>_qits-workspaces-service.json`, and
              ConsumerPactVerificationTest loads every such resource off the test classpath. Test
