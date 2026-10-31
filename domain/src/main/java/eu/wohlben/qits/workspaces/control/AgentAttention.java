@@ -33,8 +33,9 @@ import java.util.UUID;
  *   <li>{@link Code#IDLE_NO_WAIT} — RUNNING and waiting for input for {@code idle-after}, with no
  *       OPEN wait, no turn still to be said, no explicit block (a block with no source counts as
  *       one; the derived {@code AGENT_WAITING} block alone is the stall itself, as the nudge reads
- *       it) and an item that is not between phases ({@link AgentService#isBetweenPhases}). Since
- *       it stopped.
+ *       it) and an item that is neither between phases ({@link AgentService#isBetweenPhases})
+ *       nor closed ({@link AgentService#isClosed}: VERIFIED, DONE, DROPPED — done, awaiting
+ *       acceptance; qits-1776). Since it stopped.
  *   <li>{@link Code#WAIT_OVERDUE} — an OPEN wait on a run still QUEUED or RUNNING past its expected
  *       finish (since that finish), or on a release request in a state that is not final and has
  *       not changed for {@code request-overdue-after} (since that threshold passed).
@@ -156,7 +157,8 @@ public final class AgentAttention {
         || !open.isEmpty()
         || agent.pendingText != null
         || exemptingBlock(agent)
-        || AgentService.isBetweenPhases(agent.entityStatus)) {
+        || AgentService.isBetweenPhases(agent.entityStatus)
+        || AgentService.isClosed(agent.entityStatus)) {
       return Optional.empty();
     }
     Duration idle = Duration.between(agent.waitingSince, now);
