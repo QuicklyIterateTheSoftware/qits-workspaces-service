@@ -38,8 +38,8 @@
 #     reach the container.
 #   * QITS_AUTH_MACHINE_AUDIENCE — the inbound audience is the platform's one, qits-platform, read by
 #     the shared guard from its own shipped `qits.auth.machine.platform-audience`.
-#   * QITS_GITHOST_AUDIENCE. The audience a workspace container asks for is `qits-platform` now;
-#     the `qits.githost.audience` key is gone.
+#   * QITS_GITHOST_AUDIENCE. The audience a workspace container asks for is the constant
+#     `WorkspaceContainerFactory.CONTAINER_TOKEN_AUDIENCE` now; the `qits.githost.audience` key is gone.
 #   * QITS_RESOURCE_*. The deployer injects those from its own resource registry, the one authority
 #     for a provisioned credential. Configuration must not be able to state or delete one.
 
