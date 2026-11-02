@@ -135,6 +135,8 @@ erDiagram
     text entity_title
     text epic_id
     uuid lease_id
+    long oom_kills
+    string oom_scope "length 8"
     string parent_id
     enum placement "not null"
     text preamble
