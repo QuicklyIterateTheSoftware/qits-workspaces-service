@@ -17,8 +17,8 @@ import eu.wohlben.qits.userflows.NetworkTaps;
  *       framework ships it; this repository's hand-copied {@code StoryNetworkFilter} was deleted
  *       when these stories were written. It is idempotent per service, which is why every class may
  *       call this method;
- *   <li><b>the idp's recording</b>, cumulative and <b>with no floor</b>: the JWKS fetch this service
- *       makes at STARTUP happens before any story exists and is the whole subject of the first one,
+ *   <li><b>the idp's recording</b>, cumulative and <b>with no floor</b>: the discovery read and the
+ *       JWKS fetch this service makes at STARTUP happen before any story exists and is the whole subject of the first one,
  *       so it must be attributable rather than filtered away;
  *   <li><b>the peers' access log</b>, {@link StoryPeers#install()} — qits-projects, qits-containers,
  *       qits-platform-idp's token and commission endpoints, and qits-events. Cumulative and, like
@@ -40,7 +40,7 @@ import eu.wohlben.qits.userflows.NetworkTaps;
  * <p>A cumulative source is attributed by a cursor, so pre-story traffic lands in whichever story
  * drains FIRST. {@code UserflowClassOrderer} sorts by fully-qualified class name, so {@code
  * …workspaces.api} runs before {@code …workspaces.stories.*} and the boot story owns the startup
- * JWKS fetch; within {@code stories}, {@code creation} runs before {@code
+ * discovery read and JWKS fetch; within {@code stories}, {@code creation} runs before {@code
  * operations} and {@code refusals}, which is why the outbound token mints — cached for an hour, so
  * they land once — belong to the first workspace story rather than to whoever needed one next.
  * {@code @UserflowRunsAfter} states the ones that are real dependencies as well as being true of

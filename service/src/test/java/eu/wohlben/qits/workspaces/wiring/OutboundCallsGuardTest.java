@@ -248,6 +248,14 @@ class OutboundCallsGuardTest {
             + String.join("\n  ", unknown));
   }
 
+  /**
+   * The calls the FRAMEWORK makes are held to the configuration that switches them on. The
+   * quarkus-oidc tenant reads qits-idp at {@code auth-server-url}: with discovery on — the default,
+   * and what ships (qits-708) — the discovery document and then the JWKS it names, and both must be
+   * rows; with discovery off it would be the JWKS alone, and no issuer would be checked at all. So
+   * turning discovery off again, or pinning a {@code token.issuer} beside it, is a red build here
+   * rather than an unpacted read or an issuer held in configuration (qits-730: it never is).
+   */
   @Test
   void theOidcCallsHaveRows() throws IOException {
     Properties shipped = new Properties();
@@ -263,6 +271,21 @@ class OutboundCallsGuardTest {
     }
     if (shipped.containsKey("quarkus.oidc.auth-server-url") && !hasRow(IdpContract.TABLE, "getJwks")) {
       missing.add("the quarkus-oidc tenant is configured, and no row reads its signing keys");
+    }
+    boolean discovery =
+        Boolean.parseBoolean(shipped.getProperty("quarkus.oidc.discovery-enabled", "true"));
+    if (shipped.containsKey("quarkus.oidc.auth-server-url")
+        && discovery
+        && !hasRow(IdpContract.TABLE, "getOpenIdConfiguration")) {
+      missing.add("the quarkus-oidc tenant discovers, and no row reads its discovery document");
+    }
+    if (!discovery || shipped.containsKey("quarkus.oidc.jwks-path")) {
+      missing.add(
+          "the quarkus-oidc tenant must discover: with discovery off no bearer's iss is checked"
+              + " (qits-708)");
+    }
+    if (shipped.containsKey("quarkus.oidc.token.issuer")) {
+      missing.add("the issuer is never configuration: discovery publishes it (qits-730)");
     }
     assertTrue(namedClient, "the shipped properties configure no oidc client: is the scan reading them?");
     assertTrue(missing.isEmpty(), String.join("\n", missing));

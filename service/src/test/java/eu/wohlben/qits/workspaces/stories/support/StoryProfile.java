@@ -41,11 +41,12 @@ import java.util.Map;
  *       quarkus.oidc.tenant-enabled=${qits.auth.machine.required:false}}, so this one key is the
  *       difference between a service that validates machine bearers and one that does not. Every
  *       refusal in this catalogue is a claim only a gate-on packaged run can make, and <b>no other
- *       suite in this repository turns it on against the shipped {@code auth-server-url} +
- *       {@code jwks-path} pair</b>.
- *   <li><b>{@code quarkus.oidc.auth-server-url}</b> — where the idp is. Discovery stays off and
- *       {@code jwks-path} stays {@code jwks}, joined onto this url, so the shipped boot-time fetch
- *       is exercised rather than replaced.
+ *       suite in this repository turns it on against the shipped discovering tenant</b>
+ *       ({@code security.BearerIssuerTest} does in-JVM).
+ *   <li><b>{@code quarkus.oidc.auth-server-url}</b> — where the idp is. Discovery stays on, as it
+ *       ships (qits-708): the tenant reads the discovery document under this url, checks every
+ *       bearer's {@code iss} against its {@code issuer}, and fetches the JWKS its {@code jwks_uri}
+ *       names, so the shipped boot-time reads are exercised rather than replaced.
  *   <li><b>{@code qits.githost.url}</b> — {@link StoryGitHost}, a real smart-HTTP git server. The
  *       packaged artifact carries {@code ConfiguredGitHostAddress} and no test double can win over
  *       it, so a story whose subject is a clone or a push needs a git host that answers over HTTP
@@ -102,7 +103,7 @@ import java.util.Map;
  * <p>It is the only profile here that configures a <b>launched packaged process</b>, and that is not
  * a matter of degree. Every other profile in this module overlays an in-JVM {@code @QuarkusTest};
  * this one names the databases a separate process creates and cleans at start, points a real
- * boot-time JWKS fetch at {@link MockIdp}, and puts a git server and a peer stub on the far end of
+ * boot-time discovery read and JWKS fetch at {@link MockIdp}, and puts a git server and a peer stub on the far end of
  * calls that leave the process. Folding any of it into a surefire profile would change what thirty
  * classes boot against — different stores, a gate they do not want, otel on — and folding a surefire
  * profile into this one would put keys a packaged jar silently ignores into the one place this

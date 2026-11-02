@@ -30,18 +30,22 @@ import org.junit.jupiter.api.TestMethodOrder;
  * {@code @QuarkusTest} in this repo can reach. {@code DaemonControlSocketMachineAuthTest} comes
  * closest and stops exactly where this one starts: it flips {@code qits.auth.machine.required} too,
  * but blanks {@code quarkus.oidc.auth-server-url} and hands Quarkus a static {@code
- * quarkus.oidc.public-key} instead — so the shipped pair that matters in a deployment, {@code
- * auth-server-url} plus {@code jwks-path=jwks}, fetched over a real listener before any caller
- * arrives, is exercised nowhere else. The far side here is {@link MockIdp}, which serves that JWKS
- * and <b>records</b> the fetch, so the interaction is assertable on <b>both ends</b>.
+ * quarkus.oidc.public-key} instead — so the shipped tenant that matters in a deployment, {@code
+ * auth-server-url} with the discovery document read from it and the JWKS that document names
+ * (qits-708), fetched over a real listener before any caller arrives, is exercised on the packaged
+ * artifact nowhere else. In-JVM, {@code security.BearerIssuerTest} points the same discovery-on
+ * tenant at {@link MockIdp} and holds the issuer pin: a bearer whose {@code iss} is not the
+ * published issuer is a 401 however well it is signed. The far side here is {@link MockIdp}, which
+ * serves the discovery document and that JWKS and <b>records</b> both reads, so the interaction is
+ * assertable on <b>both ends</b>.
  *
  * <p><b>It is the first class of the story catalogue and it owns the boot.</b> Everything else lives
  * under {@code …workspaces.stories.*} and shares this class's {@link StoryProfile} — one profile is
  * one launched process, and two would be two boots, two JWKS fetches and two database sets. This
  * class stays in {@code …workspaces.api} for one reason and it is load-bearing: {@code
  * UserflowClassOrderer} sorts by fully-qualified class name, {@code api} sorts before {@code
- * stories}, and a cumulative recording is attributed by a cursor — so the startup JWKS fetch, which
- * happened before any story existed, lands in whichever story drains <b>first</b>. That has to be
+ * stories}, and a cumulative recording is attributed by a cursor — so the startup discovery read
+ * and JWKS fetch, which happened before any story existed, lands in whichever story drains <b>first</b>. That has to be
  * the story about it.
  *
  * <p><b>What moved out.</b> The refusals used to be here, both of them, and the second one is now
@@ -103,9 +107,8 @@ public class TokenValidationBootstrapIT {
   @UserStoryDescription(
       """
       A freshly deployed qits-workspaces must validate service bearers before any caller arrives:
-      at startup it fetches the signing keys (JWKS) from qits-platform-idp — discovery stays off,
-      the path is configured — so the very first machine request is judged on the platform's own
-      keys. The callers that depend on it are the ones that cannot log in: a workspace daemon
+      at startup it reads qits-idp's discovery document and fetches the signing keys (JWKS) it
+      names, so the very first machine request is judged on the platform's own keys and issuer. The callers that depend on it are the ones that cannot log in: a workspace daemon
       dialling its control socket, and the machine callers that drive this service's API.
 
       It asks the idp a second question at boot, and it is not about keys at all. Every workspace
@@ -137,10 +140,16 @@ public class TokenValidationBootstrapIT {
     // token at all. That ordering is the whole claim. A service that fetched keys lazily, on the
     // first bearer, would look identical from this end and fail its first caller after a restart.
     assertTrue(
+        idp.recordedRequests().stream()
+            .anyMatch(request -> "/idp/.well-known/openid-configuration".equals(request.path())),
+        "the packaged service never read the idp's discovery document at startup");
+    assertTrue(
         idp.recordedRequests().stream().anyMatch(request -> "/idp/jwks".equals(request.path())),
         "the packaged service never fetched /idp/jwks at startup");
     story
-        .note("the signing keys were fetched at startup, before this story presented any token")
+        .note(
+            "the discovery document was read and the signing keys it names fetched at startup,"
+                + " before this story presented any token")
         .as("jwks-fetched");
 
     // End (b), this service's side: those keys are what token validation now runs on. The route is a
@@ -258,6 +267,15 @@ public class TokenValidationBootstrapIT {
     // because it is the first one that ran (see the class javadoc on ordering).
     ReportAssertions.assertEdge(
         CATEGORY, ACCEPTED_SLUG, "http", SERVICE, MockIdp.SERVICE_NAME, "GET /idp/jwks -> 200");
+    // And the discovery read before it (qits-708): the issuer every bearer's iss is checked
+    // against comes from that document, so it is a boot edge of its own.
+    ReportAssertions.assertEdge(
+        CATEGORY,
+        ACCEPTED_SLUG,
+        NetworkEdge.HTTP,
+        SERVICE,
+        MockIdp.SERVICE_NAME,
+        "GET /idp/.well-known/openid-configuration -> 200");
     // Observed on the near side, by the framework's shipped tap, with the actor this story set.
     ReportAssertions.assertEdge(
         CATEGORY,
@@ -301,9 +319,10 @@ public class TokenValidationBootstrapIT {
         SERVICE,
         StoryPeers.EVENTS,
         StoryPeers.label("GET", StoryPeers.EVENTS_STREAM_PATH, 404));
-    // SIX: one door, the three questions a fresh process asks the idp before anybody arrives, and
-    // the two calls that start it listening to qits-events.
-    ReportAssertions.assertEdgeCount(CATEGORY, ACCEPTED_SLUG, 6);
+    // SEVEN: one door, the four questions a fresh process asks the idp before anybody arrives (its
+    // discovery document, its keys, and the two commission listings), and the two calls that start
+    // it listening to qits-events.
+    ReportAssertions.assertEdgeCount(CATEGORY, ACCEPTED_SLUG, 7);
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "jwks-fetched");
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "history-served");
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "commissions-reconciled");
