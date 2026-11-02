@@ -1318,6 +1318,85 @@
         "references": {
           "qits-call": {
             "app": "qits-idp-service",
+            "operationId": "getOpenIdConfiguration"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "event": "StartupEvent",
+            "kind": "event"
+          }
+        }
+      },
+      "description": "StartupEvent: getOpenIdConfiguration",
+      "key": "b2edec1",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a published signing key",
+          "params": {
+            "kid": "contract-signing-key"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/idp/.well-known/openid-configuration"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "issuer": "https://idp.qits.localhost",
+            "jwks_uri": "http://dev-qits-idp:8080/idp/jwks",
+            "token_endpoint": "http://dev-qits-idp:8080/idp/token"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.jwks_uri": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.token_endpoint": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-idp-service",
             "operationId": "deleteToken"
           },
           "qits-trigger": {

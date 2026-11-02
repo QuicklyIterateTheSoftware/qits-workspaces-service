@@ -48,8 +48,9 @@ import java.util.concurrent.Executors;
  * by. Nothing about the evidence changes — direction, method, path and status are what an edge is.
  *
  * <p><b>qits-platform-idp appears here as its OUTBOUND half only.</b> {@link MockIdp} serves the
- * inbound half — the JWKS this service validates its callers against, fetched at startup over a
- * real listener — and it draws as the same node, because it is the same component. The token
+ * inbound half — the discovery document whose issuer this service checks its callers' {@code iss}
+ * against and the JWKS it validates their signatures with, both read at startup over a real
+ * listener — and it draws as the same node, because it is the same component. The token
  * endpoint is served here rather than stubbed on the mock because a {@code MockIdp.attach()} handle
  * has no stubbing of its own, and because a token this service <i>fetches</i> is outbound traffic
  * whose evidence belongs with the other outbound recordings.

@@ -86,9 +86,11 @@ public class DaemonControlSocketMachineAuthTest {
    * application does not — a class that sends no bearer, which is most of them, would stop being
    * able to reach the socket at all. It also blanks the dev user for the same reason {@code
    * NoDevUserProfile} does, and swaps the live IdP for a local public key so the gate can be proved
-   * without a network. The one packaged run that also has the gate on ({@code StoryProfile})
-   * deliberately keeps the shipped {@code auth-server-url} + {@code jwks-path} pair instead, which
-   * is the other half of the same coverage and cannot be this half.
+   * without a network; its {@code token.issuer} is the test key's own and pins nothing that ships
+   * (the shipped tenant takes its issuer from discovery, qits-708). The shipped discovering tenant
+   * is the subject of {@code security.BearerIssuerTest} in-JVM — the control socket included —
+   * and of the one packaged run that also has the gate on ({@code StoryProfile}), which is the
+   * other half of the same coverage and cannot be this half.
    */
   public static class GateOn implements QuarkusTestProfile, NecessaryTestProfileDuplication {
     @Override

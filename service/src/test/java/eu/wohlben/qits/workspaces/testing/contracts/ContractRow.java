@@ -25,6 +25,9 @@ import java.util.Objects;
  *
  * @param pending whether the provider has yet to record the row's state and operation
  * @param receive a message row's handling; null for an HTTP row, whose {@code call} it replaces
+ * @param exact consumed response paths bound BY VALUE rather than by type ({@link #withExact}): the
+ *     provider must answer the recorded value itself, because this service compares it rather than
+ *     merely reads it; each must be one of {@code consumes} and name a leaf
  */
 public record ContractRow(
     Trigger trigger,
@@ -34,7 +37,8 @@ public record ContractRow(
     List<String> consumes,
     boolean pending,
     Call call,
-    Receive receive) {
+    Receive receive,
+    List<String> exact) {
 
   /** The consumer's code, pointed at the mock server's base url, with the state's params. */
   @FunctionalInterface
@@ -54,6 +58,13 @@ public record ContractRow(
     Objects.requireNonNull(operationId, "operationId");
     request = request == null ? Request.NONE : request;
     consumes = List.copyOf(consumes);
+    exact = exact == null ? List.of() : List.copyOf(exact);
+    for (String declared : exact) {
+      if (!consumes.contains(declared)) {
+        throw new IllegalArgumentException(
+            operationId + ": " + declared + " is bound by value but not consumed");
+      }
+    }
     if ((call == null) == (receive == null)) {
       throw new IllegalArgumentException(
           operationId + ": a row either calls (HTTP) or receives (a message), exactly one");
@@ -68,7 +79,8 @@ public record ContractRow(
       Request request,
       List<String> consumes,
       Call call) {
-    return new ContractRow(trigger, state, operationId, request, consumes, false, call, null);
+    return new ContractRow(
+        trigger, state, operationId, request, consumes, false, call, null, List.of());
   }
 
   /**
@@ -84,7 +96,8 @@ public record ContractRow(
         List.of(),
         false,
         null,
-        Objects.requireNonNull(receive, "receive"));
+        Objects.requireNonNull(receive, "receive"),
+        List.of());
   }
 
   /** Whether this row is a message the provider sends, rather than a call this service makes. */
@@ -94,7 +107,19 @@ public record ContractRow(
 
   /** The same row, waiting for its provider to record {@link #state} for {@link #operationId}. */
   public ContractRow waiting() {
-    return new ContractRow(trigger, state, operationId, request, consumes, true, call, receive);
+    return new ContractRow(
+        trigger, state, operationId, request, consumes, true, call, receive, exact);
+  }
+
+  /**
+   * The same row, binding each of {@code paths} by its recorded value rather than by its type: the
+   * pact carries no matcher for it, so the provider must answer exactly what it recorded. For a
+   * value this service compares — qits-idp's discovery {@code issuer}, which every inbound bearer's
+   * {@code iss} is checked against (qits-708).
+   */
+  public ContractRow withExact(String... paths) {
+    return new ContractRow(
+        trigger, state, operationId, request, consumes, pending, call, receive, List.of(paths));
   }
 
   public String description() {

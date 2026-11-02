@@ -426,7 +426,10 @@ literal and must carry `/workspaces` itself. Five do, each for its own reason:
   `WorkspaceContainerFactory` injects `ws://<host>:<port>/workspaces/daemon/<id>` as
   `QITS_WORKSPACE_DAEMON_URL` and qits-workspace-daemon dials exactly that. Change both together.
   A daemon holding a workspace token presents it at the edge, which forwards a platform-audience
-  JWT on every upgrade; the endpoint requires `qits:system` or `qits:agent`. A caller with
+  JWT on every upgrade; the endpoint requires `qits:system` or `qits:agent`. The bearer is checked
+  by the same quarkus-oidc tenant as every REST door: discovery on, so its `iss` must be the issuer
+  qits-idp publishes in its discovery document — there is no `quarkus.oidc.token.issuer` and never
+  will be (qits-708, qits-730; `security.BearerIssuerTest`). A caller with
   `qits:agent` and not `qits:system` may open only its own workspace's socket: `DaemonAgentBindingCheck`
   (an `HttpUpgradeCheck`, so the refusal is a real 403 before the upgrade) compares the token's `sub`
   with the row's `commissioned_token_subject` (qits-812; `Workspace.boundSubject`). A row holding no
@@ -2085,13 +2088,13 @@ about the whole of it.
 
 **Ten stories, five classes, one launched process.** Every class names
 `stories.support.StoryProfile`, because a `@TestProfile` is what failsafe launches a process for and
-two profiles would be two qits-workspaces — two boots, two JWKS fetches, two database sets, two
+two profiles would be two qits-workspaces — two boots, two discovery reads and JWKS fetches, two database sets, two
 mirror trees, and a diagram whose startup traffic landed in whichever process happened to be
 running.
 
 | class | category | what it is about |
 | --- | --- | --- |
-| `api.TokenValidationBootstrapIT` | authentication | the boot: the JWKS fetch, the commission reconcile, the event-bus listener's first calls, and a bearer cut for another audience |
+| `api.TokenValidationBootstrapIT` | authentication | the boot: the discovery read and JWKS fetch, the commission reconcile, the event-bus listener's first calls, and a bearer cut for another audience |
 | `stories.creation.WorkspaceProvisionIT` | workspaces | a workspace provisioned end to end, daemon dial included |
 | `stories.operations.OperatorReadsIT` | operations | what a live read costs, and what a stored read does not |
 | `stories.refusals.MergeDoorRefusalIT` | refusals | four ways not to get through a door, told at `/branches/merge` |
@@ -2133,7 +2136,8 @@ being asked.
   half, and qits-events**, one stub answering as four and told apart by path prefix. Stateless
   except for the container table (a provision asks whether a container is there, puts one, and later
   lists them) and the file-armed `refuse(prefix)` the registry-outage story uses.
-- **`MockIdp` — the idp's inbound half**, serving the JWKS the gate validates against. It draws as
+- **`MockIdp` — the idp's inbound half**, serving the discovery document (whose `issuer` every
+  bearer's `iss` is checked against, qits-708) and the JWKS the gate validates against. It draws as
   the same node `StoryPeers`' `/idp/*` routes do, because it is the same component.
 
 Both stubs and the git host are started by the **test profile** and read by story methods, which a

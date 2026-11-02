@@ -136,7 +136,8 @@ public record ContractTable(
           row.trigger(),
           row.request(),
           row.consumes(),
-          via);
+          via,
+          row.exact());
     }
     return builder.toPact();
   }

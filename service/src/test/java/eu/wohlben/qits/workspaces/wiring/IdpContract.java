@@ -53,8 +53,13 @@ import java.util.Optional;
  *   <li>quarkus-oidc-client's {@code qits} client — the platform-audience bearer this service sends
  *       qits-containers, qits-githost and qits-projects, minted with {@code client_secret_basic}
  *       ({@code POST /idp/token}).
- *   <li>the quarkus-oidc tenant — the signing keys every inbound bearer is checked against ({@code
- *       GET /idp/jwks}, discovery off).
+ *   <li>the quarkus-oidc tenant, at startup (qits-708, the qits-1149 pattern) — the discovery
+ *       document ({@code GET /idp/.well-known/openid-configuration}), whose {@code issuer} is what
+ *       every inbound bearer's {@code iss} is checked against and is therefore bound BY VALUE
+ *       ({@link ContractRow#withExact}), and the signing keys at the {@code jwks_uri} it names
+ *       ({@code GET /idp/jwks}). One tenant guards the REST doors and the daemon control socket
+ *       alike. No class of this source tree makes either call, so {@code OutboundCallsGuardTest}
+ *       holds the two rows to the shipped tenant configuration instead.
  * </ul>
  *
  * <p><b>The Basic pair is the state's.</b> qits-idp's doors take HTTP Basic, and its verification
@@ -72,6 +77,9 @@ public final class IdpContract {
   static final String SIGNING_KEY = "a published signing key";
   static final String NO_TOKEN = "no commissioned token with the given id";
   static final String PEER_CALLER = "a service client calling its peers";
+
+  /** Where the quarkus-oidc tenant reads the discovery document, under auth-server-url. */
+  static final String DISCOVERY_PATH = "/idp/.well-known/openid-configuration";
 
   // One state per commission body this service sends (qits-idp qits-1149 round 3): the state's
   // params are the row's values, and the body binds each with a provider-state expression.
@@ -190,7 +198,31 @@ public final class IdpContract {
                   (url, params) ->
                       assertFalse(commissionerAgainst(url, params).listTokens().isEmpty())),
               tokenHandback(LEGACY_RUNNERS),
-              // --- the tenant's signing keys ---------------------------------------------------
+              // --- the tenant's discovery document and signing keys -----------------------------
+              // The issuer every inbound bearer's `iss` is checked against (qits-708): an idp
+              // answering another issuer refuses every token this service accepts, so its type
+              // alone is not the contract — it is bound by value.
+              ContractRow.of(
+                      Trigger.event("StartupEvent"),
+                      SIGNING_KEY,
+                      "getOpenIdConfiguration",
+                      Request.NONE,
+                      List.of("$.issuer", "$.jwks_uri", "$.token_endpoint"),
+                      (url, params) -> {
+                        JsonNode document = getJson(url + DISCOVERY_PATH);
+                        assertEquals(
+                            GoldenMasters.json(GoldenMasters.IDP, SIGNING_KEY, "getOpenIdConfiguration")
+                                .path("issuer")
+                                .asText(),
+                            document.path("issuer").asText(),
+                            "the issuer every bearer's iss is checked against");
+                        assertTrue(
+                            URI.create(document.path("jwks_uri").asText()).isAbsolute(), "jwks_uri");
+                        assertTrue(
+                            URI.create(document.path("token_endpoint").asText()).isAbsolute(),
+                            "token_endpoint");
+                      })
+                  .withExact("$.issuer"),
               ContractRow.of(
                   Trigger.event("StartupEvent"),
                   SIGNING_KEY,

@@ -475,11 +475,37 @@ public final class GoldenMasters {
       Request sent,
       List<String> consumes,
       Via via) {
+    return interaction(builder, provider, state, operationId, trigger, sent, consumes, via, List.of());
+  }
+
+  /**
+   * As above, binding each of {@code exact} — consumed leaves — by its recorded value: its matcher
+   * is removed, and a leaf with no matcher is compared by equality, so the provider must answer the
+   * recorded value itself (qits-708, the discovery {@code issuer}).
+   */
+  public static PactBuilder interaction(
+      PactBuilder builder,
+      Provider provider,
+      String state,
+      String operationId,
+      Trigger trigger,
+      Request sent,
+      List<String> consumes,
+      Via via,
+      List<String> exact) {
     Objects.requireNonNull(trigger, "trigger: every interaction names the entry point that makes it");
     Objects.requireNonNull(sent, "sent: Request.NONE for a call that sends nothing");
     Objects.requireNonNull(consumes, "consumes: name what the consumer reads, or List.of()");
     Operation op = operation(provider, state, operationId);
     DslPart body = consumes.isEmpty() ? null : responseBody(op, consumes);
+    for (String path : exact) {
+      // The root part keys its rules without the leading `$`, which the pact writer adds.
+      if (body == null || body.getMatchers().getMatchingRules().remove(path.substring(1)) == null) {
+        throw new IllegalStateException(
+            "golden master " + state + "/" + operationId + ": " + path
+                + " is bound by value but carries no matcher to remove");
+      }
+    }
     String[] pathAndQuery = op.path().split("\\?", 2);
     Operation pathOnly =
         new Operation(
