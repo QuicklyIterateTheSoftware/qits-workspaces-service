@@ -109,7 +109,11 @@ public interface SystemLeases {
   record Limits(
       String memory, String memorySwap, Long pidsLimit, String cpus, Integer oomScoreAdj) {}
 
-  /** qits-system's {@code Lease}, narrowed to what this service reads. */
+  /**
+   * qits-system's {@code Lease}, narrowed to what this service reads. {@code oomKills} and {@code
+   * oomScope} (qits-1818) are the lease's reported OOM kills and which killer acted ({@code LEASE}
+   * or {@code NODE}); both null until a kill is reported.
+   */
   @JsonIgnoreProperties(ignoreUnknown = true)
   record LeaseView(
       UUID id,
@@ -118,6 +122,8 @@ public interface SystemLeases {
       UUID targetId,
       Integer exitCode,
       String detail,
+      Long oomKills,
+      String oomScope,
       Instant requestedAt) {}
 
   /**

@@ -305,17 +305,19 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
   /**
    * A start's write, once qits-system answered the lease (epic qits-1481): the row records the lease
    * and its target and waits QUEUED, stamped {@code queuedAt}, the lease's {@code detail} as its
-   * runtime error. A compare-and-swap on a TARGET row that names no lease and holds a token — STOPPED
-   * or FAILED, QUEUED waiting for its legacy target, or RUNNING/PROVISIONING with no lease, whose
-   * container is gone (qits-1592) — so a stop or a second start in between changes nothing: answers 0
-   * or 1.
+   * runtime error. {@code oomKills} and {@code oomScope} (qits-1818) go back to null: a new lease's
+   * reading starts from nothing, whatever the row's old lease last reported. A compare-and-swap on a
+   * TARGET row that names no lease and holds a token — STOPPED or FAILED, QUEUED waiting for its
+   * legacy target, or RUNNING/PROVISIONING with no lease, whose container is gone (qits-1592) — so a
+   * stop or a second start in between changes nothing: answers 0 or 1.
    */
   public int recordLease(
       Long id, UUID leaseId, UUID targetId, String detail, String adoptedVolume, Instant queuedAt) {
     return update(
         "leaseId = ?1, targetId = ?2, runtimeStatus = ?3, runtimeError = ?4, adoptedVolume = ?5,"
-            + " queuedAt = ?6 where id = ?7 and status = ?8 and placement = ?9 and runtimeStatus in"
-            + " ?10 and leaseId is null and commissionedTokenId is not null",
+            + " queuedAt = ?6, oomKills = null, oomScope = null where id = ?7 and status = ?8 and"
+            + " placement = ?9 and runtimeStatus in ?10 and leaseId is null and commissionedTokenId"
+            + " is not null",
         leaseId,
         targetId,
         WorkspaceRuntimeStatus.QUEUED,

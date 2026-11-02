@@ -225,6 +225,25 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public UUID targetId;
 
   /**
+   * Processes of this row's current lease the OOM killer has taken ({@code V37}, qits-1818),
+   * {@code cgroup memory.events oom_kill} of the lease's container, the highest reading its lease
+   * has reported: {@link eu.wohlben.qits.workspaces.control.TargetLeaseStates} never lowers it, so
+   * a later sample under the same reading is a no-op and only a higher one, or a new lease, moves
+   * it. Null for a DIRECT row and for a TARGET row whose lease has reported no kill. Cleared to
+   * null, with {@link #oomScope}, whenever the row is handed a new lease.
+   */
+  @Column(name = "oom_kills")
+  public Long oomKills;
+
+  /**
+   * Which killer acted on {@link #oomKills}' reading ({@code V37}, qits-1818): {@code LEASE} (the
+   * lease hit its own memory limit) or {@code NODE} (the node ran out and the killer picked a
+   * process in this lease). Null exactly when {@link #oomKills} is.
+   */
+  @Column(name = "oom_scope", length = 8)
+  public String oomScope;
+
+  /**
    * The retired workspaces runner's container and volume name this row's work was adopted from
    * ({@code qits-workspaces-runner-ws-<rowId>-<oldRunnerId8>}, {@code V30}), or null. Every lease of
    * the row carries {@code adopt{container, volume}} with it for as long as it is set: the runner

@@ -76,6 +76,8 @@ public class TargetLeaseEventsTest {
         state,
         null,
         null,
+        null,
+        null,
         Instant.now());
   }
 

@@ -66,6 +66,13 @@ import org.jboss.logging.Logger;
  * <p><b>A live row with no lease</b> has no lease to be revised by: {@link #stopLeaseless} stops it
  * once no daemon has been connected for a grace period (qits-1592).
  *
+ * <p><b>{@code oomKills} only ever goes up</b> (qits-1818): the row stores a lease's reading, with
+ * {@code oomScope}, only when it is higher than what the row already holds, whatever the lease's
+ * state — so a stale or missing sample on a later frame never erases a kill the row already
+ * reported. Both are reset to null the moment the row is handed a NEW lease ({@code
+ * WorkspaceRepository.recordLease}), never here: this class only ever revises the lease it is told
+ * about.
+ *
  * <p><b>RUNNING after a restart.</b> The daemon wait runs in memory. A lease this process asked for,
  * or saw waiting, is {@link #expectStart expected}: its RUNNING starts the wait. A RUNNING lease this
  * process knows nothing about whose row is still PROVISIONING is a restart that lost the wait, and
@@ -278,7 +285,7 @@ public class TargetLeaseStates {
 
   /** A lease that qits-system no longer lists: as good as ENDED. */
   public static Lease ended(UUID leaseId) {
-    return new Lease(leaseId, null, LeaseState.ENDED, null, null, null, null);
+    return new Lease(leaseId, null, LeaseState.ENDED, null, null, null, null, null, null);
   }
 
   /**
@@ -342,6 +349,7 @@ public class TargetLeaseStates {
     WorkspaceRuntimeStatus was = row.runtimeStatus;
     String error = row.runtimeError;
     UUID target = row.targetId;
+    Long oomKills = row.oomKills;
     boolean live =
         was == WorkspaceRuntimeStatus.QUEUED
             || was == WorkspaceRuntimeStatus.PROVISIONING
@@ -349,6 +357,12 @@ public class TargetLeaseStates {
     String token = null;
     boolean end = false;
     Follow follow = Follow.NOTHING;
+    // The row's own reading never goes down: a later, lower sample is not this lease's to
+    // overwrite, and a fresh lease starts from null (WorkspaceRepository.recordLease).
+    if (lease.oomKills() != null && (row.oomKills == null || lease.oomKills() > row.oomKills)) {
+      row.oomKills = lease.oomKills();
+      row.oomScope = lease.oomScope();
+    }
     switch (lease.state()) {
       case QUEUED -> {
         if (was == WorkspaceRuntimeStatus.QUEUED) {
@@ -440,6 +454,7 @@ public class TargetLeaseStates {
         row.runtimeStatus != was
             || !Objects.equals(row.runtimeError, error)
             || !Objects.equals(row.targetId, target)
+            || !Objects.equals(row.oomKills, oomKills)
             || row.leaseId == null
             || token != null;
     return new Applied(row, was, changed, token, end, false, follow);
