@@ -109,6 +109,8 @@ public class AgentDispatchControllerTest {
                       null,
                       null,
                       "no target has a free WORKSPACE slot",
+                      null,
+                      null,
                       java.time.Instant.now()));
             });
   }

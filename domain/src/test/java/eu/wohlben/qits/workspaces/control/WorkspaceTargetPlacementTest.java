@@ -468,7 +468,7 @@ public class WorkspaceTargetPlacementTest {
     states.observe(
         new Lease(
             leaseId, created.id.toString(), LeaseState.RUNNING, UUID.randomUUID(), null, null,
-            Instant.now()));
+            null, null, Instant.now()));
 
     assertEquals(WorkspaceRuntimeStatus.RUNNING, read(created.id).runtimeStatus);
   }
@@ -518,6 +518,89 @@ public class WorkspaceTargetPlacementTest {
     assertNotNull(restarted.leaseId);
     assertFalse(queued.leaseId.equals(restarted.leaseId), "a new lease");
     assertEquals(2, commissioner.tokensMinted().size(), "one token per lease");
+  }
+
+  // --- OOM kills (qits-1818) -------------------------------------------------------------------------
+
+  @Test
+  public void aRunningLeaseReadingOomKillsSetsTheFields() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "oom-set", false);
+    Workspace queued = read(created.id);
+    UUID target = UUID.randomUUID();
+    states.observe(placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null));
+    awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
+
+    states.observe(
+        placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null, 1L, "LEASE"));
+
+    Workspace row = read(created.id);
+    assertEquals(1L, row.oomKills);
+    assertEquals("LEASE", row.oomScope);
+  }
+
+  @Test
+  public void aLowerOomKillsReadingDoesNotLowerIt() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "oom-lower", false);
+    Workspace queued = read(created.id);
+    UUID target = UUID.randomUUID();
+    states.observe(placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null));
+    awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
+    states.observe(
+        placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null, 5L, "NODE"));
+
+    states.observe(
+        placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null, 2L, "LEASE"));
+
+    Workspace row = read(created.id);
+    assertEquals(5L, row.oomKills, "never lowered");
+    assertEquals("NODE", row.oomScope, "the scope of the higher reading stands with it");
+  }
+
+  @Test
+  public void aNullOomKillsReadingChangesNothing() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "oom-null", false);
+    Workspace queued = read(created.id);
+    UUID target = UUID.randomUUID();
+    states.observe(placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null));
+    awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
+    states.observe(
+        placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null, 1L, "LEASE"));
+
+    // A detail-only refresh of the same RUNNING lease, naming no OOM reading.
+    states.observe(
+        new Lease(
+            queued.leaseId, queued.id.toString(), LeaseState.RUNNING, target, null, null, null,
+            null, Instant.now()));
+
+    Workspace row = read(created.id);
+    assertEquals(1L, row.oomKills, "a null reading is no information, not a reset");
+    assertEquals("LEASE", row.oomScope);
+  }
+
+  @Test
+  public void aNewLeaseResetsOomKillsAndScope() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "oom-reset", false);
+    Workspace queued = read(created.id);
+    UUID target = UUID.randomUUID();
+    states.observe(placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null));
+    awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
+    states.observe(
+        placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null, 4L, "LEASE"));
+    assertEquals(4L, read(created.id).oomKills);
+
+    states.observe(placement.move(queued.leaseId, LeaseState.EXITED, target, 137, null));
+    placement.move(queued.leaseId, LeaseState.ENDED, target, 137, null);
+
+    workspaceService.beginEnsureContainer(created.id);
+
+    Workspace restarted = read(created.id);
+    assertFalse(queued.leaseId.equals(restarted.leaseId), "a new lease");
+    assertNull(restarted.oomKills);
+    assertNull(restarted.oomScope);
   }
 
   // --- stop, delete, recreate, resolution ----------------------------------------------------------
@@ -829,7 +912,7 @@ public class WorkspaceTargetPlacementTest {
     Lease orphan =
         new Lease(
             UUID.randomUUID(), "999999", LeaseState.QUEUED, null, null, null,
-            Instant.now().minus(Duration.ofHours(1)));
+            null, null, Instant.now().minus(Duration.ofHours(1)));
     placement.seed(orphan);
 
     List<Long> changed = states.reconcile(Duration.ofMinutes(2), Instant.now());

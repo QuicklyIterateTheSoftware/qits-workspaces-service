@@ -78,11 +78,29 @@ public class FakeTargetPlacement implements TargetPlacement {
     targets = List.copyOf(answer);
   }
 
-  /** The lease, moved to {@code state} on {@code targetId}, as qits-system would report it. */
+  /**
+   * The lease, moved to {@code state} on {@code targetId}, as qits-system would report it. Its OOM
+   * reading (qits-1818) carries over, as qits-system's own last sample would.
+   */
   public Lease move(UUID leaseId, LeaseState state, UUID targetId, Integer exitCode, String detail) {
     Lease was = leases.get(leaseId);
+    return move(leaseId, state, targetId, exitCode, detail, was.oomKills(), was.oomScope());
+  }
+
+  /** {@link #move}, also reporting an OOM kill reading (qits-1818). */
+  public Lease move(
+      UUID leaseId,
+      LeaseState state,
+      UUID targetId,
+      Integer exitCode,
+      String detail,
+      Long oomKills,
+      String oomScope) {
+    Lease was = leases.get(leaseId);
     Lease moved =
-        new Lease(leaseId, was.ownerRef(), state, targetId, exitCode, detail, was.requestedAt());
+        new Lease(
+            leaseId, was.ownerRef(), state, targetId, exitCode, detail, oomKills, oomScope,
+            was.requestedAt());
     leases.put(leaseId, moved);
     return moved;
   }
@@ -153,6 +171,8 @@ public class FakeTargetPlacement implements TargetPlacement {
             null,
             null,
             WAITING,
+            null,
+            null,
             Instant.now());
     leases.put(id, lease);
     requests.put(id, request);

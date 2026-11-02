@@ -903,6 +903,11 @@ components:
           $ref: "#/components/schemas/UUID"
         targetId:
           $ref: "#/components/schemas/UUID"
+        oomKills:
+          type: integer
+          format: int64
+        oomScope:
+          type: string
         queuedAt:
           $ref: "#/components/schemas/Instant"
         affectedAgentIds:

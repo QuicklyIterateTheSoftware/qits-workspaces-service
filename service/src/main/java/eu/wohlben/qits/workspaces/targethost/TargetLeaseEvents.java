@@ -89,6 +89,8 @@ public class TargetLeaseEvents implements QitsEventListener<TargetLeaseChanged> 
             uuid(event.targetId()),
             event.exitCode(),
             event.detail(),
+            event.oomKills(),
+            event.oomScope(),
             null);
     try {
       if (states.observe(lease) == TargetLeaseStates.Outcome.CHANGED) {

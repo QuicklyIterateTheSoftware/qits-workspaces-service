@@ -87,6 +87,10 @@ public interface TargetPlacement {
    * @param targetId null while QUEUED
    * @param exitCode set for EXITED
    * @param detail why a QUEUED lease waits, or why it failed or exited
+   * @param oomKills processes of this lease the OOM killer has taken (qits-1818), the highest
+   *     reading qits-system has reported; null until one is
+   * @param oomScope which killer acted: {@code LEASE} or {@code NODE}; null exactly when {@code
+   *     oomKills} is
    */
   record Lease(
       UUID id,
@@ -95,6 +99,8 @@ public interface TargetPlacement {
       UUID targetId,
       Integer exitCode,
       String detail,
+      Long oomKills,
+      String oomScope,
       Instant requestedAt) {
 
     /** The row this lease was asked for, or null when its owner ref is not one of ours. */

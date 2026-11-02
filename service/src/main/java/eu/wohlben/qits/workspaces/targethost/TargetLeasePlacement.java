@@ -189,6 +189,8 @@ public class TargetLeasePlacement implements TargetPlacement {
         view.targetId(),
         view.exitCode(),
         view.detail(),
+        view.oomKills(),
+        view.oomScope(),
         view.requestedAt());
   }
 

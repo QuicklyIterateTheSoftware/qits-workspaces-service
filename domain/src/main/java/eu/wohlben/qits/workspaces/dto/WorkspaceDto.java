@@ -97,6 +97,13 @@ import java.util.UUID;
  *     DIRECT workspace and for a TARGET workspace with no live lease
  * @param targetId the execution target that lease was granted on; null while it waits (QUEUED) and
  *     whenever there is no lease
+ * @param oomKills processes of this TARGET workspace's current lease the OOM killer has taken
+ *     (qits-1818), the highest reading its lease has reported; null for every DIRECT workspace and
+ *     for a TARGET workspace whose lease has reported no kill. Cleared, with {@code oomScope},
+ *     whenever the workspace is handed a new lease
+ * @param oomScope which killer acted on {@code oomKills}' reading: {@code LEASE} (the lease hit its
+ *     own memory limit) or {@code NODE} (the node ran out and the killer picked a process in this
+ *     lease). Null exactly when {@code oomKills} is
  * @param queuedAt when a TARGET workspace was last asked to start, while its lease waits for a slot
  *     ({@code runtimeStatus} {@code QUEUED}, with the lease's {@code detail} — why it waits — in
  *     {@code runtimeError}); null otherwise
@@ -133,6 +140,8 @@ public record WorkspaceDto(
     WorkspacePlacement placement,
     UUID leaseId,
     UUID targetId,
+    Long oomKills,
+    String oomScope,
     Instant queuedAt,
     List<String> affectedAgentIds) {
 
@@ -166,6 +175,8 @@ public record WorkspaceDto(
         placement,
         leaseId,
         targetId,
+        oomKills,
+        oomScope,
         queuedAt,
         agentIds == null ? List.of() : List.copyOf(agentIds));
   }

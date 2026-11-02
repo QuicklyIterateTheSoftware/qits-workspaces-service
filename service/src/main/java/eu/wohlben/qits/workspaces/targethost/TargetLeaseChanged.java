@@ -12,9 +12,15 @@ import java.util.UUID;
  * change there is a change here, in the same campaign; {@code TargetLeaseChangedContractTest} holds
  * the two together.
  *
- * <p>Published on every state change of a lease and on every change of a queued lease's {@code
- * detail}. {@code targetId} is null while QUEUED, {@code exitCode} is set for EXITED, {@code
- * detail} names why a lease waits or failed.
+ * <p>Published on every state change of a lease, on every change of a queued lease's {@code
+ * detail}, and now also when {@code oomKills} changes on a running lease (qits-1818). {@code
+ * targetId} is null while QUEUED, {@code exitCode} is set for EXITED, {@code detail} names why a
+ * lease waits or failed.
+ *
+ * <p>{@code oomKills} is the lease's container's processes the OOM killer has taken (cgroup {@code
+ * memory.events oom_kill}), the last sample kept after exit; {@code oomScope} is which killer acted
+ * — {@code LEASE} (the lease hit its own memory limit) or {@code NODE} (the node ran out and the
+ * killer picked a process in this lease) — null exactly when {@code oomKills} is null or 0.
  */
 public record TargetLeaseChanged(
     UUID eventId,
@@ -26,5 +32,7 @@ public record TargetLeaseChanged(
     String state,
     Integer exitCode,
     String detail,
+    Long oomKills,
+    String oomScope,
     Instant occurredAt)
     implements QitsEvent {}

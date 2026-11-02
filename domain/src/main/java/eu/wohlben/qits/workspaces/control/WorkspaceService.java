@@ -999,6 +999,8 @@ public class WorkspaceService {
                   wt.placement,
                   wt.leaseId,
                   wt.targetId,
+                  wt.oomKills,
+                  wt.oomScope,
                   wt.queuedAt,
                   null);
             })
