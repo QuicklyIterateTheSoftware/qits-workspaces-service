@@ -75,12 +75,12 @@
              after the container is gone. Framework-free — vertx-core and qits-commands are its only
              compile dependencies, and nothing here imports either. -->
         <qits.coding-agents.version>2026.1031.164420</qits.coding-agents.version>
-        <qits.eventstream.version>2026.1031.131702</qits.eventstream.version>
+        <qits.eventstream.version>2026.1103.140652</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
         <qits.arch-rules.version>2026.1030.30851</qits.arch-rules.version>
         <qits.auth-core.version>2026.1031.63225</qits.auth-core.version>
-        <qits.containers-client.version>2026.1031.135810</qits.containers-client.version>
+        <qits.containers-client.version>2026.1103.143113</qits.containers-client.version>
         <!-- CallerServerFilter/CallerClientFilter: jandex-indexed filters that record inbound
              X-Qits-Caller as the qits.caller span attribute and stamp it on outgoing REST-client
              calls. Also published by qits-integrations-quarkus. -->
