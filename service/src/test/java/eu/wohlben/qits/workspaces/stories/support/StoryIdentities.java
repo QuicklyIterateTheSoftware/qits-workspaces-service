@@ -7,10 +7,10 @@ import io.restassured.specification.RequestSpecification;
  * The two identity tracks a launched qits-workspaces accepts, one helper each.
  *
  * <ul>
- *   <li><b>{@code qits:admin} is a PERSON's</b>, and it arrives as the {@code X-Qits-User} / {@code
- *       X-Qits-Roles} pair the platform edge asserts for an authenticated admin session. That
- *       namespace is stripped from every inbound request at the edge, unconditionally, which is the
- *       entire reason a header can be trusted inside.
+ *   <li><b>{@code qits:admin} is a PERSON's</b>, and it arrives in a person's bearer from the same
+ *       idp: the account in {@code sub}, the platform audience, {@code qits:admin} in {@code
+ *       groups}. Forward-auth — the {@code X-Qits-User} / {@code X-Qits-Roles} pair the edge used to
+ *       assert — leaves qits-auth-core with qits-1338 (epic qits-543).
  *   <li><b>A MACHINE's is an idp-minted bearer</b>, and it carries whichever roles the idp copied
  *       into its {@code groups} claim — quarkus-oidc reads them as roles with no configuration at
  *       all. A pipeline step's commissioned credential carries whatever it was granted; the daemon
@@ -61,12 +61,6 @@ public final class StoryIdentities {
   /** A real platform role this service names on no route — the 403 that is not a 401. */
   public static final String UNPRIVILEGED_ROLE = "qits:reader";
 
-  /** The header the edge names the logged-in person in. */
-  public static final String USER_HEADER = "X-Qits-User";
-
-  /** …and the one it asserts that person's roles in, comma-separated. */
-  public static final String ROLES_HEADER = "X-Qits-Roles";
-
   // --- how a diagram names each initiator ---------------------------------------------------------
 
   /** The person who creates a workspace, reads the list and merges a branch in it. */
@@ -78,7 +72,7 @@ public final class StoryIdentities {
   /** The in-container workspace-daemon, which dials out and is never dialled. */
   public static final String DAEMON = "a workspace daemon";
 
-  /** Nobody at all: no bearer, no forwarded pair. */
+  /** Nobody at all: no bearer. */
   public static final String ANONYMOUS = "an unauthenticated caller";
 
   /** A real caller, correctly authenticated, holding a role this service never names. */
@@ -130,14 +124,15 @@ public final class StoryIdentities {
     return request.header("Authorization", "Bearer " + token);
   }
 
-  /** {@code given()} with the pair the edge asserts for a logged-in admin session. */
+  /** {@code given()} with a signed-in operator's bearer: the operator's account, {@code qits:admin}. */
   public static RequestSpecification person(RequestSpecification request) {
     return person(request, OPERATOR_ACCOUNT, ADMIN_ROLE);
   }
 
-  /** …and the same pair for a session holding some other role, which is how a 403 is asked for. */
+  /** …and the same person holding some other roles, which is how a 403 is asked for. */
   public static RequestSpecification person(
-      RequestSpecification request, String user, String roles) {
-    return request.header(USER_HEADER, user).header(ROLES_HEADER, roles);
+      RequestSpecification request, String user, String... roles) {
+    return bearer(
+        request, MockIdp.attach().token().subject(user).audience(AUDIENCE).groups(roles).mint());
   }
 }

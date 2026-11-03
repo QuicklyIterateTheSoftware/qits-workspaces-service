@@ -11,6 +11,7 @@ import eu.wohlben.qits.workspaces.control.TechnicalProcessRegistry;
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.security.TestSecurity;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import java.io.BufferedReader;
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.Test;
  * is a 404 (fatal to {@code EventSource}, so no retry loop).
  */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 @TestProfile(SharedTuningProfile.class)
 public class TechnicalProcessEventsControllerTest {
 

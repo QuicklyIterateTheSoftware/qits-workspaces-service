@@ -12,6 +12,7 @@ import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Test;
  * WorkspaceLookup} SPI.
  */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 public class BranchControllerTest {
 
   @ConfigProperty(name = "qits.test.origins-dir")

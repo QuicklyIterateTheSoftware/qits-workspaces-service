@@ -2,9 +2,8 @@ package eu.wohlben.qits.workspaces.api;
 
 import static io.restassured.RestAssured.given;
 
-import eu.wohlben.qits.workspaces.security.NoDevUserProfile;
+import eu.wohlben.qits.workspaces.contracts.ContractBearers;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -19,16 +18,15 @@ import org.junit.jupiter.api.Test;
  * otherwise have gone — pins only {@code qits:admin} on its class, which is exactly the 403 this
  * class is here to prove did not happen.
  *
- * <p>Under {@link NoDevUserProfile}, which blanks the {@code %test} dev-user fallback so that an
- * anonymous request really is anonymous. Roles arrive the way the platform edge asserts them for a
- * caller it has authenticated; a machine's idp bearer lands in the same {@code SecurityIdentity} and
- * is judged by the same annotation, so what is proved here is the annotation.
+ * <p>The suite has no {@code %test} dev user (epic qits-543), so an anonymous request really is
+ * anonymous. Each caller is a {@link ContractBearers#caller} credential holding exactly the roles it
+ * names; a machine's idp bearer lands in the same {@code SecurityIdentity} and is judged by the same
+ * annotation, so what is proved here is the annotation.
  *
  * <p>Every request below names a repository that does not exist, so nothing is created on any
  * outcome — the interesting status is the one in front of that 404.
  */
 @QuarkusTest
-@TestProfile(NoDevUserProfile.class)
 class AgentDispatchDoorRolesTest {
 
   private static Map<String, Object> aDispatch() {
@@ -54,8 +52,7 @@ class AgentDispatchDoorRolesTest {
   @Test
   void theSystemRoleIsAdmitted() {
     given()
-        .header("X-Qits-User", "qits-projects")
-        .header("X-Qits-Roles", "qits:system")
+        .header("Authorization", ContractBearers.caller("qits-projects", "qits:system"))
         .contentType(ContentType.JSON)
         .body(aDispatch())
         .when()
@@ -75,8 +72,7 @@ class AgentDispatchDoorRolesTest {
     Map<String, Object> admin = new java.util.HashMap<>(aDispatch());
     admin.put("admin", true);
     given()
-        .header("X-Qits-User", "qits-projects")
-        .header("X-Qits-Roles", "qits:system")
+        .header("Authorization", ContractBearers.caller("qits-projects", "qits:system"))
         .contentType(ContentType.JSON)
         .body(admin)
         .when()
@@ -89,8 +85,7 @@ class AgentDispatchDoorRolesTest {
   @Test
   void theAdminRoleIsAdmitted() {
     given()
-        .header("X-Qits-User", "alice")
-        .header("X-Qits-Roles", "qits:admin")
+        .header("Authorization", ContractBearers.caller("alice", "qits:admin"))
         .contentType(ContentType.JSON)
         .body(aDispatch())
         .when()
@@ -103,8 +98,7 @@ class AgentDispatchDoorRolesTest {
   @Test
   void anUnprivilegedRoleIsRefused() {
     given()
-        .header("X-Qits-User", "bob")
-        .header("X-Qits-Roles", "qits:reader")
+        .header("Authorization", ContractBearers.caller("bob", "qits:reader"))
         .contentType(ContentType.JSON)
         .body(aDispatch())
         .when()
@@ -121,8 +115,7 @@ class AgentDispatchDoorRolesTest {
   @Test
   void theSystemRoleMayReadTheReferences() {
     given()
-        .header("X-Qits-User", "qits-projects")
-        .header("X-Qits-Roles", "qits:system")
+        .header("Authorization", ContractBearers.caller("qits-projects", "qits:system"))
         .when()
         .get("/workspaces/api/agent-dispatches/references?ticketId=t-1")
         .then()
@@ -133,8 +126,7 @@ class AgentDispatchDoorRolesTest {
   @Test
   void theAdminRoleMayReadTheReferences() {
     given()
-        .header("X-Qits-User", "alice")
-        .header("X-Qits-Roles", "qits:admin")
+        .header("Authorization", ContractBearers.caller("alice", "qits:admin"))
         .when()
         .get("/workspaces/api/agent-dispatches/references?ticketId=t-1")
         .then()
@@ -144,8 +136,7 @@ class AgentDispatchDoorRolesTest {
   @Test
   void anUnprivilegedRoleMayNotReadTheReferences() {
     given()
-        .header("X-Qits-User", "bob")
-        .header("X-Qits-Roles", "qits:reader")
+        .header("Authorization", ContractBearers.caller("bob", "qits:reader"))
         .when()
         .get("/workspaces/api/agent-dispatches/references?ticketId=t-1")
         .then()

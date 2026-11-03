@@ -12,6 +12,7 @@ import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import jakarta.enterprise.inject.Vetoed;
 import jakarta.inject.Inject;
 import java.sql.SQLTransientConnectionException;
@@ -42,6 +43,7 @@ import org.junit.jupiter.api.Test;
  * is precisely the retry nobody wants.
  */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 public class ContainerProxyDbPatienceTest {
 
   /**

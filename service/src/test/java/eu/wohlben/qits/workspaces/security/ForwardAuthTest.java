@@ -1,64 +1,29 @@
 package eu.wohlben.qits.workspaces.security;
 
 import static io.restassured.RestAssured.given;
-import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
 
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.Test;
 
 /**
- * The deployed posture (dev-user fallback blanked): the gateway-injected header is the identity, and
- * its absence is anonymous rather than denied.
+ * <b>A forwarded identity header authenticates nothing</b> (epic qits-543, qits-1372). The edge
+ * used to assert {@code X-Qits-User} / {@code X-Qits-Roles} and qits-auth-core's forward-auth
+ * turned them into the caller; forward-auth leaves the library with qits-1338, so a caller is what
+ * its bearer says and a request with nothing but those headers is anonymous. Until qits-1338 lands,
+ * the suite's test config renames the headers forward-auth reads and blanks its dev user, which is
+ * what this proves today; afterwards it proves the same thing with no config at all.
  *
- * <p>That last point is the one worth stating. Nothing in this service denies anything — there is no
- * authorization policy here, by design (migration-auth-plan.md §12). So every assertion below is
- * about <em>who the request is</em>, never about a status code. A test that expected a 401 would be
- * asserting a security control this service does not have and must not grow.
+ * <p>Every assertion is about <em>who the request is</em>, against the unguarded identity echo,
+ * never about a status code: the guarded doors' refusals are their own tests'.
+ *
+ * <p>This is the one test here that still sends the pair, on purpose.
  */
 @QuarkusTest
-@TestProfile(NoDevUserProfile.class)
 class ForwardAuthTest {
 
   @Test
-  void theGatewayInjectedHeaderEstablishesTheIdentity() {
-    given()
-        .header("X-Qits-User", "alice")
-        .when()
-        .get("/workspaces/api/test-identity")
-        .then()
-        .statusCode(200)
-        .body("anonymous", equalTo(false))
-        .body("principal", equalTo("alice"));
-  }
-
-  @Test
-  void noHeaderIsAnonymousAndStillServed() {
-    // Anonymous is "no name for the audit row", not a security state — the request proceeds.
-    given()
-        .when()
-        .get("/workspaces/api/test-identity")
-        .then()
-        .statusCode(200)
-        .body("anonymous", equalTo(true));
-  }
-
-  @Test
-  void aBlankHeaderIsAnonymousNotAnEmptyPrincipal() {
-    given()
-        .header("X-Qits-User", "  ")
-        .when()
-        .get("/workspaces/api/test-identity")
-        .then()
-        .statusCode(200)
-        .body("anonymous", equalTo(true));
-  }
-
-  @Test
-  void theIdentityCarriesForwardedRoles() {
-    // The service consumes the role set asserted from the same edge session as the user.
-    // Jakarta security annotations then make the boundary decision from this identity.
+  void theForwardedHeaderPairIsIgnored() {
     given()
         .header("X-Qits-User", "alice")
         .header("X-Qits-Roles", "qits:admin")
@@ -66,7 +31,17 @@ class ForwardAuthTest {
         .get("/workspaces/api/test-identity")
         .then()
         .statusCode(200)
-        .body("principal", equalTo("alice"))
-        .body("roles", contains("qits:admin"));
+        .body("anonymous", equalTo(true));
+  }
+
+  @Test
+  void noCredentialIsAnonymousAndStillServed() {
+    // Anonymous is "no name for the audit row", not a security state — the echo proceeds.
+    given()
+        .when()
+        .get("/workspaces/api/test-identity")
+        .then()
+        .statusCode(200)
+        .body("anonymous", equalTo(true));
   }
 }

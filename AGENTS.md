@@ -976,10 +976,26 @@ and never implied by code, so a door that must stay human-only can drop it on it
 that admits `qits:admin` lists it too. `AdminAgentAccessTest` pins it, door by door, against
 `qits:agent` alone.
 **`X-Qits-*` is the gateway's reserved namespace, stripped from every inbound request
-unconditionally**, so a client cannot forge one. That strip rule is the entire reason the header can
-be trusted here — and it is why `ForwardAuthTest` sets the real header rather than reaching for
-`@TestSecurity`. The header *is* the contract under test; a test that mocked the identity instead
-would pass just as happily against a mechanism that never reads it.
+unconditionally**, so a client cannot forge one. Forward-auth itself leaves qits-auth-core with
+qits-1338 (epic qits-543): `ForwardAuthTest` now proves the pair authenticates nothing, and it is
+the one test that still sends it.
+
+**No test uses forward-auth (epic qits-543, qits-1372).** The `%test` dev user goes with qits-1338,
+and the suite already runs without it: the test config blanks it and renames the forward headers
+(`%test.qits.auth.forward.*` in `service/src/test/resources/application.properties`, which go with
+qits-1338), so a header-less request is anonymous. A test that needs a caller sends
+`ContractBearers.caller(subject, roles...)` in `Authorization` — a plain principal holding exactly
+those roles, answered by the test-only `contracts/SuiteCallerMechanism` (its scheme is not `Bearer`,
+so it works beside the gate-on profiles' real bearers); a single-caller class may use
+`@TestSecurity` instead. Contract recordings and pact verifications without a credential run as
+`ContractBearers.consumerCaller()` (`dev`, `qits:admin` + `qits:system`, the old dev user), so no
+golden master moves. The packaged story ITs send `MockIdp` bearers for a person as for a machine.
+
+**Dev mode needs a bearer.** The `%dev` dev user goes with qits-1338, so a `quarkus:dev` request
+without one is anonymous and every guarded door answers 401. Turn the tenant on against an idp
+(`-Dqits.auth.machine.required=true -Dquarkus.oidc.auth-server-url=...`) and call it with a
+person's token, for example `curl -H "Authorization: Bearer $(qits-token qits-platform)" ...`, or
+through the `qits` CLI.
 
 The daemon control socket is the exception that proves the rule. `/workspaces/daemon/{id}` is
 token-free by necessity — its callers are daemons inside containers, holding no user token — and it

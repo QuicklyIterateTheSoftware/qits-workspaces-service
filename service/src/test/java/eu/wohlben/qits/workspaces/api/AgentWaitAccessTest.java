@@ -6,12 +6,11 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import eu.wohlben.qits.workspaces.contracts.ContractBearers;
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
-import eu.wohlben.qits.workspaces.security.NoDevUserProfile;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
 import io.restassured.specification.RequestSpecification;
 import jakarta.inject.Inject;
@@ -27,11 +26,10 @@ import org.junit.jupiter.api.Test;
  * "agents get no write doors here": {@code qits:agent} and {@code qits:admin-agent} only for the
  * agent their token belongs to (principal = the agent's token subject), {@code qits:admin} and
  * {@code qits:system} for any; {@code qits:desk-admin} (qits-1618) is admitted and bound exactly as
- * an agent is. Also the door's own 400s. Under {@link NoDevUserProfile}, so the
- * roles are exactly the ones a request sends.
+ * an agent is. Also the door's own 400s. Each caller is a {@link ContractBearers#caller}
+ * credential, so the roles are exactly the ones a request names.
  */
 @QuarkusTest
-@TestProfile(NoDevUserProfile.class)
 class AgentWaitAccessTest {
 
   @Inject AgentWorktreeRepository agents;
@@ -81,8 +79,7 @@ class AgentWaitAccessTest {
 
   private static RequestSpecification as(String user, String roles) {
     return given()
-        .header("X-Qits-User", user)
-        .header("X-Qits-Roles", roles)
+        .header("Authorization", ContractBearers.caller(user, roles))
         .contentType(ContentType.JSON);
   }
 

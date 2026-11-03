@@ -38,7 +38,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * {@code pacts/<consumer>_qits-workspaces-service.json} in a jar, and this repository pins that jar
  * as a test dependency (today: qits-landing-app's, qits-projects', qits-artifacts',
  * qits-orchestrator's and the qits CLI's; qits-bootstrap-cli calls this service no more). Each
- * interaction runs against this {@code @QuarkusTest} over real HTTP as the {@code %test} dev user.
+ * interaction runs against this {@code @QuarkusTest} over real HTTP as {@link
+ * ContractBearers#consumerCaller()} where the pact carries no credential of its own.
  *
  * <p>Every {@code @State} method delegates to {@link ProviderStates}. {@link #target} fails a state
  * this provider does not answer for, and an interaction without {@code comments.references.qits-call}
@@ -117,6 +118,11 @@ class ConsumerPactVerificationTest {
   void consumerPactHolds(PactVerificationContext context, ClassicHttpRequest request)
       throws IOException {
     try {
+      if (!request.containsHeader("Authorization")) {
+        // An interaction without a credential of its own is the consumer's caller, named rather than
+        // left to a forward-auth dev user (epic qits-543).
+        request.setHeader("Authorization", ContractBearers.consumerCaller());
+      }
       withThisRunsStateParams(context, request);
       context.verifyInteraction();
     } finally {

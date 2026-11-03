@@ -195,6 +195,13 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <!-- @TestSecurity: tests name the identity they mean instead of leaning on the forward-auth
+                 dev user, which goes with qits-1338 (epic qits-543). -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-security</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>rest-assured</artifactId>
             <scope>test</scope>

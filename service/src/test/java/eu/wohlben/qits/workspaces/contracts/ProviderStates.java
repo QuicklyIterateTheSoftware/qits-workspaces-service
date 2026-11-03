@@ -485,7 +485,7 @@ public class ProviderStates {
   /** The CI run {@code qits wait ci-run} waits on. */
   static final String CI_RUN_ID = "00000000-0000-4000-8000-0000000000c2";
 
-  /** The caller the recording sends ({@code X-Qits-User}), and so the agents' token subject. */
+  /** The caller the recording sends ({@link ContractBearers#caller}), and so the agents' token subject. */
   static final String CONTRACT_CALLER = "contract-caller";
   static final String AGENT_OBSOLETE_ID = "00000000-0000-4000-8000-0000000000a2";
   static final String AGENT_REMOVED_ID = "00000000-0000-4000-8000-0000000000a3";

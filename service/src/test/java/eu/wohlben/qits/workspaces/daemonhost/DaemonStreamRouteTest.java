@@ -17,6 +17,7 @@ import eu.wohlben.qits.workspacedaemon.protocol.Hello;
 import eu.wohlben.qits.workspacedaemon.protocol.OpenStream;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.RestAssured;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -52,6 +53,7 @@ import org.junit.jupiter.api.Test;
  * still listening on {@code qits-net} and one at 4 is not.
  */
 @QuarkusTest
+@TestSecurity(user = "workspace-daemon", roles = "qits:system")
 @TestProfile(SharedTuningProfile.class)
 public class DaemonStreamRouteTest {
 

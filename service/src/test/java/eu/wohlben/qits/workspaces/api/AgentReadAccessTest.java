@@ -6,10 +6,9 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import eu.wohlben.qits.workspaces.security.NoDevUserProfile;
+import eu.wohlben.qits.workspaces.contracts.ContractBearers;
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
 import io.restassured.specification.RequestSpecification;
 import java.io.InputStream;
@@ -30,11 +29,10 @@ import org.junit.jupiter.api.Test;
  * class still refuses it a write.
  *
  * <p>One test per class whose reads changed. The ids name nothing, so a read answers 404 or an
- * empty list — what matters is that it is not 401 or 403. Under {@link NoDevUserProfile}, so the
- * roles are exactly the ones the request sends.
+ * empty list — what matters is that it is not 401 or 403. Each caller is a {@link
+ * ContractBearers#caller} credential, so the roles are exactly the ones the request names.
  */
 @QuarkusTest
-@TestProfile(NoDevUserProfile.class)
 class AgentReadAccessTest {
 
   private static final String NO_ROW = "999999999";
@@ -51,7 +49,7 @@ class AgentReadAccessTest {
   }
 
   private static RequestSpecification asAgent() {
-    return given().header("X-Qits-User", "agent-1").header("X-Qits-Roles", "qits:agent");
+    return given().header("Authorization", ContractBearers.caller("agent-1", "qits:agent"));
   }
 
   /** The status of an event stream, read from its headers; the stream itself is closed at once. */
@@ -59,8 +57,7 @@ class AgentReadAccessTest {
     HttpClient client = HttpClient.newHttpClient();
     HttpRequest request =
         HttpRequest.newBuilder(base.resolve(path))
-            .header("X-Qits-User", "agent-1")
-            .header("X-Qits-Roles", "qits:agent")
+            .header("Authorization", ContractBearers.caller("agent-1", "qits:agent"))
             .header("Accept", "text/event-stream")
             .timeout(Duration.ofSeconds(30))
             .GET()
@@ -191,8 +188,7 @@ class AgentReadAccessTest {
   @Test
   void aRoleThatIsNotTheAgentsIsStillRefused() {
     given()
-        .header("X-Qits-User", "bob")
-        .header("X-Qits-Roles", "qits:reader")
+        .header("Authorization", ContractBearers.caller("bob", "qits:reader"))
         .get("/workspaces/api/workspaces/" + NO_ROW)
         .then()
         .statusCode(403);

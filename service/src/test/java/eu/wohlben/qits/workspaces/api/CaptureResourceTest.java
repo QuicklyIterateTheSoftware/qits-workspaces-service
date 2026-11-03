@@ -13,6 +13,7 @@ import eu.wohlben.qits.workspaces.control.FakeWorkFiler;
 import eu.wohlben.qits.workspaces.dto.CaptureContent;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -29,6 +30,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 @TestProfile(SharedTuningProfile.class)
 public class CaptureResourceTest {
 

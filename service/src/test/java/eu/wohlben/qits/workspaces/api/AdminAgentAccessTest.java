@@ -5,9 +5,8 @@ import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 
-import eu.wohlben.qits.workspaces.security.NoDevUserProfile;
+import eu.wohlben.qits.workspaces.contracts.ContractBearers;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
 import io.restassured.specification.RequestSpecification;
 import java.util.Map;
@@ -24,12 +23,11 @@ import org.junit.jupiter.api.Test;
  * widening reached the admin-agent and nobody else.
  *
  * <p>The ids and repositories name nothing, so an admitted write answers 400/404 — what matters is
- * that it is not 401 or 403. Under {@link NoDevUserProfile}, so the roles are exactly the ones the
- * request sends. When a door is narrowed back to people only, its line here moves to the refused
+ * that it is not 401 or 403. Each caller is a {@link ContractBearers#caller} credential, so the
+ * roles are exactly the ones the request names. When a door is narrowed back to people only, its line here moves to the refused
  * side.
  */
 @QuarkusTest
-@TestProfile(NoDevUserProfile.class)
 class AdminAgentAccessTest {
 
   private static final String NO_ROW = "999999999";
@@ -42,7 +40,7 @@ class AdminAgentAccessTest {
   }
 
   private static RequestSpecification as(String role) {
-    return given().header("X-Qits-User", "admin-agent-1").header("X-Qits-Roles", role);
+    return given().header("Authorization", ContractBearers.caller("admin-agent-1", role));
   }
 
   private static RequestSpecification asAdminAgent() {

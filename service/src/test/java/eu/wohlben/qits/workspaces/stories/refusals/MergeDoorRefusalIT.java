@@ -168,10 +168,8 @@ public class MergeDoorRefusalIT {
       What makes this door different is that it is annotated, and an annotated route asks the
       identity for a role.
 
-      With the machine-auth gate on there are exactly two ways to be somebody: an idp-minted bearer,
-      or the X-Qits-User / X-Qits-Roles pair the platform edge asserts for a session. That namespace
-      is stripped from every inbound request at the edge, unconditionally, which is the entire reason
-      the header can be trusted inside. A caller with neither is nobody, and nobody gets a 401.
+      With the machine-auth gate on there is one way to be somebody: an idp-minted bearer, a
+      person's or a machine's. A caller without one is nobody, and nobody gets a 401.
 
       It is worth stating out loud because the synthetic dev identity would answer this request
       happily: it holds every platform role, and it exists in dev and test only. A packaged process

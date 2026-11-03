@@ -13,6 +13,7 @@ import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
 import jakarta.inject.Inject;
 import java.util.Base64;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Test;
 
 /** The prompt attachments over HTTP: the row shape, the sniff, the caps and the scoping. */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 public class WorkspacePromptAttachmentControllerTest {
 
   @ConfigProperty(name = "qits.test.origins-dir")

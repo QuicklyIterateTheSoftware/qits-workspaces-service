@@ -16,6 +16,7 @@ import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
 import jakarta.inject.Inject;
 import java.net.ServerSocket;
@@ -32,6 +33,7 @@ import org.junit.jupiter.api.Test;
  * AgentServiceTest}'s, in the domain module.
  */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 @TestProfile(AgentDispatchControllerTest.TestProfile.class)
 public class AgentDispatchControllerTest {
 

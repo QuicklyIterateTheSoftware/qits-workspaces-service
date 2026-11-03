@@ -20,6 +20,7 @@ import eu.wohlben.qits.workspacedaemon.protocol.TranscriptResync;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.WebSocket;
 import io.vertx.core.http.WebSocketClient;
@@ -49,6 +50,7 @@ import org.junit.jupiter.api.Test;
  * only whom an agent row is placed with.
  */
 @QuarkusTest
+@TestSecurity(user = "workspace-daemon", roles = "qits:system")
 class WorkspaceDaemonRegistryTranscriptTest {
 
   private static final String SESSION = "aaaaaaaa-1111-4111-8111-000000000001";
