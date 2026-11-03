@@ -24,7 +24,8 @@ import org.hamcrest.Matcher;
 import org.junit.jupiter.api.Test;
 
 /**
- * An agent keeps every read and gains no write (phase 4 of principal-bound-git-refs-plan.md). A
+ * An agent keeps every read and gains no write (phase 4 of epic qits-543, dossier page "Plan (as of
+ * 2026-09-13)"). A
  * caller holding only {@code qits:agent} gets past the gate of every read route here, and a mixed
  * class still refuses it a write.
  *
