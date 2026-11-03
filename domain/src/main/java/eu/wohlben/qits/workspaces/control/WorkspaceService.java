@@ -1879,22 +1879,6 @@ public class WorkspaceService {
   }
 
   /**
-   * Sanitizes a branch name into a workspace-id slug ([A-Za-z0-9_-], ≤64 chars, not dash-leading).
-   * Public because the capture ingest derives workspace ids from its generated branch names through
-   * the same rule.
-   */
-  public static String toWorkspaceSlug(String branch) {
-    String slug = branch.replaceAll("[^A-Za-z0-9_-]", "-");
-    if (slug.length() > 64) {
-      slug = slug.substring(0, 64);
-    }
-    if (slug.isBlank() || slug.startsWith("-")) {
-      slug = "main";
-    }
-    return slug;
-  }
-
-  /**
    * The branch a blank parent/target defaults to: the repository's configured main branch (set at
    * clone time from the remote's default), with "master" as the last-resort fallback for a row
    * whose {@code mainBranch} was never populated.
