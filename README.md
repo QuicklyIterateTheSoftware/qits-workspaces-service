@@ -398,8 +398,8 @@ starting, and it is never sent as `"*"` — qits-idp refuses the wildcard by des
 **It states that the container may push nothing**: `"gitRefs": []`, never an absent list, which
 would be unscoped. Since qits-1152 the push scope is the agent's — its token carries the refs of its
 own branch (`agent_worktree.git_refs`), and the daemon pushes with it — so a workspace slot has no
-refs of its own. The per-workspace list and its narrowing (contracts C4 and C5 in the superproject's
-`principal-bound-git-refs-plan.md`) are gone, and `V27` dropped their columns (qits-1385).
+refs of its own. The per-workspace list and its narrowing (contracts C4 and C5 in epic qits-543,
+dossier page "Plan (as of 2026-09-13)") are gone, and `V27` dropped their columns (qits-1385).
 
 **It mirrors the container's lifetime, not the row's.** A provision mints, a recreate mints afresh
 and deletes the old one, `deleteContainer` deletes it while the workspace stays ACTIVE (the next
