@@ -11,7 +11,7 @@ import java.util.Set;
 
 /**
  * The Git refs an agent's credential may push (qits-1152), in the shape of contract C1
- * (principal-bound-git-refs-plan.md): a list of exact refs ({@code refs/heads/ticket/x}) and prefix
+ * (epic qits-543, dossier page "Plan (as of 2026-09-13)"): a list of exact refs ({@code refs/heads/ticket/x}) and prefix
  * patterns ending in {@code *}. A trailing {@code *} means "starts with what precedes it", wherever
  * it follows: {@code refs/heads/ticket/qits-1-*} covers {@code ticket/qits-1-fix}, and {@code /*} is
  * the special case it always was (qits-1152). Any other {@code *} is invalid.

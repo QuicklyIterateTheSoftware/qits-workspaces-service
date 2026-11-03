@@ -438,8 +438,8 @@ literal and must carry `/workspaces` itself. Five do, each for its own reason:
   `wss://workspaces.qits.<domain>/workspaces/daemon/<id>` through the edge rather than the
   `ws://` qits-net address. `DaemonSocketBearerLifetime` drops the bearer's expiry on this path for a
   `tok-` subject only, so a token daemon's socket outlives the edge's 300 s JWT.
-  `qits:system` is not bound until agents switch to their own role (phase 4 of the superproject's
-  `principal-bound-git-refs-plan.md`). The local/no-IdP topology
+  `qits:system` is not bound until agents switch to their own role (phase 4 of epic qits-543,
+  dossier page "Plan (as of 2026-09-13)"). The local/no-IdP topology
   stays anonymous only while the machine-auth rollout gate is off. Do not make this path public to
   repair a failed dial-home: a missing bearer is an integration failure, not a routing exception.
 - `ContainerProxyRoute` — `ContainerProxyPath.PREFIX`, `/workspaces/container/`, **the only path by
@@ -921,8 +921,8 @@ There is no auth variant to select in this service. The shared `qits-auth-core` 
 `@RolesAllowed("qits:admin")`. Machine-facing boundaries require an authenticated identity and
 retain their narrower `MachineAuth` audience/scope checks.
 
-**Every read also takes `qits:agent`; no write does** (phase 4 of the superproject's
-`principal-bound-git-refs-plan.md`: agents keep every read and lose only writes) — with two stated
+**Every read also takes `qits:agent`; no write does** (phase 4 of epic qits-543, dossier page
+"Plan (as of 2026-09-13)": agents keep every read and lose only writes) — with two stated
 exceptions until qits-1481 (a workspace runner's health check, gone with the runner), and an agent's own declared waits
 (qits-1153, below). It is stated on
 each read METHOD — every `GET`, the three event streams — and never on a class, so a write added to
@@ -1697,7 +1697,7 @@ There is no key of ours, and there must not be.
 
 ## The Git refs a workspace may push
 
-None. Contracts C4 and C5 of the superproject's `principal-bound-git-refs-plan.md` gave each
+None. Contracts C4 and C5 of epic qits-543, dossier page "Plan (as of 2026-09-13)" gave each
 workspace a list of its own, stated in its commission and narrowed when another workspace took a
 branch. Since qits-1152 the push scope is the **agent's**: `AgentService.gitRefsFor` works it out,
 `agent_worktree.git_refs` stores it, and the agent's token carries it (see "Agents and the

@@ -16,7 +16,7 @@ import org.jboss.logging.Logger;
  * Binds an agent's control socket to its own workspace.
  *
  * <p>The control socket ({@link DaemonControlSocket}) takes the workspace from the path. {@code qits:system} callers are trusted to name any workspace, as today.
- * A {@code qits:agent} caller is not (phase 4 of principal-bound-git-refs-plan.md): the token's
+ * A {@code qits:agent} caller is not (phase 4 of epic qits-543, dossier page "Plan (as of 2026-09-13)"): the token's
  * {@code sub} must be the identity bound to that workspace's container: the subject of its
  * workspace token ({@code commissioned_token_subject}, qits-625 — the {@code sub} the edge puts on
  * the JWT it mints for the token), which every TARGET row holds and a DIRECT admin or editor row

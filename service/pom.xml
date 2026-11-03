@@ -7,7 +7,7 @@
     <parent>
         <groupId>eu.wohlben.qits</groupId>
         <artifactId>qits-workspaces</artifactId>
-        <version>2026.1103.91903</version>
+        <version>2026.1103.144943</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -330,7 +330,7 @@
         </dependency>
         <dependency>
             <groupId>eu.wohlben.qits</groupId>
-            <artifactId>qits-platform-access-cli-pacts-qits-workspaces-service</artifactId>
+            <artifactId>qits-platform-access-monorepo-pacts-qits-workspaces-service</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
