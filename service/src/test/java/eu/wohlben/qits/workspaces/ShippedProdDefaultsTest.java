@@ -90,10 +90,6 @@ class ShippedProdDefaultsTest {
         "https://mcp.qits.wohlben.eu",
         config.getValue("qits.workspaces.platform-mcp-url", String.class));
     assertEquals("dev-qits-workspaces", config.getValue("qits.workspace.git-host", String.class));
-    // Telemetry moves in a later step of epic qits-428, not with the peers.
-    assertEquals(
-        "http://dev-qits-observability:8080",
-        config.getValue("qits.observability.url", String.class));
     assertEquals(
         "https://idp.qits.wohlben.eu/idp",
         config.getValue("quarkus.oidc.auth-server-url", String.class));
