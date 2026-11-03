@@ -11,6 +11,7 @@ import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.RestAssured;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServer;
@@ -47,6 +48,7 @@ import org.junit.jupiter.api.Test;
  * and this class needed no application of its own.
  */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 @TestProfile(AgentDispatchControllerTest.TestProfile.class)
 public class ContainerProxyRouteTest {
 

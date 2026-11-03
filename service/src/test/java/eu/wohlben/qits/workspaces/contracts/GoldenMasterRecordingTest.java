@@ -68,8 +68,9 @@ class GoldenMasterRecordingTest {
    *     freezing: values a dependency bump moves (an image version), which would otherwise change
    *     the recording on every bump, and names a test fake makes up. Listed in {@code
    *     frozen.strings}
-   * @param callerRole the one role the call is made with, as the edge asserts it in {@code
-   *     X-Qits-Roles}; null calls as the {@code %test} dev user (admin and system at once). Recorded
+   * @param callerRole the one role the call is made with, sent as {@link ContractBearers#caller}
+   *     for {@link ProviderStates#CONTRACT_CALLER}; null calls as {@link
+   *     ContractBearers#consumerCaller()} (admin and system at once, the old dev user). Recorded
    *     into the index as {@code callerRole}
    * @param headers request headers a consumer sends because the answer depends on them — the
    *     register door's {@code Authorization}. A value is expanded from the state's params as a path
@@ -734,11 +735,16 @@ class GoldenMasterRecordingTest {
     Response response;
     try {
       var request = given();
-      if (interaction.callerRole() != null) {
+      if (!interaction.headers().containsKey("Authorization")) {
+        // The caller is named rather than left to a forward-auth dev user (epic qits-543): one role
+        // as the contract caller, or else the consumer's caller. Sent, not recorded, so the golden
+        // master stays the consumer's shape.
         request =
-            request
-                .header("X-Qits-User", "contract-caller")
-                .header("X-Qits-Roles", interaction.callerRole());
+            request.header(
+                "Authorization",
+                interaction.callerRole() != null
+                    ? ContractBearers.caller(ProviderStates.CONTRACT_CALLER, interaction.callerRole())
+                    : ContractBearers.consumerCaller());
       }
       for (Map.Entry<String, String> header : interaction.headers().entrySet()) {
         request = request.header(header.getKey(), expand(header.getValue(), params));

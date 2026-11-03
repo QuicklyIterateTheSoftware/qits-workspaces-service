@@ -7,6 +7,7 @@ import static org.hamcrest.Matchers.notNullValue;
 
 import eu.wohlben.qits.workspacedaemon.protocol.WorkspaceImage;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.path.json.JsonPath;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.Test;
  * restart to prove four lines of string handling.
  */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 public class PinsControllerTest {
 
   private static final String workspaceImageVersion = WorkspaceImage.VERSION;

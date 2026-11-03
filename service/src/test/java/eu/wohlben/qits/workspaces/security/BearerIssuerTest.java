@@ -62,8 +62,8 @@ class BearerIssuerTest {
   URI controlSocket;
 
   /**
-   * The gate on, the dev user off, the tenant pointed at the mock idp and nothing else moved. See
-   * the class javadoc for why it cannot be GateOn.
+   * The gate on, the tenant pointed at the mock idp and nothing else moved (the dev user is off in
+   * the whole suite, test config). See the class javadoc for why it cannot be GateOn.
    */
   public static class DiscoveringTheMockIdp
       implements QuarkusTestProfile, NecessaryTestProfileDuplication {
@@ -72,7 +72,6 @@ class BearerIssuerTest {
       MockIdp idp = MockIdp.ensureStarted();
       return Map.of(
           "qits.auth.machine.required", "true",
-          "qits.auth.forward.dev-user", "",
           "quarkus.oidc.auth-server-url", idp.baseUrl());
     }
   }

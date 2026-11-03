@@ -22,6 +22,7 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceEventType;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
 import io.restassured.path.json.JsonPath;
 import jakarta.inject.Inject;
@@ -47,6 +48,7 @@ import org.junit.jupiter.api.Test;
  * answers the same, because the caller is best-effort and free to retry.
  */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 public class BranchResolutionControllerTest {
 
   @ConfigProperty(name = "qits.test.origins-dir")

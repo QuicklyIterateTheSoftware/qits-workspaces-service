@@ -163,10 +163,9 @@ public class StoryProfile implements QuarkusTestProfile, NecessaryTestProfileDup
     // (StoryIdentities.AUDIENCE is that same value), so what these stories present a token for is
     // what a deployment really enforces rather than a second spelling this profile invented.
     config.put("quarkus.oidc.auth-server-url", idp.baseUrl());
-    // The dev identity is LaunchMode-guarded and a launched artifact is NORMAL, so this changes
-    // nothing — it is here so the refusal stories cannot be read as "the dev user happened to be
-    // absent". An anonymous request really is anonymous.
-    config.put("qits.auth.forward.dev-user", "");
+    // There is no dev identity to blank: it is LaunchMode-guarded and a launched artifact is
+    // NORMAL (and it leaves qits-auth-core with qits-1338, epic qits-543). An anonymous request
+    // really is anonymous.
 
     // --- the peers ---------------------------------------------------------------------------------
     config.put("qits.projects.url", peers);

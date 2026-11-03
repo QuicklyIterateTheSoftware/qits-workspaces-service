@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.*;
 
 import eu.wohlben.qits.workspaces.control.TestOrigin;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
 import jakarta.ws.rs.core.Response;
 import java.nio.file.Files;
@@ -12,6 +13,7 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 public class WorkspaceControllerTest {
 
   // The effective data dir the app uses, so tests can commit directly inside a workspace on disk.

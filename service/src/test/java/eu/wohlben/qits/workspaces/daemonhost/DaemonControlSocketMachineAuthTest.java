@@ -84,8 +84,8 @@ public class DaemonControlSocketMachineAuthTest {
    * what makes it un-mergeable rather than its map. {@code qits.auth.machine.required} gates {@code
    * quarkus.oidc.tenant-enabled}, so this application validates bearers where every other surefire
    * application does not — a class that sends no bearer, which is most of them, would stop being
-   * able to reach the socket at all. It also blanks the dev user for the same reason {@code
-   * NoDevUserProfile} does, and swaps the live IdP for a local public key so the gate can be proved
+   * able to reach the socket at all. (The dev user is blanked for the whole suite in the test
+   * config, epic qits-543.) It swaps the live IdP for a local public key so the gate can be proved
    * without a network; its {@code token.issuer} is the test key's own and pins nothing that ships
    * (the shipped tenant takes its issuer from discovery, qits-708). The shipped discovering tenant
    * is the subject of {@code security.BearerIssuerTest} in-JVM — the control socket included —
@@ -97,7 +97,6 @@ public class DaemonControlSocketMachineAuthTest {
     public Map<String, String> getConfigOverrides() {
       return Map.of(
           "qits.auth.machine.required", "true",
-          "qits.auth.forward.dev-user", "",
           "quarkus.oidc.auth-server-url", "",
           "quarkus.oidc.token.issuer", DaemonMachineTokens.ISSUER,
           "quarkus.oidc.public-key", base64Key());

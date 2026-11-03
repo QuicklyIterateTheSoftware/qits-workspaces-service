@@ -8,6 +8,7 @@ import eu.wohlben.qits.workspaces.control.WorkspaceChangeHint.Topic;
 import eu.wohlben.qits.workspaces.control.WorkspaceChangePublisher;
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import jakarta.inject.Inject;
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.Test;
  * choke-point.
  */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 class WorkspaceChangeHintBusTest {
 
   @Inject WorkspaceChangePublisher publisher;

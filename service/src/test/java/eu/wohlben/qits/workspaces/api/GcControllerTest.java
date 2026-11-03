@@ -16,6 +16,7 @@ import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
 import io.restassured.path.json.JsonPath;
 import jakarta.inject.Inject;
@@ -43,6 +44,7 @@ import org.junit.jupiter.api.Test;
  * {@code aCallerMayWidenTheProtectionButNeverNarrowIt} covers.
  */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 public class GcControllerTest {
 
   @ConfigProperty(name = "qits.test.origins-dir")

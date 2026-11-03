@@ -21,6 +21,7 @@ import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import eu.wohlben.qits.workspaces.transcripthost.ShippedClaudeTranscripts;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.path.json.JsonPath;
 import jakarta.inject.Inject;
 import java.time.Instant;
@@ -44,6 +45,7 @@ import org.junit.jupiter.api.Test;
  * get a 404.
  */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 public class WorkspaceHistoryControllerTest {
 
   @Inject FakeRepositoryLookup repositories;

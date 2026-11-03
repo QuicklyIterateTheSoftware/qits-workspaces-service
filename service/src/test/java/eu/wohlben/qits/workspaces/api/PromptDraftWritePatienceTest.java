@@ -12,6 +12,7 @@ import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import eu.wohlben.qits.workspaces.persistence.WorkspacePromptDraftRepository;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
 import jakarta.enterprise.inject.Vetoed;
 import jakarta.inject.Inject;
@@ -41,6 +42,7 @@ import org.junit.jupiter.api.Test;
  * first attempt. Widen the classifier and every rejected write would sit on the deadline first.
  */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 public class PromptDraftWritePatienceTest {
 
   /**

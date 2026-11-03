@@ -6,6 +6,7 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import eu.wohlben.qits.workspaces.contracts.ContractBearers;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.daemonhost.DaemonControlSocketMachineAuthTest;
 import eu.wohlben.qits.workspaces.daemonhost.DaemonMachineTokens;
@@ -32,8 +33,8 @@ import org.junit.jupiter.api.Test;
  * <p>Under {@link DaemonControlSocketMachineAuthTest.GateOn}, reused ({@code
  * AdminAgentAccessTest} binds its own): a desk token's {@code project} claim is only
  * readable off a validated bearer's {@code JsonWebToken} principal, and with the machine gate off
- * there is none to read it from. A person's or a peer service's role still arrives as the edge
- * asserts it, in {@code X-Qits-Roles}.
+ * there is none to read it from. A person's or a peer service's role arrives as a {@link
+ * ContractBearers#caller} credential (forward-auth's header pair goes with qits-1338).
  */
 @QuarkusTest
 @TestProfile(DaemonControlSocketMachineAuthTest.GateOn.class)
@@ -63,8 +64,7 @@ class AgentDispatchDeliveryDeskTest {
     repositories.registerWrapper(repoId, project, "repo-of-" + project);
     String workId = "w-" + UUID.randomUUID();
     given()
-        .header("X-Qits-User", "qits-projects")
-        .header("X-Qits-Roles", "qits:system")
+        .header("Authorization", ContractBearers.caller("qits-projects", "qits:system"))
         .contentType(ContentType.JSON)
         .body(dispatchBody(repoId, workId))
         .when()
@@ -146,8 +146,7 @@ class AgentDispatchDeliveryDeskTest {
     String workId = anAgentOf("project-a");
 
     given()
-        .header("X-Qits-User", "qits-projects")
-        .header("X-Qits-Roles", "qits:system")
+        .header("Authorization", ContractBearers.caller("qits-projects", "qits:system"))
         .contentType(ContentType.JSON)
         .body(Map.of("workId", workId, "text", "carry on", "compactFirst", false))
         .when()

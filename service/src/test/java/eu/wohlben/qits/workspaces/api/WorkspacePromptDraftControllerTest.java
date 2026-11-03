@@ -13,6 +13,7 @@ import eu.wohlben.qits.workspaces.control.TestOrigin;
 import eu.wohlben.qits.workspaces.control.WorkspaceIds;
 import eu.wohlben.qits.workspaces.control.WorkspaceService;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
 import jakarta.inject.Inject;
 import java.util.List;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Test;
  * the envelope, the status codes, and the two refusals whose whole point is that they are not 500s.
  */
 @QuarkusTest
+@TestSecurity(user = "operator", roles = "qits:admin")
 public class WorkspacePromptDraftControllerTest {
 
   @ConfigProperty(name = "qits.test.origins-dir")
