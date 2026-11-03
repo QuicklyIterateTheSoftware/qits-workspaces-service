@@ -139,7 +139,7 @@
              (qits-bootstrap-cli-rr-60). -->
         <qits.artifacts-service-pacts-qits-workspaces-service.version>2026.1024.160449</qits.artifacts-service-pacts-qits-workspaces-service.version>
         <qits.orchestrator-service-pacts-qits-workspaces-service.version>2026.1023.105608</qits.orchestrator-service-pacts-qits-workspaces-service.version>
-        <qits.platform-access-cli-pacts-qits-workspaces-service.version>2026.1030.112950</qits.platform-access-cli-pacts-qits-workspaces-service.version>
+        <qits.platform-access-monorepo-pacts-qits-workspaces-service.version>2026.1103.101116</qits.platform-access-monorepo-pacts-qits-workspaces-service.version>
         <qits.maven.repository.url>https://registry.qits.wohlben.eu/artifacts/maven/maven</qits.maven.repository.url>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -433,8 +433,8 @@
             </dependency>
             <dependency>
                 <groupId>eu.wohlben.qits</groupId>
-                <artifactId>qits-platform-access-cli-pacts-qits-workspaces-service</artifactId>
-                <version>${qits.platform-access-cli-pacts-qits-workspaces-service.version}</version>
+                <artifactId>qits-platform-access-monorepo-pacts-qits-workspaces-service</artifactId>
+                <version>${qits.platform-access-monorepo-pacts-qits-workspaces-service.version}</version>
             </dependency>
             <dependency>
                 <groupId>${project.groupId}</groupId>

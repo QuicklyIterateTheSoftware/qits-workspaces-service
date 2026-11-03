@@ -330,7 +330,7 @@
         </dependency>
         <dependency>
             <groupId>eu.wohlben.qits</groupId>
-            <artifactId>qits-platform-access-cli-pacts-qits-workspaces-service</artifactId>
+            <artifactId>qits-platform-access-monorepo-pacts-qits-workspaces-service</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
