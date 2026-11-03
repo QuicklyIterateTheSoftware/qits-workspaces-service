@@ -42,9 +42,9 @@ public class WorkspaceHistoryService {
   @Inject AgentWorktreeRepository agents;
 
   /**
-   * Optional: the transcripts live on a mounted volume, not in this context's store. Absent yields
-   * an empty session list rather than an error — a workspace's narrative and timeline are this
-   * context's own, and stand without it.
+   * Optional: the transcripts live in the transcript store, not in this context's database. Absent
+   * yields an empty session list rather than an error — a workspace's narrative and timeline are
+   * this context's own, and stand without it.
    */
   @Inject Instance<ArchivedAgentTranscripts> archivedTranscripts;
 
@@ -79,9 +79,9 @@ public class WorkspaceHistoryService {
   }
 
   /**
-   * The agent sessions attributed to this workspace, oldest first. An empty list is a valid answer
-   * — a workspace where no agent ever ran, one resolved before the shared volume was mounted here,
-   * or a deployment with no mount at all — and never an error.
+   * The agent sessions of this workspace's agents. An empty list is a valid answer — a workspace
+   * where no agent ever ran, one whose daemon never shipped, or an old-model workspace — and never
+   * an error.
    */
   @Transactional
   public List<ArchivedSessionDto> agentSessions(Long id) {
@@ -103,10 +103,9 @@ public class WorkspaceHistoryService {
       throw new NotFoundException("Agent session not found: " + sessionId);
     }
     List<String> lines = archivedTranscripts.get().transcriptOf(workspace, sessionId);
-    // The port raises this itself for an id that does not attribute; this is the same answer for an
-    // implementation that returns empty instead. An attributed session always has at least the
-    // record that named the branch, so empty can only mean "not one of yours" — and that must be
-    // indistinguishable from "never existed", or the door reports what else is on a shared volume.
+    // The port raises this itself for an id that is not listed; this is the same answer for an
+    // implementation that returns empty instead. Empty can only mean "not one of yours" — and that
+    // must be indistinguishable from "never existed", or the door reports what else is in the store.
     if (lines.isEmpty()) {
       throw new NotFoundException("Agent session not found: " + sessionId);
     }
@@ -128,8 +127,8 @@ public class WorkspaceHistoryService {
   }
 
   /**
-   * One of the agent's sessions, raw, under {@link #agentTranscript}'s rules: a session that does
-   * not attribute to this agent is a 404, the same as one that never existed.
+   * One of the agent's sessions, raw, under {@link #agentTranscript}'s rules: a session that is
+   * not this agent's is a 404, the same as one that never existed.
    *
    * @throws NotFoundException no such agent, or no such session of it
    */

@@ -1266,10 +1266,8 @@ holds for RUNNING only). The old instance draining during a rolling deploy canno
 - **What anyone may read of an agent** (epic qits-1667), the roles above plus `qits:agent`, the desk
   unbound (it reads everything): `GET …/agents/{id}/sessions` and `…/sessions/{sessionId}/transcript`
   (`WorkspaceHistoryService.agentSessionsOf`/`agentTranscriptOf` over
-  `ArchivedAgentTranscripts.sessionsFor(AgentWorktree)`: what the agent's daemon shipped, then its own
-  worktree directory on the mounted volume, attributed by `(wrapper_branch, created_at, removed_at)` —
-  see "Agent transcripts" below — so a REMOVED agent answers too and another agent's session is a
-  404), and `GET …/agents/{id}/active-process` (its workspace's, as
+  `ArchivedAgentTranscripts.sessionsFor(AgentWorktree)`: what the agent's daemon shipped — see
+  "Agent transcripts" below — so a REMOVED agent answers too and another agent's session is a 404), and `GET …/agents/{id}/active-process` (its workspace's, as
   `WorkspaceController.activeProcess`; null with no workspace). An agent reads every other agent's
   transcripts, read-only (the owner's ruling on qits-1575). `AgentControlAccessTest` pins role ×
   door, own agent and another's.
@@ -1311,12 +1309,13 @@ data}`:
   socket, and the held size never goes down. A chunk need not end in a newline (one long line is
   split across chunks). The agent segment is a UUID and the session id and file are checked against
   the protocol's `TranscriptFiles` again before they become a path. Nothing prunes the store yet.
-- **The read.** `AgentTranscripts` is the one `ArchivedAgentTranscripts`: per agent, shipped ∪
-  mounted (`MountedClaudeTranscripts`, the fallback for DIRECT workspaces and pre-qits-1752
-  sessions), deduplicated by session id with the shipped copy winning; a slot's history iterates its
-  agents, an old-model branch workspace keeps the mounted read. The store is read by
-  `ClaudeTranscriptArchive.ofDirectory` — the same scan, DTOs and sidechain markers, every session in
-  the directory belonging — and a requested id is still resolved against the listing. The daemon
+- **The read.** `AgentTranscripts` is the one `ArchivedAgentTranscripts`, and the store is its only
+  source (qits-368): per agent, what its daemon shipped; a slot's history iterates its agents; an
+  old-model branch workspace answers no sessions, and any session id asked of it is a 404. The
+  shared harness volume is not mounted here any more — the fallback that read it
+  (`/claude-home`, attributed by branch and time window) served nothing live and was removed. The
+  store is read by `ClaudeTranscriptArchive.ofDirectory` — every session in the agent's directory
+  belonging — and a requested id is resolved against the listing, never joined onto a path. The daemon
   ships no `agent-<id>.meta.json`, so a shipped sidechain's marker carries no `agentType`,
   `description` or `toolUseId`.
 
@@ -1577,8 +1576,7 @@ releases it, at VERIFIED, behind manual-review approval — the same gate every 
 gets.
 
 **Known limits.** The person door derives the wrapper branch from what it is told; it does
-not read the work item. `MountedClaudeTranscripts` (the fallback) reads a slot's sessions per agent
-directory, keyed on the wrapper's name.
+not read the work item. Sessions from before a daemon shipped them (pre-qits-1752) are not served.
 
 ## The credential a workspace container holds
 

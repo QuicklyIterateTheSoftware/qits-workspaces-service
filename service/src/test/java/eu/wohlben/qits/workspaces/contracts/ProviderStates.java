@@ -1,6 +1,5 @@
 package eu.wohlben.qits.workspaces.contracts;
 
-import eu.wohlben.qits.agents.ClaudeCodeAgent;
 import eu.wohlben.qits.workspaces.control.AgentAttentions;
 import eu.wohlben.qits.workspaces.control.AgentService;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
@@ -9,10 +8,9 @@ import eu.wohlben.qits.workspaces.control.TargetPlacement;
 import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlane;
 import eu.wohlben.qits.workspaces.control.WorkspacePromptDraftService;
 import eu.wohlben.qits.workspaces.daemonhost.StubDaemonTunnels;
+import eu.wohlben.qits.workspaces.transcripthost.ShippedClaudeTranscripts;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServer;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.concurrent.TimeUnit;
 import eu.wohlben.qits.workspaces.control.TechnicalProcess;
 import eu.wohlben.qits.workspaces.control.TechnicalProcessRegistry;
@@ -211,8 +209,7 @@ public class ProviderStates {
   @Inject Vertx vertx;
   @Inject ContractBearers bearers;
 
-  @ConfigProperty(name = "qits.workspace.claude-archive-root")
-  String archiveRoot;
+  @Inject ShippedClaudeTranscripts shippedTranscripts;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String originsDir;
@@ -305,6 +302,7 @@ public class ProviderStates {
     endStartingProcess();
     endLeftoverProcesses();
     tearDownGitWorkspaces();
+    forgetShippedTranscripts();
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
@@ -322,6 +320,16 @@ public class ProviderStates {
               workspaces.delete("repositoryId = ?1", ATTENTION_REPOSITORY_ID);
             });
     targets.reset();
+  }
+
+  /** The session {@link #A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION} shipped for its agent. */
+  private void forgetShippedTranscripts() {
+    try {
+      TestOrigin.deleteRecursively(
+          shippedTranscripts.store().agentDirectory(UUID.fromString(AGENT_ACTIVE_ID)));
+    } catch (java.io.IOException e) {
+      throw new IllegalStateException("Could not empty the agent's transcript store", e);
+    }
   }
 
   /**
@@ -1004,9 +1012,9 @@ public class ProviderStates {
 
   /**
    * A wrapper slot that was removed with its last agent (ABANDONED), and the session that agent's
-   * harness ran there, on the shared harness volume where its directory is keyed: one exchange on
-   * the bug ticket's wrapper branch. The agent's life and the session's lines carry fixed instants,
-   * so the transcript is the same on every run.
+   * daemon shipped into the transcript store: one exchange on the bug ticket's wrapper branch. The
+   * agent's life and the session's lines carry fixed instants, so the transcript is the same on
+   * every run; {@link #cleanUp} empties the agent's store directory, so no other state lists it.
    */
   private Setup resolvedSlotWithAnArchivedSession() {
     repositories.register(WRAPPER_REPOSITORY_ID);
@@ -1032,29 +1040,23 @@ public class ProviderStates {
               agent.removedAt = ARCHIVED_AGENT_REMOVED;
             });
     String wrapperBranch = "ticket/" + BUG_TICKET.qualifiedId();
-    String cwd =
-        "/workspace/agents/"
-            + AGENT_ACTIVE_ID
-            + "/"
-            + FakeRepositoryLookup.nameOf(WRAPPER_REPOSITORY_ID);
-    Path file =
-        Path.of(archiveRoot)
-            .resolve(".claude")
-            .resolve(new ClaudeCodeAgent().transcriptPath(cwd, ARCHIVED_SESSION_ID));
+    String lines =
+        String.join(
+                "\n",
+                turn("user", "Fix the rounding in the invoice totals.", wrapperBranch, ARCHIVED_SESSION_AT),
+                turn(
+                    "assistant",
+                    "Rounded each line before summing; the totals match now.",
+                    wrapperBranch,
+                    ARCHIVED_SESSION_AT.plusSeconds(60)))
+            + "\n";
     try {
-      Files.createDirectories(file.getParent());
-      Files.writeString(
-          file,
-          String.join(
-                  "\n",
-                  turn("user", "Fix the rounding in the invoice totals.", wrapperBranch, ARCHIVED_SESSION_AT),
-                  turn(
-                      "assistant",
-                      "Rounded each line before summing; the totals match now.",
-                      wrapperBranch,
-                      ARCHIVED_SESSION_AT.plusSeconds(60)))
-              + "\n",
-          StandardCharsets.UTF_8);
+      if (!shippedTranscripts
+          .store()
+          .append(UUID.fromString(AGENT_ACTIVE_ID), ARCHIVED_SESSION_ID, "main", 0, lines)
+          .appended()) {
+        throw new IllegalStateException("The archived session's store file was not empty");
+      }
     } catch (java.io.IOException e) {
       throw new IllegalStateException("Could not lay out the archived session", e);
     }

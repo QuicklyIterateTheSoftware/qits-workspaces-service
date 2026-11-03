@@ -60,11 +60,9 @@
             <artifactId>qits-workspace-daemon-protocol</artifactId>
         </dependency>
         <dependency>
-            <!-- The coding-agent harness library, for its path maths alone: where a Claude session's
-                 JSONL and its subagents' sidechains sit under the harness config directory. Reading
-                 an archived transcript off the shared /claude-home volume means spelling that layout
-                 host-side, and spelling it twice is how the reader and the daemon that wrote the
-                 files drift apart over a CLI upgrade. See transcripthost/ClaudeTranscriptArchive. -->
+            <!-- The coding-agent harness library, for its JSON reader (eu.wohlben.qits.agents.json.Json):
+                 transcripthost/ClaudeTranscriptArchive parses the shipped transcripts' lines and
+                 sidechain sidecars with it, so a session reads here as the harness library reads it. -->
             <groupId>eu.wohlben.qits</groupId>
             <artifactId>qits-coding-agents</artifactId>
         </dependency>

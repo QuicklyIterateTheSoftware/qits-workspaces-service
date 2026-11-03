@@ -14,10 +14,10 @@ import java.util.UUID;
  * service's own volume.
  *
  * <p><b>Why it exists.</b> A TARGET workspace's harness writes its transcripts to its execution
- * target's {@code /claude-home}, which this service cannot mount, so the mounted archive ({@link
- * ClaudeTranscriptArchive}) held none of them and every agent-session door answered empty. The
- * daemon now sends each of its own agents' files as {@code TranscriptChunk}s, and this class is
- * where they land.
+ * target's {@code /claude-home}, which this service cannot mount, so every agent-session door
+ * answered empty for it. The daemon sends each of its own agents' files as {@code
+ * TranscriptChunk}s, and this class is where they land: since qits-368 the only source the doors
+ * read.
  *
  * <p><b>Framework-free</b>, like {@link ClaudeTranscriptArchive}: given a root, it appends and says
  * where an agent's sessions are. {@link ShippedClaudeTranscripts} supplies the root from config,
@@ -27,8 +27,7 @@ import java.util.UUID;
  *
  * <p>The harness's own, relative to one directory per agent: {@code <root>/<agentId>/<sessionId>.jsonl}
  * and {@code <root>/<agentId>/<sessionId>/subagents/agent-<id>.jsonl}. That is what {@link
- * ClaudeTranscriptArchive#ofDirectory} reads, so a shipped session is listed and rendered by the
- * same code as a mounted one.
+ * ClaudeTranscriptArchive#ofDirectory} reads.
  *
  * <h2>The append rule is the delivery guarantee</h2>
  *

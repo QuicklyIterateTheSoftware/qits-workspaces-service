@@ -160,8 +160,8 @@ class TranscriptStoreTest {
   // --- read back ---------------------------------------------------------------------------------
 
   /**
-   * What the store holds reads exactly like a mounted session: listed with its span and its count of
-   * conversation turns, oldest first, every session in the agent's directory belonging.
+   * What the store holds is listed with its span and its count of conversation turns, oldest first,
+   * every session in the agent's directory belonging.
    */
   @Test
   void storedSessionsAreListedWithTheirSpanAndTurnCount() throws IOException {
@@ -216,12 +216,6 @@ class TranscriptStoreTest {
         ClaudeTranscriptArchive.ofDirectory(store().agentDirectory(UUID.randomUUID()))
             .sessions()
             .isEmpty());
-  }
-
-  /** The mounted volume holds everybody's sessions, so it is never listed whole. */
-  @Test
-  void theMountedArchiveRefusesToBeListedWhole() {
-    assertThrows(IllegalStateException.class, () -> new ClaudeTranscriptArchive(root).sessions());
   }
 
   private void write(String sessionId, String text) throws IOException {

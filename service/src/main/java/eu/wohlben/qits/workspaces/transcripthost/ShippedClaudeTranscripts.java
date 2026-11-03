@@ -11,9 +11,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * The transcript store as a bean (qits-1752): the configured root, the {@link TranscriptStore} the
  * control socket's chunks are appended to, and the read of one agent's shipped sessions.
  *
- * <p>Deliberately thin, as {@link MountedClaudeTranscripts} is: the append rule is {@link
- * TranscriptStore}'s and the listing and rendering are {@link ClaudeTranscriptArchive}'s, both
- * framework-free and tested as plain JUnit.
+ * <p>The only source {@link AgentTranscripts} reads (qits-368), and deliberately thin: the append
+ * rule is {@link TranscriptStore}'s and the listing and rendering are {@link
+ * ClaudeTranscriptArchive}'s, both framework-free and tested as plain JUnit.
  */
 @ApplicationScoped
 public class ShippedClaudeTranscripts {

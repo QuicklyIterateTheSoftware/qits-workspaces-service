@@ -426,8 +426,8 @@ public class AgentController {
       responseCode = "200",
       description =
           "The agent's sessions, oldest first: those its workspace-daemon shipped to this service,"
-              + " and those on the shared harness volume, one entry per session. They answer for a"
-              + " REMOVED agent too. An empty list is a valid answer.")
+              + " one entry per session. They answer for a REMOVED agent too. An empty list is a"
+              + " valid answer.")
   @APIResponse(
       responseCode = "404",
       description = "No such agent.",

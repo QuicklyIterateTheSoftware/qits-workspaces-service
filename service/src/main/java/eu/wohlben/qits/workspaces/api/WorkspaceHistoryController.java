@@ -73,14 +73,13 @@ public class WorkspaceHistoryController {
   }
 
   /**
-   * The agent sessions that ran in this workspace, oldest first: what its agents' workspace-daemon
-   * shipped to this service's transcript store (qits-1752), and what the shared harness volume
-   * holds — neither is the container or its {@code /workspace} volume, which is why they answer for
-   * a resolved workspace at all.
+   * The agent sessions that ran in this workspace, agent by agent: what its agents'
+   * workspace-daemon shipped to this service's transcript store (qits-1752) — not the container or
+   * its {@code /workspace} volume, which is why they answer for a resolved workspace at all.
    *
-   * <p><b>An empty list is a valid 200.</b> A workspace where no agent ever ran, and one resolved
-   * before either source held its sessions, both legitimately have no sessions; neither is an error
-   * to report and neither is distinguishable from the other.
+   * <p><b>An empty list is a valid 200.</b> A workspace where no agent ever ran, one whose daemon
+   * never shipped, and an old-model workspace (a branch of its own, no agents) all legitimately have
+   * no sessions; none is an error to report and none is distinguishable from the others.
    */
   @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:agent"})
   @GET
@@ -99,7 +98,7 @@ public class WorkspaceHistoryController {
    * introduced by a synthetic marker line the frontend parser reads. Unrendered on purpose: the
    * envelopes are the render contract, and reshaping them here would fork it.
    *
-   * <p>A session id that does not attribute to this workspace answers 404, exactly as one that
+   * <p>A session id that is not one of this workspace's agents' answers 404, exactly as one that
    * never existed does — the id is matched against the listing above and never reaches a path.
    */
   @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:agent"})

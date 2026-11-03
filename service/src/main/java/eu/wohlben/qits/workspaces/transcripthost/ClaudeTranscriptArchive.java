@@ -1,6 +1,5 @@
 package eu.wohlben.qits.workspaces.transcripthost;
 
-import eu.wohlben.qits.agents.ClaudeCodeAgent;
 import eu.wohlben.qits.agents.json.Json;
 import eu.wohlben.qits.workspaces.dto.ArchivedSessionDto;
 import eu.wohlben.qits.workspaces.dto.ArchivedSubagentDto;
@@ -11,121 +10,42 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Predicate;
 import java.util.stream.Stream;
-import org.jboss.logging.Logger;
 
 /**
- * Reads Claude Code's own JSONL transcripts back off the shared harness volume, and decides which of
- * them belong to a given workspace.
+ * Reads Claude Code's own JSONL transcripts back out of one agent's directory in the transcript
+ * store, and renders them as the agent-session doors answer.
  *
  * <p><b>Framework-free on purpose.</b> Nothing here is injected, scheduled or configured: it is
- * given a root directory and answers questions about what is under it. {@link
- * MountedClaudeTranscripts} is the thin CDI adapter that supplies the root and adapts a {@code
- * Workspace} row into an {@link Attribution}. The whole attribution rule — the part that is actually
- * hard, and the part a mistake in returns another workspace's conversation — therefore runs in a
- * plain JUnit test against a temp directory, with no Quarkus application behind it. That matters
- * twice over in this module, where every {@code @TestProfile} is a separate Quarkus boot and the
- * suite has been OOM-killed for having too many.
+ * given a directory and answers questions about what is under it. {@link ShippedClaudeTranscripts}
+ * is the thin CDI adapter that supplies the directory. The listing and rendering therefore run in a
+ * plain JUnit test against a temp directory, with no Quarkus application behind it. That matters in
+ * this module, where every {@code @TestProfile} is a separate Quarkus boot and the suite has been
+ * OOM-killed for having too many.
  *
- * <h2>Why attribution is needed at all</h2>
- *
- * <p>The volume carries no workspace identity. Every workspace container runs the agent with cwd
- * {@code /workspace}, and the harness keys its transcript directory on the <em>escaped cwd</em>, so
- * every session the estate has ever run — across every workspace, every repository and every
- * project agent container that shares the volume — lands in one flat directory named {@code
- * projects/-workspace}. A file name is a session UUID and says nothing about who produced it.
- *
- * <h2>The rule</h2>
- *
- * <p>Four conditions, and all four are load-bearing:
- *
- * <ol>
- *   <li><b>An mtime pre-filter.</b> A file whose last write predates the workspace by more than
- *       {@link #MTIME_SLACK} cannot be the workspace's, so it is skipped without being opened. The
- *       filter is deliberately one-sided: a session's mtime is its <em>last</em> write and therefore
- *       never earlier than its first record, so in theory {@code mtime < createdAt} would imply the
- *       window test below rejects it anyway. In practice mtime comes from the kernel's coarse clock,
- *       which can trail the precise clock the workspace's {@code createdAt} is stamped with by up to
- *       a tick, and some filesystems only store whole seconds — so a session written within that
- *       slack of the workspace's creation can have an mtime that reads earlier than a timestamp it
- *       in fact follows. The slack only ever lets more files past this pre-filter to be
- *       <em>opened</em>; it decides nothing about attribution, so it can never let a file through
- *       the real rule would otherwise have excluded. There is no upper mtime bound, because a
- *       session may legitimately keep writing after the workspace resolves and its mtime then sits
- *       outside the window while its first record does not.
- *   <li><b>Branch equality.</b> The first record carrying {@code gitBranch} names the branch the
- *       agent was working on; it must equal the workspace's branch exactly.
- *   <li><b>{@code HEAD} is never a match.</b> A project agent container's checkout is detached, so
- *       its sessions record {@code "gitBranch":"HEAD"}. Those sessions share this volume and are not
- *       any workspace's. A workspace branch can never be the literal string {@code HEAD} — branch
- *       names are slug-validated — so this is stated rather than inferred, because it is the one
- *       exclusion a reader of this file would otherwise have to reconstruct.
- *   <li><b>The {@code [createdAt, resolvedAt ?: now]} window.</b> Branch equality alone is not
- *       enough, and this is the subtle one: a branch is <em>reusable</em> once its workspace
- *       resolves. Two workspace rows can legitimately carry the same branch name at different times,
- *       and without the window the second one would serve the first one's transcripts as its own.
- *       The session's first timestamp is what is tested — where a session <em>started</em> is what
- *       places it in a workspace's life, and a long session running past resolution still belongs to
- *       the workspace that began it.
- * </ol>
- *
- * <h2>Why {@code gitBranch} is looked for over a bounded lookahead</h2>
- *
- * <p>Not every record carries it. A transcript commonly opens with harness bookkeeping — {@code
- * {"type":"queue-operation"}} and friends — that has no {@code gitBranch} at all, so taking the
- * first line's value would attribute nothing. Equally, scanning the whole file for one would make
- * every megabyte of every foreign session the cost of answering. So the first {@link
- * #BRANCH_LOOKAHEAD_LINES} lines are searched and the first {@code gitBranch} among them wins; a
- * file that has not named a branch by then is treated as unattributable rather than guessed at.
- *
- * <h2>The path maths is the library's, not ours</h2>
- *
- * <p>Where a session's JSONL and its subagents' sidechains sit under the harness config directory is
- * {@link ClaudeCodeAgent#transcriptPath} and {@link ClaudeCodeAgent#subagentsDir}' to say — the same
- * methods the workspace daemon uses to find the files it wrote. Spelling the cwd-escaping rule a
- * second time here is how the reader and the writer drift apart over a CLI upgrade, so the directory
- * below is <em>derived</em> from those methods rather than composed from a literal.
- *
- * <h2>The second mode: a directory that is already one agent's (qits-1752)</h2>
+ * <h2>A directory that is already one agent's (qits-1752)</h2>
  *
  * <p>{@link #ofDirectory} reads a directory in which <em>every</em> session belongs — the
  * transcript store's {@code <root>/<agentId>/}, which {@link TranscriptStore} fills from what an
  * agent's own workspace-daemon shipped. The daemon attributed those sessions when it chose to ship
- * them, so there is no branch, window or mtime rule to apply: {@link #sessions()} lists them all,
- * and {@link #transcriptOf(String)} still resolves the requested id against that listing rather
- * than joining it onto a path. The scan, the sidechain markers and the DTOs are the ones the
- * mounted mode uses, so a shipped session reads exactly like a mounted one.
+ * them, so there is nothing left to decide: {@link #sessions()} lists them all, and {@link
+ * #transcriptOf(String)} still resolves the requested id against that listing rather than joining
+ * it onto a path.
  *
  * <h2>Failure is always an empty answer</h2>
  *
- * <p>A missing archive root, an unreadable directory, an unreadable file and a line that is not JSON
- * all yield "nothing here", never an exception. That is not defensive padding: a deployment with no
- * mount at all is the production-normal case today, and a caller cannot distinguish it from a
- * workspace where no agent ever ran anyway — so there is nothing an exception would let anyone do.
- * The single exception is {@link #transcriptOf} being asked for a session that does not attribute,
- * which is a 404 about the request rather than about the volume.
+ * <p>A missing directory, an unreadable file and a line that is not JSON all yield "nothing here",
+ * never an exception. That is not defensive padding: an agent whose daemon never shipped anything
+ * has no directory at all, and a caller cannot distinguish that from an agent that never ran — so
+ * there is nothing an exception would let anyone do. The single exception is {@link #transcriptOf}
+ * being asked for a session that is not listed, which is a 404 about the request rather than about
+ * the store.
  */
 public final class ClaudeTranscriptArchive {
-
-  /**
-   * The cwd every workspace container runs the agent with, and therefore the only escaped-cwd
-   * directory this reader looks in. Mirrors {@code AgentTranscriptService.CONTAINER_CWD}, which is
-   * package-private in the library.
-   */
-  static final String CONTAINER_CWD = "/workspace";
-
-  /**
-   * Claude's config directory under the shared volume — {@code $CLAUDE_CONFIG_DIR} as every
-   * container sets it. Mirrors the library's {@code dotDir(AgentType.CLAUDE)}, which is private.
-   */
-  static final String HARNESS_DOT_DIR = ".claude";
 
   /**
    * The synthetic line type introducing a sidechain, mirroring {@code
@@ -135,21 +55,6 @@ public final class ClaudeTranscriptArchive {
    */
   static final String AGENT_META_TYPE = "qits_agent_meta";
 
-  /** How far into a transcript a {@code gitBranch} is looked for. See the class javadoc. */
-  static final int BRANCH_LOOKAHEAD_LINES = 20;
-
-  /**
-   * How far before the workspace's {@code createdAt} a file's mtime is still trusted by the mtime
-   * pre-filter. {@code createdAt} is stamped by the JVM's precise clock; a file's mtime is the
-   * kernel's own, coarse clock, which trails the precise one by up to a tick — about 4 ms at a
-   * 250 Hz {@code HZ} — and some filesystems store mtimes to the whole second regardless. Either
-   * one can place a real session's mtime a sliver before a workspace that in fact preceded it. The
-   * slack can only let the pre-filter pass more files on to the real rule — see {@link
-   * #writtenNoEarlierThan} — never attribute one: the window test below still decides, so widening
-   * this constant changes what gets opened and never what gets attributed.
-   */
-  static final Duration MTIME_SLACK = Duration.ofSeconds(2);
-
   /** The clamp the harness library applies to the same labels, repeated so the shapes match. */
   private static final int AGENT_TYPE_MAX = 255;
 
@@ -157,44 +62,10 @@ public final class ClaudeTranscriptArchive {
 
   private static final String JSONL = ".jsonl";
 
-  private static final Logger LOG = Logger.getLogger(ClaudeTranscriptArchive.class);
-
-  /**
-   * Guards the absent-archive warning so it is said once per process rather than once per read.
-   *
-   * <p>Mirrors the harness library's own {@code MISSING_CONFIG_DIR_LOGGED}, and for its reason: the
-   * condition is a deployment's standing shape rather than an event, so repeating it per request
-   * would bury every other line in the log of exactly the deployment that needs reading.
-   */
-  private static final AtomicBoolean ARCHIVE_ABSENT_LOGGED = new AtomicBoolean();
-
-  private final Path archiveRoot;
-
-  /** The harness working directory the transcripts are keyed on. */
-  private final String cwd;
-
-  /**
-   * The directory of {@link #ofDirectory}, where every session belongs; null for the mounted
-   * harness volume, where the path is derived from {@link #cwd} and sessions are attributed.
-   */
+  /** The agent's directory: {@code <sessionId>.jsonl} files and their sidechain directories. */
   private final Path sessionsDirectory;
 
-  public ClaudeTranscriptArchive(Path archiveRoot) {
-    this(archiveRoot, CONTAINER_CWD);
-  }
-
-  /**
-   * An archive read for one working directory: an agent's (qits-1152) is {@code
-   * /workspace/agents/<agentId>/<wrapper name>}, where its harness ran, and the harness keys its
-   * transcripts on the escaped cwd.
-   */
-  public ClaudeTranscriptArchive(Path archiveRoot, String cwd) {
-    this(archiveRoot, cwd, null);
-  }
-
-  private ClaudeTranscriptArchive(Path archiveRoot, String cwd, Path sessionsDirectory) {
-    this.cwd = cwd == null || cwd.isBlank() ? CONTAINER_CWD : cwd;
-    this.archiveRoot = archiveRoot;
+  private ClaudeTranscriptArchive(Path sessionsDirectory) {
     this.sessionsDirectory = sessionsDirectory;
   }
 
@@ -204,86 +75,42 @@ public final class ClaudeTranscriptArchive {
    * with {@link #sessions()} and {@link #transcriptOf(String)}; see the class javadoc.
    */
   public static ClaudeTranscriptArchive ofDirectory(Path directory) {
-    return new ClaudeTranscriptArchive(directory, CONTAINER_CWD, directory);
+    return new ClaudeTranscriptArchive(directory);
   }
 
   /**
-   * Say that the mounted archive answered nothing for {@code projects}, at the level the cause
-   * deserves.
-   *
-   * <p><b>A WARN only when the archive ROOT is missing</b> — the volume is not mounted at all — and
-   * then once per process: that is a deployment's standing shape, and an unmounted volume and a
-   * workspace whose sessions genuinely do not attribute produce the identical empty answer, so the
-   * log line is the only way to tell the two apart without reading the platform's configuration.
-   * WARN and not ERROR: the mount is only the fallback now.
-   *
-   * <p>A missing directory UNDER a present root is DEBUG. It is the normal answer for every agent
-   * whose harness never wrote to this volume — every TARGET workspace's, whose sessions the
-   * workspace-daemon ships into the transcript store instead (qits-1752) — and a WARN telling an
-   * operator to mount a volume that is mounted would send them the wrong way.
-   */
-  private void sayTheMountedArchiveHoldsNothing(Path projects) {
-    if (archiveRoot != null && Files.isDirectory(archiveRoot)) {
-      LOG.debugf(
-          "The mounted agent-transcript archive holds nothing at %s. Sessions of TARGET workspaces"
-              + " come from the transcript store their workspace-daemons ship to; this mount is only"
-              + " the fallback for DIRECT workspaces and sessions shipped before qits-1752.",
-          projects);
-      return;
-    }
-    if (ARCHIVE_ABSENT_LOGGED.compareAndSet(false, true)) {
-      LOG.warnf(
-          "No agent-transcript archive mounted at %s, so the mounted fallback finds no sessions."
-              + " Sessions of TARGET workspaces come from the transcript store their"
-              + " workspace-daemons ship to and are unaffected; only DIRECT workspaces and sessions"
-              + " from before qits-1752 are read from this mount.",
-          archiveRoot);
-    }
-  }
-
-  /**
-   * What a workspace is, as far as attribution is concerned: a branch and a life. Everything else
-   * about the row — its id, its repository, its narrative — is irrelevant here, and taking the whole
-   * entity would make this class need one.
-   *
-   * @param branch the workspace's branch, matched exactly against the transcript's {@code gitBranch}
-   * @param createdAt when the workspace came into being; the window's inclusive lower bound
-   * @param resolvedAt when it stopped being live, or {@code null} while it still is — in which case
-   *     the window runs to now, so an agent working in a live workspace is reported as it writes
-   */
-  public record Attribution(String branch, Instant createdAt, Instant resolvedAt) {}
-
-  /** The workspace's sessions, oldest first. Empty when nothing attributes; never throws. */
-  public List<ArchivedSessionDto> sessionsFor(Attribution attribution) {
-    if (attribution == null || attribution.branch() == null || attribution.createdAt() == null) {
-      return List.of();
-    }
-    Path projects = projectsDir();
-    if (!Files.isDirectory(projects)) {
-      sayTheMountedArchiveHoldsNothing(projects);
-      return List.of();
-    }
-    Instant from = attribution.createdAt();
-    Instant to = attribution.resolvedAt() == null ? Instant.now() : attribution.resolvedAt();
-    return list(
-        projects,
-        path -> writtenNoEarlierThan(path, from),
-        scan -> attributes(scan, attribution.branch(), from, to));
-  }
-
-  /**
-   * Every session in an {@link #ofDirectory} archive, oldest first: no attribution, because the
-   * directory is already one agent's. Empty when the directory does not exist; never throws.
-   *
-   * @throws IllegalStateException on the mounted harness volume, which holds every workspace's and
-   *     every project's sessions and must never be listed whole
+   * Every session in the directory, oldest first. Empty when the directory does not exist; never
+   * throws.
    */
   public List<ArchivedSessionDto> sessions() {
-    requireDirectoryMode();
     if (!Files.isDirectory(sessionsDirectory)) {
       return List.of();
     }
-    return list(sessionsDirectory, path -> true, scan -> true);
+    List<ArchivedSessionDto> sessions = new ArrayList<>();
+    try (Stream<Path> entries = Files.list(sessionsDirectory)) {
+      List<Path> candidates =
+          entries
+              .filter(path -> path.getFileName().toString().endsWith(JSONL))
+              .filter(Files::isRegularFile)
+              .toList();
+      for (Path candidate : candidates) {
+        Scan scan = scan(candidate);
+        if (scan == null) {
+          continue;
+        }
+        String sessionId = stripSuffix(candidate.getFileName().toString());
+        sessions.add(
+            new ArchivedSessionDto(
+                sessionId, scan.firstAt(), scan.lastAt(), scan.messageCount(), subagents(sessionId)));
+      }
+    } catch (IOException e) {
+      return List.of();
+    }
+    sessions.sort(
+        Comparator.comparing(
+                ArchivedSessionDto::startedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(ArchivedSessionDto::sessionId));
+    return List.copyOf(sessions);
   }
 
   /**
@@ -291,21 +118,9 @@ public final class ClaudeTranscriptArchive {
    * synthetic {@link #AGENT_META_TYPE} marker line.
    *
    * <p><b>{@code sessionId} never reaches a path.</b> It is resolved against what {@link
-   * #sessionsFor} returned for this workspace, and the path that is then opened is rebuilt from the
-   * attributed session's own id. That is not belt-and-braces: this volume is the estate's shared
-   * harness home, holding every other project's transcripts and the harness credential beside them,
-   * so a string concatenated into a path here is a read of all of it. Anything that does not
-   * attribute is a 404 — the same answer a session that never existed gets, so the door tells a
-   * caller nothing about what else is on the volume.
-   */
-  public List<String> transcriptOf(Attribution attribution, String sessionId) {
-    return linesOf(find(sessionsFor(attribution), sessionId));
-  }
-
-  /**
-   * One session of an {@link #ofDirectory} archive, raw, as {@link #transcriptOf(Attribution,
-   * String)} renders it — and under its rule: the id is resolved against {@link #sessions()}, never
-   * joined onto a path, and an unlisted one is a 404.
+   * #sessions()} listed, and the path that is then opened is rebuilt from the listed session's own
+   * id. Anything unlisted is a 404 — the same answer a session that never existed gets, so the door
+   * tells a caller nothing about what else is on disk.
    */
   public List<String> transcriptOf(String sessionId) {
     return linesOf(find(sessions(), sessionId));
@@ -327,96 +142,19 @@ public final class ClaudeTranscriptArchive {
     return List.copyOf(lines);
   }
 
-  /**
-   * The sessions in {@code directory}, oldest first: each {@code .jsonl} file {@code worthOpening}
-   * lets through is scanned once, and kept when its scan {@code belongs}.
-   */
-  private List<ArchivedSessionDto> list(
-      Path directory, Predicate<Path> worthOpening, Predicate<Scan> belongs) {
-    List<ArchivedSessionDto> sessions = new ArrayList<>();
-    try (Stream<Path> entries = Files.list(directory)) {
-      List<Path> candidates =
-          entries
-              .filter(path -> path.getFileName().toString().endsWith(JSONL))
-              .filter(Files::isRegularFile)
-              .filter(worthOpening)
-              .toList();
-      for (Path candidate : candidates) {
-        Scan scan = scan(candidate);
-        if (scan == null || !belongs.test(scan)) {
-          continue;
-        }
-        String sessionId = stripSuffix(candidate.getFileName().toString());
-        sessions.add(
-            new ArchivedSessionDto(
-                sessionId, scan.firstAt(), scan.lastAt(), scan.messageCount(), subagents(sessionId)));
-      }
-    } catch (IOException e) {
-      return List.of();
-    }
-    sessions.sort(
-        Comparator.comparing(
-                ArchivedSessionDto::startedAt, Comparator.nullsLast(Comparator.naturalOrder()))
-            .thenComparing(ArchivedSessionDto::sessionId));
-    return List.copyOf(sessions);
-  }
-
-  private void requireDirectoryMode() {
-    if (sessionsDirectory == null) {
-      throw new IllegalStateException(
-          "Only a directory archive is listed whole; the mounted volume is attributed");
-    }
-  }
-
-  // --- the rule ----------------------------------------------------------------------------------
-
-  private static boolean attributes(Scan scan, String branch, Instant from, Instant to) {
-    if (scan.branch() == null || "HEAD".equals(scan.branch()) || !branch.equals(scan.branch())) {
-      return false;
-    }
-    Instant startedAt = scan.firstAt();
-    return startedAt != null && !startedAt.isBefore(from) && !startedAt.isAfter(to);
-  }
-
-  /**
-   * The mtime pre-filter. A file whose mtime sits more than {@link #MTIME_SLACK} before the
-   * workspace was created cannot carry a record from inside the window, so it is skipped unopened.
-   * The slack is there because mtime is the kernel's coarse clock — it can trail the precise clock
-   * {@code from} is stamped with by up to a tick, and some filesystems keep whole-second mtimes —
-   * so a file written within a tick of the workspace's creation must not be judged by a clock that
-   * can read it as slightly earlier than it was. An unreadable mtime keeps the file — the filter
-   * exists to save work, and must never be the reason a real session is lost.
-   */
-  private static boolean writtenNoEarlierThan(Path file, Instant from) {
-    try {
-      return !Files.getLastModifiedTime(file).toInstant().isBefore(from.minus(MTIME_SLACK));
-    } catch (IOException e) {
-      return true;
-    }
-  }
-
-  /** One pass over a transcript: its branch, its span, and how many turns it holds. */
-  private record Scan(String branch, Instant firstAt, Instant lastAt, int messageCount) {}
+  /** One pass over a transcript: its span, and how many turns it holds. */
+  private record Scan(Instant firstAt, Instant lastAt, int messageCount) {}
 
   private Scan scan(Path file) {
-    String branch = null;
     Instant firstAt = null;
     Instant lastAt = null;
     int messageCount = 0;
-    int lineNumber = 0;
     try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
       String line;
       while ((line = reader.readLine()) != null) {
-        lineNumber++;
         Json node = Json.parse(line);
         if (node.isMissing()) {
           continue;
-        }
-        if (branch == null && lineNumber <= BRANCH_LOOKAHEAD_LINES) {
-          String candidate = node.path("gitBranch").asText(null);
-          if (candidate != null && !candidate.isBlank()) {
-            branch = candidate;
-          }
         }
         Instant timestamp = timestampOf(node);
         if (timestamp != null) {
@@ -434,7 +172,7 @@ public final class ClaudeTranscriptArchive {
     } catch (IOException e) {
       return null;
     }
-    return new Scan(branch, firstAt, lastAt, messageCount);
+    return new Scan(firstAt, lastAt, messageCount);
   }
 
   /**
@@ -572,39 +310,15 @@ public final class ClaudeTranscriptArchive {
     }
   }
 
-  // --- paths, all derived from the library's own maths -------------------------------------------
-
-  private Path configDir() {
-    return archiveRoot.resolve(HARNESS_DOT_DIR);
-  }
-
-  /**
-   * {@code <root>/.claude/projects/<escaped-cwd>} — taken as the parent of a transcript path rather
-   * than composed, so the escaping rule stays the library's alone.
-   */
-  private Path projectsDir() {
-    if (sessionsDirectory != null) {
-      return sessionsDirectory;
-    }
-    return configDir().resolve(new ClaudeCodeAgent().transcriptPath(cwd, "probe").getParent());
-  }
+  // --- paths: the store's layout, which is the harness's own relative one ------------------------
 
   private Path transcriptFile(String sessionId) {
-    if (sessionsDirectory != null) {
-      return sessionsDirectory.resolve(sessionId + JSONL);
-    }
-    return configDir().resolve(new ClaudeCodeAgent().transcriptPath(cwd, sessionId));
+    return sessionsDirectory.resolve(sessionId + JSONL);
   }
 
-  /**
-   * In an {@link #ofDirectory} archive, {@code <dir>/<sessionId>/subagents}: the store's layout,
-   * which is the harness's own relative one ({@link TranscriptStore} says why).
-   */
+  /** {@code <dir>/<sessionId>/subagents} ({@link TranscriptStore} says why this layout). */
   private Path subagentsDir(String sessionId) {
-    if (sessionsDirectory != null) {
-      return sessionsDirectory.resolve(sessionId).resolve(TranscriptStore.SUBAGENTS);
-    }
-    return configDir().resolve(new ClaudeCodeAgent().subagentsDir(cwd, sessionId));
+    return sessionsDirectory.resolve(sessionId).resolve(TranscriptStore.SUBAGENTS);
   }
 
   private Path sidechainFile(String sessionId, String agentId) {
