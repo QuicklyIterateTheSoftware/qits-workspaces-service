@@ -28,12 +28,11 @@ public class WorkspaceContainerFactory {
 
   /**
    * qits-platform-access-mcp-service's base — the one central MCP server the qits CLI is served as
-   * (epic qits-630). An environment-qualified default, because it is an environment service rather
-   * than a platform-wide singleton.
+   * (epic qits-630): its edge host, {@code https://mcp.qits.<domain>} (qits-1412). The value ships in
+   * {@code META-INF/microprofile-config.properties}; it is what a row holding no workspace token is
+   * told, and a token-holding row takes {@link WorkspaceAddressPlane#platformMcpUrl} instead.
    */
-  @ConfigProperty(
-      name = "qits.workspaces.platform-mcp-url",
-      defaultValue = "http://${QITS_ENVIRONMENT:dev}-qits-platform-access-mcp-service:8080")
+  @ConfigProperty(name = "qits.workspaces.platform-mcp-url")
   String platformMcpUrl;
 
   /**
@@ -413,10 +412,12 @@ public class WorkspaceContainerFactory {
   @ConfigProperty(name = "qits.workspace.qits-port", defaultValue = "8080")
   String qitsPort;
 
-  /** The edge address containers use for Git; direct githost traffic is Bearer-only. */
-  @ConfigProperty(
-      name = "qits.workspace.container-git-url",
-      defaultValue = "http://githost.${QITS_ENVIRONMENT:dev}.internal:8080")
+  /**
+   * The edge address containers use for Git, {@code https://githost.qits.<domain>} (qits-1412),
+   * shipped in {@code META-INF/microprofile-config.properties}. Told to a row holding no workspace
+   * token; a token-holding row takes {@link WorkspaceAddressPlane#gitBaseUrl} instead.
+   */
+  @ConfigProperty(name = "qits.workspace.container-git-url")
   String containerGitUrl;
 
   /**

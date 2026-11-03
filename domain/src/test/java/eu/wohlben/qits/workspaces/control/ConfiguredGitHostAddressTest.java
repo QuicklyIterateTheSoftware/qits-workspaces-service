@@ -34,21 +34,22 @@ class ConfiguredGitHostAddressTest {
   void composesThePublicProjectScopedRoute() {
     ConfiguredGitHostAddress address =
         addressWith(
-            "http://dev-qits-githost:8080",
+            "https://githost.qits.test.wohlben.eu",
             lookup(
                 "row-uuid-123",
                 new RepositoryLookup.RepositoryView(
                     "row-uuid-123", "qits-workspaces", "qits", "main")));
 
     assertEquals(
-        "http://dev-qits-githost:8080/git/qits/qits-workspaces", address.fetchUrl("row-uuid-123"));
+        "https://githost.qits.test.wohlben.eu/git/qits/qits-workspaces",
+        address.fetchUrl("row-uuid-123"));
   }
 
   @Test
   void readAndWriteAddressesAreTheSame() {
     ConfiguredGitHostAddress address =
         addressWith(
-            "http://dev-qits-githost:8080",
+            "https://githost.qits.test.wohlben.eu",
             lookup(
                 "row-uuid-123",
                 new RepositoryLookup.RepositoryView(
@@ -61,18 +62,19 @@ class ConfiguredGitHostAddressTest {
   void trimsTrailingSlashesOnTheHost() {
     ConfiguredGitHostAddress address =
         addressWith(
-            "http://dev-qits-githost:8080///",
+            "https://githost.qits.test.wohlben.eu///",
             lookup(
                 "r1",
                 new RepositoryLookup.RepositoryView("r1", "qits-projects", "qits", "main")));
 
-    assertEquals("http://dev-qits-githost:8080/git/qits/qits-projects", address.fetchUrl("r1"));
+    assertEquals(
+        "https://githost.qits.test.wohlben.eu/git/qits/qits-projects", address.fetchUrl("r1"));
   }
 
   @Test
   void failsWhenTheRepositoryIsNotInTheRegistry() {
     ConfiguredGitHostAddress address =
-        addressWith("http://dev-qits-githost:8080", id -> Optional.empty());
+        addressWith("https://githost.qits.test.wohlben.eu", id -> Optional.empty());
 
     IllegalStateException thrown =
         assertThrows(IllegalStateException.class, () -> address.fetchUrl("missing"));
@@ -87,7 +89,7 @@ class ConfiguredGitHostAddressTest {
     // would only reproduce the 403, so this must throw instead.
     ConfiguredGitHostAddress address =
         addressWith(
-            "http://dev-qits-githost:8080",
+            "https://githost.qits.test.wohlben.eu",
             lookup("r1", new RepositoryLookup.RepositoryView("r1", null, null, "main")));
 
     assertThrows(IllegalStateException.class, () -> address.fetchUrl("r1"));

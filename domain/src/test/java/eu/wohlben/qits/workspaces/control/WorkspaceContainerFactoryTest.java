@@ -56,7 +56,7 @@ class WorkspaceContainerFactoryTest {
     // the config key is only an override. A fixture that set it would test the override on every
     // case and never the shipped path.
     f.imageVersionOverride = Optional.empty();
-    f.platformMcpUrl = "http://dev-qits-platform-access-mcp-service:8080/";
+    f.platformMcpUrl = "https://mcp.qits.test.wohlben.eu/";
     f.network = "qits-net";
     f.claudeVolume = "qits_shared_dot_claude";
     f.claudeMount = "/claude-home";
@@ -78,7 +78,7 @@ class WorkspaceContainerFactoryTest {
     // home to.
     f.qitsHostResolver = resolver("qits");
     f.qitsPort = "8080";
-    f.containerGitUrl = "http://qits-platform-edge:8080";
+    f.containerGitUrl = "https://githost.qits.test.wohlben.eu";
     // A live project scope, so the daemon self-clones name-addressed. Stubbed (the real resolver
     // needs a tx + DB); the no-scope fallback has its own test.
     f.nameResolver =
@@ -157,10 +157,10 @@ class WorkspaceContainerFactoryTest {
     assertEnv(
         c,
         "QITS_PLATFORM_MCP_URL",
-        "http://dev-qits-platform-access-mcp-service:8080/mcp");
+        "https://mcp.qits.test.wohlben.eu/mcp");
     // The self-clone base, told rather than left to the daemon's pre-split derivation
     // (/artifacts/git), which 404s now that the git host is qits-githost under /git.
-    assertEnv(c, "QITS_WORKSPACE_DAEMON_GIT_BASE_URL", "http://qits-platform-edge:8080/git");
+    assertEnv(c, "QITS_WORKSPACE_DAEMON_GIT_BASE_URL", "https://githost.qits.test.wohlben.eu/git");
     // Where ContainerProxyRoute addresses this container. Asserted as a literal rather than through
     // ContainerProxyPath.base: the daemon in the other repo matches this string, so a test that
     // computed it the same way the production code does would rename itself along with the bug.

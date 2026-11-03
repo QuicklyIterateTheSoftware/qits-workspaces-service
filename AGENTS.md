@@ -1955,7 +1955,7 @@ file `pacts/qits-workspaces-service_qits-ci-service.json` (`release.yml`: `qits-
 absent) and `no run with the given id` (a 404, read by its status, which becomes `subject_error`).
 The client is `wiring/CiRuns` on `quarkus.rest-client.qits-ci.url=${qits.ci.url}` (connect 2000 ms,
 read 5000 ms), and `qits.ci.url` is provided exactly as `qits.system.url` is: defaulted in
-`application.properties` to the qits-net alias `http://${QITS_ENVIRONMENT:dev}-qits-ci:8080`, read
+`application.properties` to qits-ci's edge host `https://ci.qits.${QITS_DOMAIN}` (qits-1412), read
 from `env.QITS_CI_URL` with no deployer extra behind it.
 
 ## Tests

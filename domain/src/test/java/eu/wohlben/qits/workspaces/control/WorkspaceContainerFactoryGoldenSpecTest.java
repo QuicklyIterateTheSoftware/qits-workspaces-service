@@ -36,7 +36,7 @@ class WorkspaceContainerFactoryGoldenSpecTest {
     WorkspaceContainerFactory f = new WorkspaceContainerFactory();
     f.imageRepo = "registry.dev.localhost:8080/qits/workspace";
     f.imageVersionOverride = Optional.of("2026.1001.120000");
-    f.platformMcpUrl = "http://dev-qits-platform-access-mcp-service:8080/";
+    f.platformMcpUrl = "https://mcp.qits.test.wohlben.eu/";
     f.network = "qits-net";
     f.claudeVolume = "qits_shared_dot_claude";
     f.claudeMount = "/claude-home";
@@ -59,7 +59,7 @@ class WorkspaceContainerFactoryGoldenSpecTest {
     resolver.configured = "qits";
     f.qitsHostResolver = resolver;
     f.qitsPort = "8080";
-    f.containerGitUrl = "http://qits-platform-edge:8080";
+    f.containerGitUrl = "https://githost.qits.test.wohlben.eu";
     f.daemonApiToken = "qits-workspace-daemon";
     f.autoPushEnabled = true;
     f.nameResolver =
@@ -98,8 +98,8 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         label qits.project=proj-1
         env TZ=Europe/Berlin
         env QITS_WORKSPACE_DAEMON_URL=ws://qits:8080/workspaces/daemon/7
-        env QITS_PLATFORM_MCP_URL=http://dev-qits-platform-access-mcp-service:8080/mcp
-        env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=http://qits-platform-edge:8080/git
+        env QITS_PLATFORM_MCP_URL=https://mcp.qits.test.wohlben.eu/mcp
+        env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=https://githost.qits.test.wohlben.eu/git
         env QITS_WORKSPACE_DAEMON_API_BASE_PATH=/workspaces/container/7/
         env QITS_WORKSPACE_DAEMON_WORKSPACE_ID=work
         env QITS_WORKSPACE_DAEMON_REPOSITORY_ID=repo12345678abc
@@ -164,8 +164,8 @@ class WorkspaceContainerFactoryGoldenSpecTest {
         label qits.project=proj-1
         env TZ=Europe/Berlin
         env QITS_WORKSPACE_DAEMON_URL=ws://qits:8080/workspaces/daemon/8
-        env QITS_PLATFORM_MCP_URL=http://dev-qits-platform-access-mcp-service:8080/mcp
-        env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=http://qits-platform-edge:8080/git
+        env QITS_PLATFORM_MCP_URL=https://mcp.qits.test.wohlben.eu/mcp
+        env QITS_WORKSPACE_DAEMON_GIT_BASE_URL=https://githost.qits.test.wohlben.eu/git
         env QITS_WORKSPACE_DAEMON_API_BASE_PATH=/workspaces/container/8/
         env QITS_WORKSPACE_DAEMON_WORKSPACE_ID=admin
         env QITS_WORKSPACE_DAEMON_REPOSITORY_ID=repo12345678abc

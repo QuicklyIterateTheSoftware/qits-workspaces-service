@@ -99,7 +99,7 @@ public final class TestWorkspaceContainerFactory {
     // assignment can replace. The two versions below stay invented and stay different from each
     // other, for the reason the constants' javadoc gives.
     f.imageVersionOverride = Optional.of(IMAGE_VERSION);
-    f.platformMcpUrl = "http://dev-qits-platform-access-mcp-service:8080";
+    f.platformMcpUrl = "https://mcp.qits.test.wohlben.eu";
     f.network = "qits-net";
     f.claudeVolume = "qits_shared_dot_claude";
     f.claudeMount = "/claude-home";
@@ -121,7 +121,7 @@ public final class TestWorkspaceContainerFactory {
     f.gitIdentity = identity();
     f.qitsHostResolver = resolver();
     f.qitsPort = "8080";
-    f.containerGitUrl = "http://qits-platform-edge:8080";
+    f.containerGitUrl = "https://githost.qits.test.wohlben.eu";
     f.daemonApiToken = "qits-workspace-daemon";
     f.autoPushEnabled = true;
     f.nameResolver =

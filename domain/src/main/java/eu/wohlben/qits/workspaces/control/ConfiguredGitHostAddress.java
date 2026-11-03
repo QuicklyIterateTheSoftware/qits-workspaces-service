@@ -57,12 +57,11 @@ public class ConfiguredGitHostAddress implements GitHostAddress {
    * qits.observability.url} already use, so that one value works whether the call goes direct on
    * qits-net or through the gateway.
    *
-   * <p>The default names an ENVIRONMENT service, so it carries an environment: qits-githost is
-   * deployed once per environment as {@code <env>-qits-githost}, and only a deployment knows which
-   * one it is. The default is the dev spelling so a developer's process reaches the standing
-   * environment; a deployment's run-args own the real value.
+   * <p>The value ships in {@code META-INF/microprofile-config.properties}: the git host's edge host,
+   * {@code https://githost.qits.<domain>} (qits-1412), never the {@code <env>-qits-githost} wire
+   * alias. No default here, so the one spelling is the shipped file's.
    */
-  @ConfigProperty(name = "qits.githost.url", defaultValue = "http://dev-qits-githost:8080")
+  @ConfigProperty(name = "qits.githost.url")
   String gitHostUrl;
 
   @Override

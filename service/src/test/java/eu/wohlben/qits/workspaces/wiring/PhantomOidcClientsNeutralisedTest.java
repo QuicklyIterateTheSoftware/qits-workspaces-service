@@ -92,7 +92,8 @@ class PhantomOidcClientsNeutralisedTest {
    */
   private static Map<String, String> deployedEnvironment() {
     Map<String, String> env = new LinkedHashMap<>();
-    env.put("QITS_RESOURCE_IDP_URL", "http://dev-qits-idp:8080/idp");
+    env.put("QITS_DOMAIN", "wohlben.eu");
+    env.put("QITS_RESOURCE_IDP_URL", "https://idp.qits.wohlben.eu/idp");
     env.put("QITS_RESOURCE_IDP_CLIENT_ID", "dev-qits-workspaces");
     env.put("QITS_RESOURCE_IDP_CLIENT_SECRET", "resource-secret");
     env.put("QUARKUS_OIDC_CLIENT_CLIENT_ENABLED", "true");
@@ -190,7 +191,7 @@ class PhantomOidcClientsNeutralisedTest {
     assertEquals(
         "resource-secret", config.getValue("quarkus.oidc-client.qits.credentials.secret", String.class));
     assertEquals(
-        "http://dev-qits-idp:8080/idp",
+        "https://idp.qits.wohlben.eu/idp",
         config.getValue("quarkus.oidc-client.qits.auth-server-url", String.class));
     assertEquals(
         "qits-platform",
@@ -223,7 +224,7 @@ class PhantomOidcClientsNeutralisedTest {
     assertEquals(
         "dev-qits-workspaces", config.getValue("quarkus.oidc-client.qits.client-id", String.class));
     assertEquals(
-        "http://dev-qits-idp:8080/idp",
+        "https://idp.qits.wohlben.eu/idp",
         config.getValue("quarkus.oidc-client.qits.auth-server-url", String.class));
     assertTrue(
         config
