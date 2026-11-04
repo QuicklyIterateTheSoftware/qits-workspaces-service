@@ -85,6 +85,15 @@ public class AgentWaitRepository implements PanacheRepositoryBase<AgentWait, UUI
         .list();
   }
 
+  /**
+   * Whether the wait is still among {@link #findUnannounced}: closed with an announcement and not
+   * yet marked. What a publish reads again before it hands a possibly stale snapshot to the bus
+   * (qits-1867); a missing row is owed nothing.
+   */
+  public boolean isOwed(UUID waitId) {
+    return count("id = ?1 and closedEventId is not null and announcedAt is null", waitId) > 0;
+  }
+
   /** The bus took the wait's announcement; a second confirmation changes nothing. */
   public void markAnnounced(UUID waitId, Instant at) {
     update("announcedAt = ?1 where id = ?2 and announcedAt is null", at, waitId);

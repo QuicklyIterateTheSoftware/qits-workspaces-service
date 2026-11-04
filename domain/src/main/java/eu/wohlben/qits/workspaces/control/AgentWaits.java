@@ -803,8 +803,18 @@ public class AgentWaits {
   /**
    * Hand a committed close to the bus, and mark the row once the bus took it. Not twice at once: a
    * sweep that finds the row still unmarked while this one is queued leaves it be.
+   *
+   * <p>Not twice in a row either (qits-1867): once {@link #announcing} is held, the row is read
+   * again, and one the bus already took — or one that is gone — is left be. {@link #announcing}
+   * alone guards only the in-flight window, and {@link #announceUnannounced}'s snapshot is older
+   * than that: a sweep that read the row unmarked while another thread's announcement was in hand
+   * would otherwise publish it a second time once that announcement was marked and released, under
+   * the same {@code closedEventId}. The re-read is what closes the stale-snapshot window, and it
+   * cannot race the mark it looks for: {@link #announcing} is released only after the mark
+   * committed. A fresh close reads its own committed, unmarked row and publishes as before.
+   * Package-private so {@code DeskWaitsTest} can hand it the stale snapshot itself.
    */
-  private void announceDesk(DeskWaitClosed event) {
+  void announceDesk(DeskWaitClosed event) {
     if (lifecycle == null || !lifecycle.isResolvable()) {
       return;
     }
@@ -813,6 +823,10 @@ public class AgentWaits {
       return;
     }
     try {
+      if (!QuarkusTransaction.requiringNew().call(() -> waits.isOwed(waitId))) {
+        announcing.remove(waitId);
+        return;
+      }
       lifecycle
           .get()
           .announce(
@@ -831,7 +845,12 @@ public class AgentWaits {
     }
   }
 
-  /** Publish again every closed desk wait the bus never took, under the id its close recorded. */
+  /**
+   * Publish again every closed desk wait the bus never took, under the id its close recorded. The
+   * list is a snapshot, and may be stale by the time each entry is published: another sweep may
+   * have announced and marked a row since. {@link #announceDesk} reads each row again before it
+   * publishes, so a stale entry is dropped there (qits-1867).
+   */
   private void announceUnannounced() {
     if (lifecycle == null || !lifecycle.isResolvable()) {
       return;
