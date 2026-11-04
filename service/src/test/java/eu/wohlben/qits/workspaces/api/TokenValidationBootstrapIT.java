@@ -319,10 +319,21 @@ public class TokenValidationBootstrapIT {
         SERVICE,
         StoryPeers.EVENTS,
         StoryPeers.label("GET", StoryPeers.EVENTS_STREAM_PATH, 404));
-    // SEVEN: one door, the four questions a fresh process asks the idp before anybody arrives (its
-    // discovery document, its keys, and the two commission listings), and the two calls that start
-    // it listening to qits-events.
-    ReportAssertions.assertEdgeCount(CATEGORY, ACCEPTED_SLUG, 7);
+    // …and the bearer both of those bus calls now carry (qits-1328, epic qits-543): qits-eventstream
+    // presents this service's own `qits` client token on the catch-up read and the dial, and fails
+    // closed without one, so the mint is boot traffic — it completes before the read the story
+    // awaits, which is what makes it this story's edge rather than whichever story runs next.
+    ReportAssertions.assertEdge(
+        CATEGORY,
+        ACCEPTED_SLUG,
+        NetworkEdge.HTTP,
+        SERVICE,
+        StoryPeers.IDP,
+        StoryPeers.posted(StoryPeers.TOKEN_PATH, 200));
+    // EIGHT: one door, the four questions a fresh process asks the idp before anybody arrives (its
+    // discovery document, its keys, and the two commission listings), the bus's token mint, and the
+    // two calls that start it listening to qits-events.
+    ReportAssertions.assertEdgeCount(CATEGORY, ACCEPTED_SLUG, 8);
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "jwks-fetched");
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "history-served");
     ReportAssertions.assertStepId(CATEGORY, ACCEPTED_SLUG, "commissions-reconciled");
