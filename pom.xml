@@ -75,16 +75,21 @@
              after the container is gone. Framework-free — vertx-core and qits-commands are its only
              compile dependencies, and nothing here imports either. -->
         <qits.coding-agents.version>2026.1031.164420</qits.coding-agents.version>
-        <qits.eventstream.version>2026.1103.140652</qits.eventstream.version>
+        <qits.eventstream.version>2026.1103.231226</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1002.70617</qits.db-core.version>
         <qits.arch-rules.version>2026.1030.30851</qits.arch-rules.version>
         <qits.auth-core.version>2026.1031.63225</qits.auth-core.version>
-        <qits.containers-client.version>2026.1103.143113</qits.containers-client.version>
+        <qits.containers-client.version>2026.1103.170050</qits.containers-client.version>
         <!-- CallerServerFilter/CallerClientFilter: jandex-indexed filters that record inbound
              X-Qits-Caller as the qits.caller span attribute and stamp it on outgoing REST-client
              calls. Also published by qits-integrations-quarkus. -->
         <qits.http-core.version>2026.1103.132907</qits.http-core.version>
+        <!-- qits-telemetry-core (epic qits-428): the three OTLP/HTTP exporters as CDI beans whose
+             header supplier carries the `qits` oidc client's current bearer, so spans, logs and
+             metrics reach qits-observability at its edge host. Published by
+             qits-integrations-quarkus, like qits-http-core above. -->
+        <qits.telemetry-core.version>2026.1103.201640</qits.telemetry-core.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
@@ -104,7 +109,7 @@
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1103.91014</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1103.180437</qits.projects-golden-masters.version>
         <!-- The other providers' golden masters (qits-1149), the same rule: qits-idp's for the
              commission doors, the peer token mint and the tenant's discovery and keys
              (wiring/IdpContract); qits-containers' for the place and volume doors
@@ -336,6 +341,15 @@
                 <groupId>${project.groupId}</groupId>
                 <artifactId>qits-http-core</artifactId>
                 <version>${qits.http-core.version}</version>
+            </dependency>
+            <dependency>
+                <!-- OTLP export to qits-observability through the edge (epic qits-428): replaces all
+                     three of Quarkus' own OTLP exporters with CDI beans that attach the `qits` oidc
+                     client's bearer on every export. qits.telemetry.endpoint in application.properties;
+                     quarkus.otel.exporter.otlp.* no longer reaches anything. -->
+                <groupId>${project.groupId}</groupId>
+                <artifactId>qits-telemetry-core</artifactId>
+                <version>${qits.telemetry-core.version}</version>
             </dependency>
             <dependency>
                 <!-- The platform's database resilience: PatientPgDriver, which every postgresql
