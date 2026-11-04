@@ -4,6 +4,8 @@ import eu.wohlben.qits.eventstream.QitsEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 /**
@@ -18,9 +20,29 @@ public class RecordingLifecycleAnnouncer implements LifecycleAnnouncer {
   // Private, with methods: a test holds a client proxy, and a field read on it reads the proxy's.
   private final List<QitsEvent> events = new CopyOnWriteArrayList<>();
 
+  /** A one-shot hook for the first event its predicate selects; null = none, the usual case. */
+  private final AtomicReference<Hook> hook = new AtomicReference<>();
+
+  private record Hook(Predicate<QitsEvent> which, Consumer<QitsEvent> run) {}
+
   @Override
   public void announce(QitsEvent event) {
+    Hook h = hook.get();
+    if (h != null && h.which().test(event) && hook.compareAndSet(h, null)) {
+      h.run().accept(event);
+    }
     events.add(event);
+  }
+
+  /**
+   * Run {@code run} once, inside the {@link #announce} of the first event {@code which} selects,
+   * before it is recorded and so before {@link LifecycleAnnouncer#announce(QitsEvent, Runnable)}'s
+   * {@code taken} marks it — the moment a concurrent sweep could read the row unmarked (qits-1867).
+   * One-shot and selected by the test's own ids, so a background pass over another test's rows
+   * never runs it; it runs on whichever thread announces.
+   */
+  public void beforeNext(Predicate<QitsEvent> which, Consumer<QitsEvent> run) {
+    hook.set(new Hook(which, run));
   }
 
   /** The recorded events of {@code type} that {@code which} selects, in announcement order. */

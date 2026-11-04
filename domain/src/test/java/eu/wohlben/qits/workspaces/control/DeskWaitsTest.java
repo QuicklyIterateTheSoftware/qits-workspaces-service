@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -228,6 +229,46 @@ public class DeskWaitsTest {
         event.turn());
     assertEquals(row.closedEventId, event.eventId());
     assertNotNull(row.announcedAt);
+  }
+
+  /**
+   * qits-1867, the interleaving that flaked {@link #aTimeoutClosesTheDeskWaitAndAnnouncesIt}: a
+   * sweep closes a desk wait and announces it while a second sweep — the agent scheduler's — has
+   * already read the committed, unmarked row into its snapshot, and publishes that snapshot only
+   * after the first one's announcement was marked and released. The snapshot is taken from inside
+   * the first announcement, where the row is exactly as the second sweep read it; it is handed on
+   * once the row is marked, where the second sweep's turn came. One announcement, not two.
+   */
+  @Test
+  void aSnapshotTakenBeforeTheMarkIsNotPublishedAgainAfterIt() throws InterruptedException {
+    AgentWaitDto wait =
+        waits.createForDesk(UUID.randomUUID(), "stale", EventSelection.of("DeskTestBuildStatusChanged"), Duration.ofHours(2), null);
+    AtomicReference<DeskWaitClosed> stale = new AtomicReference<>();
+    announced.beforeNext(
+        e -> e instanceof DeskWaitClosed c && c.waitId().equals(wait.id()),
+        e -> {
+          AgentWait row = waitRow(wait.id());
+          assertNull(row.announcedAt, "inside the announcement the row is still unmarked");
+          stale.set(AgentWaits.closedEvent(row));
+        });
+    expire(wait.id());
+
+    waits.sweep();
+
+    // The scheduler's pass may be the one that closed it: wait for its mark, as the second sweep
+    // would have waited on announcing.
+    long deadline = System.currentTimeMillis() + 15_000;
+    while (waitRow(wait.id()).announcedAt == null && System.currentTimeMillis() < deadline) {
+      Thread.sleep(20);
+    }
+    assertNotNull(waitRow(wait.id()).announcedAt);
+    assertNotNull(stale.get(), "the hook ran inside the first announcement");
+
+    waits.announceDesk(stale.get());
+
+    List<DeskWaitClosed> events = closedOf(wait.id());
+    assertEquals(1, events.size(), "a stale snapshot of a marked row is not published again");
+    assertEquals(stale.get(), events.get(0));
   }
 
   @Test
