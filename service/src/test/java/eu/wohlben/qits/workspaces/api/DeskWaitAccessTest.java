@@ -1,6 +1,7 @@
 package eu.wohlben.qits.workspaces.api;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
@@ -196,5 +197,26 @@ class DeskWaitAccessTest {
     asDesk(project).body(Map.of("label", "x")).post(waits(project)).then().statusCode(400);
     asDesk(project).get(waits(project) + "?state=SOMETIMES").then().statusCode(400);
     asSystem().get(waits("not-a-project")).then().statusCode(400);
+  }
+
+  /** qits-1849: a path its event never carries is refused at the door, naming the closest field. */
+  @Test
+  void aPathTheEventNeverCarriesIsA400NamingTheClosestField() {
+    String project = UUID.randomUUID().toString();
+    asDesk(project)
+        .body(
+            Map.of(
+                "selection",
+                Map.of(
+                    "event",
+                    "BuildStatusChanged",
+                    "when",
+                    List.of(List.of(Map.of("path", "repositoryName", "op", "exact", "value", "x"))))))
+        .post(waits(project))
+        .then()
+        .statusCode(400)
+        .body("message", containsString("Invalid selection: BuildStatusChanged carries no field 'repositoryName'"))
+        .body("message", containsString("did you mean 'repoName'?"));
+    asDesk(project).get(waits(project)).then().statusCode(200).body("waits", hasSize(0));
   }
 }

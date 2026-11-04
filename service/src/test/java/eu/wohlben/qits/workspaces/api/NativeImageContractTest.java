@@ -171,4 +171,23 @@ public class NativeImageContractTest {
       assertTrue(targets.contains(needed), needed + " is not in AgentWaitController's targets");
     }
   }
+
+  @ConfigProperty(name = "quarkus.native.resources.includes")
+  List<String> nativeResources;
+
+  /**
+   * The wait door checks a selection's paths against domain's payload catalog (qits-1849), a
+   * resource read by name: a native image carries it only when it is listed, and on the JVM it is on
+   * the classpath regardless.
+   */
+  @Test
+  public void thePayloadCatalogIsIncludedInTheNativeImage() {
+    String resource =
+        eu.wohlben.qits.workspaces.control.EventPayloadCatalog.class.getPackageName().replace('.', '/')
+            + "/"
+            + eu.wohlben.qits.workspaces.control.EventPayloadCatalog.RESOURCE;
+    assertTrue(
+        nativeResources.contains(resource),
+        resource + " is not in quarkus.native.resources.includes: " + nativeResources);
+  }
 }

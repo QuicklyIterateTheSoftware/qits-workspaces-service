@@ -190,6 +190,56 @@ class AgentWaitAccessTest {
     as("alice", "qits:admin").body(Map.of("label", "x")).post(waits()).then().statusCode(400);
   }
 
+  /**
+   * qits-1849: BuildStatusChanged carries {@code repoName}, never {@code repositoryName}, so the wait
+   * could never match; the door refuses it and names the field meant. An event the catalog does not
+   * name is still taken unchecked.
+   */
+  @Test
+  void aPathTheEventNeverCarriesIsA400NamingTheClosestField() {
+    as("alice", "qits:admin")
+        .body(
+            Map.of(
+                "selection",
+                Map.of(
+                    "event",
+                    "BuildStatusChanged",
+                    "when",
+                    List.of(List.of(Map.of("path", "repositoryName", "op", "exact", "value", "x"))))))
+        .post(waits())
+        .then()
+        .statusCode(400)
+        .body("message", containsString("Invalid selection: BuildStatusChanged carries no field 'repositoryName'"))
+        .body("message", containsString("did you mean 'repoName'?"))
+        .body("message", containsString("Its fields: branch, commitSha,"));
+    as(subject, "qits:agent")
+        .body(
+            Map.of(
+                "selection",
+                Map.of(
+                    "event",
+                    "EntityTransitioned",
+                    "when",
+                    List.of(List.of(Map.of("path", "entities.status", "op", "exact", "value", "DONE"))))))
+        .post(waits())
+        .then()
+        .statusCode(400)
+        .body("message", containsString("write 'entities[].status'"));
+    as(subject, "qits:agent").get(waits()).then().statusCode(200).body("waits", hasSize(0));
+    as(subject, "qits:agent")
+        .body(
+            Map.of(
+                "selection",
+                Map.of(
+                    "event",
+                    "SomeoneElsesEvent",
+                    "when",
+                    List.of(List.of(Map.of("path", "whatever.it[].carries", "op", "exact", "value", "x"))))))
+        .post(waits())
+        .then()
+        .statusCode(201);
+  }
+
   @Test
   void anUnknownAgentIsA404() {
     as("alice", "qits:admin")

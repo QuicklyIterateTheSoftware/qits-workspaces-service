@@ -1,0 +1,222 @@
+{
+  "_comment": [
+    "qits-1849: the payload fields of the events a declared wait is checked against (EventPayloadCatalog).",
+    "A field is \"scalar\", an object {field: …}, a list of scalars [\"scalar\"] or a list of objects [{field: …}].",
+    "eventId and occurredAt ride the envelope and are never payload fields; a null field is dropped from a",
+    "payload, so every field here is optional on the wire. Keys starting with '_' are comments.",
+    "The qits-workspaces entries are pinned by EventPayloadCatalogDriftTest against workspaces-events' records.",
+    "The qits-ci entries (BuildStatusChanged, BuildSuccessful, BuildFailed, SoftwareRelease; ci-events) and the",
+    "qits-projects entries (ReleaseRequestStateChanged, EntityTransitioned, EntityCommented, BranchDeliveryChanged,",
+    "SCMRelease; service's bus package) are TRANSCRIBED BY HAND from those records on 2026-11-04 and are not",
+    "pinned by any test, unlike qits-maintenance's ForeignEventContractTest: a field renamed there makes this",
+    "door refuse a wait on the new name until it is transcribed here. An event named nowhere here is not checked."
+  ],
+  "events": {
+    "BuildStatusChanged": {
+      "branch": "scalar",
+      "commitSha": "scalar",
+      "phase": "scalar",
+      "previousStatus": "scalar",
+      "projectId": "scalar",
+      "releaseRequestId": "scalar",
+      "releaseRequestQualifiedId": "scalar",
+      "repoId": "scalar",
+      "repoName": "scalar",
+      "runId": "scalar",
+      "status": "scalar"
+    },
+    "BuildSuccessful": {
+      "branch": "scalar",
+      "commitSha": "scalar",
+      "finishedAt": "scalar",
+      "imageDigest": "scalar",
+      "phase": "scalar",
+      "projectId": "scalar",
+      "releaseRequestId": "scalar",
+      "releaseRequestQualifiedId": "scalar",
+      "repoId": "scalar",
+      "repoName": "scalar",
+      "retryOfRunId": "scalar",
+      "runId": "scalar"
+    },
+    "BuildFailed": {
+      "branch": "scalar",
+      "commitSha": "scalar",
+      "finishedAt": "scalar",
+      "outcome": "scalar",
+      "phase": "scalar",
+      "projectId": "scalar",
+      "releaseRequestId": "scalar",
+      "releaseRequestQualifiedId": "scalar",
+      "repoId": "scalar",
+      "repoName": "scalar",
+      "retryOfRunId": "scalar",
+      "runId": "scalar"
+    },
+    "SoftwareRelease": {
+      "packageName": "scalar",
+      "packageType": "scalar",
+      "priority": "scalar",
+      "projectId": "scalar",
+      "repoId": "scalar",
+      "repoName": "scalar",
+      "repository": "scalar",
+      "runId": "scalar",
+      "section": "scalar",
+      "version": "scalar"
+    },
+    "ReleaseRequestStateChanged": {
+      "backingBranch": "scalar",
+      "branches": ["scalar"],
+      "changedAt": "scalar",
+      "detail": "scalar",
+      "mergedSha": "scalar",
+      "previousState": "scalar",
+      "projectId": "scalar",
+      "releaseRequestId": "scalar",
+      "releaseRequestQualifiedId": "scalar",
+      "repoId": "scalar",
+      "repoName": "scalar",
+      "state": "scalar",
+      "version": "scalar"
+    },
+    "EntityTransitioned": {
+      "entities": [
+        {
+          "archetype": "scalar",
+          "changedBy": "scalar",
+          "entityId": "scalar",
+          "number": "scalar",
+          "parentId": "scalar",
+          "position": "scalar",
+          "projectId": "scalar",
+          "slug": "scalar",
+          "status": "scalar",
+          "statusBefore": "scalar",
+          "title": "scalar"
+        }
+      ],
+      "transitionedAt": "scalar"
+    },
+    "EntityCommented": {
+      "archetype": "scalar",
+      "author": "scalar",
+      "authorAgentOf": "scalar",
+      "changedBy": "scalar",
+      "commentId": "scalar",
+      "commentedAt": "scalar",
+      "entityId": "scalar",
+      "mentions": ["scalar"],
+      "number": "scalar",
+      "projectId": "scalar",
+      "title": "scalar"
+    },
+    "BranchDeliveryChanged": {
+      "branch": "scalar",
+      "changedAt": "scalar",
+      "everywhere": "scalar",
+      "failure": "scalar",
+      "foldAttempt": "scalar",
+      "foldSha": "scalar",
+      "previousQualifiedId": "scalar",
+      "previousRequestId": "scalar",
+      "projectId": "scalar",
+      "qualifiedId": "scalar",
+      "repoId": "scalar",
+      "repository": "scalar",
+      "requestId": "scalar",
+      "runId": "scalar",
+      "step": "scalar",
+      "version": "scalar"
+    },
+    "SCMRelease": {
+      "branch": "scalar",
+      "commitSha": "scalar",
+      "priority": "scalar",
+      "projectId": "scalar",
+      "releaseRequestId": "scalar",
+      "releaseRequestQualifiedId": "scalar",
+      "repository": "scalar",
+      "repositoryName": "scalar",
+      "version": "scalar"
+    },
+    "AgentPlaced": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar"
+    },
+    "AgentStarted": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "commandId": "scalar", "launched": "scalar", "resumed": "scalar"
+    },
+    "AgentStartRefused": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "detail": "scalar"
+    },
+    "AgentRequeued": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "detail": "scalar", "reason": "scalar"
+    },
+    "AgentYielded": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar"
+    },
+    "AgentNudged": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "nudgeCount": "scalar", "reason": "scalar"
+    },
+    "AgentResumed": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "reason": "scalar"
+    },
+    "AgentObsolete": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "branch": "scalar", "commitSha": "scalar", "version": "scalar"
+    },
+    "AgentCleanupDeferred": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "detail": "scalar", "reason": "scalar"
+    },
+    "AgentRemoved": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "detail": "scalar", "discardedBy": "scalar", "harnessStopped": "scalar", "reason": "scalar"
+    },
+    "AgentHarnessExited": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "commandId": "scalar", "exitCode": "scalar", "remoteArchive": "scalar", "remoteSession": "scalar",
+      "status": "scalar", "stoppedBy": "scalar"
+    },
+    "AgentWaitOpened": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "eventName": "scalar", "label": "scalar", "projectId": "scalar", "subjectKind": "scalar",
+      "subjectRef": "scalar", "targetStates": ["scalar"], "waitId": "scalar"
+    },
+    "AgentWaitChanged": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "projectId": "scalar", "subjectKind": "scalar", "subjectQualifiedId": "scalar", "subjectRef": "scalar",
+      "subjectState": "scalar", "subjectStateAt": "scalar", "waitId": "scalar"
+    },
+    "AgentWaitClosed": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "matchedEventId": "scalar", "projectId": "scalar", "state": "scalar", "waitId": "scalar"
+    },
+    "AgentActivityChanged": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "activity": "scalar", "at": "scalar", "projectId": "scalar", "waitingSince": "scalar"
+    },
+    "AgentAttentionChanged": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "code": "scalar", "projectId": "scalar", "reason": "scalar", "since": "scalar", "waitId": "scalar"
+    },
+    "WorkspaceStarted": {
+      "repositoryId": "scalar", "workspaceId": "scalar"
+    },
+    "WorkspaceFailed": {
+      "repositoryId": "scalar", "runtimeError": "scalar", "workspaceId": "scalar"
+    },
+    "WorkspaceRemoved": {
+      "reason": "scalar", "repositoryId": "scalar", "workspaceId": "scalar"
+    },
+    "DeskWaitClosed": {
+      "closedAt": "scalar", "eventName": "scalar", "label": "scalar", "matchedEventId": "scalar",
+      "projectId": "scalar", "state": "scalar", "turn": "scalar", "waitId": "scalar"
+    }
+  }
+}

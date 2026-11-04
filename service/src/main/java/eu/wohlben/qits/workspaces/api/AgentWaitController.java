@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import eu.wohlben.qits.eventstream.selection.EventSelection;
 import eu.wohlben.qits.eventstream.selection.EventSelectionException;
 import eu.wohlben.qits.workspaces.control.AgentWaits;
+import eu.wohlben.qits.workspaces.control.EventPayloadCatalog;
 import eu.wohlben.qits.workspaces.dto.AgentWaitDto;
 import eu.wohlben.qits.workspaces.dto.WaitView;
 import eu.wohlben.qits.workspaces.dto.WaitView.SelectionSchema;
@@ -125,16 +126,29 @@ public class AgentWaitController {
     return Response.status(Response.Status.CREATED).entity(view(created)).build();
   }
 
-  /** The request's selection, bound by qits-eventstream's reader; a 400 with its reason otherwise. */
+  /**
+   * The request's selection, bound by qits-eventstream's reader; a 400 with its reason otherwise.
+   * An event {@link EventPayloadCatalog} names is also checked against its payload fields
+   * (qits-1849), so a path the event never carries is a 400 naming the closest field rather than a
+   * wait that never matches. An event the catalog does not name is accepted unchecked.
+   */
   static EventSelection selectionOf(CreateWaitRequest request) {
     if (request == null || request.selection() == null || request.selection().isNull()) {
       throw new BadRequestException("A wait needs a selection: {\"event\": …, \"when\": […]}.");
     }
+    EventSelection selection;
     try {
-      return EventSelection.fromJson(request.selection().toString());
+      selection = EventSelection.fromJson(request.selection().toString());
     } catch (EventSelectionException invalid) {
       throw new BadRequestException("Invalid selection: " + invalid.getMessage());
     }
+    EventPayloadCatalog.shipped()
+        .refusal(selection)
+        .ifPresent(
+            reason -> {
+              throw new BadRequestException("Invalid selection: " + reason);
+            });
+    return selection;
   }
 
   /** The request's timeout; null = none. A 400 for one that is not an ISO-8601 duration. */

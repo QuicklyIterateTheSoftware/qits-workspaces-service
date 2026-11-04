@@ -1434,6 +1434,17 @@ event name, optional expiry) and gets a turn when it happens:
 - **Limits.** 8 OPEN waits per agent, timeout at most 30 days, label at most 200 characters (default:
   the selection in one line). The native image registers `EventSelection`, its `Condition` and `Op`
   on `AgentWaitController`.
+- **Paths its event never carries are refused** (qits-1849, `control/EventPayloadCatalog`).
+  `AgentWaitController.selectionOf`, which both wait doors use, checks every condition's path
+  against `event-fields.json` beside that class (event name → payload field tree, `eventId` and
+  `occurredAt` left out): an unknown segment, `[]` on a field that is no list, a segment below a
+  single value, a list passed through without `[]` (`entities.status`) and `exact`/`prefix` on a
+  whole list or object are a 400 naming the closest field (`did you mean 'repoName'?`) and every
+  field. `exists`/absent hold on any declared field, a bare list included. An event the catalog does
+  not name is taken unchecked. This repository's events are pinned against their records by
+  `EventPayloadCatalogDriftTest`; the qits-ci and qits-projects entries are transcribed by hand and
+  pinned by nothing, so a field renamed there is refused here until it is transcribed. The resource
+  is listed in `quarkus.native.resources.includes` (`NativeImageContractTest`).
 - **The desk's waits** (qits-1618, `V32`, `DeskWaitController`). A project's front desk — a Claude
   session qits-projects runs, with no agent row — declares waits on its project id, with the agent
   door's bodies (`agentId: null`), selection rules and limits (8 OPEN per project, counted under a
