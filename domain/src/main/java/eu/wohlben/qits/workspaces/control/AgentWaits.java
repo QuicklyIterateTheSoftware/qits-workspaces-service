@@ -1034,6 +1034,12 @@ public class AgentWaits {
    * as instructions. Only the values at the paths the selection matched on are shown, each cut
    * short, JSON-quoted, and inside a block marked as data from the event log. The rest of the event
    * is one {@code qits events query} away.
+   *
+   * <p>A selection of several OR'd groups names the group that matched, by its number and the
+   * count only (qits-1890): the conditions are an agent's text, so they stay out of the sentence,
+   * and the block shows that group's values alone. A path of a group that did not need to hold is
+   * not printed as {@code (absent)}, which read as an absent field having matched. A single group,
+   * or none, gives the turn it always gave.
    */
   static String matchedTurn(
       String label, EventSelection selection, String eventId, Instant occurredAt, JsonNode payload) {
@@ -1047,6 +1053,14 @@ public class AgentWaits {
             .append(" (event ")
             .append(eventId)
             .append(").");
+    int group = matchedGroup(selection, payload);
+    if (selection.when().size() > 1 && group >= 0) {
+      turn.append(" It matched group ")
+          .append(group + 1)
+          .append(" of ")
+          .append(selection.when().size())
+          .append("; the others did not need to hold.");
+    }
     List<String> lines = matchedValues(selection, payload);
     if (!lines.isEmpty()) {
       turn.append(
@@ -1081,10 +1095,34 @@ public class AgentWaits {
   /** At most this many values shown per path (an array path can reach many). */
   static final int MAX_VALUES_PER_PATH = 3;
 
-  /** {@code path = "value"} per distinct condition path of the selection, in its order. */
+  /**
+   * The index of the first group of the selection the payload satisfies, or -1 when none does (an
+   * unconditional selection, or a payload that no longer fits). Each group is asked as a selection
+   * of its own, since the evaluator keeps its per-group test to itself.
+   */
+  static int matchedGroup(EventSelection selection, JsonNode payload) {
+    List<List<EventSelection.Condition>> groups = selection.when();
+    for (int i = 0; i < groups.size(); i++) {
+      EventSelection one = new EventSelection(selection.event(), List.of(groups.get(i)));
+      if (EventSelectionEvaluator.matchesPayload(one, payload)) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * {@code path = "value"} per distinct condition path of the group that matched, in its order. When
+   * no group matches, every group's paths, as before qits-1890, so a value is never hidden.
+   */
   static List<String> matchedValues(EventSelection selection, JsonNode payload) {
     java.util.LinkedHashSet<String> paths = new java.util.LinkedHashSet<>();
-    selection.when().forEach(group -> group.forEach(c -> paths.add(c.path())));
+    int group = matchedGroup(selection, payload);
+    if (group >= 0) {
+      selection.when().get(group).forEach(c -> paths.add(c.path()));
+    } else {
+      selection.when().forEach(g -> g.forEach(c -> paths.add(c.path())));
+    }
     List<String> lines = new ArrayList<>();
     for (String path : paths) {
       List<JsonNode> found = new ArrayList<>();

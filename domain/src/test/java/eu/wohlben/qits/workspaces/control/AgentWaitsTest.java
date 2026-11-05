@@ -613,6 +613,57 @@ public class AgentWaitsTest {
     assertTrue(block.contains("…"), "the value is cut: " + block);
   }
 
+  /**
+   * A selection of OR'd groups names the group that matched and shows only its values (qits-1890):
+   * a path of the group that did not need to hold no longer reads as an absent field that matched.
+   */
+  @Test
+  void theWakeNamesTheGroupThatMatchedAndShowsOnlyItsValues() {
+    EventSelection either =
+        new EventSelection(
+            "CiRunStatusChanged",
+            List.of(
+                List.of(Condition.exact("repoName", "qits-system-service")),
+                List.of(Condition.exact("releaseRequestQualifiedId", "qits-system-service-rr-190"))));
+
+    String first =
+        AgentWaits.matchedTurn(
+            "system ci",
+            either,
+            "ev-11",
+            Instant.EPOCH,
+            eu.wohlben.qits.eventstream.selection.EventSelectionEvaluator.parsePayload(
+                "{\"repoName\":\"qits-system-service\",\"status\":\"RUNNING\"}"));
+    assertTrue(first.contains("It matched group 1 of 2; the others did not need to hold."), first);
+    assertTrue(first.contains("repoName = \"qits-system-service\""), first);
+    assertFalse(first.contains("releaseRequestQualifiedId"), first);
+    assertFalse(first.contains("(absent)"), first);
+
+    String second =
+        AgentWaits.matchedTurn(
+            "system ci",
+            either,
+            "ev-12",
+            Instant.EPOCH,
+            eu.wohlben.qits.eventstream.selection.EventSelectionEvaluator.parsePayload(
+                "{\"repoName\":\"qits-other-service\",\"releaseRequestQualifiedId\":\"qits-system-service-rr-190\"}"));
+    assertTrue(second.contains("It matched group 2 of 2; the others did not need to hold."), second);
+    assertTrue(second.contains("releaseRequestQualifiedId = \"qits-system-service-rr-190\""), second);
+    assertFalse(second.contains("repoName"), second);
+    assertFalse(second.contains("(absent)"), second);
+
+    // One group says nothing about groups.
+    String single =
+        AgentWaits.matchedTurn(
+            "l",
+            EventSelection.of("CiRunStatusChanged", Condition.exact("repoName", "qits-system-service")),
+            "ev-13",
+            Instant.EPOCH,
+            eu.wohlben.qits.eventstream.selection.EventSelectionEvaluator.parsePayload(
+                "{\"repoName\":\"qits-system-service\"}"));
+    assertFalse(single.contains("group"), single);
+  }
+
   /** The CLI's {@code qits wait release-request} shape: one group per end state. */
   private static EventSelection requestEnds(String qualifiedId) {
     return new EventSelection(
