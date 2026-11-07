@@ -88,34 +88,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "createAgentWait",
           "method" : "POST",
           "path" : "/agents/{agentId}/waits",
@@ -137,27 +109,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "discardAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/discard",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "discardAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/discard",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "discardAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/discard",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "dispatchAgent",
           "method" : "POST",
           "path" : "/agent-dispatches",
@@ -165,59 +116,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "getAgent",
           "method" : "GET",
           "path" : "/agents/{id}",
           "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getAgent",
-          "method" : "GET",
-          "path" : "/agents/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getAgent",
-          "method" : "GET",
-          "path" : "/agents/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getAgent",
-          "method" : "GET",
-          "path" : "/agents/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -242,34 +144,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listAgentWaits",
           "method" : "GET",
           "path" : "/agents/{agentId}/waits",
@@ -281,34 +155,6 @@
           "method" : "GET",
           "path" : "/agents",
           "dto" : "eu.wohlben.qits.workspaces.api.AgentController$ListAgentsRequest$Response",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -326,59 +172,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "restartAgent",
           "method" : "POST",
           "path" : "/agents/{id}/restart",
           "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "restartAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/restart",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "restartAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/restart",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "restartAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/restart",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -389,52 +186,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "stopAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/stop",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "stopAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/stop",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "stopAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/stop",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "yieldAgent",
           "method" : "POST",
           "path" : "/agents/{id}/yield",
           "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "yieldAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/yield",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "yieldAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/yield",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "yieldAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/yield",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         }
       ]
@@ -531,53 +286,11 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgentWait",
-          "method" : "POST",
-          "path" : "/agents/{agentId}/waits",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentWaitDto",
-          "kind" : "body"
-        },
-        {
           "operationId" : "createAgentWait",
           "method" : "POST",
           "path" : "/agents/{agentId}/waits",
           "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "schema"
-        },
-        {
-          "operationId" : "createDeskWait",
-          "method" : "POST",
-          "path" : "/desks/{projectId}/waits",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentWaitDto",
-          "kind" : "body"
         },
         {
           "operationId" : "createDeskWait",
@@ -591,27 +304,6 @@
           "method" : "POST",
           "path" : "/agents/{id}/discard",
           "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "discardAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/discard",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "discardAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/discard",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "discardAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/discard",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -622,59 +314,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "getAgent",
           "method" : "GET",
           "path" : "/agents/{id}",
           "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getAgent",
-          "method" : "GET",
-          "path" : "/agents/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getAgent",
-          "method" : "GET",
-          "path" : "/agents/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getAgent",
-          "method" : "GET",
-          "path" : "/agents/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -699,34 +342,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listAgentWaits",
           "method" : "GET",
           "path" : "/agents/{agentId}/waits",
@@ -738,34 +353,6 @@
           "method" : "GET",
           "path" : "/agents",
           "dto" : "eu.wohlben.qits.workspaces.api.AgentController$ListAgentsRequest$Response",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -783,59 +370,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "restartAgent",
           "method" : "POST",
           "path" : "/agents/{id}/restart",
           "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "restartAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/restart",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "restartAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/restart",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "restartAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/restart",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -846,52 +384,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "stopAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/stop",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "stopAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/stop",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "stopAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/stop",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "yieldAgent",
           "method" : "POST",
           "path" : "/agents/{id}/yield",
           "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "yieldAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/yield",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "yieldAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/yield",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "yieldAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/yield",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         }
       ]
@@ -1060,53 +556,11 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgentWait",
-          "method" : "POST",
-          "path" : "/agents/{agentId}/waits",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentWaitDto",
-          "kind" : "body"
-        },
-        {
           "operationId" : "createAgentWait",
           "method" : "POST",
           "path" : "/agents/{agentId}/waits",
           "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "schema"
-        },
-        {
-          "operationId" : "createDeskWait",
-          "method" : "POST",
-          "path" : "/desks/{projectId}/waits",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentWaitDto",
-          "kind" : "body"
         },
         {
           "operationId" : "createDeskWait",
@@ -1130,27 +584,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "discardAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/discard",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "discardAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/discard",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "discardAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/discard",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "dispatchAgent",
           "method" : "POST",
           "path" : "/agent-dispatches",
@@ -1158,59 +591,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "getAgent",
           "method" : "GET",
           "path" : "/agents/{id}",
           "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getAgent",
-          "method" : "GET",
-          "path" : "/agents/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getAgent",
-          "method" : "GET",
-          "path" : "/agents/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getAgent",
-          "method" : "GET",
-          "path" : "/agents/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -1242,34 +626,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listAgentPromptAttachments",
           "method" : "GET",
           "path" : "/agents/{id}/prompt-attachments",
@@ -1277,31 +633,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listAgentPromptAttachments",
-          "method" : "GET",
-          "path" : "/agents/{id}/prompt-attachments",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspacePromptAttachmentDataDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listAgentSessions",
           "method" : "GET",
           "path" : "/agents/{id}/sessions",
           "dto" : "eu.wohlben.qits.workspaces.api.WorkspaceHistoryController$ListAgentSessionsRequest$Response",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentSessions",
-          "method" : "GET",
-          "path" : "/agents/{id}/sessions",
-          "dto" : "eu.wohlben.qits.workspaces.dto.ArchivedSessionDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentSessions",
-          "method" : "GET",
-          "path" : "/agents/{id}/sessions",
-          "dto" : "eu.wohlben.qits.workspaces.dto.ArchivedSubagentDto",
           "kind" : "returns"
         },
         {
@@ -1319,34 +654,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listDeskWaits",
           "method" : "GET",
           "path" : "/desks/{projectId}/waits",
@@ -1361,38 +668,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listOpenWorkspaces",
-          "method" : "GET",
-          "path" : "/work/workspaces",
-          "dto" : "eu.wohlben.qits.workspaces.api.WorkItemWorkspacesController$WorkItemWorkspaces",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listOpenWorkspaces",
-          "method" : "GET",
-          "path" : "/work/workspaces",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkItemWorkspaceDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listWorkItemWorkspaces",
           "method" : "GET",
           "path" : "/work/{workRef}/workspaces",
           "dto" : "eu.wohlben.qits.workspaces.api.WorkItemWorkspacesController$WorkItemWorkspaceEntry",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkItemWorkspaces",
-          "method" : "GET",
-          "path" : "/work/{workRef}/workspaces",
-          "dto" : "eu.wohlben.qits.workspaces.api.WorkItemWorkspacesController$WorkItemWorkspaces",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkItemWorkspaces",
-          "method" : "GET",
-          "path" : "/work/{workRef}/workspaces",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkItemWorkspaceDto",
           "kind" : "returns"
         },
         {
@@ -1403,52 +682,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listWorkspaceAgentSessions",
-          "method" : "GET",
-          "path" : "/history/{id}/agent-sessions",
-          "dto" : "eu.wohlben.qits.workspaces.dto.ArchivedSessionDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgentSessions",
-          "method" : "GET",
-          "path" : "/history/{id}/agent-sessions",
-          "dto" : "eu.wohlben.qits.workspaces.dto.ArchivedSubagentDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listWorkspaceAgents",
           "method" : "GET",
           "path" : "/workspaces/{id}/agents",
           "dto" : "eu.wohlben.qits.workspaces.api.WorkspaceController$ListWorkspaceAgentsRequest$Response",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -1487,27 +724,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "restartAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/restart",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "restartAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/restart",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "restartAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/restart",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "stopAgent",
           "method" : "POST",
           "path" : "/agents/{id}/stop",
@@ -1515,52 +731,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "stopAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/stop",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "stopAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/stop",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "stopAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/stop",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "yieldAgent",
           "method" : "POST",
           "path" : "/agents/{id}/yield",
           "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "yieldAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/yield",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "yieldAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/yield",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "yieldAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/yield",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         }
       ]
@@ -1817,34 +991,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "createAgent",
-          "method" : "POST",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "createAgentWait",
           "method" : "POST",
           "path" : "/agents/{agentId}/waits",
@@ -1873,59 +1019,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "discardAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/discard",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "discardAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/discard",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "discardAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/discard",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "dispatchAgent",
           "method" : "POST",
           "path" : "/agent-dispatches",
           "dto" : "eu.wohlben.qits.workspaces.control.AgentService$Dispatch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "dispatchAgent",
-          "method" : "POST",
-          "path" : "/agent-dispatches",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -1936,38 +1033,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "ensureWorkspaceContainer",
-          "method" : "POST",
-          "path" : "/workspaces/{id}/ensure-container",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "getAgent",
           "method" : "GET",
           "path" : "/agents/{id}",
           "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getAgent",
-          "method" : "GET",
-          "path" : "/agents/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getAgent",
-          "method" : "GET",
-          "path" : "/agents/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getAgent",
-          "method" : "GET",
-          "path" : "/agents/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -1985,13 +1054,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "getWorkspace",
-          "method" : "GET",
-          "path" : "/workspaces/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "getWorkspaceActiveProcess",
           "method" : "GET",
           "path" : "/workspaces/{id}/active-process",
@@ -2006,20 +1068,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "getWorkspaceHistory",
-          "method" : "GET",
-          "path" : "/history/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceEventDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getWorkspaceHistory",
-          "method" : "GET",
-          "path" : "/history/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceHistoryDetailDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listAgentDispatchReferences",
           "method" : "GET",
           "path" : "/agent-dispatches/references",
@@ -2027,52 +1075,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentDispatchReferences",
-          "method" : "GET",
-          "path" : "/agent-dispatches/references",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listAgentSessions",
           "method" : "GET",
           "path" : "/agents/{id}/sessions",
           "dto" : "eu.wohlben.qits.workspaces.api.WorkspaceHistoryController$ListAgentSessionsRequest$Response",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentSessions",
-          "method" : "GET",
-          "path" : "/agents/{id}/sessions",
-          "dto" : "eu.wohlben.qits.workspaces.dto.ArchivedSessionDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgentSessions",
-          "method" : "GET",
-          "path" : "/agents/{id}/sessions",
-          "dto" : "eu.wohlben.qits.workspaces.dto.ArchivedSubagentDto",
           "kind" : "returns"
         },
         {
@@ -2090,34 +1096,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listAgents",
-          "method" : "GET",
-          "path" : "/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listDeskWaits",
           "method" : "GET",
           "path" : "/desks/{projectId}/waits",
@@ -2132,38 +1110,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listOpenWorkspaces",
-          "method" : "GET",
-          "path" : "/work/workspaces",
-          "dto" : "eu.wohlben.qits.workspaces.api.WorkItemWorkspacesController$WorkItemWorkspaces",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listOpenWorkspaces",
-          "method" : "GET",
-          "path" : "/work/workspaces",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkItemWorkspaceDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listWorkItemWorkspaces",
           "method" : "GET",
           "path" : "/work/{workRef}/workspaces",
           "dto" : "eu.wohlben.qits.workspaces.api.WorkItemWorkspacesController$WorkItemWorkspaceEntry",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkItemWorkspaces",
-          "method" : "GET",
-          "path" : "/work/{workRef}/workspaces",
-          "dto" : "eu.wohlben.qits.workspaces.api.WorkItemWorkspacesController$WorkItemWorkspaces",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkItemWorkspaces",
-          "method" : "GET",
-          "path" : "/work/{workRef}/workspaces",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkItemWorkspaceDto",
           "kind" : "returns"
         },
         {
@@ -2174,52 +1124,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listWorkspaceAgentSessions",
-          "method" : "GET",
-          "path" : "/history/{id}/agent-sessions",
-          "dto" : "eu.wohlben.qits.workspaces.dto.ArchivedSessionDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgentSessions",
-          "method" : "GET",
-          "path" : "/history/{id}/agent-sessions",
-          "dto" : "eu.wohlben.qits.workspaces.dto.ArchivedSubagentDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listWorkspaceAgents",
           "method" : "GET",
           "path" : "/workspaces/{id}/agents",
           "dto" : "eu.wohlben.qits.workspaces.api.WorkspaceController$ListWorkspaceAgentsRequest$Response",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaceAgents",
-          "method" : "GET",
-          "path" : "/workspaces/{id}/agents",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -2230,24 +1138,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listWorkspaceHistory",
-          "method" : "GET",
-          "path" : "/history",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceHistoryDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "listWorkspaces",
           "method" : "GET",
           "path" : "/workspaces",
           "dto" : "eu.wohlben.qits.workspaces.api.WorkspaceController$ListWorkspacesRequest$Response$Entry",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "listWorkspaces",
-          "method" : "GET",
-          "path" : "/workspaces",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceDto",
           "kind" : "returns"
         },
         {
@@ -2279,13 +1173,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "recreateWorkspaceContainer",
-          "method" : "POST",
-          "path" : "/workspaces/{id}/recreate-container",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "resolveReleasedBranch",
           "method" : "POST",
           "path" : "/branches/resolution",
@@ -2300,52 +1187,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "restartAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/restart",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "restartAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/restart",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "restartAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/restart",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "stopAgent",
           "method" : "POST",
           "path" : "/agents/{id}/stop",
           "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "stopAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/stop",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "stopAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/stop",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "stopAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/stop",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         },
         {
@@ -2363,20 +1208,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "sweepBranches",
-          "method" : "POST",
-          "path" : "/gc/branches",
-          "dto" : "eu.wohlben.qits.workspaces.control.WorkspaceService$SweepError",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "sweepBranches",
-          "method" : "POST",
-          "path" : "/gc/branches",
-          "dto" : "eu.wohlben.qits.workspaces.control.WorkspaceService$SweptBranch",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "updateWorkspaceHistory",
           "method" : "PATCH",
           "path" : "/history/{id}",
@@ -2384,45 +1215,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "updateWorkspaceHistory",
-          "method" : "PATCH",
-          "path" : "/history/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceEventDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "updateWorkspaceHistory",
-          "method" : "PATCH",
-          "path" : "/history/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceHistoryDetailDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "yieldAgent",
           "method" : "POST",
           "path" : "/agents/{id}/yield",
           "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "yieldAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/yield",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "yieldAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/yield",
-          "dto" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "yieldAgent",
-          "method" : "POST",
-          "path" : "/agents/{id}/yield",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "returns"
         }
       ]
@@ -2469,38 +1265,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "getWorkspaceHistory",
-          "method" : "GET",
-          "path" : "/history/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceEventDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "getWorkspaceHistory",
-          "method" : "GET",
-          "path" : "/history/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceHistoryDetailDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "updateWorkspaceHistory",
           "method" : "PATCH",
           "path" : "/history/{id}",
           "dto" : "eu.wohlben.qits.workspaces.api.WorkspaceHistoryController$UpdateHistoryRequest$Response",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "updateWorkspaceHistory",
-          "method" : "PATCH",
-          "path" : "/history/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceEventDto",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "updateWorkspaceHistory",
-          "method" : "PATCH",
-          "path" : "/history/{id}",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspaceHistoryDetailDto",
           "kind" : "returns"
         }
       ]
@@ -2548,13 +1316,6 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "listAgentPromptAttachments",
-          "method" : "GET",
-          "path" : "/agents/{id}/prompt-attachments",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspacePromptAttachmentDataDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "updateAgentPromptAttachment",
           "method" : "PUT",
           "path" : "/agents/{id}/prompt-attachments/{attachmentId}",
@@ -2599,24 +1360,10 @@
           "kind" : "returns"
         },
         {
-          "operationId" : "getAgentPromptDraft",
-          "method" : "GET",
-          "path" : "/agents/{id}/prompt-draft",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspacePromptDraftDto",
-          "kind" : "returns"
-        },
-        {
           "operationId" : "saveAgentPromptDraft",
           "method" : "PUT",
           "path" : "/agents/{id}/prompt-draft",
           "dto" : "eu.wohlben.qits.workspaces.api.WorkspacePromptDraftController$SavePromptDraftRequest$Response",
-          "kind" : "returns"
-        },
-        {
-          "operationId" : "saveAgentPromptDraft",
-          "method" : "PUT",
-          "path" : "/agents/{id}/prompt-draft",
-          "dto" : "eu.wohlben.qits.workspaces.dto.WorkspacePromptDraftDto",
           "kind" : "returns"
         }
       ]
