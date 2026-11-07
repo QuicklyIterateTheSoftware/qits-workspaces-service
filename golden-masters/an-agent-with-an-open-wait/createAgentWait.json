@@ -1,7 +1,7 @@
 {
   "id": "00000000-0000-4000-8000-000000000100",
   "agentId": "00000000-0000-4000-8000-0000000000a1",
-  "label": "work contract-00000001-10 VERIFIED",
+  "label": "work contract-00000001-9 VERIFIED",
   "selection": {
     "event": "EntityTransitioned",
     "when": [

@@ -5,10 +5,10 @@
       "workspaceRowId": 1,
       "repositoryId": "00000000-0000-4000-8000-000000000018",
       "workId": "00000000-0000-4000-8000-000000000001",
-      "entityId": "contract-00000001-10",
+      "entityId": "contract-00000001-9",
       "ticketId": "00000000-0000-4000-8000-000000000001",
       "epicId": null,
-      "wrapperBranch": "ticket/contract-00000001-10",
+      "wrapperBranch": "ticket/contract-00000001-9",
       "branches": [],
       "state": "ACTIVE",
       "runState": "RUNNING",
@@ -80,11 +80,11 @@
       "agentId": "00000000-0000-4000-8000-0000000000a7",
       "workspaceRowId": 1,
       "repositoryId": "00000000-0000-4000-8000-000000000018",
-      "workId": "00000000-0000-4000-8000-000000000006",
-      "entityId": "contract-00000001-2",
+      "workId": "00000000-0000-4000-8000-000000000005",
+      "entityId": "contract-00000001-1",
       "ticketId": null,
-      "epicId": "00000000-0000-4000-8000-000000000006",
-      "wrapperBranch": "epic/contract-00000001-2",
+      "epicId": "00000000-0000-4000-8000-000000000005",
+      "wrapperBranch": "epic/contract-00000001-1",
       "branches": [],
       "state": "ACTIVE",
       "runState": "RUNNING",
@@ -118,11 +118,11 @@
       "agentId": "00000000-0000-4000-8000-0000000000a8",
       "workspaceRowId": 1,
       "repositoryId": "00000000-0000-4000-8000-000000000018",
-      "workId": "00000000-0000-4000-8000-000000000007",
-      "entityId": "contract-00000001-6",
-      "ticketId": "00000000-0000-4000-8000-000000000007",
+      "workId": "00000000-0000-4000-8000-000000000006",
+      "entityId": "contract-00000001-5",
+      "ticketId": "00000000-0000-4000-8000-000000000006",
       "epicId": null,
-      "wrapperBranch": "ticket/contract-00000001-6",
+      "wrapperBranch": "ticket/contract-00000001-5",
       "branches": [],
       "state": "ACTIVE",
       "runState": "RUNNING",
@@ -156,11 +156,11 @@
       "agentId": "00000000-0000-4000-8000-0000000000a9",
       "workspaceRowId": 1,
       "repositoryId": "00000000-0000-4000-8000-000000000018",
-      "workId": "00000000-0000-4000-8000-000000000011",
-      "entityId": "contract-00000001-5",
-      "ticketId": "00000000-0000-4000-8000-000000000011",
+      "workId": "00000000-0000-4000-8000-000000000010",
+      "entityId": "contract-00000001-4",
+      "ticketId": "00000000-0000-4000-8000-000000000010",
       "epicId": null,
-      "wrapperBranch": "ticket/contract-00000001-5",
+      "wrapperBranch": "ticket/contract-00000001-4",
       "branches": [],
       "state": "ACTIVE",
       "runState": "RUNNING",
@@ -232,11 +232,11 @@
       "agentId": "00000000-0000-4000-8000-0000000000aa",
       "workspaceRowId": 1,
       "repositoryId": "00000000-0000-4000-8000-000000000018",
-      "workId": "00000000-0000-4000-8000-00000000000b",
-      "entityId": "contract-00000001-11",
-      "ticketId": "00000000-0000-4000-8000-00000000000b",
+      "workId": "00000000-0000-4000-8000-00000000000a",
+      "entityId": "contract-00000001-10",
+      "ticketId": "00000000-0000-4000-8000-00000000000a",
       "epicId": null,
-      "wrapperBranch": "ticket/contract-00000001-11",
+      "wrapperBranch": "ticket/contract-00000001-10",
       "branches": [],
       "state": "ACTIVE",
       "runState": "RUNNING",
@@ -248,7 +248,7 @@
       "entityBlocked": false,
       "activity": null,
       "waitingSince": null,
-      "waitingOn": "work contract-00000001-5 VERIFIED; a comment on contract-00000001-5",
+      "waitingOn": "work contract-00000001-4 VERIFIED; a comment on contract-00000001-4",
       "waitingOnSince": "2026-01-01T00:00:00Z",
       "lastActivityAt": "2026-01-01T00:00:00Z",
       "createdAt": "2026-01-01T00:00:00Z",
@@ -260,7 +260,7 @@
         {
           "id": "00000000-0000-4000-8000-0000000000b4",
           "agentId": "00000000-0000-4000-8000-0000000000aa",
-          "label": "work contract-00000001-5 VERIFIED",
+          "label": "work contract-00000001-4 VERIFIED",
           "selection": {
             "event": "EntityTransitioned",
             "when": [
@@ -268,7 +268,7 @@
                 {
                   "path": "entities[].entityId",
                   "op": "exact",
-                  "value": "00000000-0000-4000-8000-000000000011"
+                  "value": "00000000-0000-4000-8000-000000000010"
                 }
               ]
             ]
@@ -279,9 +279,9 @@
           "matchedEventId": null,
           "closedAt": null,
           "subjectKind": "WORK_ITEM",
-          "subjectRef": "00000000-0000-4000-8000-000000000011",
-          "subjectId": "00000000-0000-4000-8000-000000000011",
-          "subjectQualifiedId": "contract-00000001-5",
+          "subjectRef": "00000000-0000-4000-8000-000000000010",
+          "subjectId": "00000000-0000-4000-8000-000000000010",
+          "subjectQualifiedId": "contract-00000001-4",
           "targetStates": [
             "VERIFIED"
           ],
@@ -293,7 +293,7 @@
         {
           "id": "00000000-0000-4000-8000-0000000000b5",
           "agentId": "00000000-0000-4000-8000-0000000000aa",
-          "label": "a comment on contract-00000001-5",
+          "label": "a comment on contract-00000001-4",
           "selection": {
             "event": "EntityCommented",
             "when": [
@@ -301,7 +301,7 @@
                 {
                   "path": "entityId",
                   "op": "exact",
-                  "value": "00000000-0000-4000-8000-000000000011"
+                  "value": "00000000-0000-4000-8000-000000000010"
                 }
               ]
             ]
@@ -312,7 +312,7 @@
           "matchedEventId": null,
           "closedAt": null,
           "subjectKind": "COMMENTS",
-          "subjectRef": "00000000-0000-4000-8000-000000000011",
+          "subjectRef": "00000000-0000-4000-8000-000000000010",
           "subjectId": null,
           "subjectQualifiedId": null,
           "targetStates": [],

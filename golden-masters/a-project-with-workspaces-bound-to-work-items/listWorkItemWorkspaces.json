@@ -4,7 +4,7 @@
       "workspace": {
         "id": 6,
         "workId": "00000000-0000-4000-8000-000000000001",
-        "qualifiedId": "contract-00000001-10",
+        "qualifiedId": "contract-00000001-9",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
         "workspaceId": "ticket-invoice-totals-are-off-by-one-cent",
         "branch": "ticket/invoice-totals-are-off-by-one-cent",
@@ -18,7 +18,7 @@
       "workspace": {
         "id": 2,
         "workId": "00000000-0000-4000-8000-000000000001",
-        "qualifiedId": "contract-00000001-10",
+        "qualifiedId": "contract-00000001-9",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
         "workspaceId": "ticket-invoice-totals-are-off-by-one-cent",
         "branch": "ticket/invoice-totals-are-off-by-one-cent",
@@ -32,7 +32,7 @@
       "workspace": {
         "id": 1,
         "workId": "00000000-0000-4000-8000-000000000001",
-        "qualifiedId": "contract-00000001-10",
+        "qualifiedId": "contract-00000001-9",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
         "workspaceId": "ticket-invoice-totals-are-off-by-one-cent",
         "branch": "ticket/invoice-totals-are-off-by-one-cent",

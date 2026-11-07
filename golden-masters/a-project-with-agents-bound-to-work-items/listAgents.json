@@ -5,14 +5,14 @@
       "workspaceRowId": 1,
       "repositoryId": "00000000-0000-4000-8000-000000000013",
       "workId": "00000000-0000-4000-8000-000000000001",
-      "entityId": "contract-00000001-10",
+      "entityId": "contract-00000001-9",
       "ticketId": "00000000-0000-4000-8000-000000000001",
       "epicId": null,
-      "wrapperBranch": "ticket/contract-00000001-10",
+      "wrapperBranch": "ticket/contract-00000001-9",
       "branches": [
         {
           "repositoryId": "00000000-0000-4000-8000-000000000015",
-          "branch": "ticket/contract-00000001-10-totals",
+          "branch": "ticket/contract-00000001-9-totals",
           "sha": "0123456789abcdef0123456789abcdef01234567",
           "pushedAt": "2026-01-01T00:00:00Z"
         }

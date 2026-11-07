@@ -30,6 +30,7 @@ import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import eu.wohlben.qits.workspaces.testing.contracts.GoldenMasters;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusMock;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -56,13 +57,18 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * ids, so a consumer can join a qits-projects recording with one of these:
  *
  * <ul>
- *   <li>project {@code …000f} (slug {@code contract-00000001})
- *   <li>epic {@code …0006}, {@code contract-00000001-2}
- *   <li>feature {@code …0007}, {@code contract-00000001-6}
- *   <li>task {@code …0011}, {@code contract-00000001-5}
- *   <li>bug ticket {@code …0001}, {@code contract-00000001-10}
- *   <li>improvement ticket {@code …000b}, {@code contract-00000001-11} — no workspace
+ *   <li>project {@code …000e} (slug {@code contract-00000001})
+ *   <li>epic {@code …0005}, {@code contract-00000001-1}
+ *   <li>feature {@code …0006}, {@code contract-00000001-5}
+ *   <li>task {@code …0010}, {@code contract-00000001-4}
+ *   <li>bug ticket {@code …0001}, {@code contract-00000001-9}
+ *   <li>improvement ticket {@code …000a}, {@code contract-00000001-10} — no workspace
  * </ul>
+ *
+ * <p>Those values are not restated here: {@link #PROJECT_ID} and its siblings are read from
+ * qits-projects' golden masters on the test classpath, so a re-recording over there that shifts
+ * them (qits-1908 removed a seeded entity) moves these rows with it at the next pin bump. The list
+ * above is the seed as of qits-projects 2026.1106.202329.
  *
  * <p>The wrapper repository the workspaces stand in has no frozen id over there; it is {@code
  * …0013}, the next number not used by those states.
@@ -142,12 +148,25 @@ public class ProviderStates {
   public static final String LEGACY_A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE =
       "a stopped workspace slot on a runner in service";
 
-  static final String PROJECT_ID = "00000000-0000-4000-8000-00000000000f";
-  static final String BUG_TICKET_ID = "00000000-0000-4000-8000-000000000001";
-  static final String EPIC_ID = "00000000-0000-4000-8000-000000000006";
-  static final String FEATURE_ID = "00000000-0000-4000-8000-000000000007";
-  static final String IMPROVEMENT_TICKET_ID = "00000000-0000-4000-8000-00000000000b";
-  static final String TASK_ID = "00000000-0000-4000-8000-000000000011";
+  // qits-projects' "… in detail" seed, read from its golden masters rather than restated (qits-1915):
+  // every "… in detail" state records the same seeded project, so one state answers the ids, and
+  // each item's own state answers its qualified id.
+  private static final Map<String, String> PROJECTS_SEED = GoldenMasters.params("an epic in detail");
+
+  static final String PROJECT_ID = PROJECTS_SEED.get("projectId");
+  static final String BUG_TICKET_ID = PROJECTS_SEED.get("bugTicketId");
+  static final String EPIC_ID = PROJECTS_SEED.get("epicId");
+  static final String FEATURE_ID = PROJECTS_SEED.get("featureId");
+  static final String IMPROVEMENT_TICKET_ID = PROJECTS_SEED.get("improvementTicketId");
+  static final String TASK_ID = PROJECTS_SEED.get("taskId");
+
+  static final String BUG_TICKET_QUALIFIED_ID = projectsQualifiedId("a bug ticket in detail");
+  static final String IMPROVEMENT_TICKET_QUALIFIED_ID =
+      projectsQualifiedId("an improvement ticket in detail");
+  static final String EPIC_QUALIFIED_ID = projectsQualifiedId("an epic in detail");
+  static final String FEATURE_QUALIFIED_ID = projectsQualifiedId("a feature in detail");
+  static final String TASK_QUALIFIED_ID = projectsQualifiedId("a task in detail");
+
   static final String WRAPPER_REPOSITORY_ID = "00000000-0000-4000-8000-000000000013";
   static final String DISPATCH_REPOSITORY_ID = "00000000-0000-4000-8000-000000000014";
   static final String RELEASED_REPOSITORY_ID = "00000000-0000-4000-8000-000000000015";
@@ -365,14 +384,20 @@ public class ProviderStates {
     }
   }
 
+  /** The {@code qualifiedId} param qits-projects' golden masters record for {@code state}. */
+  private static String projectsQualifiedId(String state) {
+    return java.util.Objects.requireNonNull(
+        GoldenMasters.params(state).get("qualifiedId"), state + " records no qualifiedId");
+  }
+
   private static Map<String, String> params() {
     Map<String, String> params = new TreeMap<>();
     params.put("bugTicketId", BUG_TICKET_ID);
-    params.put("bugTicketQualifiedId", "contract-00000001-10");
+    params.put("bugTicketQualifiedId", BUG_TICKET_QUALIFIED_ID);
     params.put("epicId", EPIC_ID);
     params.put("featureId", FEATURE_ID);
     params.put("improvementTicketId", IMPROVEMENT_TICKET_ID);
-    params.put("improvementTicketQualifiedId", "contract-00000001-11");
+    params.put("improvementTicketQualifiedId", IMPROVEMENT_TICKET_QUALIFIED_ID);
     params.put("projectId", PROJECT_ID);
     params.put("repositoryId", WRAPPER_REPOSITORY_ID);
     params.put("taskId", TASK_ID);
@@ -406,42 +431,42 @@ public class ProviderStates {
               ids.add(
                   write(
                       BUG_TICKET_ID,
-                      "contract-00000001-10",
+                      BUG_TICKET_QUALIFIED_ID,
                       bugBranch,
                       WorkspaceStatus.ABANDONED,
                       WorkspaceRuntimeStatus.STOPPED));
               ids.add(
                   write(
                       BUG_TICKET_ID,
-                      "contract-00000001-10",
+                      BUG_TICKET_QUALIFIED_ID,
                       bugBranch,
                       WorkspaceStatus.INTEGRATED,
                       WorkspaceRuntimeStatus.STOPPED));
               ids.add(
                   write(
                       EPIC_ID,
-                      "contract-00000001-2",
+                      EPIC_QUALIFIED_ID,
                       "epic/export-invoices-for-the-accountants",
                       WorkspaceStatus.ACTIVE,
                       WorkspaceRuntimeStatus.RUNNING));
               ids.add(
                   write(
                       FEATURE_ID,
-                      "contract-00000001-6",
+                      FEATURE_QUALIFIED_ID,
                       "feature/pdf-export",
                       WorkspaceStatus.ACTIVE,
                       WorkspaceRuntimeStatus.STOPPED));
               ids.add(
                   write(
                       TASK_ID,
-                      "contract-00000001-5",
+                      TASK_QUALIFIED_ID,
                       "task/download-button-on-the-invoice-list",
                       WorkspaceStatus.ACTIVE,
                       WorkspaceRuntimeStatus.RUNNING));
               ids.add(
                   write(
                       BUG_TICKET_ID,
-                      "contract-00000001-10",
+                      BUG_TICKET_QUALIFIED_ID,
                       bugBranch,
                       WorkspaceStatus.ACTIVE,
                       WorkspaceRuntimeStatus.RUNNING));
@@ -489,7 +514,7 @@ public class ProviderStates {
   static final String CONTRACT_CALLER = "contract-caller";
   static final String AGENT_OBSOLETE_ID = "00000000-0000-4000-8000-0000000000a2";
   static final String AGENT_REMOVED_ID = "00000000-0000-4000-8000-0000000000a3";
-  static final String WRAPPER_BRANCH = "ticket/contract-00000001-10";
+  static final String WRAPPER_BRANCH = "ticket/" + BUG_TICKET_QUALIFIED_ID;
   static final String PUSHED_BRANCH = WRAPPER_BRANCH + "-totals";
 
   /**
@@ -516,7 +541,7 @@ public class ProviderStates {
     Map<String, String> params = new TreeMap<>();
     params.put("repositoryId", DISPATCH_REPOSITORY_ID);
     params.put("ticketId", BUG_TICKET_ID);
-    params.put("ticketQualifiedId", "contract-00000001-10");
+    params.put("ticketQualifiedId", BUG_TICKET_QUALIFIED_ID);
     params.put("wrapperBranch", WRAPPER_BRANCH);
     return new Setup(params, List.of());
   }
@@ -642,9 +667,9 @@ public class ProviderStates {
   static final String ITEM_WAIT_ID = "00000000-0000-4000-8000-0000000000b4";
   static final String COMMENTS_WAIT_ID = "00000000-0000-4000-8000-0000000000b5";
 
-  static final Item FEATURE = new Item(FEATURE_ID, "contract-00000001-6", false, "PDF export");
+  static final Item FEATURE = new Item(FEATURE_ID, FEATURE_QUALIFIED_ID, false, "PDF export");
   static final Item TASK =
-      new Item(TASK_ID, "contract-00000001-5", false, "Download button on the invoice list");
+      new Item(TASK_ID, TASK_QUALIFIED_ID, false, "Download button on the invoice list");
 
   /** When the passed request ended and the item waited on began implementing: fixed, so a reason is. */
   static final Instant SUBJECT_STATE_AT = Instant.parse("2026-10-20T10:42:00Z");
@@ -719,15 +744,15 @@ public class ProviderStates {
                   attentionAgent(AGENT_HEALTHY_ID, slot, IMPROVEMENT_TICKET, now, 5);
               AgentWait item =
                   subjectWait(
-                      ITEM_WAIT_ID, healthy, "work contract-00000001-5 VERIFIED",
+                      ITEM_WAIT_ID, healthy, "work " + TASK_QUALIFIED_ID + " VERIFIED",
                       "EntityTransitioned", "entities[].entityId", TASK_ID, "WORK_ITEM",
                       "[\"VERIFIED\"]", "IMPLEMENTING", SUBJECT_STATE_AT, now.minusSeconds(1800));
               item.subjectId = TASK_ID;
-              item.subjectQualifiedId = "contract-00000001-5";
+              item.subjectQualifiedId = TASK_QUALIFIED_ID;
               agentWaits.persist(item);
               agentWaits.persist(
                   subjectWait(
-                      COMMENTS_WAIT_ID, healthy, "a comment on contract-00000001-5",
+                      COMMENTS_WAIT_ID, healthy, "a comment on " + TASK_QUALIFIED_ID,
                       "EntityCommented", "entityId", TASK_ID, "COMMENTS", "[]", null, null,
                       now.minusSeconds(1700)));
             });
@@ -845,7 +870,7 @@ public class ProviderStates {
     Map<String, String> params = new TreeMap<>();
     params.put("agentId", AGENT_ACTIVE_ID);
     params.put("bugTicketId", BUG_TICKET_ID);
-    params.put("bugTicketQualifiedId", "contract-00000001-10");
+    params.put("bugTicketQualifiedId", BUG_TICKET_QUALIFIED_ID);
     params.put("repositoryId", WRAPPER_REPOSITORY_ID);
     params.put("targetId", TARGET_ID);
     params.put("workspaceId", String.valueOf(ids.get(0)));
@@ -1201,7 +1226,7 @@ public class ProviderStates {
                                   check
                                       ? "{\"clean\":false,\"dirty\":[\"qits-ci-service\"],"
                                           + "\"unpushed\":[{\"repository\":\"wrapper\","
-                                          + "\"branch\":\"ticket/contract-00000001-10\","
+                                          + "\"branch\":\"ticket/" + BUG_TICKET_QUALIFIED_ID + "\","
                                           + "\"commits\":1}],\"busy\":false}"
                                       : "{\"message\":\"Unknown agent\"}");
                         })
@@ -1255,12 +1280,12 @@ public class ProviderStates {
   record Item(String workId, String qualifiedId, boolean epic, String title) {}
 
   static final Item BUG_TICKET =
-      new Item(BUG_TICKET_ID, "contract-00000001-10", false, "Invoice totals are off by one cent");
+      new Item(BUG_TICKET_ID, BUG_TICKET_QUALIFIED_ID, false, "Invoice totals are off by one cent");
   static final Item EPIC =
-      new Item(EPIC_ID, "contract-00000001-2", true, "Export invoices for the accountants");
+      new Item(EPIC_ID, EPIC_QUALIFIED_ID, true, "Export invoices for the accountants");
   static final Item IMPROVEMENT_TICKET =
       new Item(
-          IMPROVEMENT_TICKET_ID, "contract-00000001-11", false, "Remember the last export format");
+          IMPROVEMENT_TICKET_ID, IMPROVEMENT_TICKET_QUALIFIED_ID, false, "Remember the last export format");
 
   private void agent(String id, Long slot, AgentState state, AgentRunState runState, Item item) {
     agent(id, slot, state, runState, item, null);

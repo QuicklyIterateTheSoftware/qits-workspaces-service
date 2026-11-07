@@ -211,7 +211,7 @@ class GoldenMasterRecordingTest {
                   + "\"entityTitle\":\"Fix it\","
                   + "\"entityStatus\":\"REFINED\",\"entityBlocked\":false,"
                   + "\"ticketId\":\"{ticketId}\","
-                  + "\"instruction\":\"Fix contract-00000001-10.\"}")
+                  + "\"instruction\":\"Fix " + ProviderStates.BUG_TICKET_QUALIFIED_ID + ".\"}")
               .fixing("$.agentIdentity", "contract-agent-token-subject"),
           // `qits agents <verb> --work qits-N` finds the item's agent this way (qits-1667).
           Interaction.read(
@@ -252,9 +252,9 @@ class GoldenMasterRecordingTest {
                   "createAgentWait",
                   WORKSPACES + "/agents/{agentId}/waits",
                   201,
-                  "{\"label\":\"work contract-00000001-10 VERIFIED\","
+                  "{\"label\":\"work " + ProviderStates.BUG_TICKET_QUALIFIED_ID + " VERIFIED\","
                       + "\"selection\":{\"event\":\"EntityTransitioned\",\"when\":[["
-                      + "{\"path\":\"entities[].entityId\",\"op\":\"exact\",\"value\":\"00000000-0000-4000-8000-000000000001\"},"
+                      + "{\"path\":\"entities[].entityId\",\"op\":\"exact\",\"value\":\"" + ProviderStates.BUG_TICKET_ID + "\"},"
                       + "{\"path\":\"entities[].status\",\"op\":\"exact\",\"value\":\"VERIFIED\"}]]},"
                       + "\"timeout\":\"PT2H\"}")
               .as("qits:agent"),
@@ -479,7 +479,7 @@ class GoldenMasterRecordingTest {
                   "{\"repositoryId\":\"{repositoryId}\",\"workId\":\"{ticketId}\","
                       + "\"entityId\":\"{ticketQualifiedId}\",\"kind\":\"TICKET\","
                       + "\"admin\":false,\"harness\":\"CLAUDE\","
-                      + "\"instruction\":\"Fix contract-00000001-10.\"}")
+                      + "\"instruction\":\"Fix " + ProviderStates.BUG_TICKET_QUALIFIED_ID + ".\"}")
               .fixing("$.agentIdentity", "contract-agent-token-subject"),
           // A second press answers the item's ACTIVE agent (fresh: false).
           Interaction.write(

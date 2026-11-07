@@ -103,14 +103,14 @@
       "slug": "a-project-with-agents-needing-attention",
       "params": {
         "bugTicketId": "00000000-0000-4000-8000-000000000001",
-        "bugTicketQualifiedId": "contract-00000001-10",
-        "epicId": "00000000-0000-4000-8000-000000000006",
-        "featureId": "00000000-0000-4000-8000-000000000007",
-        "improvementTicketId": "00000000-0000-4000-8000-00000000000b",
-        "improvementTicketQualifiedId": "contract-00000001-11",
-        "projectId": "00000000-0000-4000-8000-00000000000f",
+        "bugTicketQualifiedId": "contract-00000001-9",
+        "epicId": "00000000-0000-4000-8000-000000000005",
+        "featureId": "00000000-0000-4000-8000-000000000006",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000a",
+        "improvementTicketQualifiedId": "contract-00000001-10",
+        "projectId": "00000000-0000-4000-8000-00000000000e",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
-        "taskId": "00000000-0000-4000-8000-000000000011"
+        "taskId": "00000000-0000-4000-8000-000000000010"
       },
       "dependsOn": [],
       "operations": [
@@ -165,15 +165,15 @@
       "params": {
         "agentId": "00000000-0000-4000-8000-0000000000a1",
         "bugTicketId": "00000000-0000-4000-8000-000000000001",
-        "bugTicketQualifiedId": "contract-00000001-10",
-        "epicId": "00000000-0000-4000-8000-000000000006",
-        "featureId": "00000000-0000-4000-8000-000000000007",
-        "improvementTicketId": "00000000-0000-4000-8000-00000000000b",
-        "improvementTicketQualifiedId": "contract-00000001-11",
-        "projectId": "00000000-0000-4000-8000-00000000000f",
+        "bugTicketQualifiedId": "contract-00000001-9",
+        "epicId": "00000000-0000-4000-8000-000000000005",
+        "featureId": "00000000-0000-4000-8000-000000000006",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000a",
+        "improvementTicketQualifiedId": "contract-00000001-10",
+        "projectId": "00000000-0000-4000-8000-00000000000e",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
         "targetId": "00000000-0000-4000-8000-000000000020",
-        "taskId": "00000000-0000-4000-8000-000000000011"
+        "taskId": "00000000-0000-4000-8000-000000000010"
       },
       "dependsOn": [],
       "operations": [
@@ -239,14 +239,14 @@
       "slug": "a-project-with-workspaces-bound-to-work-items",
       "params": {
         "bugTicketId": "00000000-0000-4000-8000-000000000001",
-        "bugTicketQualifiedId": "contract-00000001-10",
-        "epicId": "00000000-0000-4000-8000-000000000006",
-        "featureId": "00000000-0000-4000-8000-000000000007",
-        "improvementTicketId": "00000000-0000-4000-8000-00000000000b",
-        "improvementTicketQualifiedId": "contract-00000001-11",
-        "projectId": "00000000-0000-4000-8000-00000000000f",
+        "bugTicketQualifiedId": "contract-00000001-9",
+        "epicId": "00000000-0000-4000-8000-000000000005",
+        "featureId": "00000000-0000-4000-8000-000000000006",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000a",
+        "improvementTicketQualifiedId": "contract-00000001-10",
+        "projectId": "00000000-0000-4000-8000-00000000000e",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
-        "taskId": "00000000-0000-4000-8000-000000000011"
+        "taskId": "00000000-0000-4000-8000-000000000010"
       },
       "dependsOn": [],
       "operations": [
@@ -455,14 +455,14 @@
       "slug": "a-work-item-with-no-workspaces",
       "params": {
         "bugTicketId": "00000000-0000-4000-8000-000000000001",
-        "bugTicketQualifiedId": "contract-00000001-10",
-        "epicId": "00000000-0000-4000-8000-000000000006",
-        "featureId": "00000000-0000-4000-8000-000000000007",
-        "improvementTicketId": "00000000-0000-4000-8000-00000000000b",
-        "improvementTicketQualifiedId": "contract-00000001-11",
-        "projectId": "00000000-0000-4000-8000-00000000000f",
+        "bugTicketQualifiedId": "contract-00000001-9",
+        "epicId": "00000000-0000-4000-8000-000000000005",
+        "featureId": "00000000-0000-4000-8000-000000000006",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000a",
+        "improvementTicketQualifiedId": "contract-00000001-10",
+        "projectId": "00000000-0000-4000-8000-00000000000e",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
-        "taskId": "00000000-0000-4000-8000-000000000011"
+        "taskId": "00000000-0000-4000-8000-000000000010"
       },
       "dependsOn": [],
       "operations": [
@@ -507,15 +507,15 @@
       "params": {
         "agentId": "00000000-0000-4000-8000-0000000000a1",
         "bugTicketId": "00000000-0000-4000-8000-000000000001",
-        "bugTicketQualifiedId": "contract-00000001-10",
-        "epicId": "00000000-0000-4000-8000-000000000006",
-        "featureId": "00000000-0000-4000-8000-000000000007",
-        "improvementTicketId": "00000000-0000-4000-8000-00000000000b",
-        "improvementTicketQualifiedId": "contract-00000001-11",
-        "projectId": "00000000-0000-4000-8000-00000000000f",
+        "bugTicketQualifiedId": "contract-00000001-9",
+        "epicId": "00000000-0000-4000-8000-000000000005",
+        "featureId": "00000000-0000-4000-8000-000000000006",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000a",
+        "improvementTicketQualifiedId": "contract-00000001-10",
+        "projectId": "00000000-0000-4000-8000-00000000000e",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
         "targetId": "00000000-0000-4000-8000-000000000020",
-        "taskId": "00000000-0000-4000-8000-000000000011",
+        "taskId": "00000000-0000-4000-8000-000000000010",
         "workspaceId": "1"
       },
       "dependsOn": [],
@@ -757,8 +757,8 @@
       "params": {
         "repositoryId": "00000000-0000-4000-8000-000000000014",
         "ticketId": "00000000-0000-4000-8000-000000000001",
-        "ticketQualifiedId": "contract-00000001-10",
-        "wrapperBranch": "ticket/contract-00000001-10"
+        "ticketQualifiedId": "contract-00000001-9",
+        "wrapperBranch": "ticket/contract-00000001-9"
       },
       "dependsOn": [],
       "operations": [
@@ -773,7 +773,7 @@
             "kind": "TICKET",
             "admin": false,
             "harness": "CLAUDE",
-            "instruction": "Fix contract-00000001-10."
+            "instruction": "Fix contract-00000001-9."
           },
           "status": 200,
           "file": "a-wrapper-repository-and-a-ticket-to-dispatch/createAgent.json",
@@ -807,7 +807,7 @@
             "entityStatus": "REFINED",
             "entityBlocked": false,
             "ticketId": "{ticketId}",
-            "instruction": "Fix contract-00000001-10."
+            "instruction": "Fix contract-00000001-9."
           },
           "status": 200,
           "file": "a-wrapper-repository-and-a-ticket-to-dispatch/dispatchAgent.json",
@@ -1064,7 +1064,7 @@
       "name": "an agent owning a released branch",
       "slug": "an-agent-owning-a-released-branch",
       "params": {
-        "branch": "ticket/contract-00000001-10",
+        "branch": "ticket/contract-00000001-9",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
         "sha": "0123456789abcdef0123456789abcdef01234567",
         "version": "2026.101.120000"
@@ -1103,7 +1103,7 @@
       "slug": "an-agent-waiting-for-a-workspace-slot",
       "params": {
         "agentId": "00000000-0000-4000-8000-0000000000a5",
-        "improvementTicketId": "00000000-0000-4000-8000-00000000000b"
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000a"
       },
       "dependsOn": [],
       "operations": [
@@ -1184,7 +1184,7 @@
       "params": {
         "agentId": "00000000-0000-4000-8000-0000000000a1",
         "bugTicketId": "00000000-0000-4000-8000-000000000001",
-        "bugTicketQualifiedId": "contract-00000001-10",
+        "bugTicketQualifiedId": "contract-00000001-9",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
         "targetId": "00000000-0000-4000-8000-000000000020",
         "workspaceId": "1"
@@ -1387,7 +1387,7 @@
           "method": "POST",
           "path": "/workspaces/api/agents/{agentId}/waits",
           "body": {
-            "label": "work contract-00000001-10 VERIFIED",
+            "label": "work contract-00000001-9 VERIFIED",
             "selection": {
               "event": "EntityTransitioned",
               "when": [
@@ -1725,14 +1725,14 @@
       "slug": "no-work-item-has-an-open-workspace",
       "params": {
         "bugTicketId": "00000000-0000-4000-8000-000000000001",
-        "bugTicketQualifiedId": "contract-00000001-10",
-        "epicId": "00000000-0000-4000-8000-000000000006",
-        "featureId": "00000000-0000-4000-8000-000000000007",
-        "improvementTicketId": "00000000-0000-4000-8000-00000000000b",
-        "improvementTicketQualifiedId": "contract-00000001-11",
-        "projectId": "00000000-0000-4000-8000-00000000000f",
+        "bugTicketQualifiedId": "contract-00000001-9",
+        "epicId": "00000000-0000-4000-8000-000000000005",
+        "featureId": "00000000-0000-4000-8000-000000000006",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000a",
+        "improvementTicketQualifiedId": "contract-00000001-10",
+        "projectId": "00000000-0000-4000-8000-00000000000e",
         "repositoryId": "00000000-0000-4000-8000-000000000013",
-        "taskId": "00000000-0000-4000-8000-000000000011"
+        "taskId": "00000000-0000-4000-8000-000000000010"
       },
       "dependsOn": [],
       "operations": [
