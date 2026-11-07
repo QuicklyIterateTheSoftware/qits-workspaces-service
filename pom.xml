@@ -138,7 +138,7 @@
              qits-maintenance bumps it when the consumer releases a changed pact. -->
         <qits.landing-app-pacts-qits-workspaces-service.version>2026.1107.21728</qits.landing-app-pacts-qits-workspaces-service.version>
         <!-- qits-projects' consumer pact against this service (qits-1152). -->
-        <qits.projects-service-pacts-qits-workspaces-service.version>2026.1030.110448</qits.projects-service-pacts-qits-workspaces-service.version>
+        <qits.projects-service-pacts-qits-workspaces-service.version>2026.1107.45933</qits.projects-service-pacts-qits-workspaces-service.version>
         <!-- qits-artifacts', qits-orchestrator's and the qits CLI's consumer pacts against this
              service (qits-1149). qits-bootstrap-cli's is gone: it calls this service no more
              (qits-bootstrap-cli-rr-60). -->
