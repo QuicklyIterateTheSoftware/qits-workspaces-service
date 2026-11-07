@@ -19,6 +19,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.time.Instant;
 import java.util.List;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -69,6 +70,7 @@ public class WorkspacePromptAttachmentController {
       responseCode = "404",
       description = "No such ACTIVE workspace.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "listAgentPromptAttachments")
   public ListAttachmentsRequest.Response list(@PathParam("id") String id) {
     return new ListAttachmentsRequest.Response(promptAttachments.listAttachments(AgentController.agentId(id)));
   }
@@ -125,6 +127,7 @@ public class WorkspacePromptAttachmentController {
       responseCode = "403",
       description = DeskBinding.AGENT_403,
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "addAgentPromptAttachment")
   public Response add(@PathParam("id") String id, @Valid AddAttachmentRequest request) {
     desk.requireAgent(id);
     WorkspacePromptAttachment attachment =
@@ -158,6 +161,7 @@ public class WorkspacePromptAttachmentController {
       responseCode = "403",
       description = DeskBinding.AGENT_403,
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "updateAgentPromptAttachment")
   public AddAttachmentRequest.Response update(
       @PathParam("id") String id,
       @PathParam("attachmentId") String attachmentId,
@@ -189,6 +193,7 @@ public class WorkspacePromptAttachmentController {
       responseCode = "404",
       description = "No such ACTIVE workspace, or no such attachment on it.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "getAgentPromptAttachmentContent")
   public Response content(
       @PathParam("id") String id, @PathParam("attachmentId") String attachmentId) {
     WorkspacePromptAttachment attachment = promptAttachments.getAttachment(AgentController.agentId(id), attachmentId);
@@ -211,6 +216,7 @@ public class WorkspacePromptAttachmentController {
       responseCode = "403",
       description = DeskBinding.AGENT_403,
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "deleteAgentPromptAttachment")
   public Response delete(
       @PathParam("id") String id, @PathParam("attachmentId") String attachmentId) {
     desk.requireAgent(id);

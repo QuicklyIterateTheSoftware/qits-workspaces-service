@@ -1760,6 +1760,7 @@ paths:
         - qits:desk
   /workspaces/api/agents/{id}/prompt-attachments:
     get:
+      operationId: listAgentPromptAttachments
       parameters:
       - name: id
         in: path
@@ -1793,6 +1794,7 @@ paths:
         - qits:desk-admin
         - qits:agent
     post:
+      operationId: addAgentPromptAttachment
       parameters:
       - name: id
         in: path
@@ -1850,6 +1852,7 @@ paths:
         - qits:desk
   /workspaces/api/agents/{id}/prompt-attachments/{attachmentId}:
     put:
+      operationId: updateAgentPromptAttachment
       parameters:
       - name: attachmentId
         in: path
@@ -1907,6 +1910,7 @@ paths:
         - qits:desk-admin
         - qits:desk
     delete:
+      operationId: deleteAgentPromptAttachment
       parameters:
       - name: attachmentId
         in: path
@@ -1947,6 +1951,7 @@ paths:
         - qits:desk
   /workspaces/api/agents/{id}/prompt-attachments/{attachmentId}/content:
     get:
+      operationId: getAgentPromptAttachmentContent
       parameters:
       - name: attachmentId
         in: path
@@ -2357,6 +2362,7 @@ paths:
         - qits:agent
   /workspaces/api/branches/cleanup:
     post:
+      operationId: cleanupBranch
       parameters:
       - name: repositoryId
         in: query
@@ -2401,6 +2407,7 @@ paths:
         - qits:admin-agent
   /workspaces/api/branches/merge:
     post:
+      operationId: mergeBranch
       parameters:
       - name: repositoryId
         in: query
@@ -2679,6 +2686,7 @@ paths:
         - qits:desk
   /workspaces/api/history:
     get:
+      operationId: listWorkspaceHistory
       parameters:
       - name: repositoryId
         in: query
@@ -2706,6 +2714,7 @@ paths:
         - qits:agent
   /workspaces/api/history/{id}:
     patch:
+      operationId: updateWorkspaceHistory
       parameters:
       - name: id
         in: path

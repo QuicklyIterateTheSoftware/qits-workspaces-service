@@ -44,6 +44,7 @@ public class WorkspaceHistoryController {
   // A read, so an agent may make it too (phase 4: agents keep every read, lose writes).
   @jakarta.annotation.security.RolesAllowed({"qits:admin", "qits:admin-agent", "qits:desk-admin", "qits:agent"})
   @GET
+  @Operation(operationId = "listWorkspaceHistory")
   public ListHistoryRequest.Response list(@QueryParam("repositoryId") String repositoryId) {
     var entries =
         workspaceHistoryService.list(repositoryId).stream()
@@ -122,6 +123,7 @@ public class WorkspaceHistoryController {
       responseCode = "403",
       description = DeskBinding.WORKSPACE_403,
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "updateWorkspaceHistory")
   public UpdateHistoryRequest.Response update(
       @PathParam("id") Long id, UpdateHistoryRequest request) {
     desk.requireWorkspace(id);

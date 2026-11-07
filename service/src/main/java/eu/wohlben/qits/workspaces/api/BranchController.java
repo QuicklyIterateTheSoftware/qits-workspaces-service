@@ -11,6 +11,7 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -113,6 +114,7 @@ public class BranchController {
           "The target is the repository's default branch. `reason` is RELEASE_REQUIRED and the"
               + " message names the release flow that does write it.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "mergeBranch")
   public MergeBranchRequest.Response mergeBranch(
       @QueryParam("repositoryId") String repoId, @Valid MergeBranchRequest request) {
     requireAdmin("/branches/merge");
@@ -142,6 +144,7 @@ public class BranchController {
       responseCode = "404",
       description = "No such repository.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
+  @Operation(operationId = "cleanupBranch")
   public CleanupBranchRequest.Response cleanupBranch(
       @QueryParam("repositoryId") String repoId, @Valid CleanupBranchRequest request) {
     requireAdmin("/branches/cleanup");
