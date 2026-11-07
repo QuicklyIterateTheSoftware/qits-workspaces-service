@@ -78,7 +78,7 @@
         <qits.eventstream.version>2026.1107.192805</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1107.191249</qits.db-core.version>
-        <qits.arch-rules.version>2026.1107.202725</qits.arch-rules.version>
+        <qits.arch-rules.version>2026.1107.205842</qits.arch-rules.version>
         <qits.auth-core.version>2026.1106.507</qits.auth-core.version>
         <qits.containers-client.version>2026.1106.31658</qits.containers-client.version>
         <!-- CallerServerFilter/CallerClientFilter: jandex-indexed filters that record inbound
@@ -115,7 +115,7 @@
              (wiring/IdpContract); qits-containers' for the place and volume doors
              (containershost/ContainersContract); qits-workspace-daemon's for the agent-worktree
              doors DaemonAgentClient calls (daemonhost/WorkspaceDaemonContract). -->
-        <qits.idp-golden-masters.version>2026.1027.165632</qits.idp-golden-masters.version>
+        <qits.idp-golden-masters.version>2026.1107.220215</qits.idp-golden-masters.version>
         <qits.containers-golden-masters.version>2026.1019.103940</qits.containers-golden-masters.version>
         <qits.workspace-daemon-golden-masters.version>2026.1107.140355</qits.workspace-daemon-golden-masters.version>
         <!-- qits-system's golden masters (epic qits-1481): the lease, work-volume and target doors
