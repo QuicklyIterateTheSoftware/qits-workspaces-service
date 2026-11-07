@@ -575,7 +575,111 @@ class GoldenMasterRecordingTest {
               ProviderStates.A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION,
               "getAgentTranscript",
               WORKSPACES + "/agents/{agentId}/sessions/{sessionId}/transcript",
-              null));
+              null),
+          // qits-1937: the doors no state recorded yet. A project front desk's declared waits
+          // (qits-1618), as the default caller (admin and system), which acts on any project's desk.
+          Interaction.read(
+              ProviderStates.A_PROJECT_DESK_WITH_AN_OPEN_WAIT,
+              "listDeskWaits",
+              WORKSPACES + "/desks/{projectId}/waits?state=OPEN",
+              null),
+          Interaction.write(
+              ProviderStates.A_PROJECT_DESK_WITH_AN_OPEN_WAIT,
+              "createDeskWait",
+              WORKSPACES + "/desks/{projectId}/waits",
+              201,
+              "{\"label\":\"work " + ProviderStates.BUG_TICKET_QUALIFIED_ID + " VERIFIED\","
+                  + "\"selection\":{\"event\":\"EntityTransitioned\",\"when\":[["
+                  + "{\"path\":\"entities[].entityId\",\"op\":\"exact\",\"value\":\"" + ProviderStates.BUG_TICKET_ID + "\"},"
+                  + "{\"path\":\"entities[].status\",\"op\":\"exact\",\"value\":\"VERIFIED\"}]]},"
+                  + "\"timeout\":\"PT2H\"}"),
+          Interaction.call(
+              ProviderStates.A_PROJECT_DESK_WITH_AN_OPEN_WAIT,
+              "cancelDeskWait",
+              "DELETE",
+              WORKSPACES + "/desks/{projectId}/waits/{waitId}",
+              200,
+              null),
+          // The slot's remaining container buttons: the delete, and the Abandon guarded as usual.
+          // The delete is recorded on the stopped slot: on the running one it waits for its lease
+          // to end, and the fake qits-system holds an ended lease ENDING, so it would wait out the
+          // ending deadline.
+          Interaction.write(
+              ProviderStates.A_STOPPED_SLOT,
+              "deleteWorkspaceContainer",
+              WORKSPACES + "/workspaces/{workspaceId}/delete-container",
+              200,
+              null),
+          Interaction.write(
+              ProviderStates.A_STOPPED_SLOT,
+              "discardWorkspace",
+              WORKSPACES + "/workspaces/{workspaceId}/discard",
+              200,
+              "{\"result\":\"Abandoned from the slot page.\"}"),
+          // A repository's workspace history and a row's narrative.
+          Interaction.read(
+              ProviderStates.A_REPOSITORY_WITH_WORKSPACE_HISTORY,
+              "listWorkspaceHistory",
+              WORKSPACES + "/history?repositoryId={repositoryId}",
+              "$.entries"),
+          Interaction.call(
+              ProviderStates.A_REPOSITORY_WITH_WORKSPACE_HISTORY,
+              "updateWorkspaceHistory",
+              "PATCH",
+              WORKSPACES + "/history/{workspaceId}",
+              200,
+              "{\"preamble\":\"Fix the rounding in the invoice totals, line by line.\","
+                  + "\"result\":\"Rounded each line before summing; integrated as one commit.\"}"),
+          // The branch list's merge and cleanup. A merge into the default branch is refused:
+          // RELEASE_REQUIRED, the answer the branch list relies on.
+          Interaction.write(
+              ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES,
+              "mergeBranch",
+              WORKSPACES + "/branches/merge?repositoryId={repositoryId}",
+              409,
+              "{\"source\":\"{mergedBranch}\"}"),
+          Interaction.write(
+              ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES,
+              "cleanupBranch",
+              WORKSPACES + "/branches/cleanup?repositoryId={repositoryId}",
+              200,
+              "{\"branch\":\"{mergedBranch}\"}"),
+          // An agent's prompt attachments. The content door's 200 is raw PNG or JPEG bytes, which
+          // no golden master here renders, so its recording is the 404 of an attachment never
+          // written.
+          Interaction.read(
+              ProviderStates.AN_AGENT_WITH_A_PROMPT_ATTACHMENT,
+              "listAgentPromptAttachments",
+              WORKSPACES + "/agents/{agentId}/prompt-attachments",
+              null),
+          Interaction.write(
+              ProviderStates.AN_AGENT_WITH_A_PROMPT_ATTACHMENT,
+              "addAgentPromptAttachment",
+              WORKSPACES + "/agents/{agentId}/prompt-attachments",
+              201,
+              "{\"mimeType\":\"image/png\",\"label\":\"Pasted image 2\",\"source\":\"PASTE\","
+                  + "\"dataBase64\":\"" + ProviderStates.ONE_PIXEL_PNG + "\"}"),
+          Interaction.call(
+              ProviderStates.AN_AGENT_WITH_A_PROMPT_ATTACHMENT,
+              "updateAgentPromptAttachment",
+              "PUT",
+              WORKSPACES + "/agents/{agentId}/prompt-attachments/{attachmentId}",
+              200,
+              "{\"mimeType\":\"image/png\",\"label\":\"Pasted image 1, cropped\","
+                  + "\"source\":\"PASTE\",\"dataBase64\":\"" + ProviderStates.ONE_PIXEL_PNG + "\"}"),
+          Interaction.call(
+              ProviderStates.AN_AGENT_WITH_A_PROMPT_ATTACHMENT,
+              "deleteAgentPromptAttachment",
+              "DELETE",
+              WORKSPACES + "/agents/{agentId}/prompt-attachments/{attachmentId}",
+              204,
+              null),
+          Interaction.read(
+                  ProviderStates.AN_AGENT_WITH_A_PROMPT_ATTACHMENT,
+                  "getAgentPromptAttachmentContent",
+                  WORKSPACES + "/agents/{agentId}/prompt-attachments/{missingAttachmentId}/content",
+                  null)
+              .answering(404));
 
   /**
    * The params that hold a workspace row id. Frozen like the answers' row ids, so the index names

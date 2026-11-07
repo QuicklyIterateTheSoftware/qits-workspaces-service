@@ -1,0 +1,4 @@
+{
+  "message": "'master' is the repository's default branch and is written by the release flow alone. Ask qits-projects for a release request naming this branch; it lands the release as a tag and merges the default branch once the deployment is live.",
+  "reason": "RELEASE_REQUIRED"
+}

@@ -29,6 +29,104 @@
       ]
     },
     {
+      "name": "a project desk with an open wait",
+      "slug": "a-project-desk-with-an-open-wait",
+      "params": {
+        "projectId": "00000000-0000-4000-8000-00000000000e",
+        "releaseRequestId": "00000000-0000-4000-8000-0000000000c1",
+        "waitId": "00000000-0000-4000-8000-0000000000b6"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "cancelDeskWait",
+          "method": "DELETE",
+          "path": "/workspaces/api/desks/{projectId}/waits/{waitId}",
+          "status": 200,
+          "file": "a-project-desk-with-an-open-wait/cancelDeskWait.json",
+          "frozen": {
+            "ids": [
+              "$.id",
+              "$.selection.when[*][*].value"
+            ],
+            "instants": [
+              "$.createdAt",
+              "$.expiresAt",
+              "$.closedAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "createDeskWait",
+          "method": "POST",
+          "path": "/workspaces/api/desks/{projectId}/waits",
+          "body": {
+            "label": "work contract-00000001-9 VERIFIED",
+            "selection": {
+              "event": "EntityTransitioned",
+              "when": [
+                [
+                  {
+                    "path": "entities[].entityId",
+                    "op": "exact",
+                    "value": "00000000-0000-4000-8000-000000000001"
+                  },
+                  {
+                    "path": "entities[].status",
+                    "op": "exact",
+                    "value": "VERIFIED"
+                  }
+                ]
+              ]
+            },
+            "timeout": "PT2H"
+          },
+          "status": 201,
+          "file": "a-project-desk-with-an-open-wait/createDeskWait.json",
+          "frozen": {
+            "ids": [
+              "$.id",
+              "$.selection.when[*][*].value",
+              "$.subjectRef"
+            ],
+            "instants": [
+              "$.createdAt",
+              "$.expiresAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "listDeskWaits",
+          "method": "GET",
+          "path": "/workspaces/api/desks/{projectId}/waits",
+          "query": {
+            "state": "OPEN"
+          },
+          "status": 200,
+          "file": "a-project-desk-with-an-open-wait/listDeskWaits.json",
+          "frozen": {
+            "ids": [
+              "$.waits[*].id",
+              "$.waits[*].selection.when[*][*].value"
+            ],
+            "instants": [
+              "$.waits[*].createdAt",
+              "$.waits[*].expiresAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "a project with agents bound to work items",
       "slug": "a-project-with-agents-bound-to-work-items",
       "params": {
@@ -296,6 +394,62 @@
       ]
     },
     {
+      "name": "a repository with workspace history",
+      "slug": "a-repository-with-workspace-history",
+      "params": {
+        "repositoryId": "00000000-0000-4000-8000-000000000019",
+        "workspaceId": "1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listWorkspaceHistory",
+          "method": "GET",
+          "path": "/workspaces/api/history",
+          "query": {
+            "repositoryId": "{repositoryId}"
+          },
+          "status": 200,
+          "file": "a-repository-with-workspace-history/listWorkspaceHistory.json",
+          "frozen": {
+            "ids": [],
+            "instants": [
+              "$.entries[*].workspace.createdAt",
+              "$.entries[*].workspace.resolvedAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.entries[*].workspace.id"
+            ],
+            "listFilteredTo": "$.entries"
+          }
+        },
+        {
+          "operationId": "updateWorkspaceHistory",
+          "method": "PATCH",
+          "path": "/workspaces/api/history/{workspaceId}",
+          "body": {
+            "preamble": "Fix the rounding in the invoice totals, line by line.",
+            "result": "Rounded each line before summing; integrated as one commit."
+          },
+          "status": 200,
+          "file": "a-repository-with-workspace-history/updateWorkspaceHistory.json",
+          "frozen": {
+            "ids": [],
+            "instants": [
+              "$.workspace.createdAt",
+              "$.workspace.resolvedAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.workspace.id"
+            ],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "a resolved workspace slot with an archived agent session",
       "slug": "a-resolved-workspace-slot-with-an-archived-agent-session",
       "params": {
@@ -402,6 +556,43 @@
       },
       "dependsOn": [],
       "operations": [
+        {
+          "operationId": "deleteWorkspaceContainer",
+          "method": "POST",
+          "path": "/workspaces/api/workspaces/{workspaceId}/delete-container",
+          "status": 200,
+          "file": "a-stopped-workspace-slot/deleteWorkspaceContainer.json",
+          "frozen": {
+            "ids": [
+              "$.affectedAgentIds[*]"
+            ],
+            "instants": [
+              "$.createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.id"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "discardWorkspace",
+          "method": "POST",
+          "path": "/workspaces/api/workspaces/{workspaceId}/discard",
+          "body": {
+            "result": "Abandoned from the slot page."
+          },
+          "status": 200,
+          "file": "a-stopped-workspace-slot/discardWorkspace.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
         {
           "operationId": "ensureWorkspaceContainer",
           "method": "POST",
@@ -1264,6 +1455,112 @@
       ]
     },
     {
+      "name": "an agent with a prompt attachment",
+      "slug": "an-agent-with-a-prompt-attachment",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1",
+        "attachmentId": "00000000-0000-4000-8000-0000000000f1",
+        "missingAttachmentId": "00000000-0000-4000-8000-0000000000f2"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "addAgentPromptAttachment",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/prompt-attachments",
+          "body": {
+            "mimeType": "image/png",
+            "label": "Pasted image 2",
+            "source": "PASTE",
+            "dataBase64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+          },
+          "status": 201,
+          "file": "an-agent-with-a-prompt-attachment/addAgentPromptAttachment.json",
+          "frozen": {
+            "ids": [
+              "$.id"
+            ],
+            "instants": [
+              "$.createdAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "deleteAgentPromptAttachment",
+          "method": "DELETE",
+          "path": "/workspaces/api/agents/{agentId}/prompt-attachments/{attachmentId}",
+          "status": 204,
+          "file": null,
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "getAgentPromptAttachmentContent",
+          "method": "GET",
+          "path": "/workspaces/api/agents/{agentId}/prompt-attachments/{missingAttachmentId}/content",
+          "status": 404,
+          "file": "an-agent-with-a-prompt-attachment/getAgentPromptAttachmentContent.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "listAgentPromptAttachments",
+          "method": "GET",
+          "path": "/workspaces/api/agents/{agentId}/prompt-attachments",
+          "status": 200,
+          "file": "an-agent-with-a-prompt-attachment/listAgentPromptAttachments.json",
+          "frozen": {
+            "ids": [
+              "$.attachments[*].id"
+            ],
+            "instants": [
+              "$.attachments[*].createdAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "updateAgentPromptAttachment",
+          "method": "PUT",
+          "path": "/workspaces/api/agents/{agentId}/prompt-attachments/{attachmentId}",
+          "body": {
+            "mimeType": "image/png",
+            "label": "Pasted image 1, cropped",
+            "source": "PASTE",
+            "dataBase64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+          },
+          "status": 200,
+          "file": "an-agent-with-a-prompt-attachment/updateAgentPromptAttachment.json",
+          "frozen": {
+            "ids": [
+              "$.id"
+            ],
+            "instants": [
+              "$.createdAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "an agent with a saved prompt draft",
       "slug": "an-agent-with-a-saved-prompt-draft",
       "params": {
@@ -1762,6 +2059,46 @@
       },
       "dependsOn": [],
       "operations": [
+        {
+          "operationId": "cleanupBranch",
+          "method": "POST",
+          "path": "/workspaces/api/branches/cleanup",
+          "query": {
+            "repositoryId": "{repositoryId}"
+          },
+          "body": {
+            "branch": "{mergedBranch}"
+          },
+          "status": 200,
+          "file": "repositories-with-merged-branches/cleanupBranch.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "mergeBranch",
+          "method": "POST",
+          "path": "/workspaces/api/branches/merge",
+          "query": {
+            "repositoryId": "{repositoryId}"
+          },
+          "body": {
+            "source": "{mergedBranch}"
+          },
+          "status": 409,
+          "file": "repositories-with-merged-branches/mergeBranch.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
         {
           "operationId": "sweepBranches",
           "method": "POST",

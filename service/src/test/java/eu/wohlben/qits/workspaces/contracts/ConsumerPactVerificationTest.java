@@ -292,6 +292,21 @@ class ConsumerPactVerificationTest {
     return states.params(ProviderStates.A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT);
   }
 
+  @State(ProviderStates.A_PROJECT_DESK_WITH_AN_OPEN_WAIT)
+  Map<String, String> aProjectDeskWithAnOpenWait() {
+    return states.params(ProviderStates.A_PROJECT_DESK_WITH_AN_OPEN_WAIT);
+  }
+
+  @State(ProviderStates.A_REPOSITORY_WITH_WORKSPACE_HISTORY)
+  Map<String, String> aRepositoryWithWorkspaceHistory() {
+    return states.params(ProviderStates.A_REPOSITORY_WITH_WORKSPACE_HISTORY);
+  }
+
+  @State(ProviderStates.AN_AGENT_WITH_A_PROMPT_ATTACHMENT)
+  Map<String, String> anAgentWithAPromptAttachment() {
+    return states.params(ProviderStates.AN_AGENT_WITH_A_PROMPT_ATTACHMENT);
+  }
+
   @State(ProviderStates.LEGACY_A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE)
   Map<String, String> aSlotRunningOnARunnerInService() {
     return states.params(ProviderStates.LEGACY_A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE);

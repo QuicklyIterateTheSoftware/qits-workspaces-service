@@ -29,7 +29,10 @@ import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
+import eu.wohlben.qits.workspaces.persistence.WorkspacePromptAttachmentRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import eu.wohlben.qits.workspaces.entity.PromptAttachmentSource;
+import eu.wohlben.qits.workspaces.entity.WorkspacePromptAttachment;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenMasters;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusMock;
@@ -139,6 +142,13 @@ public class ProviderStates {
   public static final String A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT =
       "a workspace slot qits-system cannot be asked about";
 
+  // The doors no state recorded yet (qits-1937): a project desk's declared waits, a repository's
+  // workspace history and an agent's prompt attachments.
+  public static final String A_PROJECT_DESK_WITH_AN_OPEN_WAIT = "a project desk with an open wait";
+  public static final String A_REPOSITORY_WITH_WORKSPACE_HISTORY =
+      "a repository with workspace history";
+  public static final String AN_AGENT_WITH_A_PROMPT_ATTACHMENT = "an agent with a prompt attachment";
+
   // The two slot states' names before the cutover, answered as aliases and never recorded: the
   // consumers' pinned pacts were written against the golden masters that named them so, and they
   // can take the new names only once this service's golden masters carrying them are published.
@@ -225,6 +235,7 @@ public class ProviderStates {
   @Inject FakeTargetPlacement targets;
   @Inject TechnicalProcessRegistry technicalProcesses;
   @Inject WorkspacePromptDraftService promptDrafts;
+  @Inject WorkspacePromptAttachmentRepository promptAttachments;
   @Inject Vertx vertx;
   @Inject ContractBearers bearers;
 
@@ -268,6 +279,9 @@ public class ProviderStates {
         A_SLOT_RUNNING_ON_A_TARGET,
         A_STOPPED_SLOT,
         A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT,
+        A_PROJECT_DESK_WITH_AN_OPEN_WAIT,
+        A_REPOSITORY_WITH_WORKSPACE_HISTORY,
+        AN_AGENT_WITH_A_PROMPT_ATTACHMENT,
         LEGACY_A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE,
         LEGACY_A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE);
   }
@@ -308,6 +322,9 @@ public class ProviderStates {
       case A_STOPPED_SLOT, LEGACY_A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE ->
           slotOnATarget(WorkspaceRuntimeStatus.STOPPED);
       case A_SLOT_QITS_SYSTEM_CANNOT_BE_ASKED_ABOUT -> slotQitsSystemCannotBeAskedAbout();
+      case A_PROJECT_DESK_WITH_AN_OPEN_WAIT -> deskWithAnOpenWait();
+      case A_REPOSITORY_WITH_WORKSPACE_HISTORY -> repositoryWithWorkspaceHistory();
+      case AN_AGENT_WITH_A_PROMPT_ATTACHMENT -> agentWithAPromptAttachment();
       default -> throw new IllegalArgumentException("No provider state named '" + state + "'");
     };
   }
@@ -337,6 +354,9 @@ public class ProviderStates {
               workspaces.delete("repositoryId = ?1", WAITING_REPOSITORY_ID);
               agentRows.delete("repositoryId = ?1", ATTENTION_REPOSITORY_ID);
               workspaces.delete("repositoryId = ?1", ATTENTION_REPOSITORY_ID);
+              // The desk's waits name no agent, so no agent's delete takes them (qits-1937).
+              agentWaits.delete("deskProjectId = ?1", UUID.fromString(PROJECT_ID));
+              workspaces.delete("repositoryId = ?1", HISTORY_REPOSITORY_ID);
             });
     targets.reset();
   }
@@ -1385,5 +1405,116 @@ public class ProviderStates {
     workspaces.persist(row);
     workspaces.flush();
     return row.id;
+  }
+
+  // --- the doors no state recorded yet (qits-1937) ------------------------------------------------
+
+  /** The OPEN wait {@link #A_PROJECT_DESK_WITH_AN_OPEN_WAIT} seeds for {@link #PROJECT_ID}'s desk. */
+  static final String DESK_WAIT_ID = "00000000-0000-4000-8000-0000000000b6";
+
+  /** The repository {@link #A_REPOSITORY_WITH_WORKSPACE_HISTORY} keeps its one resolved row in. */
+  static final String HISTORY_REPOSITORY_ID = "00000000-0000-4000-8000-000000000019";
+
+  /** The attachment {@link #AN_AGENT_WITH_A_PROMPT_ATTACHMENT} seeds, and one it never wrote. */
+  static final String PROMPT_ATTACHMENT_ID = "00000000-0000-4000-8000-0000000000f1";
+
+  static final String MISSING_PROMPT_ATTACHMENT_ID = "00000000-0000-4000-8000-0000000000f2";
+
+  /** A 1×1 transparent PNG, as {@code PromptAttachmentFixtures} holds it: the sniff wants real bytes. */
+  static final String ONE_PIXEL_PNG =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5Erk"
+          + "Jggg==";
+
+  /**
+   * {@link #PROJECT_ID}'s front desk waiting on a release request (qits-1618): one OPEN desk wait,
+   * two hours to run, naming no agent. {@link #cleanUp} removes every desk wait of the project, so
+   * the one a recorded create declares goes too.
+   */
+  private Setup deskWithAnOpenWait() {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWait wait = new AgentWait();
+              wait.id = UUID.fromString(DESK_WAIT_ID);
+              wait.deskProjectId = UUID.fromString(PROJECT_ID);
+              wait.waiterSubject = CONTRACT_CALLER;
+              wait.label = "release-request " + RELEASE_REQUEST_ID;
+              wait.selection =
+                  EventSelection.of(
+                          "ReleaseRequestStateChanged",
+                          EventSelection.Condition.exact("releaseRequestId", RELEASE_REQUEST_ID),
+                          EventSelection.Condition.exact("state", "FINALIZED"))
+                      .toJson();
+              wait.eventName = "ReleaseRequestStateChanged";
+              wait.createdAt = Instant.now();
+              wait.expiresAt = wait.createdAt.plusSeconds(7200);
+              agentWaits.persist(wait);
+            });
+    Map<String, String> params = new TreeMap<>();
+    params.put("projectId", PROJECT_ID);
+    params.put("releaseRequestId", RELEASE_REQUEST_ID);
+    params.put("waitId", DESK_WAIT_ID);
+    return new Setup(params, List.of());
+  }
+
+  /**
+   * One workspace that flowed through {@link #HISTORY_REPOSITORY_ID}, a repository of its own so its
+   * history lists nothing another state wrote: the bug ticket's, INTEGRATED, with its narrative.
+   */
+  private Setup repositoryWithWorkspaceHistory() {
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Workspace row = new Workspace();
+              row.repositoryId = HISTORY_REPOSITORY_ID;
+              row.workspaceId = "ticket-invoice-totals-are-off-by-one-cent";
+              row.branch = TICKET_BRANCH;
+              row.status = WorkspaceStatus.INTEGRATED;
+              row.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+              row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
+              row.workId = BUG_TICKET_ID;
+              row.entityId = BUG_TICKET_QUALIFIED_ID;
+              row.ticketId = BUG_TICKET_ID;
+              row.preamble = "Fix the rounding in the invoice totals.";
+              row.result = "Rounded each line before summing; integrated.";
+              row.resolvedAt = Instant.now();
+              workspaces.persist(row);
+              workspaces.flush();
+              ids.add(row.id);
+            });
+    Map<String, String> params = new TreeMap<>();
+    params.put("repositoryId", HISTORY_REPOSITORY_ID);
+    params.put("workspaceId", String.valueOf(ids.get(0)));
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /**
+   * The bug ticket's ACTIVE agent, holding a slot whose lease waits, with one pasted PNG beside its
+   * prompt at {@link #PROMPT_ATTACHMENT_ID}. The attachments go with the agent's row (on delete
+   * cascade), so the one a recorded add makes goes too.
+   */
+  private Setup agentWithAPromptAttachment() {
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Long slot = slot(WorkspaceRuntimeStatus.QUEUED);
+              ids.add(slot);
+              agent(AGENT_ACTIVE_ID, slot, AgentState.ACTIVE, AgentRunState.RUNNING);
+              WorkspacePromptAttachment attachment = new WorkspacePromptAttachment();
+              attachment.id = PROMPT_ATTACHMENT_ID;
+              attachment.agentId = UUID.fromString(AGENT_ACTIVE_ID);
+              attachment.mimeType = "image/png";
+              attachment.label = "Pasted image 1";
+              attachment.source = PromptAttachmentSource.PASTE;
+              attachment.bytes = java.util.Base64.getDecoder().decode(ONE_PIXEL_PNG);
+              promptAttachments.persist(attachment);
+            });
+    Map<String, String> params = new TreeMap<>();
+    params.put("agentId", AGENT_ACTIVE_ID);
+    params.put("attachmentId", PROMPT_ATTACHMENT_ID);
+    params.put("missingAttachmentId", MISSING_PROMPT_ATTACHMENT_ID);
+    return new Setup(params, List.copyOf(ids));
   }
 }

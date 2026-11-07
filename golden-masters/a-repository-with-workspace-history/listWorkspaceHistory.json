@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "workspace": {
+        "id": 1,
+        "workspaceId": "ticket-invoice-totals-are-off-by-one-cent",
+        "parent": null,
+        "status": "INTEGRATED",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "resolvedAt": "2026-01-01T00:00:00Z"
+      }
+    }
+  ]
+}

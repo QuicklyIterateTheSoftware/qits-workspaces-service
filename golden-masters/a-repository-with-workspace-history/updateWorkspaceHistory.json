@@ -1,0 +1,14 @@
+{
+  "workspace": {
+    "id": 1,
+    "workspaceId": "ticket-invoice-totals-are-off-by-one-cent",
+    "parent": null,
+    "status": "INTEGRATED",
+    "preamble": "Fix the rounding in the invoice totals, line by line.",
+    "result": "Rounded each line before summing; integrated as one commit.",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "resolvedAt": "2026-01-01T00:00:00Z",
+    "events": [],
+    "placement": "TARGET"
+  }
+}
