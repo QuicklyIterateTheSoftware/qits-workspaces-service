@@ -5,12 +5,13 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * A project front desk's declared wait closed (qits-1618): an event matched it, or its timeout
- * passed. The desk is a Claude session qits-projects runs, with no agent row here to be woken, so
+ * A project front desk's declared wait closed (qits-1618): an event matched it, its timeout
+ * passed, or (qits-1961) its subject can no longer reach what it waits for. The desk is a Claude session qits-projects runs, with no agent row here to be woken, so
  * this event is its wake — qits-projects consumes it and hands {@code turn} to the desk.
  *
- * <p>The field names are a contract with that consumer. {@code state} is {@link #MATCHED} or {@link
- * #TIMED_OUT}; a cancelled wait announces nothing. {@code matchedEventId} is the id of the event
+ * <p>The field names are a contract with that consumer. {@code state} is {@link #MATCHED}, {@link
+ * #TIMED_OUT} or {@link #BROKEN}; a cancelled wait announces nothing. A BROKEN one's {@code turn}
+ * says why it broke. {@code matchedEventId} is the id of the event
  * that matched, absent on a timeout. {@code turn} is the sentence an agent's wake would carry,
  * verbatim, and {@code closedAt} is the close's ISO-8601 instant (also the envelope's {@code
  * occurredAt}).
@@ -40,6 +41,9 @@ public record DeskWaitClosed(
 
   /** The wait's timeout passed first. */
   public static final String TIMED_OUT = "TIMED_OUT";
+
+  /** The wait's subject can no longer reach what it waits for (qits-1961). */
+  public static final String BROKEN = "BROKEN";
 
   /** The facts of a closed wait, under the id stored when it closed; {@code occurredAt} is the close. */
   public DeskWaitClosed(

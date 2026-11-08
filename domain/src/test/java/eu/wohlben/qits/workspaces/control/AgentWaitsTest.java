@@ -844,10 +844,21 @@ public class AgentWaitsTest {
       assertEquals("RUNNING", changed.get(0).subjectState());
       assertEquals(startedAt.toString(), changed.get(0).subjectStateAt());
 
-      // A resolved wait is not looked up again by a pass.
+      // A wait looked up less than RECHECK_EVERY ago is not looked up again by a pass (qits-1961)…
       long asked = resolver.askedFor(run);
       waits.resolveUnresolved();
       assertEquals(asked, resolver.askedFor(run));
+      // …and one whose last lookup is older is: a resolved wait is no longer read only once.
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  waitRows.findById(UUID.fromString(wait.id())).subjectResolvedAt =
+                      Instant.now().minus(Duration.ofDays(1)));
+      waits.resolveUnresolved();
+      assertEquals(asked + 1, resolver.askedFor(run));
+      assertTrue(
+          waitRow(wait.id()).subjectResolvedAt.isAfter(Instant.now().minus(AgentWaits.RECHECK_EVERY)),
+          "the re-check is what the next one is paced by");
     } finally {
       resolver.forget(run);
     }

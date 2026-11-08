@@ -237,20 +237,21 @@ public class AgentAttentionsTest {
             null);
     assertNull(row(id).attentionCode, "a declared wait is not idleness");
 
-    // The request ended another way: the wait will never match.
+    // The request got there with no event the wait heard: it should have matched. (One that ended
+    // another way is no longer reported: its lookup breaks the wait, qits-1961.)
     UUID waitId = UUID.fromString(wait.id());
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
               AgentWait w = waitRows.findById(waitId);
-              w.subjectState = "WITHDRAWN";
+              w.subjectState = "FINALIZED";
               w.subjectStateAt = Instant.parse("2026-10-28T10:42:00Z");
             });
     attentions.reevaluate(id);
     AgentWorktree passed = row(id);
     assertEquals("WAIT_SUBJECT_PASSED", passed.attentionCode);
     assertEquals(waitId, passed.attentionWaitId);
-    assertEquals("Waits on x-rr-7 to end; it is WITHDRAWN since 10:42", passed.attentionReason);
+    assertEquals("Waits on x-rr-7 to end; it is FINALIZED since 10:42", passed.attentionReason);
     List<AgentAttentionChanged> all =
         announced.await(AgentAttentionChanged.class, e -> e.agentId().equals(id.toString()), 3);
     assertEquals(List.of("IDLE_NO_WAIT", "-", "WAIT_SUBJECT_PASSED"),

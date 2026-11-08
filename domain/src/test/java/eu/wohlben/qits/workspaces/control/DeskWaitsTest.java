@@ -89,10 +89,13 @@ public class DeskWaitsTest {
   }
 
   @Test
-  void aDeskHoldsAtMostEightOpenWaitsAndATimeoutOfAtMostThirtyDays() {
+  void aDeskHoldsAtMostEightOpenWaitsAndATimeoutOfAtMostADay() {
     UUID project = UUID.randomUUID();
     for (int i = 0; i < AgentWaits.MAX_OPEN_PER_AGENT; i++) {
-      waits.createForDesk(project, "w" + i, EventSelection.of("DeskTestBuildStatusChanged"), null, null);
+      AgentWaitDto w =
+          waits.createForDesk(project, "w" + i, EventSelection.of("DeskTestBuildStatusChanged"), null, null);
+      // No timeout asked for: the platform's ceiling (qits-1961).
+      assertEquals(AgentWaits.DEFAULT_TIMEOUT, Duration.between(w.createdAt(), w.expiresAt()));
     }
     ConflictException full =
         assertThrows(
@@ -105,7 +108,10 @@ public class DeskWaitsTest {
 
     assertThrows(
         BadRequestException.class,
-        () -> waits.createForDesk(UUID.randomUUID(), "x", EventSelection.of("X"), Duration.ofDays(31), null));
+        () -> waits.createForDesk(UUID.randomUUID(), "x", EventSelection.of("X"), Duration.ofHours(25), null));
+    AgentWaitDto day =
+        waits.createForDesk(UUID.randomUUID(), "x", EventSelection.of("X"), Duration.ofHours(24), null);
+    assertEquals(Duration.ofHours(24), Duration.between(day.createdAt(), day.expiresAt()));
     assertThrows(
         BadRequestException.class,
         () -> waits.createForDesk(UUID.randomUUID(), "x", EventSelection.of("X"), Duration.ZERO, null));

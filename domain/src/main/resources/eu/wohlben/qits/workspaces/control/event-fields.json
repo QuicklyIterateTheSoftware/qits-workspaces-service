@@ -195,7 +195,8 @@
     },
     "AgentWaitClosed": {
       "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
-      "matchedEventId": "scalar", "projectId": "scalar", "state": "scalar", "waitId": "scalar"
+      "label": "scalar", "matchedEventId": "scalar", "projectId": "scalar", "reason": "scalar",
+      "state": "scalar", "waitId": "scalar"
     },
     "AgentActivityChanged": {
       "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",

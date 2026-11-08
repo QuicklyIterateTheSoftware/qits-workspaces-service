@@ -9,7 +9,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * The subject lookup (epic qits-1681), scripted per ref: a ref a test {@link #answer}s resolves to
- * that, one it {@link #fail}s throws {@link WaitSubjectResolver.Unresolvable}, and every other ref
+ * that, one it {@link #fail}s throws {@link WaitSubjectResolver.Unresolvable} (one it says is {@link
+ * #notFound}, the 404's {@link WaitSubjectResolver.NotFound}, qits-1961), and every other ref
  * resolves to nothing — so being a bean for every {@code @QuarkusTest} in the module changes no other
  * test's waits. Refs are unique per test; {@link #forget} after.
  */
@@ -20,11 +21,17 @@ public class FakeWaitSubjectResolver implements WaitSubjectResolver {
 
   private final Map<String, String> failures = new ConcurrentHashMap<>();
 
+  private final Map<String, String> missing = new ConcurrentHashMap<>();
+
   private final List<String> asked = new CopyOnWriteArrayList<>();
 
   @Override
   public Optional<Resolved> resolve(WaitSubjects.Kind kind, String ref, String projectId) {
     asked.add(kind + " " + ref + " " + projectId);
+    String gone = missing.get(ref);
+    if (gone != null) {
+      throw new NotFound(gone);
+    }
     String failure = failures.get(ref);
     if (failure != null) {
       throw new Unresolvable(failure);
@@ -34,12 +41,21 @@ public class FakeWaitSubjectResolver implements WaitSubjectResolver {
 
   public void answer(String ref, Resolved resolved) {
     failures.remove(ref);
+    missing.remove(ref);
     answers.put(ref, resolved);
   }
 
   public void fail(String ref, String message) {
     answers.remove(ref);
+    missing.remove(ref);
     failures.put(ref, message);
+  }
+
+  /** The provider answers 404 for {@code ref} (qits-1961). */
+  public void notFound(String ref, String message) {
+    answers.remove(ref);
+    failures.remove(ref);
+    missing.put(ref, message);
   }
 
   /** How often {@code ref} was looked up, of any kind. */
@@ -55,5 +71,6 @@ public class FakeWaitSubjectResolver implements WaitSubjectResolver {
   public void forget(String ref) {
     answers.remove(ref);
     failures.remove(ref);
+    missing.remove(ref);
   }
 }

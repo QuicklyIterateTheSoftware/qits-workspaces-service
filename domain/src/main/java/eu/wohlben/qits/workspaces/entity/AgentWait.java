@@ -15,7 +15,8 @@ import java.util.UUID;
 
 /**
  * A declared wait (qits-1153): the agent waits for an event that matches {@link #selection}, and
- * gets a turn when one arrives or {@link #expiresAt} passes. See {@code V23}.
+ * gets a turn when one arrives, when its subject can no longer get there (BROKEN, qits-1961) or when
+ * {@link #expiresAt} passes. See {@code V23}.
  *
  * <p><b>Two holders</b> (qits-1618, {@code V32}): an agent ({@link #agentId}) or a project's front
  * desk ({@link #deskProjectId}), exactly one of them. A desk wait's close is announced as {@code
@@ -81,9 +82,28 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
   @Column(name = "created_at", nullable = false, updatable = false)
   public Instant createdAt;
 
-  /** When it times out; null = never. */
+  /**
+   * When it times out. Never null on a wait declared since qits-1961 ({@code V38}): a wait that asked
+   * for no timeout gets the platform's ceiling ({@link #expiryIsCeiling}); null only on a closed row
+   * from before.
+   */
   @Column(name = "expires_at")
   public Instant expiresAt;
+
+  /**
+   * Whether {@link #expiresAt} is the platform's ceiling (qits-1961, {@code V38}) — the default for a
+   * wait that asked for no timeout, or the cap {@code V38} put on an older one that asked for more —
+   * rather than a timeout the waiter asked for. The timed-out turn says which.
+   */
+  @Column(name = "expiry_is_ceiling", nullable = false)
+  public boolean expiryIsCeiling;
+
+  /**
+   * Why the wait is BROKEN (qits-1961, {@code V38}): the platform's one line, naming the subject,
+   * its state and since when. Null in every other state.
+   */
+  @Column(name = "broken_reason", columnDefinition = "text")
+  public String brokenReason;
 
   /** The id of the event that matched it. */
   @Column(name = "matched_event_id", columnDefinition = "text")
@@ -92,7 +112,7 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
   @Column(name = "closed_at")
   public Instant closedAt;
 
-  /** A desk wait's {@code DeskWaitClosed} id, set when it MATCHED or TIMED_OUT; re-published as is. */
+  /** A desk wait's {@code DeskWaitClosed} id, set when it MATCHED, BROKE or TIMED_OUT; re-published as is. */
   @Column(name = "closed_event_id")
   public UUID closedEventId;
 
@@ -139,7 +159,10 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
   @Column(name = "subject_expected_by")
   public Instant subjectExpectedBy;
 
-  /** The last successful REST resolution of the subject. */
+  /**
+   * The last successful REST resolution of the subject. Since qits-1961 an OPEN wait is looked up
+   * again once this is {@code AgentWaits.RECHECK_EVERY} old, so it also paces the re-check.
+   */
   @Column(name = "subject_resolved_at")
   public Instant subjectResolvedAt;
 

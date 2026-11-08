@@ -114,8 +114,10 @@ class LifecycleEventsContractTest {
             agentInProject, "subjectKind", "subjectQualifiedId", "subjectRef", "subjectState",
             "subjectStateAt", "waitId"));
     out.put(
-        new AgentWaitClosed(AGENT, WORK, "385", REPO, PROJECT, "wait-1", AgentWaitClosed.MATCHED, "ev-1", AT),
-        with(agentInProject, "matchedEventId", "state", "waitId"));
+        new AgentWaitClosed(
+            AGENT, WORK, "385", REPO, PROJECT, "wait-1", AgentWaitClosed.BROKEN, null,
+            "branch ticket/x live everywhere", "branch ticket/x is FAILED since 09:00 UTC", AT),
+        with(agentInProject, "label", "reason", "state", "waitId"));
     out.put(
         new AgentActivityChanged(
             AGENT, WORK, "385", REPO, PROJECT, "IDLE", Instant.parse("2026-10-13T09:00:00Z"), AT),

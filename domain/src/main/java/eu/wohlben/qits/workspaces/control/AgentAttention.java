@@ -25,8 +25,9 @@ import java.util.UUID;
  *
  * <ol>
  *   <li>{@link Code#WAIT_SUBJECT_PASSED} — an OPEN wait whose subject's recorded state is one the
- *       wait names (it should have matched), or final for its kind and not one it names (it never
- *       will). Since the state was seen to begin.
+ *       wait names (it should have matched). Since the state was seen to begin. A subject final for
+ *       its kind and not one the wait names (it never will) is no longer reported here: since
+ *       qits-1961 its lookup closes the wait BROKEN and wakes the agent ({@link WaitBreaks}).
  *   <li>{@link Code#BLOCKED_NO_DESK} — an explicit block ({@code EXPLICIT} or {@code BOTH}) standing
  *       for {@code blocked-after}, with no {@code @desk} comment on the item since it began. Since
  *       the block began.
@@ -110,9 +111,8 @@ public final class AgentAttention {
         continue;
       }
       List<String> targets = targets(wait);
-      boolean reached = !targets.isEmpty() && targets.contains(state);
-      boolean ended = WaitSubjects.isFinal(kind, state) && !targets.contains(state);
-      if (!reached && !ended) {
+      // A subject that ended elsewhere breaks its wait (qits-1961): only a reached one is reported.
+      if (targets.isEmpty() || !targets.contains(state)) {
         continue;
       }
       Instant since = wait.subjectStateAt != null ? wait.subjectStateAt : wait.createdAt;

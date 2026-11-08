@@ -26,7 +26,11 @@ public record WaitView(
     @Schema(implementation = SelectionSchema.class) JsonNode selection,
     AgentWaitState state,
     Instant createdAt,
-    Instant expiresAt,
+    @Schema(
+            description =
+                "When it times out: the timeout it asked for, else the platform's ceiling of 8 h;"
+                    + " never null on a wait declared since qits-1961")
+        Instant expiresAt,
     String matchedEventId,
     Instant closedAt,
     @Schema(
@@ -43,7 +47,12 @@ public record WaitView(
     @Schema(description = "The subject's last known state") String subjectState,
     @Schema(description = "When that state was seen to begin") Instant subjectStateAt,
     @Schema(description = "Runs only: when the run should have finished") Instant subjectExpectedBy,
-    @Schema(description = "The last failure to look the subject up") String subjectError) {
+    @Schema(description = "The last failure to look the subject up") String subjectError,
+    @Schema(
+            description =
+                "Why the wait is BROKEN: its subject, looked up, can no longer reach what it waits"
+                    + " for; null in every other state")
+        String brokenReason) {
 
   /** Parses a stored selection; a bare tree, so nothing here needs reflection in a native image. */
   private static final ObjectMapper JSON = new ObjectMapper();
@@ -96,6 +105,7 @@ public record WaitView(
         wait.subjectState(),
         wait.subjectStateAt(),
         wait.subjectExpectedBy(),
-        wait.subjectError());
+        wait.subjectError(),
+        wait.brokenReason());
   }
 }

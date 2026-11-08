@@ -78,18 +78,20 @@ class AgentAttentionTest {
   @CsvSource(
       delimiter = '|',
       value = {
-        // kind | state | target states | passed
-        "RELEASE_REQUEST | FINALIZED | []                         | true",
+        // kind | state | target states | passed. A final state that is no target is not "passed"
+        // any more (qits-1961): its lookup closes the wait BROKEN instead (WaitBreaks).
+        "RELEASE_REQUEST | FINALIZED | []                         | false",
         "RELEASE_REQUEST | FINALIZED | [\"FINALIZED\"]            | true",
-        "RELEASE_REQUEST | WITHDRAWN | [\"FINALIZED\"]            | true",
+        "RELEASE_REQUEST | WITHDRAWN | [\"FINALIZED\"]            | false",
         "RELEASE_REQUEST | PENDING   | [\"FINALIZED\"]            | false",
         "RELEASE_REQUEST | PENDING   | [\"PENDING\"]              | true",
-        "CI_RUN          | SUCCESS   | []                         | true",
+        "CI_RUN          | SUCCESS   | []                         | false",
+        "CI_RUN          | SUCCESS   | [\"SUCCESS\",\"FAILED\"]   | true",
         "CI_RUN          | RUNNING   | [\"SUCCESS\",\"FAILED\"]   | false",
-        "CI_RUN          | CANCELLED | [\"SUCCESS\",\"FAILED\"]   | true",
+        "CI_RUN          | CANCELLED | [\"SUCCESS\",\"FAILED\"]   | false",
         "WORK_ITEM       | VERIFIED  | [\"VERIFIED\"]             | true",
         "WORK_ITEM       | VERIFYING | [\"VERIFIED\"]             | false",
-        "WORK_ITEM       | DROPPED   | [\"VERIFIED\"]             | true",
+        "WORK_ITEM       | DROPPED   | [\"VERIFIED\"]             | false",
         "COMMENTS        | x         | []                         | false",
         "OTHER           | DONE      | []                         | false",
       })
@@ -120,7 +122,12 @@ class AgentAttentionTest {
         evaluate(agent(), item).orElseThrow().reason());
 
     AgentWait run =
-        wait("CI_RUN", "9677c59a-0000-4000-8000-000000000001", "[]", "FAILED", w.subjectStateAt);
+        wait(
+            "CI_RUN",
+            "9677c59a-0000-4000-8000-000000000001",
+            "[\"SUCCESS\",\"FAILED\"]",
+            "FAILED",
+            w.subjectStateAt);
     assertEquals(
         "Waits on run 9677c59a to end; it is FAILED since 10:42",
         evaluate(agent(), run).orElseThrow().reason());
@@ -391,7 +398,7 @@ class AgentAttentionTest {
     assertTrue(evaluate(idleAndBlocked).isEmpty());
     // With two waits of one rule, the older one is named.
     AgentWait older =
-        wait("CI_RUN", "11111111-a", "[]", "SUCCESS", NOW.minus(Duration.ofMinutes(10)));
+        wait("CI_RUN", "11111111-a", "[\"SUCCESS\"]", "SUCCESS", NOW.minus(Duration.ofMinutes(10)));
     older.createdAt = NOW.minus(Duration.ofHours(9));
     assertEquals(older.id, evaluate(agent(), passed, older).orElseThrow().waitId());
   }

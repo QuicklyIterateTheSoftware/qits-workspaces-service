@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import eu.wohlben.qits.eventstream.selection.EventSelection;
 import eu.wohlben.qits.eventstream.selection.EventSelection.Condition;
 import eu.wohlben.qits.eventstream.selection.EventSelection.Op;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -58,7 +59,12 @@ import java.util.Set;
  * not this wait's. Groups that disagree on it, or a group naming none, leave no repository filter —
  * such a wait listens to more than one repository, so no single one's events can be ruled out.
  *
- * <p><b>Final states</b> ({@link #isFinal}), which the attention evaluation reads: a request is done
+ * <p><b>Reading a branch's lookup</b> ({@link #branchReading}, qits-1961): qits-projects' deliveries
+ * of the branch, read as the wait reads its events — {@code everywhere} for a wait targeting it; the
+ * row of the subject's {@link Subject#repository} when it names one; else, of every repository's
+ * row, the newest in a target state, or the newest at all.
+ *
+ * <p><b>Final states</b> ({@link #isFinal}), which {@link WaitBreaks} reads: a request is done
  * FINALIZED, WITHDRAWN or OBSOLETE; a run is done in anything but QUEUED and RUNNING; an item DONE or
  * DROPPED; a branch is done LIVE or WITHDRAWN; comments and OTHER never are.
  */
@@ -297,6 +303,63 @@ public final class WaitSubjects {
       case BRANCH -> BRANCH_FINAL.contains(state);
       case COMMENTS, OTHER -> false;
     };
+  }
+
+  /**
+   * The rows of a branch's lookup a BRANCH wait reads (qits-1961): those of the subject's {@link
+   * Subject#repository} (by name) when it names one, else every row. Oldest first, by {@code
+   * changedAt}.
+   */
+  public static List<WaitSubjectResolver.Delivery> branchRows(
+      Subject subject, WaitSubjectResolver.Branch branch) {
+    if (branch == null) {
+      return List.of();
+    }
+    String repository = subject == null ? null : subject.repository();
+    return branch.deliveries().stream()
+        .filter(Objects::nonNull)
+        .filter(row -> repository == null || repository.equals(row.repository()))
+        .sorted(
+            java.util.Comparator.comparing(
+                WaitSubjectResolver.Delivery::changedAt,
+                java.util.Comparator.nullsFirst(java.util.Comparator.naturalOrder())))
+        .toList();
+  }
+
+  /**
+   * What a branch's lookup says a BRANCH wait's subject state is (qits-1961), as {@link
+   * #stateIn(Subject, String, JsonNode, Collection)} would read the events behind it: for a subject
+   * whose {@link Subject#statePath} is {@code everywhere}, the lookup's {@code everywhere} since the
+   * newest row at that step (none when it is null); otherwise the row of the subject's repository,
+   * or — naming none — the newest row in one of {@code targets}, else the newest row; none when
+   * there is no row. The answer keeps the lookup's {@link WaitSubjectResolver.Branch}, and no ids.
+   */
+  public static WaitSubjectResolver.Resolved branchReading(
+      Subject subject, List<String> targets, WaitSubjectResolver.Branch branch) {
+    List<WaitSubjectResolver.Delivery> rows = branchRows(subject, branch);
+    String state = null;
+    Instant at = null;
+    if (subject != null && EVERYWHERE.equals(subject.statePath())) {
+      state = branch == null ? null : branch.everywhere();
+      String everywhere = state;
+      at =
+          rows.stream()
+              .filter(row -> everywhere != null && everywhere.equals(row.step()))
+              .map(WaitSubjectResolver.Delivery::changedAt)
+              .filter(Objects::nonNull)
+              .reduce((a, b) -> b)
+              .orElse(null);
+    } else if (!rows.isEmpty()) {
+      List<String> wanted = targets == null ? List.of() : targets;
+      WaitSubjectResolver.Delivery chosen =
+          rows.stream()
+              .filter(row -> wanted.contains(row.step()))
+              .reduce((a, b) -> b)
+              .orElse(rows.get(rows.size() - 1));
+      state = chosen.step();
+      at = chosen.changedAt();
+    }
+    return new WaitSubjectResolver.Resolved(null, null, state, at, null, null, branch);
   }
 
   /** {@code kind} by its stored name; null (a wait from before V33, a desk's from before qits-1668) stays null. */

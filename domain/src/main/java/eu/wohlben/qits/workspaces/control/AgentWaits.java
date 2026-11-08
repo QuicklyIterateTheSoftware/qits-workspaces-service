@@ -48,7 +48,9 @@ import org.jboss.logging.Logger;
 /**
  * <b>Declared waits</b> (qits-1153, W1–W8 of the superproject's {@code
  * agent-workspace-decoupling-plan.md}): an agent says which event it waits on, and gets a turn when
- * one arrives or the wait times out.
+ * one arrives, when its subject can no longer get where it waits for it to (BROKEN, qits-1961), or
+ * when the wait times out. Every wait ends: one that asks for no timeout gets the platform's ceiling
+ * ({@link #DEFAULT_TIMEOUT}), and none may ask for more than {@link #MAX_TIMEOUT}.
  *
  * <ul>
  *   <li><b>Matching</b> ({@link #onEvent}): the bus listener hands every event whose name some OPEN
@@ -61,7 +63,8 @@ import org.jboss.logging.Logger;
  *       running agent once it is not BUSY, or after the launch window regardless, and resumes a
  *       yielded one first (D17).
  *   <li><b>The sweep</b> ({@link #sweep}, every scheduler pass): an OPEN wait past {@code expires_at}
- *       is TIMED_OUT and wakes its agent; an OPEN wait of an agent that is no longer ACTIVE is
+ *       is TIMED_OUT and wakes its agent — its turn says when that expiry was the platform's
+ *       ceiling rather than a timeout it asked for ({@code expiry_is_ceiling}, qits-1961); an OPEN wait of an agent that is no longer ACTIVE is
  *       CANCELLED with no wake (W6).
  *   <li><b>Waiting on</b> (W5): while an agent has an OPEN wait, its waiting relay to qits-projects
  *       says {@code cause: "Wait"} and names the wait's label in {@code waitingOn}, so the item is
@@ -100,15 +103,24 @@ import org.jboss.logging.Logger;
  *       matching are untouched.
  *   <li><b>The subject's lookup</b> (epic qits-1681, "Resolution at open"): once an agent's wait on
  *       a subject is committed, {@link WaitSubjectResolver} looks the subject up — its id, qualified
- *       id, state and, for a run, when it should have finished — and the scheduler pass looks up
- *       again every OPEN wait still unresolved ({@link #resolveUnresolved}). A failure is written to
- *       {@code subject_error} and fails nothing; a state older than the one an event recorded is not
- *       written over it. A looked-up state that is one of the wait's target states closes it MATCHED
- *       at once, as an event would have (qits-1668): the event that got it there may be older than
- *       the look-back, and no event is coming any more. The wake says it was looked up, and names no
- *       event; a final state the wait does not wait for leaves it OPEN, for {@link AgentAttention}.
+ *       id, state and, for a run, when it should have finished; for a branch, its deliveries
+ *       (qits-1961) — and since qits-1961 the scheduler pass looks up again every OPEN wait whose
+ *       last lookup is {@link #RECHECK_EVERY} old, or that never had one ({@link
+ *       #resolveUnresolved}). A failure is written to {@code subject_error} and fails nothing; a
+ *       state older than the one an event recorded is not written over it. A looked-up state that is
+ *       one of the wait's target states closes it MATCHED at once, as an event would have
+ *       (qits-1668): the event that got it there may be older than the look-back, and no event is
+ *       coming any more. The wake says it was looked up, and names no event.
+ *   <li><b>A broken wait</b> (qits-1961): when the lookup did not match it, {@link WaitBreaks} asks
+ *       whether the subject can still get there — final and not a target, stuck for {@link
+ *       WaitBreaks#STUCK_AFTER}, unknown to its provider (a 404), or a branch the delivery ledger
+ *       does not follow {@link WaitBreaks#UNFOLLOWED_AFTER} after the declaration. If not, the wait
+ *       is closed BROKEN in the lookup's transaction, {@code broken_reason} holds the platform's one
+ *       line, and the agent gets a turn saying so (relay cause {@link #CAUSE_BROKEN}); a desk's is
+ *       announced as {@link DeskWaitClosed} with that turn. It replaced {@link AgentAttention}'s
+ *       "ended" case, which only told people.
  *   <li><b>The announcements</b> (epic qits-1681): an agent's wait opening, its subject's state
- *       changing and its closing (match, timeout, cancel, or its agent leaving ACTIVE) are announced
+ *       changing and its closing (match, break, timeout, cancel, or its agent leaving ACTIVE) are announced
  *       as {@link AgentWaitOpened}, {@link AgentWaitChanged} and {@link AgentWaitClosed}, after the
  *       write committed. A desk's waits announce none of them.
  * </ul>
@@ -121,8 +133,18 @@ public class AgentWaits {
   /** At most this many OPEN waits per agent. */
   public static final int MAX_OPEN_PER_AGENT = 8;
 
-  /** The longest timeout an agent may ask for. */
-  public static final Duration MAX_TIMEOUT = Duration.ofDays(30);
+  /**
+   * The platform's ceiling (qits-1961): the timeout of a wait that asks for none. It clears every
+   * machine wait measured (BRANCH p99 5.7 h, max 7.6 h over 7 days); a wait on a person passes its
+   * own timeout, up to {@link #MAX_TIMEOUT}.
+   */
+  public static final Duration DEFAULT_TIMEOUT = Duration.ofHours(8);
+
+  /** The longest timeout a waiter may ask for (qits-1961; 30 days before). A wait on a person declares again. */
+  public static final Duration MAX_TIMEOUT = Duration.ofHours(24);
+
+  /** An OPEN wait's subject is looked up again once its last lookup is this old (qits-1961). */
+  public static final Duration RECHECK_EVERY = Duration.ofMinutes(5);
 
   static final int MAX_LABEL = 200;
 
@@ -132,6 +154,9 @@ public class AgentWaits {
   public static final String CAUSE_MATCHED = "WaitMatched";
 
   public static final String CAUSE_TIMED_OUT = "WaitTimedOut";
+
+  /** A wait closed BROKEN (qits-1961): its subject can no longer get where it waits for it to. */
+  public static final String CAUSE_BROKEN = "WaitBroken";
 
   public static final String CAUSE_CANCELLED = "WaitCancelled";
 
@@ -168,7 +193,7 @@ public class AgentWaits {
   @ConfigProperty(name = "qits.workspaces.waits.subject-retry-every", defaultValue = "PT1M")
   Duration subjectRetryEvery;
 
-  /** At most this many unresolved waits are looked up per scheduler pass. */
+  /** At most this many waits are looked up per scheduler pass. */
   static final int MAX_RESOLVED_PER_PASS = 20;
 
   /** A pass stops looking subjects up once it spent this long on it; the rest wait for the next. */
@@ -176,6 +201,9 @@ public class AgentWaits {
 
   /** The longest {@code subject_error} stored. */
   static final int MAX_SUBJECT_ERROR = 300;
+
+  /** The longest {@code broken_reason} stored (qits-1961). */
+  static final int MAX_BROKEN_REASON = 400;
 
   /** Waits whose last lookup failed, and when they may be asked again. */
   private final Map<UUID, Instant> retryAfter = new ConcurrentHashMap<>();
@@ -219,13 +247,14 @@ public class AgentWaits {
   }
 
   /**
-   * Declare a wait. It stays OPEN until an event matches {@code selection}, {@code timeout} passes,
-   * or it is cancelled. Declaring does not yield the agent (W5). An event from the look-back, or a
-   * subject the lookup finds already in a target state, can match it at once, so the answer may
-   * already say MATCHED (qits-1668).
+   * Declare a wait. It stays OPEN until an event matches {@code selection}, its subject can no longer
+   * get there (BROKEN, qits-1961), {@code timeout} passes, or it is cancelled. Declaring does not
+   * yield the agent (W5). An event from the look-back, or a subject the lookup finds already in a
+   * target state, can match it at once, so the answer may already say MATCHED (qits-1668) — or
+   * BROKEN, when the lookup finds it can never match.
    *
    * @param label what the agent calls it; null = the selection's one-line description
-   * @param timeout null = never
+   * @param timeout null = the platform's ceiling, {@link #DEFAULT_TIMEOUT}
    * @throws NotFoundException no such agent
    * @throws ConflictException {@code AGENT_NOT_ACTIVE} or {@code TOO_MANY_WAITS}
    * @throws BadRequestException a timeout that is not positive or longer than {@link #MAX_TIMEOUT}
@@ -266,7 +295,8 @@ public class AgentWaits {
                   wait.selection = selection.toJson();
                   wait.eventName = selection.event();
                   wait.createdAt = declaredAt;
-                  wait.expiresAt = timeout == null ? null : wait.createdAt.plus(timeout);
+                  wait.expiresAt = expiryOf(declaredAt, timeout);
+                  wait.expiryIsCeiling = timeout == null;
                   wait.subjectKind = subject.kind().name();
                   wait.subjectRef = subject.ref();
                   wait.targetStates = targetStatesJson(subject.targetStates());
@@ -315,10 +345,19 @@ public class AgentWaits {
     }
     if (timeout != null && timeout.compareTo(MAX_TIMEOUT) > 0) {
       throw new BadRequestException(
-          "A timeout may be at most " + MAX_TIMEOUT + " (30 days), got " + timeout + ".");
+          "A timeout may be at most "
+              + MAX_TIMEOUT
+              + " (24 hours, the platform's cap), got "
+              + timeout
+              + ". A wait on a person declares again when it lapses.");
     }
     String named = label == null || label.isBlank() ? EventSelectionGrammar.describe(selection) : label.trim();
     return bounded(named, MAX_LABEL);
+  }
+
+  /** When a wait declared at {@code declaredAt} expires: its timeout, else the ceiling (qits-1961). */
+  static Instant expiryOf(Instant declaredAt, Duration timeout) {
+    return declaredAt.plus(timeout == null ? DEFAULT_TIMEOUT : timeout);
   }
 
   /** An agent's waits, newest first; {@code state} null = all. */
@@ -378,10 +417,12 @@ public class AgentWaits {
 
   /**
    * Declare a wait for a project's front desk. Everything an agent's declaration checks except the
-   * agent: the selection, the timeout (at most {@link #MAX_TIMEOUT}), and at most {@link
+   * agent: the selection, the timeout (at most {@link #MAX_TIMEOUT}, {@link #DEFAULT_TIMEOUT} when
+   * none is given), and at most {@link
    * #MAX_OPEN_PER_AGENT} OPEN waits per project. The project is not looked up — it lives in
    * qits-projects — so the caller's authorization is what binds the id. The wait's subject is, as an
-   * agent's is, and one already in a target state answers MATCHED (qits-1668).
+   * agent's is, and one already in a target state answers MATCHED (qits-1668), one that can never get
+   * there BROKEN (qits-1961).
    *
    * @param waiterSubject the declaring principal; its own comments never match the wait (qits-1759)
    * @throws ConflictException {@code TOO_MANY_WAITS}
@@ -414,7 +455,8 @@ public class AgentWaits {
               wait.selection = selection.toJson();
               wait.eventName = selection.event();
               wait.createdAt = declaredAt;
-              wait.expiresAt = timeout == null ? null : wait.createdAt.plus(timeout);
+              wait.expiresAt = expiryOf(declaredAt, timeout);
+              wait.expiryIsCeiling = timeout == null;
               wait.subjectKind = subject.kind().name();
               wait.subjectRef = subject.ref();
               wait.targetStates = targetStatesJson(subject.targetStates());
@@ -657,8 +699,9 @@ public class AgentWaits {
   }
 
   /**
-   * What closing waits MATCHED in one transaction leaves to do once it committed: shared by an
-   * event's match and a lookup's (qits-1668), so the two close a wait the same way.
+   * What closing waits MATCHED (or BROKEN, qits-1961) in one transaction leaves to do once it
+   * committed: shared by an event's match and a lookup's (qits-1668), so the two close a wait the
+   * same way.
    */
   private static final class Closing {
     final List<Placed> closedFor = new ArrayList<>();
@@ -685,13 +728,41 @@ public class AgentWaits {
     AgentWorktree agent = wake(wait.agentId, turn);
     closing.closedFor.add(placedOf(wait.agentId));
     if (agent != null) {
-      closing.woken.add(new Woken(agent.id, agent.workId, agent.sessionId));
+      closing.woken.add(new Woken(agent.id, agent.workId, agent.sessionId, CAUSE_MATCHED));
     }
   }
 
   /**
-   * After the commit of {@link #closeMatched}: hint, announce, refresh the names, relay {@code
-   * waiting: false} for every agent woken and kick the scheduler. Changes nothing when nothing closed.
+   * Close the OPEN, locked {@code wait} BROKEN in the caller's transaction (qits-1961), as {@link
+   * #closeMatched} closes one MATCHED: {@code broken_reason} is written, a desk's records its
+   * announcement with the turn, an agent's turn is appended to its {@code pending_text} and its
+   * {@link AgentWaitClosed} carries the label and the reason. {@link #afterMatched} does the rest.
+   */
+  private void closeBroken(AgentWait wait, WaitBreaks.Broken broken, Closing closing) {
+    closing.closed++;
+    String reason = bounded(broken.reason(), MAX_BROKEN_REASON);
+    String turn = brokenTurn(wait, broken.why(), reason);
+    wait.brokenReason = reason;
+    if (wait.isDeskWait()) {
+      closing.deskClosed.add(closeDesk(wait, AgentWaitState.BROKEN, null, turn));
+      LOG.infof("The desk of project %s: its wait %s is broken: %s", wait.deskProjectId, wait.label, reason);
+      return;
+    }
+    close(wait, AgentWaitState.BROKEN, null);
+    closing.announced.add(
+        closedEvent(wait.agentId, wait.id, AgentWaitClosed.BROKEN, null, wait.label, reason));
+    AgentWorktree agent = wake(wait.agentId, turn);
+    closing.closedFor.add(placedOf(wait.agentId));
+    if (agent != null) {
+      closing.woken.add(new Woken(agent.id, agent.workId, agent.sessionId, CAUSE_BROKEN));
+    }
+    LOG.infof("Agent %s's wait %s is broken: %s", wait.agentId, wait.label, reason);
+  }
+
+  /**
+   * After the commit of {@link #closeMatched} and {@link #closeBroken}: hint, announce, refresh the
+   * names, relay {@code waiting: false} (with the close's cause) for every agent woken and kick the
+   * scheduler. Changes nothing when nothing closed.
    *
    * @return how many waits matched with somebody to tell: agents woken and desks announced
    */
@@ -705,7 +776,7 @@ public class AgentWaits {
     // After the commit, so the label read is what stays open once the matched waits closed
     // (qits-1460): an agent with a second wait still shows it.
     for (Woken w : closing.woken) {
-      relay(w.workId(), false, CAUSE_MATCHED, waitingOn(w.agentId()), w.sessionId(), Instant.now());
+      relay(w.workId(), false, w.cause(), waitingOn(w.agentId()), w.sessionId(), Instant.now());
     }
     if (!closing.woken.isEmpty()) {
       agentService.kick();
@@ -750,7 +821,7 @@ public class AgentWaits {
                     AgentWorktree agent = wake(wait.agentId, timedOutTurn(wait));
                     closedFor.add(placedOf(wait.agentId));
                     if (agent != null) {
-                      out.add(new Woken(agent.id, agent.workId, agent.sessionId));
+                      out.add(new Woken(agent.id, agent.workId, agent.sessionId, CAUSE_TIMED_OUT));
                     }
                     LOG.infof("Agent %s's wait %s timed out", wait.agentId, wait.label);
                   }
@@ -957,7 +1028,8 @@ public class AgentWaits {
 
   // --- helpers ------------------------------------------------------------------------------------
 
-  private record Woken(UUID agentId, String workId, String sessionId) {}
+  /** An agent a close woke, and the relay cause its close says. */
+  private record Woken(UUID agentId, String workId, String sessionId, String cause) {}
 
   /** Where an agent is listed: its wrapper and its workspace (null while it has none). */
   private record Placed(String repositoryId, Long workspaceId) {
@@ -1009,9 +1081,27 @@ public class AgentWaits {
     return agent;
   }
 
-  /** The turn a timed-out wait gives: its agent's wake, or the text a desk's announcement carries. */
+  /**
+   * The turn a timed-out wait gives: its agent's wake, or the text a desk's announcement carries.
+   * When the expiry was the platform's ceiling (qits-1961) rather than a timeout the waiter asked
+   * for, it says so, and what it may ask for instead.
+   */
   static String timedOutTurn(AgentWait wait) {
     Duration after = Duration.between(wait.createdAt, wait.expiresAt);
+    if (wait.expiryIsCeiling) {
+      return "Your wait \""
+          + wait.label
+          + "\" timed out after "
+          + human(after)
+          + ", the platform's ceiling for a wait that asks for no timeout (or for more than "
+          + human(MAX_TIMEOUT)
+          + "): no "
+          + wait.eventName
+          + " event matched it. It is closed; declare a new one if you still need to wait, with a"
+          + " timeout of at most "
+          + human(MAX_TIMEOUT)
+          + " if it waits on a person.";
+    }
     return "Your wait \""
         + wait.label
         + "\" timed out after "
@@ -1229,7 +1319,8 @@ public class AgentWaits {
         wait.subjectState,
         wait.subjectStateAt,
         wait.subjectExpectedBy,
-        wait.subjectError);
+        wait.subjectError,
+        wait.brokenReason);
   }
 
   // --- the subject and the announcements (epic qits-1681) ------------------------------------------
@@ -1308,15 +1399,21 @@ public class AgentWaits {
 
   /**
    * Look up the subject of the wait {@code waitId} now, and write what was found: after its create
-   * committed, and on a scheduler pass while it is OPEN and unresolved. Called with no transaction
-   * open, so the call to the provider holds no lock. An OTHER wait or a closed one is left as it is.
-   * Never throws.
+   * committed, and on a scheduler pass while it is OPEN (every {@link #RECHECK_EVERY} since
+   * qits-1961). Called with no transaction open, so the call to the provider holds no lock. An OTHER
+   * wait or a closed one is left as it is. Never throws.
    *
    * <p>A looked-up state that is one of the wait's target states closes it MATCHED (qits-1668), in
    * the write's transaction and on the locked row, exactly as {@link #match} closes one for an
    * event — so an event that matched it first leaves the lookup nothing to close, and the other way
    * round. A desk's wait (qits-1668) is looked up the same way, its release request under the
    * desk's own project, and announces nothing but its {@link DeskWaitClosed}.
+   *
+   * <p>A lookup that did not match it may break it (qits-1961, {@link #broken}): closed BROKEN in
+   * the same transaction, on the same locked row, with the agent's turn or the desk's announcement.
+   * A 404 ({@link WaitSubjectResolver.NotFound}) breaks it too; every other failure only writes
+   * {@code subject_error}. A branch's deliveries are read under the project as the wait reads its
+   * events ({@link WaitSubjects#branchReading}).
    *
    * @return whether the subject was resolved
    */
@@ -1346,16 +1443,22 @@ public class AgentWaits {
       if (lookup == null) {
         return false;
       }
+      // A request and a branch are read under the project (a branch since qits-1961).
       String projectId =
-          lookup.kind() != WaitSubjects.Kind.RELEASE_REQUEST
+          lookup.kind() != WaitSubjects.Kind.RELEASE_REQUEST && lookup.kind() != WaitSubjects.Kind.BRANCH
               ? null
               : lookup.deskProjectId() != null
                   ? lookup.deskProjectId().toString()
                   : projectOf(lookup.repositoryId());
       Optional<WaitSubjectResolver.Resolved> found;
       String error = null;
+      boolean notFound = false;
       try {
         found = subjectResolver.get().resolve(lookup.kind(), lookup.ref(), projectId);
+      } catch (WaitSubjectResolver.NotFound e) {
+        found = Optional.empty();
+        error = e.getMessage();
+        notFound = true;
       } catch (WaitSubjectResolver.Unresolvable e) {
         found = Optional.empty();
         error = e.getMessage();
@@ -1372,13 +1475,24 @@ public class AgentWaits {
           retryAfter.put(waitId, now.plus(subjectRetryEvery));
         }
         String failure = bounded(error, MAX_SUBJECT_ERROR);
+        boolean gone = notFound;
+        Closing closing = new Closing();
         QuarkusTransaction.requiringNew()
             .run(
                 () ->
                     waits
                         .findByIdOptional(waitId, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
                         .filter(w -> w.state == AgentWaitState.OPEN)
-                        .ifPresent(w -> w.subjectError = failure));
+                        .ifPresent(
+                            w -> {
+                              w.subjectError = failure;
+                              // Only a 404 breaks a wait (qits-1961); any other failure is retried.
+                              if (gone) {
+                                WaitBreaks.notFound(lookup.kind(), subjectName(w, lookup.kind()), failure)
+                                    .ifPresent(broken -> closeBroken(w, broken, closing));
+                              }
+                            }));
+        afterMatched(closing);
         LOG.infof("Wait %s: its subject %s %s was not looked up: %s", waitId, lookup.kind(), lookup.ref(), failure);
         return false;
       }
@@ -1393,17 +1507,26 @@ public class AgentWaits {
                       .filter(w -> w.state == AgentWaitState.OPEN)
                       .ifPresent(
                           w -> {
-                            Pending changed = applyResolution(w, lookup.kind(), resolved, now);
+                            // A branch's deliveries say its state as the wait reads it (qits-1961).
+                            WaitSubjectResolver.Resolved read =
+                                lookup.kind() == WaitSubjects.Kind.BRANCH && resolved.branch() != null
+                                    ? WaitSubjects.branchReading(
+                                        subjectOf(w), targetStatesOf(w.targetStates), resolved.branch())
+                                    : resolved;
+                            Pending changed = applyResolution(w, lookup.kind(), read, now);
                             // A desk announces none of its subject's moves (qits-1618).
                             if (changed != null && !w.isDeskWait()) {
                               closing.announced.add(changed);
                             }
-                            if (reachedTarget(w, lookup.kind(), resolved)) {
+                            if (reachedTarget(w, lookup.kind(), read)) {
                               closeMatched(w, null, lookedUpTurn(w, lookup.kind()), closing);
                               LOG.infof(
                                   "Wait %s (%s) matched on its lookup: %s %s is %s",
                                   w.id, w.label, lookup.kind(), lookup.ref(), w.subjectState);
+                              return;
                             }
+                            broken(w, lookup.kind(), read, now)
+                                .ifPresent(b -> closeBroken(w, b, closing));
                           }));
       afterMatched(closing);
       return true;
@@ -1483,6 +1606,83 @@ public class AgentWaits {
         + ", as looked up. No event matched it, so there is none to read; the wait is closed.";
   }
 
+  /**
+   * The wake for a wait that broke (qits-1961). The platform writes every sentence: the label, the
+   * {@code reason} ({@link WaitBreaks}: the subject by its ids, its state since when in UTC, the
+   * request carrying it and what its provider adds, quoted), what the wait waited for and what to
+   * do next.
+   */
+  static String brokenTurn(AgentWait wait, WaitBreaks.Why why, String reason) {
+    List<String> targets = targetStatesOf(wait.targetStates);
+    String waitedFor =
+        targets == null || targets.isEmpty()
+            ? "a " + wait.eventName + " event"
+            : String.join(
+                " or ", targets.stream().map(t -> bounded(t, MAX_VALUE_SHOWN)).toList());
+    String replan =
+        switch (why) {
+          case NOT_FOUND -> "Re-plan: check the id you waited on, or declare a wait on what you need now.";
+          case UNFOLLOWED ->
+              "Re-plan: wait on a branch the ledger follows (one you pushed for a ticket), or declare"
+                  + " a wait on what you need now.";
+          case FINAL, STUCK -> "Re-plan: fix and push, or declare a wait on what you need now.";
+        };
+    return "Your wait \""
+        + wait.label
+        + "\" can no longer be satisfied and is closed (BROKEN): "
+        + reason
+        + ". It waited for "
+        + waitedFor
+        + ". "
+        + replan;
+  }
+
+  /**
+   * Whether the lookup just written onto {@code wait} breaks it (qits-1961): {@link WaitBreaks} on
+   * what the lookup read, and only while the row still holds that — an event that recorded another
+   * state since is newer than the lookup, and the next re-check reads again. A branch is judged on
+   * its deliveries; every other kind on its state, since the row says it began.
+   */
+  static Optional<WaitBreaks.Broken> broken(
+      AgentWait wait, WaitSubjects.Kind kind, WaitSubjectResolver.Resolved read, Instant now) {
+    List<String> stored = targetStatesOf(wait.targetStates);
+    List<String> targets = stored == null ? List.of() : stored;
+    String name = subjectName(wait, kind);
+    if (kind == WaitSubjects.Kind.BRANCH && read.branch() != null) {
+      if (read.state() != null && !read.state().equals(wait.subjectState)) {
+        return Optional.empty();
+      }
+      return WaitBreaks.branch(subjectOf(wait), name, targets, read.branch(), wait.createdAt, now);
+    }
+    if (read.state() == null || !read.state().equals(wait.subjectState)) {
+      return Optional.empty();
+    }
+    Instant since =
+        wait.subjectStateAt != null
+            ? wait.subjectStateAt
+            : read.stateAt() != null ? read.stateAt() : wait.createdAt;
+    return WaitBreaks.seen(
+        kind,
+        targets,
+        new WaitBreaks.Seen(name, read.state(), since, null, WaitBreaks.quotedDetail(read.detail())),
+        now);
+  }
+
+  /** What a broken wait's reason calls its subject: {@link AgentAttention#nameOf}, a branch as one. */
+  static String subjectName(AgentWait wait, WaitSubjects.Kind kind) {
+    String name = AgentAttention.nameOf(wait, kind);
+    return kind == WaitSubjects.Kind.BRANCH && wait.subjectRef != null ? "branch " + name : name;
+  }
+
+  /** The wait's parsed subject; null when its selection cannot be read. */
+  static WaitSubjects.Subject subjectOf(AgentWait wait) {
+    try {
+      return WaitSubjects.parse(EventSelection.fromJson(wait.selection));
+    } catch (RuntimeException unreadable) {
+      return null;
+    }
+  }
+
   /** Whether the wait is still OPEN, read in a transaction of its own. */
   private boolean isOpen(UUID waitId) {
     return QuarkusTransaction.requiringNew()
@@ -1494,10 +1694,13 @@ public class AgentWaits {
   }
 
   /**
-   * The scheduler pass's share (epic qits-1681): look up again the OPEN waits whose subject
-   * was never resolved, oldest first, each at most once, at most {@link #MAX_RESOLVED_PER_PASS} and
-   * for at most {@link #RESOLVE_BUDGET_PER_PASS}; a wait whose lookup failed is skipped until
-   * {@code qits.workspaces.waits.subject-retry-every} passed. Never throws.
+   * The scheduler pass's share (epic qits-1681; a re-check since qits-1961): look up again the OPEN
+   * waits on a subject this side can look up (any kind but OTHER) that were never resolved or
+   * whose last lookup is at least {@link #RECHECK_EVERY} old — the longest unread first, each at most
+   * once, at most {@link #MAX_RESOLVED_PER_PASS} and for at most {@link #RESOLVE_BUDGET_PER_PASS};
+   * a wait whose lookup failed is skipped until {@code qits.workspaces.waits.subject-retry-every}
+   * passed. A resolved wait used to be read once and then only moved by events, so a missed event
+   * left it stale for good; a re-check is what lets a lookup match or break it later. Never throws.
    *
    * @return how many were resolved
    */
@@ -1513,13 +1716,13 @@ public class AgentWaits {
           QuarkusTransaction.requiringNew()
               .call(
                   () ->
-                      waits.findOpenUnresolved(10 * MAX_RESOLVED_PER_PASS).stream()
+                      waits.findOpenDue(now.minus(RECHECK_EVERY), 10 * MAX_RESOLVED_PER_PASS).stream()
                           .map(w -> w.id)
                           .filter(id -> !retryAfter.containsKey(id))
                           .limit(MAX_RESOLVED_PER_PASS)
                           .toList());
     } catch (RuntimeException e) {
-      LOG.warnf(e, "the unresolved waits could not be read");
+      LOG.warnf(e, "the waits due a lookup could not be read");
       return 0;
     }
     long deadline = System.nanoTime() + RESOLVE_BUDGET_PER_PASS.toNanos();
@@ -1541,6 +1744,12 @@ public class AgentWaits {
 
   /** The {@link AgentWaitClosed} of an agent's wait, to announce once the close committed. */
   private static Pending closedEvent(UUID agentId, UUID waitId, String state, String matchedEventId) {
+    return closedEvent(agentId, waitId, state, matchedEventId, null, null);
+  }
+
+  /** As above, with the label and reason a BROKEN close carries (qits-1961). */
+  private static Pending closedEvent(
+      UUID agentId, UUID waitId, String state, String matchedEventId, String label, String reason) {
     Instant at = Instant.now();
     return new Pending(
         agentId,
@@ -1554,6 +1763,8 @@ public class AgentWaits {
                 waitId.toString(),
                 state,
                 matchedEventId,
+                label,
+                reason,
                 at));
   }
 

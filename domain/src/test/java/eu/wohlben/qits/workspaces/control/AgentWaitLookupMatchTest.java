@@ -29,8 +29,8 @@ import org.junit.jupiter.api.Test;
 /**
  * A looked-up target state closes the wait (qits-1668): a wait on a subject that reached what it
  * waits for longer ago than the look-back reaches is MATCHED by its lookup — at declaration, and on
- * a later lookup — with a wake that names no event; a final state the wait does not wait for leaves
- * it OPEN; a desk's wait records its subject, is looked up under its own project and announces its
+ * a later lookup — with a wake that names no event; a final state the wait does not wait for breaks
+ * it (qits-1961, {@code AgentWaitBreakTest}); a desk's wait records its subject, is looked up under its own project and announces its
  * close. The event log ({@link FakeRecentEvents}) is left empty, so the look-back replays nothing
  * and only the lookup can fire a wait here.
  */
@@ -199,7 +199,7 @@ public class AgentWaitLookupMatchTest {
   }
 
   @Test
-  void aFinalStateTheWaitDoesNotWaitForLeavesItOpen() {
+  void aFinalStateTheWaitDoesNotWaitForBreaksItAndCommentsStayOpen() {
     UUID id = agent();
     String item = "qits-" + UUID.randomUUID();
     EventSelection verified =
@@ -216,7 +216,8 @@ public class AgentWaitLookupMatchTest {
     try {
       AgentWaitDto wait = waits.create(id, null, verified, null);
       assertEquals("WORK_ITEM", wait.subjectKind());
-      assertEquals(AgentWaitState.OPEN, wait.state());
+      // It never will be VERIFIED: BROKEN since qits-1961, where it used to stay OPEN for attention.
+      assertEquals(AgentWaitState.BROKEN, wait.state());
       assertEquals("DROPPED", wait.subjectState());
 
       AgentWaitDto comments =
@@ -224,8 +225,8 @@ public class AgentWaitLookupMatchTest {
       assertEquals("COMMENTS", comments.subjectKind());
       assertEquals(AgentWaitState.OPEN, comments.state());
 
-      assertNull(row(id).pendingText);
-      assertTrue(closesOf(wait.id()).isEmpty());
+      assertTrue(row(id).pendingText.contains("(BROKEN): " + item + " is DROPPED"), row(id).pendingText);
+      assertEquals(AgentWaitClosed.BROKEN, closesOf(wait.id()).get(0).state());
       assertTrue(closesOf(comments.id()).isEmpty());
     } finally {
       resolver.forget(item);

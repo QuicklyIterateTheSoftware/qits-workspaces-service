@@ -10,7 +10,8 @@ import java.util.List;
  * declared before qits-1668.
  *
  * @param selection qits-eventstream's {@code EventSelection}, in its JSON form
- * @param expiresAt when it times out; null = never
+ * @param expiresAt when it times out — the platform's ceiling when it asked for no timeout
+ *     (qits-1961); null only on a closed wait from before that
  * @param matchedEventId the event that matched it; null unless MATCHED
  * @param closedAt when it left OPEN; null while OPEN
  * @param subjectKind {@code RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS},
@@ -23,6 +24,7 @@ import java.util.List;
  * @param subjectStateAt when that state was seen to begin
  * @param subjectExpectedBy runs only: when the run should have finished
  * @param subjectError the last failure to look the subject up
+ * @param brokenReason why it is BROKEN (qits-1961); null in every other state
  */
 public record AgentWaitDto(
     String id,
@@ -42,4 +44,5 @@ public record AgentWaitDto(
     String subjectState,
     Instant subjectStateAt,
     Instant subjectExpectedBy,
-    String subjectError) {}
+    String subjectError,
+    String brokenReason) {}

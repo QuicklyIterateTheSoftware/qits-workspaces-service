@@ -71,16 +71,19 @@ public class AgentWaitRepository implements PanacheRepositoryBase<AgentWait, UUI
   }
 
   /**
-   * OPEN waits whose subject was parsed and never looked up (epic qits-1681), oldest first, at most
-   * {@code limit}: what a scheduler pass resolves again. An agent's or, since qits-1668, a desk's; an
-   * OTHER one is never among them.
+   * OPEN waits whose subject was parsed (any kind but OTHER) and is due a lookup (qits-1961): never
+   * looked up, or last looked up before {@code resolvedBefore}. The longest unread first — by the
+   * last lookup, or by the declaration for one never resolved — at most {@code limit}: what a
+   * scheduler pass looks up again. An agent's or, since qits-1668, a desk's.
    */
-  public List<AgentWait> findOpenUnresolved(int limit) {
+  public List<AgentWait> findOpenDue(Instant resolvedBefore, int limit) {
     return find(
             "state = ?1 and subjectKind is not null and subjectKind <> ?2"
-                + " and subjectResolvedAt is null order by createdAt",
+                + " and (subjectResolvedAt is null or subjectResolvedAt < ?3)"
+                + " order by coalesce(subjectResolvedAt, createdAt), createdAt",
             AgentWaitState.OPEN,
-            "OTHER")
+            "OTHER",
+            resolvedBefore)
         .page(0, limit)
         .list();
   }
