@@ -26,6 +26,7 @@ import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -79,6 +80,57 @@ class ConsumerPactVerificationTest {
     System.setProperty("pact_do_not_track", "true");
   }
 
+  /**
+   * A pinned, deployed or rollback consumer pact interaction this provider cannot honour, and why:
+   * the consumer must fix it. {@code state}, when not null, narrows the entry to the interaction
+   * set up in that provider state — for a description a consumer reuses across several
+   * interactions. {@code version} is matched against the pact's source ({@link Pact#getSource()}),
+   * whose string names the jar or file it was read from — the pinned jar's maven path carries
+   * {@code /<version>/}, same as the deployed-pacts layout's {@code
+   * <consumer-repo>/<pactVersion>/} directory, so the one check covers both.
+   */
+  record KnownWrong(String consumer, String version, String description, String state, String reason) {
+
+    boolean names(Pact pact, Interaction interaction) {
+      return consumer.equals(pact.getConsumer().getName())
+          && (description == null || description.equals(interaction.getDescription()))
+          && String.valueOf(pact.getSource()).contains("/" + version + "/")
+          && (state == null
+              || interaction.getProviderStates().stream()
+                  .anyMatch(each -> state.equals(each.getName())));
+    }
+  }
+
+  /**
+   * The pinned, deployed or rollback consumer pact interactions this provider cannot honour. Empty
+   * when every consumer version the gate verifies holds; an entry stays only while its version is
+   * pinned, deployed or a rollback target of its consumer.
+   *
+   * <p>The qits CLI's {@code 2026.1107.32045} pins {@code expiresAt} to {@code null} with no
+   * matcher on two {@code createAgentWait} interactions — ci-run and release-request waits — a
+   * value qits-1961 makes impossible: every wait now gets an expiry (an 8 h ceiling), so {@code
+   * createAgentWait} always answers a non-null {@code expiresAt}. The third {@code createAgentWait}
+   * interaction, for a work wait, already pins a timestamp with a regex matcher and passes. These
+   * entries stay until {@code 2026.1107.32045} is neither pinned, deployed nor a rollback target of
+   * the CLI.
+   */
+  static final List<KnownWrong> KNOWN_WRONG =
+      List.of(
+          new KnownWrong(
+              "qits-platform-access-monorepo",
+              "2026.1107.32045",
+              "qits wait ci-run: createAgentWait",
+              "an agent declaring a wait on a CI run",
+              "pins expiresAt to null, but since qits-1961 every wait has an expiry (8 h ceiling);"
+                  + " the CLI loosens the row in its next pact (qits-1961)"),
+          new KnownWrong(
+              "qits-platform-access-monorepo",
+              "2026.1107.32045",
+              "qits wait release-request: createAgentWait",
+              "an agent declaring a wait on a release request",
+              "pins expiresAt to null, but since qits-1961 every wait has an expiry (8 h ceiling);"
+                  + " the CLI loosens the row in its next pact (qits-1961)"));
+
   @Inject ProviderStates states;
 
   @TestHTTPResource("/")
@@ -87,6 +139,20 @@ class ConsumerPactVerificationTest {
   @BeforeEach
   void target(PactVerificationContext context, Pact pact, Interaction interaction) {
     String consumer = pact.getConsumer().getName();
+    // First, so a known-wrong interaction is skipped for its reason rather than failed on
+    // something else below.
+    for (KnownWrong wrong : KNOWN_WRONG) {
+      if (wrong.names(pact, interaction)) {
+        Assumptions.abort(
+            consumer
+                + " "
+                + wrong.version()
+                + " '"
+                + interaction.getDescription()
+                + "': "
+                + wrong.reason());
+      }
+    }
     for (ProviderState state : interaction.getProviderStates()) {
       if (!states.names().contains(state.getName())) {
         fail(
