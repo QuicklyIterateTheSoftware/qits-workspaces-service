@@ -217,9 +217,11 @@ public class AgentWaitBreakTest {
       assertEquals(AgentWaitState.OPEN, wait.state(), "the ledger may not have written it yet");
       assertTrue(resolver.lookupsOf(branch).get(0).startsWith("BRANCH " + branch), resolver.lookupsOf(branch).toString());
 
-      // A re-check within RECHECK_EVERY does not ask again.
+      // A re-check within RECHECK_EVERY does not ask again. Counted from here, not from zero: a
+      // pass another test kicked may have looked the wait up too, while it was still unresolved.
+      long asked = resolver.askedFor(branch);
       waits.resolveUnresolved();
-      assertEquals(1, resolver.askedFor(branch));
+      assertEquals(asked, resolver.askedFor(branch));
 
       // Thirty-one minutes after the declaration, the re-check finds it still unfollowed.
       declaredAt(wait.id(), Instant.now().minus(Duration.ofMinutes(31)));
