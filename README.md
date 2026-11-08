@@ -189,23 +189,28 @@ gets a turn when it happens:
 
 - `POST /workspaces/api/agents/{agentId}/waits` `{label?, selection: {event, when: [[{path, op:
   exact|prefix|exists, value}]]}, timeout?: ISO-8601}` → 201 `{id, agentId, label, selection,
-  state: OPEN|MATCHED|TIMED_OUT|CANCELLED, createdAt, expiresAt, matchedEventId, closedAt}`. The
-  selection is qits-eventstream's `EventSelection`; an invalid one is a 400 with its reason. At most
-  8 OPEN waits per agent (`409 TOO_MANY_WAITS`); timeout at most 30 days.
+  state: OPEN|MATCHED|BROKEN|TIMED_OUT|CANCELLED, createdAt, expiresAt, matchedEventId, closedAt,
+  brokenReason, …}`. The selection is qits-eventstream's `EventSelection`; an invalid one is a 400
+  with its reason. At most 8 OPEN waits per agent (`409 TOO_MANY_WAITS`); no timeout means the
+  platform's ceiling of 8 hours, and a timeout is at most 24 hours (qits-1961), so every wait ends.
 - `GET …/waits?state=` → `{waits: [...]}`; `DELETE …/waits/{waitId}` → 200 with the wait
   (CANCELLED, or as it was if already closed).
 - `qits:agent`, `qits:admin-agent` and `qits:desk-admin` act only on the agent their token belongs
   to; `qits:admin` and `qits:system` on any.
 - A durable bus listener (`qits-workspaces.agent-waits`, subscribed to `*`) matches arriving events.
   A match or a timeout closes the wait and gives the agent a turn naming the label, the event, its
-  time and the matched values (never the raw payload); a yielded agent resumes for it. `GET /agents/{id}` shows `waitingOn`,
+  time and the matched values (never the raw payload); a yielded agent resumes for it. The wait's
+  subject is looked up at declaration and every 5 minutes while it is OPEN; one that can no longer
+  get where the wait wants it (final elsewhere, stuck for 30 minutes, unknown to its provider, or a
+  branch the delivery ledger does not follow) closes it **BROKEN** with a turn saying why
+  (qits-1961). `GET /agents/{id}` shows `waitingOn`,
   and the waiting relay to qits-projects says `cause: "Wait"` with `waitingOn` instead of a plain
   wait for input.
 - **A project's front desk waits too** (qits-1618): `POST`/`GET …` and `DELETE …/{waitId}` on
   `/workspaces/api/desks/{projectId}/waits`, the same bodies with `agentId: null`, the same limits
   (8 OPEN per project). `qits:admin` and `qits:system` act on any project, `qits:desk-admin` only on
   its token's `project` claim; nobody else. A match or timeout is announced as **`DeskWaitClosed`**
-  `{waitId, projectId, label, state: MATCHED|TIMED_OUT, eventName, matchedEventId?, turn, closedAt}`
+  `{waitId, projectId, label, state: MATCHED|TIMED_OUT|BROKEN, eventName, matchedEventId?, turn, closedAt}`
   (`turn` the agent's wake sentence, verbatim) for qits-projects to hand to the desk; a cancel
   announces nothing.
 

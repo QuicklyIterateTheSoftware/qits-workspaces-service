@@ -242,6 +242,14 @@ null`: an agent stopped while queued has no workspace. `AgentSchemaTest` inserts
 **`V36__wait_waiter_subject.sql`** (qits-1759) adds `agent_wait.waiter_subject` (nullable): the
 principal that waits, whose own `EntityCommented` never matches the wait. Not shown by any door. A
 column on a `CausedRow`, so no `ArchRulesTest` decision; see "Declared waits".
+**`V38__wait_broken.sql`** (qits-1961) admits `BROKEN` in `agent_wait.state` — it drops V23's
+inline check by the name postgres gave it, `agent_wait_state_check`, and adds
+`ck_agent_wait_state` — and adds `broken_reason` (nullable `text`, the platform's one line on why
+a wait broke) and `expiry_is_ceiling` (`not null default false`: the expiry is the platform's
+ceiling, not a timeout the waiter asked for). It gives the OPEN rows standing at migration a
+ceiling: no expiry becomes `greatest(created_at + 8 h, now() + 1 h)`, an expiry later than
+`created_at + 24 h` becomes `greatest(created_at + 24 h, now() + 1 h)`, both marked
+`expiry_is_ceiling`. Columns on a `CausedRow`, so no `ArchRulesTest` decision; see "Declared waits".
 **`V30__workspace_leases.sql`** (epic qits-1481, qits-1532) retires the workspace runners: it first
 copies every row with a `runner_id` into `legacy_placement(row_id, old_runner_id, engine_id,
 hostname, runner_name)` — `engine_id` and `hostname` from the runner's `capabilities ->> 'engineId'`
@@ -1337,7 +1345,11 @@ data}`:
 
 **Declared waits** (qits-1153, W1–W8; `AgentWaits`, `AgentWaitController`, `bus/AgentWaitListener`).
 An agent says which event it waits on (`agent_wait`: label, qits-eventstream `EventSelection` JSON,
-event name, optional expiry) and gets a turn when it happens:
+event name, expiry) and gets a turn when it happens — or when it never can (BROKEN), or when the
+wait times out. **Every wait ends** (qits-1961): one that asks for no timeout expires after the
+platform's ceiling, `AgentWaits.DEFAULT_TIMEOUT` (8 h, which clears every machine wait measured),
+and none may ask for more than `MAX_TIMEOUT` (24 h; a 400 names the cap). `expires_at` is never null
+on a wait declared since; `expiry_is_ceiling` says the expiry is the ceiling:
 
 - **Matching.** `AgentWaitListener` is this service's wait listener: durable, consumer id
   `qits-workspaces.agent-waits` (never change it), signatures `*`. `selects` looks the event name up
@@ -1355,12 +1367,14 @@ event name, optional expiry) and gets a turn when it happens:
   instructions. Only the values at the selection's own paths are shown (JSON-quoted, at most 80
   characters and 3 per path) inside a block marked as event-log data, not instructions.
 - **The sweep** (first step of every scheduler pass): an OPEN wait past `expires_at` is TIMED_OUT and
-  wakes its agent; an OPEN wait of an agent that is no longer ACTIVE is CANCELLED, with no wake.
+  wakes its agent — the turn says when that was the platform's ceiling rather than a timeout it
+  asked for, and that a wait on a person may ask for up to 24 h; an OPEN wait of an agent that is
+  no longer ACTIVE is CANCELLED, with no wake.
 - **Waiting on** (W5). Declaring a wait does not yield the agent. While it has an OPEN wait, the
   waiting relay says `cause: "Wait"` and `waitingOn: <labels>` (`AgentWaitingReporter`), and an agent
   waiting for input on a wait gives up its slot at once when another agent wants it (no
   `yield-after`); its harness keeps running.
-  A match or timeout relays `waiting: false` (`WaitMatched`, `WaitTimedOut`).
+  A match, a break or a timeout relays `waiting: false` (`WaitMatched`, `WaitBroken`, `WaitTimedOut`).
   **Every relay names the OPEN waits, busy or idle** (qits-1460): `waitingOn` is the labels of the
   waits still open whatever `waiting` says — after a match or timeout, the waits that stayed open,
   read after the close committed — so an item whose agent is working still shows what it waits on.
@@ -1398,6 +1412,13 @@ event name, optional expiry) and gets a turn when it happens:
   for a release request (`getProjectReleaseRequest`, under the agent's project) or a work item
   (`getWork`, for `WORK_ITEM` and `COMMENTS`), and qits-ci for a run (`getRun`, `wiring/CiRuns`).
   A desk's request is read under the desk's own project (qits-1668).
+  **Since qits-1961 a branch is looked up too**: `getBranchDeliveries` (`wiring/ProjectsBranchDeliveries`,
+  `?branch=&project=`, under the agent's or the desk's project; no `repository`, the wait picks its
+  row out of the whole answer). Its state is read as the wait reads its events
+  (`WaitSubjects.branchReading`): `everywhere` for a wait targeting it, the row of the wait's
+  `repository` when it names one, else the newest row in a target state or the newest at all. A
+  branch the ledger never followed is no failure: 200, no rows. A request's answer now carries
+  `detail`, which a broken wait quotes.
   It writes `subject_id`, `subject_qualified_id`, `subject_state` (a request's `state`, an item's
   `status`, a run's `status`; comments have none) since `subject_state_at` (`updatedAt`; a run's
   `finishedAt ?: startedAt ?: createdAt`), a run's `subject_expected_by`, `subject_resolved_at` and
@@ -1412,14 +1433,34 @@ event name, optional expiry) and gets a turn when it happens:
   kick — a desk's through `DeskWaitClosed`. It is what fires a wait whose subject got there before
   the look-back reaches. The wake is the platform's own sentence: `Your wait "<label>" matched when
   its subject was looked up: run 9677c59a is already SUCCESS since 10:42 UTC, as looked up. …` (the
-  subject named as Attention names it; no "since" when the provider gave no time). A final state
-  the wait does not wait for, comments and a lookup with no state close nothing — that is
-  `WAIT_SUBJECT_PASSED`'s. A declaration its lookup matched answers MATCHED and skips its
-  look-back. **Every scheduler pass looks up again** the OPEN waits (an agent's or, since
-  qits-1668, a desk's) of a parsed kind with no
-  `subject_resolved_at` (`AgentWaits.resolveUnresolved`, right after the sweep): oldest first, each
-  at most once, at most 20 and for at most 10 s per pass, and a wait whose lookup failed not before
-  `qits.workspaces.waits.subject-retry-every` (PT1M) passed. **A run's expected finish**: with
+  subject named as Attention names it; no "since" when the provider gave no time). Comments
+  and a lookup with no state match nothing. A declaration its lookup matched answers MATCHED and
+  skips its look-back.
+  **A lookup that did not match may break the wait** (qits-1961, `control/WaitBreaks`, pure, beside
+  `WaitSubjects.isFinal`): the subject is final for its kind and not a target (a request FINALIZED,
+  WITHDRAWN or OBSOLETE; a run not QUEUED or RUNNING; an item DONE or DROPPED; a branch LIVE or
+  WITHDRAWN); stuck and not a target for `STUCK_AFTER` (30 min: a request REJECTED or CONFLICTED, a
+  branch step FAILED or CONFLICTED — a REJECTED request reopens on a push, qits-1731); the provider
+  answered 404 (`WaitSubjectResolver.NotFound`; a 5xx or no answer is only retried); or a branch
+  with no row (none in the wait's repository) 30 min after the declaration — a maintenance branch
+  the ledger does not follow (qits-1952). A branch is judged on the wait's repository's row; an
+  `everywhere` wait on `everywhere`, and on any row stuck for the grace (the least advanced step
+  cannot pass it); a wait naming neither only when every row ended or is stuck and none is a
+  target. COMMENTS break only on a 404, OTHER never. Only while the row still holds what the lookup
+  read: an event that recorded another state since is newer. A broken wait is closed BROKEN in the
+  lookup's transaction on the locked row, `broken_reason` holds `<subject> is <state> since HH:mm
+  UTC[ in <request>][: <detail>]`, `AgentWaitClosed` BROKEN carries `label` and `reason`, and the
+  agent's turn (relay `WaitBroken`) is the platform's: `Your wait "<label>" can no longer be
+  satisfied and is closed (BROKEN): <reason>. It waited for <targets>. Re-plan: …`. A desk's is
+  announced as `DeskWaitClosed` BROKEN with that turn. It replaced `WAIT_SUBJECT_PASSED`'s "ended"
+  case, which only told people.
+  **Every scheduler pass looks up again** (a re-check since qits-1961) the OPEN waits (an agent's
+  or, since qits-1668, a desk's) of a parsed kind other than OTHER never resolved or last resolved
+  at least `AgentWaits.RECHECK_EVERY` (5 min) ago (`AgentWaits.resolveUnresolved`, right after the
+  sweep): the longest unread first (`coalesce(subject_resolved_at, created_at)`), each at most once,
+  at most 20 and for at most 10 s per pass, and a wait whose lookup failed not before
+  `qits.workspaces.waits.subject-retry-every` (PT1M) passed. Before, a resolved wait was never read
+  again, so a missed event left it stale for good. **A run's expected finish**: with
   qits-ci's `expectedStepDurationsMillis` non-empty, `(startedAt ?: now) + run-overdue-factor ×
   Σ + run-overdue-grace`; otherwise `createdAt + run-unpredicted-after`
   (`qits.workspaces.attention.run-overdue-factor` 2, `…run-overdue-grace` PT15M,
@@ -1431,7 +1472,7 @@ event name, optional expiry) and gets a turn when it happens:
   agent's wait, whose `author` is the agent's id — skips the wait, which stays OPEN, live and on
   the look-back alike (`AgentWaits.ownComment`). Only comments: a state event the waiter caused
   still matches. A wait from before `V36` has no subject and is held to the author check alone.
-- **Limits.** 8 OPEN waits per agent, timeout at most 30 days, label at most 200 characters (default:
+- **Limits.** 8 OPEN waits per agent, timeout 8 h when none is given and at most 24 h (qits-1961), label at most 200 characters (default:
   the selection in one line). The native image registers `EventSelection`, its `Condition` and `Op`
   on `AgentWaitController`.
 - **Paths its event never carries are refused** (qits-1849, `control/EventPayloadCatalog`).
@@ -1470,7 +1511,7 @@ bean). What an ACTIVE agent needs a person for, in one code and one line, stored
 
 | # | `code` | holds when | `since` | reason, e.g. |
 |---|---|---|---|---|
-| 1 | `WAIT_SUBJECT_PASSED` | an OPEN wait whose `subject_state` is one of its `target_states`, or final for its kind (`WaitSubjects.isFinal`) and not one of them | `subject_state_at` | `Waits on qits-projects-service-rr-368 to end; it is FINALIZED since 10:42` |
+| 1 | `WAIT_SUBJECT_PASSED` | an OPEN wait whose `subject_state` is one of its `target_states` (a final state that is not one of them breaks the wait since qits-1961, "Declared waits") | `subject_state_at` | `Waits on qits-projects-service-rr-368 to end; it is FINALIZED since 10:42` |
 | 2 | `BLOCKED_NO_DESK` | `entity_blocked` with `block_source` `EXPLICIT` or `BOTH`, `blocked_at` at least `blocked-after` ago, and no `desk_asked_at` at or after `blocked_at` | `blocked_at` | `Blocked 50 min by <blockAuthor>, no @desk comment since` |
 | 3 | `IDLE_NO_WAIT` | `run_state` RUNNING, `waiting_since` at least `idle-after` ago, no OPEN wait, no `pending_text`, no explicit block (as the nudge reads it: `EXPLICIT`, `BOTH` or no source; the derived `AGENT_WAITING` block alone does not excuse it), not `BETWEEN_PHASES` | `waiting_since` | `Idle 42 min with no wait and no block` |
 | 4 | `WAIT_OVERDUE` | an OPEN `CI_RUN` wait QUEUED or RUNNING past `subject_expected_by`; or an OPEN `RELEASE_REQUEST` wait in a state that is not final, unchanged for `request-overdue-after` | `subject_expected_by`, or `subject_state_at + request-overdue-after` | `Run 9677c59a RUNNING for 1 h 40 min, expected about 35 min` / `qits-qits-rr-12 PENDING, unchanged for 3 h 10 min` |
@@ -1529,10 +1570,10 @@ payload's top-level fields:
 | `WorkspaceStarted` | `workspaceId`, `repositoryId` | |
 | `WorkspaceFailed` | `workspaceId`, `repositoryId`, `runtimeError` | |
 | `WorkspaceRemoved` | `workspaceId`, `repositoryId`, `reason` | `NO_AGENT_LEFT` |
-| `DeskWaitClosed` | `waitId`, `projectId`, `label`, `state`, `eventName`, `matchedEventId` (absent on a timeout), `turn`, `closedAt` — not a lifecycle fact but a project desk's wake (qits-1618, "Declared waits") | `state`: `MATCHED`, `TIMED_OUT` |
+| `DeskWaitClosed` | `waitId`, `projectId`, `label`, `state`, `eventName`, `matchedEventId` (absent on a timeout or a break), `turn`, `closedAt` — not a lifecycle fact but a project desk's wake (qits-1618, "Declared waits") | `state`: `MATCHED`, `TIMED_OUT`, `BROKEN` (qits-1961) |
 | `AgentWaitOpened` | the four, `projectId`, `waitId`, `label`, `eventName`, `subjectKind`, `subjectRef` (absent for OTHER), `targetStates` — an agent's wait declared (epic qits-1681) | `subjectKind`: `RELEASE_REQUEST`, `CI_RUN`, `WORK_ITEM`, `COMMENTS`, `OTHER` |
 | `AgentWaitChanged` | the four, `projectId`, `waitId`, `subjectKind`, `subjectRef`, `subjectQualifiedId`, `subjectState`, `subjectStateAt` — an event of the wait's name moved its subject's recorded state (epic qits-1681) | |
-| `AgentWaitClosed` | the four, `projectId`, `waitId`, `state`, `matchedEventId` (a match only) — an agent's wait matched, timed out, was cancelled, or went with its agent (epic qits-1681) | `state`: `MATCHED`, `TIMED_OUT`, `CANCELLED` |
+| `AgentWaitClosed` | the four, `projectId`, `waitId`, `state`, `matchedEventId` (a match only), `label` and `reason` (BROKEN only, qits-1961) — an agent's wait matched, broke, timed out, was cancelled, or went with its agent (epic qits-1681) | `state`: `MATCHED`, `TIMED_OUT`, `BROKEN`, `CANCELLED` |
 | `AgentActivityChanged` | the four, `projectId`, `activity`, `waitingSince` (absent once it works), `at` — the waiting flip `onActivity` relays to qits-projects, and no other frame (epic qits-1681) | `activity`: `IDLE`, `BUSY`, `WAITING`, `ENDED` |
 | `AgentAttentionChanged` | the four, `projectId`, `code` (absent once cleared), `reason` (this service's one line), `since`, `waitId` (codes 1 and 4) — what an ACTIVE agent needs a person for changed code or wait ("Attention"; epic qits-1681) | `code`: `WAIT_SUBJECT_PASSED`, `BLOCKED_NO_DESK`, `IDLE_NO_WAIT`, `WAIT_OVERDUE` |
 
