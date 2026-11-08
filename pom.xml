@@ -115,7 +115,7 @@
              (wiring/IdpContract); qits-containers' for the place and volume doors
              (containershost/ContainersContract); qits-workspace-daemon's for the agent-worktree
              doors DaemonAgentClient calls (daemonhost/WorkspaceDaemonContract). -->
-        <qits.idp-golden-masters.version>2026.1107.220215</qits.idp-golden-masters.version>
+        <qits.idp-golden-masters.version>2026.1108.62139</qits.idp-golden-masters.version>
         <qits.containers-golden-masters.version>2026.1019.103940</qits.containers-golden-masters.version>
         <qits.workspace-daemon-golden-masters.version>2026.1107.140355</qits.workspace-daemon-golden-masters.version>
         <!-- qits-system's golden masters (epic qits-1481): the lease, work-volume and target doors
