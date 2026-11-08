@@ -63,8 +63,13 @@ public final class SystemContract {
   static final List<String> LEASE =
       List.of("$.id", "$.ownerRef", "$.state", "$.targetId", "$.exitCode", "$.detail", "$.requestedAt");
 
-  /** The row id the create below asks for. */
-  static final long ROW_ID = 17L;
+  /**
+   * The row id the create below asks for: 18, not the queued lease's 17. qits-system records its
+   * create beside that lease, for another ownerRef, and one live lease per ownerRef answers a create
+   * for 17 with 409 LEASE_EXISTS — qits-1952 found it once the provider first verified this pact.
+   * Every other row addresses the state's own lease, by its params.
+   */
+  static final long ROW_ID = 18L;
 
   private static final String BEARER = "{authorization}";
 

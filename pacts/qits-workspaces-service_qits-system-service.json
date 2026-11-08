@@ -502,7 +502,7 @@
       "request": {
         "body": {
           "content": {
-            "ownerRef": "17",
+            "ownerRef": "18",
             "priority": 0,
             "slotType": "WORKSPACE",
             "spec": {
@@ -519,7 +519,7 @@
               },
               "user": "1000"
             },
-            "workKey": "ws-17"
+            "workKey": "ws-18"
           },
           "contentType": "application/json",
           "encoded": false
