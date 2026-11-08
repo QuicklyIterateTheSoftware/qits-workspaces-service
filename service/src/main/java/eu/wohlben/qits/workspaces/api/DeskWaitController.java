@@ -36,8 +36,9 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * (qits-1618): the desk is a Claude session qits-projects runs, with no agent row here, and it
  * waits with {@code qits wait} like the agents do. The bodies are the agent door's ({@link
  * AgentWaitController}), {@code agentId} null; the rules are {@link AgentWaits}' — same selection,
- * timeout at most 30 days, at most 8 OPEN waits per project. A match or timeout is announced as
- * {@code DeskWaitClosed} rather than written as a turn.
+ * timeout at most 24 hours and 8 hours when none is given (qits-1961), at most 8 OPEN waits per
+ * project. A match, a break (qits-1961) or a timeout is announced as {@code DeskWaitClosed} rather
+ * than written as a turn.
  *
  * <p><b>Who.</b> {@code qits:admin} and {@code qits:system} act on any project's desk. {@code
  * qits:desk-admin} (the desk's own role, qits-1622) acts only on the desk of the project its

@@ -35,7 +35,11 @@ public interface ProjectsReleaseRequests {
   @JsonIgnoreProperties(ignoreUnknown = true)
   record RequestAnswer(Request request) {}
 
-  /** The four fields a wait reads; the rest of the request stays qits-projects' to change. */
+  /**
+   * The fields a wait reads — and {@code detail}, the request's one line on its state (a
+   * rejection's reason), which a broken wait's turn quotes (qits-1961); the rest of the request
+   * stays qits-projects' to change.
+   */
   @JsonIgnoreProperties(ignoreUnknown = true)
-  record Request(String id, String qualifiedId, String state, Instant updatedAt) {}
+  record Request(String id, String qualifiedId, String state, Instant updatedAt, String detail) {}
 }

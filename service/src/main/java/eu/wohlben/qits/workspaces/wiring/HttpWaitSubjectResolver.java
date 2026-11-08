@@ -26,15 +26,21 @@ import org.eclipse.microprofile.rest.client.inject.RestClient;
  *       its id, qualified id and, for an item, {@code status} since {@code updatedAt};
  *   <li>a run: qits-ci's {@code getRun} ({@link CiRuns}) — its id, {@code status} since {@code
  *       finishedAt ?: startedAt ?: createdAt}, and when it should have finished ({@link
- *       #expectedBy}).
+ *       #expectedBy});
+ *   <li>a branch (qits-1961): qits-projects' {@code getBranchDeliveries} ({@link
+ *       ProjectsBranchDeliveries}), under the wait's project when it is known — {@code everywhere}
+ *       and each repository's row; the wait reads its own state out of them ({@code
+ *       WaitSubjects.branchReading}). A branch the ledger never followed is an answer, not a
+ *       failure: no rows.
  * </ul>
  *
- * A branch has no door of its own here: {@link WaitSubjects.Kind#BRANCH} resolves to nothing, same
- * as {@link WaitSubjects.Kind#OTHER} — its state comes only from the events it listens to.
+ * A request's answer also carries its {@code detail} (qits-1961), which a broken wait quotes. {@link
+ * WaitSubjects.Kind#OTHER} resolves to nothing.
  *
  * Every failure is a {@link WaitSubjectResolver.Unresolvable} naming it in one sentence: a 404 is
- * "no such subject", another status is what the provider answered, a transport failure (a timeout,
- * a refused connection) is "did not answer". Each call carries the {@code qits} oidc client's bearer.
+ * "no such subject" and, since qits-1961, the {@link WaitSubjectResolver.NotFound} that breaks the
+ * wait; another status is what the provider answered, a transport failure (a timeout, a refused
+ * connection) is "did not answer" — both only retried. Each call carries the {@code qits} oidc client's bearer.
  * {@code @DefaultBean}, so a suite's double wins without ambiguity.
  */
 @ApplicationScoped
@@ -46,6 +52,8 @@ public class HttpWaitSubjectResolver implements WaitSubjectResolver {
   @Inject @RestClient ProjectsWorkItems workItems;
 
   @Inject @RestClient CiRuns runs;
+
+  @Inject @RestClient ProjectsBranchDeliveries branchDeliveries;
 
   @Inject IdpProjectsBearer bearer;
 
@@ -68,9 +76,8 @@ public class HttpWaitSubjectResolver implements WaitSubjectResolver {
       case RELEASE_REQUEST -> Optional.of(releaseRequest(ref, projectId));
       case WORK_ITEM, COMMENTS -> Optional.of(workItem(kind, ref));
       case CI_RUN -> Optional.of(run(ref));
-      // BRANCH has no lookup door of its own yet: a branch wait's state comes only from the
-      // events it listens to.
-      case BRANCH, OTHER -> Optional.empty();
+      case BRANCH -> Optional.of(branch(ref, projectId));
+      case OTHER -> Optional.empty();
     };
   }
 
@@ -88,7 +95,38 @@ public class HttpWaitSubjectResolver implements WaitSubjectResolver {
     if (request == null || request.id() == null) {
       throw new Unresolvable("qits-projects answered no release request for " + ref + ".");
     }
-    return new Resolved(request.id(), request.qualifiedId(), request.state(), request.updatedAt(), null);
+    return new Resolved(
+        request.id(),
+        request.qualifiedId(),
+        request.state(),
+        request.updatedAt(),
+        null,
+        request.detail(),
+        null);
+  }
+
+  /**
+   * A branch's deliveries, under {@code projectId} when known (else unnarrowed, which qits-projects
+   * answers unless the branch has rows in several projects). No rows is an answer.
+   */
+  private Resolved branch(String ref, String projectId) {
+    String project = projectId == null || projectId.isBlank() ? null : projectId;
+    ProjectsBranchDeliveries.Deliveries answer =
+        call(
+            "qits-projects",
+            "deliveries of branch " + ref,
+            () -> branchDeliveries.get(authorization(), ref, project));
+    if (answer == null) {
+      throw new Unresolvable("qits-projects answered no deliveries for branch " + ref + ".");
+    }
+    List<Delivery> rows =
+        answer.deliveries() == null
+            ? List.of()
+            : answer.deliveries().stream()
+                .filter(Objects::nonNull)
+                .map(d -> new Delivery(d.repository(), d.step(), d.qualifiedId(), d.runId(), d.changedAt()))
+                .toList();
+    return Resolved.ofBranch(new Branch(answer.everywhere(), rows));
   }
 
   private Resolved workItem(WaitSubjects.Kind kind, String ref) {
@@ -143,7 +181,7 @@ public class HttpWaitSubjectResolver implements WaitSubjectResolver {
     } catch (WebApplicationException http) {
       int status = http.getResponse() == null ? 0 : http.getResponse().getStatus();
       if (status == 404) {
-        throw new Unresolvable(provider + " knows no " + subject + ".", http);
+        throw new NotFound(provider + " knows no " + subject + ".", http);
       }
       throw new Unresolvable(provider + " answered " + status + " for the " + subject + ".", http);
     } catch (Unresolvable already) {

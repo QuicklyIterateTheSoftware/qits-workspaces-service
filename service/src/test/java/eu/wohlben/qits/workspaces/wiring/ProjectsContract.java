@@ -54,7 +54,11 @@ import java.util.Map;
  *       whether or not the agent waits for input (qits-1460). And since epic qits-1681 the wait's
  *       subject is looked up once the wait is committed ({@link HttpWaitSubjectResolver}): a release
  *       request with {@code getProjectReleaseRequest} under the agent's project, a work item (or its
- *       comments) with {@code getWork}.
+ *       comments) with {@code getWork}. Since qits-1961 a branch too, with {@code
+ *       getBranchDeliveries} and the wait's project in {@code project} — a query parameter this
+ *       consumer adds to the recorded {@code branch}, bound to the state's own project id — and the
+ *       request's {@code detail} is read, which a broken wait's turn quotes. The same lookups run
+ *       again on the scheduler's re-check; the trigger names the declaration, where they start.
  * </ul>
  */
 final class ProjectsContract {
@@ -97,6 +101,12 @@ final class ProjectsContract {
   static final String BUG_TICKET = "a bug ticket in detail";
   static final String GET_WORK = "getWork";
 
+  static final String BRANCH_RELEASED = "branch ticket/qits-9001 is RELEASED in qits-demo-service";
+  static final String GET_BRANCH_DELIVERIES = "getBranchDeliveries";
+
+  /** The branch that state's ledger holds; the recording asks for it by name, not by a param. */
+  static final String RELEASED_BRANCH = "ticket/qits-9001";
+
   /** The clients a row drives, each built against the row's mock server. */
   record Clients(
       RepositoryLookup lookup,
@@ -111,8 +121,9 @@ final class ProjectsContract {
   }
 
   /**
-   * One (trigger, call), the body this consumer sends (null for a GET) and the answer's body paths
-   * that call reads.
+   * One (trigger, call), the body this consumer sends (null for a GET), the answer's body paths
+   * that call reads, and the query parameters it sends beyond the recorded ones (qits-1961; a
+   * {@code {param}} value is the state's).
    */
   record Case(
       Trigger trigger,
@@ -120,10 +131,30 @@ final class ProjectsContract {
       String operationId,
       DslPart requestBody,
       List<String> consumes,
-      Call call) {
+      Call call,
+      Map<String, String> query) {
+
+    Case(
+        Trigger trigger,
+        String state,
+        String operationId,
+        DslPart requestBody,
+        List<String> consumes,
+        Call call) {
+      this(trigger, state, operationId, requestBody, consumes, call, Map.of());
+    }
 
     Case(Trigger trigger, String state, String operationId, List<String> consumes, Call call) {
       this(trigger, state, operationId, null, consumes, call);
+    }
+
+    /** What this consumer sends besides the method, the path and the recorded query. */
+    GoldenMasters.Request sent() {
+      GoldenMasters.Request sent = GoldenMasters.Request.json(requestBody);
+      for (Map.Entry<String, String> param : query.entrySet()) {
+        sent = sent.query(param.getKey(), param.getValue());
+      }
+      return sent;
     }
 
     String description() {
@@ -213,6 +244,32 @@ final class ProjectsContract {
         assertEquals(request.path("qualifiedId").asText(), resolved.subjectQualifiedId());
         assertEquals(request.path("state").asText(), resolved.state());
         assertEquals(Instant.parse(request.path("updatedAt").asText()), resolved.stateAt());
+        assertEquals(request.path("detail").asText(), resolved.detail());
+      };
+
+  /**
+   * A wait on a branch (qits-1961): {@code everywhere} and each row's repository, step, request,
+   * run and time, read under the wait's project.
+   */
+  private static final Call RESOLVE_BRANCH =
+      (clients, params) -> {
+        WaitSubjectResolver.Resolved resolved =
+            clients
+                .subjects()
+                .resolve(WaitSubjects.Kind.BRANCH, RELEASED_BRANCH, params.get("projectId"))
+                .orElseThrow();
+        JsonNode answer = GoldenMasters.json(BRANCH_RELEASED, GET_BRANCH_DELIVERIES);
+        WaitSubjectResolver.Branch branch = resolved.branch();
+        assertEquals(answer.path("everywhere").asText(), branch.everywhere());
+        assertEquals(answer.path("deliveries").size(), branch.deliveries().size());
+        JsonNode recorded = answer.path("deliveries").path(0);
+        WaitSubjectResolver.Delivery row = branch.deliveries().get(0);
+        assertEquals(recorded.path("repository").asText(), row.repository());
+        assertEquals(recorded.path("step").asText(), row.step());
+        assertEquals(recorded.path("qualifiedId").asText(), row.qualifiedId());
+        assertEquals(
+            recorded.path("runId").isNull() ? null : recorded.path("runId").asText(), row.runId());
+        assertEquals(Instant.parse(recorded.path("changedAt").asText()), row.changedAt());
       };
 
   /** A wait on a work item: its id, qualified id, status and when it last changed. */
@@ -311,14 +368,33 @@ final class ProjectsContract {
               Trigger.operation("createAgentWait"),
               REQUESTS_IN_EVERY_STATE,
               GET_PROJECT_RELEASE_REQUEST,
-              List.of("$.request.id", "$.request.qualifiedId", "$.request.state", "$.request.updatedAt"),
+              List.of(
+                  "$.request.id",
+                  "$.request.qualifiedId",
+                  "$.request.state",
+                  "$.request.updatedAt",
+                  "$.request.detail"),
               RESOLVE_REQUEST),
           new Case(
               Trigger.operation("createAgentWait"),
               BUG_TICKET,
               GET_WORK,
               List.of("$.id", "$.qualifiedId", "$.status", "$.updatedAt"),
-              RESOLVE_ITEM));
+              RESOLVE_ITEM),
+          new Case(
+              Trigger.operation("createAgentWait"),
+              BRANCH_RELEASED,
+              GET_BRANCH_DELIVERIES,
+              null,
+              List.of(
+                  "$.everywhere",
+                  "$.deliveries[*].repository",
+                  "$.deliveries[*].step",
+                  "$.deliveries[*].qualifiedId",
+                  "$.deliveries[*].runId",
+                  "$.deliveries[*].changedAt"),
+              RESOLVE_BRANCH,
+              Map.of("project", "{projectId}")));
 
   private ProjectsContract() {}
 
@@ -338,7 +414,7 @@ final class ProjectsContract {
           c.state(),
           c.operationId(),
           c.trigger(),
-          c.requestBody(),
+          c.sent(),
           c.consumes());
     }
     return builder.toPact();

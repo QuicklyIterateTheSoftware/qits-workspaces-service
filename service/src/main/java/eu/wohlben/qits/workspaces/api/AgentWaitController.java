@@ -87,12 +87,17 @@ public class AgentWaitController {
   /**
    * @param label what the agent calls the wait; default: the selection in one line
    * @param selection the event and conditions to wait for
-   * @param timeout an ISO-8601 duration ({@code PT2H}); none = never; at most 30 days
+   * @param timeout an ISO-8601 duration ({@code PT2H}); none = the platform's ceiling of 8 hours; at
+   *     most 24 hours, else 400 (qits-1961)
    */
   public record CreateWaitRequest(
       String label,
       @Schema(implementation = SelectionSchema.class, required = true) JsonNode selection,
-      @Schema(example = "PT2H") String timeout) {}
+      @Schema(
+              example = "PT2H",
+              description =
+                  "ISO-8601; none = the platform's ceiling of 8 hours; at most 24 hours (PT24H)")
+          String timeout) {}
 
   public record WaitList(List<WaitView> waits) {}
 
@@ -103,7 +108,9 @@ public class AgentWaitController {
       content = @Content(schema = @Schema(implementation = WaitView.class)))
   @APIResponse(
       responseCode = "400",
-      description = "An invalid selection (the matcher's reason), or a bad timeout.",
+      description =
+          "An invalid selection (the matcher's reason), or a bad timeout: not positive, or longer"
+              + " than the 24-hour cap.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @APIResponse(
       responseCode = "403",
@@ -227,7 +234,7 @@ public class AgentWaitController {
       return AgentWaitState.valueOf(state.trim().toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException unknown) {
       throw new BadRequestException(
-          "Unknown wait state '" + state + "'; use OPEN, MATCHED, TIMED_OUT or CANCELLED.");
+          "Unknown wait state '" + state + "'; use OPEN, MATCHED, BROKEN, TIMED_OUT or CANCELLED.");
     }
   }
 

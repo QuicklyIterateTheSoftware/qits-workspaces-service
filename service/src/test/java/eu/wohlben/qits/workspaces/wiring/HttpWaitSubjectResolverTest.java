@@ -1,6 +1,8 @@
 package eu.wohlben.qits.workspaces.wiring;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,8 +21,9 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link HttpWaitSubjectResolver}'s mapping (epic qits-1681) over stub clients: each kind, a 404, a
- * timeout, another status, and the expected-finish arithmetic with and without a prediction. The
+ * {@link HttpWaitSubjectResolver}'s mapping (epic qits-1681) over stub clients: each kind (a branch
+ * since qits-1961), a 404 (the {@code NotFound} that breaks a wait), a timeout, another status, and
+ * the expected-finish arithmetic with and without a prediction. The
  * wire itself — the paths, the bodies the real generated clients bind — is the contract tables'
  * ({@code ProjectsContract}, {@code CiContract}).
  */
@@ -32,7 +35,16 @@ class HttpWaitSubjectResolverTest {
 
   private HttpWaitSubjectResolver resolver(
       ProjectsReleaseRequests requests, ProjectsWorkItems items, CiRuns runs) {
+    return resolver(requests, items, runs, (auth, branch, project) -> fail());
+  }
+
+  private HttpWaitSubjectResolver resolver(
+      ProjectsReleaseRequests requests,
+      ProjectsWorkItems items,
+      CiRuns runs,
+      ProjectsBranchDeliveries branches) {
     HttpWaitSubjectResolver resolver = new HttpWaitSubjectResolver();
+    resolver.branchDeliveries = branches;
     resolver.releaseRequests = requests;
     resolver.workItems = items;
     resolver.runs = runs;
@@ -60,12 +72,17 @@ class HttpWaitSubjectResolverTest {
             (auth, project, ref) -> {
               calls.add(auth + " " + project + " " + ref);
               return new ProjectsReleaseRequests.RequestAnswer(
-                  new ProjectsReleaseRequests.Request("u-1", "qits-x-rr-3", "PENDING", T0));
+                  new ProjectsReleaseRequests.Request(
+                      "u-1", "qits-x-rr-3", "REJECTED", T0, "Automation golden-recordings failed"));
             },
             (auth, ref) -> fail(),
             (auth, ref) -> fail());
     Resolved r = resolver.resolve(Kind.RELEASE_REQUEST, "qits-x-rr-3", "p-1").orElseThrow();
-    assertEquals(new Resolved("u-1", "qits-x-rr-3", "PENDING", T0, null), r);
+    // The request's detail rides along (qits-1961): a broken wait's turn quotes it.
+    assertEquals(
+        new Resolved(
+            "u-1", "qits-x-rr-3", "REJECTED", T0, null, "Automation golden-recordings failed", null),
+        r);
     assertEquals(List.of("Bearer t p-1 qits-x-rr-3"), calls);
   }
 
@@ -147,6 +164,50 @@ class HttpWaitSubjectResolverTest {
   }
 
   @Test
+  void aBranchIsItsDeliveriesUnderTheWaitsProject() {
+    List<String> asked = new ArrayList<>();
+    HttpWaitSubjectResolver resolver =
+        resolver(
+            (auth, project, ref) -> fail(),
+            (auth, ref) -> fail(),
+            (auth, ref) -> fail(),
+            (auth, branch, project) -> {
+              asked.add(auth + " " + branch + " " + project);
+              if (branch.startsWith("maintenance/")) {
+                // A branch the ledger never followed: 200, nothing.
+                return new ProjectsBranchDeliveries.Deliveries(branch, null, List.of());
+              }
+              return new ProjectsBranchDeliveries.Deliveries(
+                  branch,
+                  "JOINED",
+                  List.of(
+                      new ProjectsBranchDeliveries.Delivery(
+                          "qits-ci-service", "FAILED", "qits-ci-service-rr-4", "run-9", T0),
+                      new ProjectsBranchDeliveries.Delivery(
+                          "qits-ci-frontend", "JOINED", "qits-ci-frontend-rr-2", null, T0.plusSeconds(5))));
+            });
+
+    Resolved r = resolver.resolve(Kind.BRANCH, "ticket/qits-1961", "p-1").orElseThrow();
+    assertNull(r.subjectId(), "a branch has no id of its own");
+    assertNull(r.subjectQualifiedId());
+    assertNull(r.state(), "its state is the wait's reading, not the resolver's");
+    assertEquals("JOINED", r.branch().everywhere());
+    assertEquals(
+        List.of(
+            new WaitSubjectResolver.Delivery("qits-ci-service", "FAILED", "qits-ci-service-rr-4", "run-9", T0),
+            new WaitSubjectResolver.Delivery(
+                "qits-ci-frontend", "JOINED", "qits-ci-frontend-rr-2", null, T0.plusSeconds(5))),
+        r.branch().deliveries());
+
+    Resolved unfollowed = resolver.resolve(Kind.BRANCH, "maintenance/x", null).orElseThrow();
+    assertNull(unfollowed.branch().everywhere());
+    assertTrue(unfollowed.branch().deliveries().isEmpty(), "no rows is an answer, not a failure");
+
+    // Under the project when known; unnarrowed (null, left off the query) when not.
+    assertEquals(List.of("Bearer t ticket/qits-1961 p-1", "Bearer t maintenance/x null"), asked);
+  }
+
+  @Test
   void a404IsNoSuchSubjectAndATimeoutIsNoAnswer() {
     HttpWaitSubjectResolver resolver =
         resolver(
@@ -163,6 +224,8 @@ class HttpWaitSubjectResolverTest {
         assertThrows(
             WaitSubjectResolver.Unresolvable.class, () -> resolver.resolve(Kind.CI_RUN, "r-9", null));
     assertEquals("qits-ci knows no run r-9.", missing.getMessage());
+    // Only a 404 is the NotFound that breaks a wait (qits-1961).
+    assertInstanceOf(WaitSubjectResolver.NotFound.class, missing);
 
     WaitSubjectResolver.Unresolvable timeout =
         assertThrows(
@@ -177,6 +240,8 @@ class HttpWaitSubjectResolverTest {
             WaitSubjectResolver.Unresolvable.class,
             () -> resolver.resolve(Kind.RELEASE_REQUEST, "qits-x-rr-3", "p-1"));
     assertEquals("qits-projects answered 503 for the release request qits-x-rr-3.", refused.getMessage());
+    assertFalse(refused instanceof WaitSubjectResolver.NotFound, "a 5xx is retried, never a break");
+    assertFalse(timeout instanceof WaitSubjectResolver.NotFound, "no answer is retried, never a break");
   }
 
   @Test

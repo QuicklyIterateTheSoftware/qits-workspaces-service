@@ -1113,7 +1113,8 @@
               "$.subjectRef"
             ],
             "instants": [
-              "$.createdAt"
+              "$.createdAt",
+              "$.expiresAt"
             ],
             "strings": [],
             "numbers": [],
@@ -1214,7 +1215,8 @@
               "$.subjectRef"
             ],
             "instants": [
-              "$.createdAt"
+              "$.createdAt",
+              "$.expiresAt"
             ],
             "strings": [],
             "numbers": [],

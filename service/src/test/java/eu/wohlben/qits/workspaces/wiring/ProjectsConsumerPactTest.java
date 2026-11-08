@@ -122,6 +122,10 @@ public class ProjectsConsumerPactTest {
         io.quarkus.rest.client.reactive.QuarkusRestClientBuilder.newBuilder()
             .baseUri(java.net.URI.create(baseUrl))
             .build(ProjectsWorkItems.class);
+    resolver.branchDeliveries =
+        io.quarkus.rest.client.reactive.QuarkusRestClientBuilder.newBuilder()
+            .baseUri(java.net.URI.create(baseUrl))
+            .build(ProjectsBranchDeliveries.class);
     return resolver;
   }
 

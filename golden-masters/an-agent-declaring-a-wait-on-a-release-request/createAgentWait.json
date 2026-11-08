@@ -69,7 +69,7 @@
   },
   "state": "OPEN",
   "createdAt": "2026-01-01T00:00:00Z",
-  "expiresAt": null,
+  "expiresAt": "2026-01-01T00:00:00Z",
   "matchedEventId": null,
   "closedAt": null,
   "subjectKind": "RELEASE_REQUEST",
@@ -86,5 +86,6 @@
   "subjectState": null,
   "subjectStateAt": null,
   "subjectExpectedBy": null,
-  "subjectError": null
+  "subjectError": null,
+  "brokenReason": null
 }

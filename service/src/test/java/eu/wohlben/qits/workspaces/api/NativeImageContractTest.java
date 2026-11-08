@@ -147,6 +147,7 @@ public class NativeImageContractTest {
         List.of(
             eu.wohlben.qits.workspaces.wiring.ProjectsReleaseRequests.class,
             eu.wohlben.qits.workspaces.wiring.ProjectsWorkItems.class,
+            eu.wohlben.qits.workspaces.wiring.ProjectsBranchDeliveries.class,
             eu.wohlben.qits.workspaces.wiring.CiRuns.class)) {
       Set<Class<?>> registered = Set.of(client.getAnnotation(RegisterForReflection.class).targets());
       for (Class<?> needed : client.getDeclaredClasses()) {

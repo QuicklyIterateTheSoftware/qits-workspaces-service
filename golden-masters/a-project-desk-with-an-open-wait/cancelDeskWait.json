@@ -32,5 +32,6 @@
   "subjectState": null,
   "subjectStateAt": null,
   "subjectExpectedBy": null,
-  "subjectError": null
+  "subjectError": null,
+  "brokenReason": null
 }

@@ -129,6 +129,7 @@ components:
       - OPEN
       - MATCHED
       - TIMED_OUT
+      - BROKEN
       - CANCELLED
     ApiError:
       description: "The error envelope: a message, plus a reason or a code on a 409."
@@ -270,6 +271,8 @@ components:
           type: object
         timeout:
           type: string
+          description: ISO-8601; none = the platform's ceiling of 8 hours; at most
+            24 hours (PT24H)
           examples:
           - PT2H
       required:
@@ -765,6 +768,9 @@ components:
           $ref: "#/components/schemas/Instant"
         expiresAt:
           $ref: "#/components/schemas/Instant"
+          description: "When it times out: the timeout it asked for, else the platform's\
+            \ ceiling of 8 h; never null on a wait declared since qits-1961"
+          type: string
         matchedEventId:
           type: string
         closedAt:
@@ -807,6 +813,10 @@ components:
         subjectError:
           type: string
           description: The last failure to look the subject up
+        brokenReason:
+          type: string
+          description: "Why the wait is BROKEN: its subject, looked up, can no longer\
+            \ reach what it waits for; null in every other state"
     WorkItemWorkspaceDto:
       type: object
       properties:
@@ -1431,7 +1441,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/WaitView"
         "400":
-          description: "An invalid selection (the matcher's reason), or a bad timeout."
+          description: "An invalid selection (the matcher's reason), or a bad timeout:\
+            \ not positive, or longer than the 24-hour cap."
           content:
             application/json:
               schema:

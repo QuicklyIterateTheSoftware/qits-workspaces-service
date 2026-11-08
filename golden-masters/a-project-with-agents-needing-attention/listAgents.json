@@ -64,7 +64,8 @@
           "subjectState": "FINALIZED",
           "subjectStateAt": "2026-01-01T00:00:00Z",
           "subjectExpectedBy": null,
-          "subjectError": null
+          "subjectError": null,
+          "brokenReason": null
         }
       ],
       "attention": {
@@ -216,7 +217,8 @@
           "subjectState": "RUNNING",
           "subjectStateAt": "2026-01-01T00:00:00Z",
           "subjectExpectedBy": "2026-01-01T00:00:00Z",
-          "subjectError": null
+          "subjectError": null,
+          "brokenReason": null
         }
       ],
       "attention": {
@@ -288,7 +290,8 @@
           "subjectState": "IMPLEMENTING",
           "subjectStateAt": "2026-01-01T00:00:00Z",
           "subjectExpectedBy": null,
-          "subjectError": null
+          "subjectError": null,
+          "brokenReason": null
         },
         {
           "id": "00000000-0000-4000-8000-0000000000b5",
@@ -319,7 +322,8 @@
           "subjectState": null,
           "subjectStateAt": null,
           "subjectExpectedBy": null,
-          "subjectError": null
+          "subjectError": null,
+          "brokenReason": null
         }
       ],
       "attention": null,

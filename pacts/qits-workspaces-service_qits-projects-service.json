@@ -367,6 +367,146 @@
         "references": {
           "qits-call": {
             "app": "qits-projects-service",
+            "operationId": "getBranchDeliveries"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "createAgentWait"
+          }
+        }
+      },
+      "description": "createAgentWait: getBranchDeliveries",
+      "key": "9b03e571",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "branch ticket/qits-9001 is RELEASED in qits-demo-service",
+          "params": {
+            "projectId": "00000000-0000-4000-8000-000000000001",
+            "repoId": "00000000-0000-4000-8000-000000000002",
+            "requestId": "00000000-0000-4000-8000-000000000003"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "query": {
+            "project": {
+              "dataType": "RAW",
+              "expression": "${projectId}",
+              "type": "ProviderState"
+            }
+          }
+        },
+        "method": "GET",
+        "path": "/projects/api/branch-deliveries",
+        "query": {
+          "branch": [
+            "ticket/qits-9001"
+          ],
+          "project": [
+            "00000000-0000-4000-8000-000000000001"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "content": {
+            "deliveries": [
+              {
+                "changedAt": "2026-01-01T00:00:00Z",
+                "qualifiedId": "qits-demo-service-rr-3",
+                "repository": "qits-demo-service",
+                "runId": null,
+                "step": "RELEASED"
+              }
+            ],
+            "everywhere": "RELEASED"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.deliveries": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "max": 1,
+                  "min": 1
+                }
+              ]
+            },
+            "$.deliveries[*].changedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+                }
+              ]
+            },
+            "$.deliveries[*].qualifiedId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.deliveries[*].repository": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.deliveries[*].step": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.everywhere": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-projects-service",
             "operationId": "getProjectReleaseRequest"
           },
           "qits-trigger": {
@@ -405,6 +545,7 @@
         "body": {
           "content": {
             "request": {
+              "detail": "Waiting for a person to approve 0000000000",
               "id": "00000000-0000-4000-8000-000000000003",
               "qualifiedId": "contract-suite-app-rr-1",
               "state": "PENDING",
@@ -421,6 +562,14 @@
         },
         "matchingRules": {
           "body": {
+            "$.request.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
             "$.request.id": {
               "combine": "AND",
               "matchers": [

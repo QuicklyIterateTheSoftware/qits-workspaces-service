@@ -418,16 +418,29 @@ public final class GoldenMasters {
    * the provider state returned — qits-idp's Basic {@code Authorization} (its {@code authorization}
    * param) comes this way.
    *
+   * <p>{@code query} (qits-1961) is query parameters this consumer sends beyond the recorded ones,
+   * its own half of the contract as a body is: a {@code {param}} value is a provider-state
+   * expression, so the verifier sends what the state returned (qits-projects' {@code project} on
+   * {@code getBranchDeliveries}, the state's own project id). A name the recording also sends is
+   * refused: the recording's value is the contract there.
+   *
    * @param json the JSON body, or null
    * @param form an {@code application/x-www-form-urlencoded} body, or null
    * @param headers the headers, by name
+   * @param query further query parameters, by name
    */
-  public record Request(DslPart json, String form, Map<String, String> headers) {
+  public record Request(
+      DslPart json, String form, Map<String, String> headers, Map<String, String> query) {
     public Request {
       headers = headers == null ? Map.of() : java.util.Collections.unmodifiableMap(new LinkedHashMap<>(headers));
+      query = query == null ? Map.of() : java.util.Collections.unmodifiableMap(new LinkedHashMap<>(query));
       if (json != null && form != null) {
         throw new IllegalArgumentException("a request has one body: json or form");
       }
+    }
+
+    public Request(DslPart json, String form, Map<String, String> headers) {
+      this(json, form, headers, Map.of());
     }
 
     /** No body and no header. */
@@ -445,7 +458,14 @@ public final class GoldenMasters {
     public Request header(String name, String value) {
       Map<String, String> all = new LinkedHashMap<>(headers);
       all.put(name, value);
-      return new Request(json, form, all);
+      return new Request(json, form, all, query);
+    }
+
+    /** The same request, also sending the query parameter {@code name=value}. */
+    public Request query(String name, String value) {
+      Map<String, String> all = new LinkedHashMap<>(query);
+      all.put(name, value);
+      return new Request(json, form, headers, all);
     }
   }
 
@@ -546,6 +566,22 @@ public final class GoldenMasters {
                 op.query()
                     .forEach(
                         (name, value) -> {
+                          if (Operation.namesParam(value)) {
+                            request.queryParameter(
+                                name,
+                                Matchers.fromProviderState(op.expression(value), op.example(value)));
+                          } else {
+                            request.queryParameter(name, value);
+                          }
+                        });
+                sent.query()
+                    .forEach(
+                        (name, value) -> {
+                          if (op.query().containsKey(name)) {
+                            throw new IllegalStateException(
+                                "golden master " + state + "/" + operationId + " records the query "
+                                    + name + " already; the consumer may not send another");
+                          }
                           if (Operation.namesParam(value)) {
                             request.queryParameter(
                                 name,

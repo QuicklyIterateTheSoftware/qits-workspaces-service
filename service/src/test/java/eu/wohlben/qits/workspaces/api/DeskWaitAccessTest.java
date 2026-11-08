@@ -189,6 +189,13 @@ class DeskWaitAccessTest {
         .post(waits(project))
         .then()
         .statusCode(400);
+    // The cap is a day (qits-1961), and the 400 names it.
+    asDesk(project)
+        .body(Map.of("selection", Map.of("event", "X"), "timeout", "PT25H"))
+        .post(waits(project))
+        .then()
+        .statusCode(400)
+        .body("message", containsString("24 hours"));
     asDesk(project)
         .body(Map.of("selection", Map.of("event", "X"), "timeout", "two hours"))
         .post(waits(project))
@@ -196,6 +203,7 @@ class DeskWaitAccessTest {
         .statusCode(400);
     asDesk(project).body(Map.of("label", "x")).post(waits(project)).then().statusCode(400);
     asDesk(project).get(waits(project) + "?state=SOMETIMES").then().statusCode(400);
+    asDesk(project).get(waits(project) + "?state=BROKEN").then().statusCode(200);
     asSystem().get(waits("not-a-project")).then().statusCode(400);
   }
 
