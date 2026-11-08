@@ -36,6 +36,7 @@ erDiagram
     uuid id PK "not null"
     uuid agent_id
     instant announced_at
+    text broken_reason
     uuid causation_id
     instant closed_at
     uuid closed_event_id
@@ -44,6 +45,7 @@ erDiagram
     uuid desk_project_id
     string event_name "not null, length 128"
     instant expires_at
+    boolean expiry_is_ceiling "not null"
     text label "not null"
     text matched_event_id
     text selection "not null"
