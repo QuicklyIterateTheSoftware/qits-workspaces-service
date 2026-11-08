@@ -78,9 +78,9 @@
         <qits.eventstream.version>2026.1107.192805</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1107.191249</qits.db-core.version>
-        <qits.arch-rules.version>2026.1107.205842</qits.arch-rules.version>
+        <qits.arch-rules.version>2026.1108.20205</qits.arch-rules.version>
         <qits.auth-core.version>2026.1106.507</qits.auth-core.version>
-        <qits.containers-client.version>2026.1106.31658</qits.containers-client.version>
+        <qits.containers-client.version>2026.1107.230235</qits.containers-client.version>
         <!-- CallerServerFilter/CallerClientFilter: jandex-indexed filters that record inbound
              X-Qits-Caller as the qits.caller span attribute and stamp it on outgoing REST-client
              calls. Also published by qits-integrations-quarkus. -->
@@ -136,7 +136,7 @@
              ConsumerPactVerificationTest loads every such resource off the test classpath. Test
              scope at the declaration site; a pin in <properties> like every other qits jar, so
              qits-maintenance bumps it when the consumer releases a changed pact. -->
-        <qits.landing-app-pacts-qits-workspaces-service.version>2026.1107.21728</qits.landing-app-pacts-qits-workspaces-service.version>
+        <qits.landing-app-pacts-qits-workspaces-service.version>2026.1107.234702</qits.landing-app-pacts-qits-workspaces-service.version>
         <!-- qits-projects' consumer pact against this service (qits-1152). -->
         <qits.projects-service-pacts-qits-workspaces-service.version>2026.1107.45933</qits.projects-service-pacts-qits-workspaces-service.version>
         <!-- qits-artifacts', qits-orchestrator's and the qits CLI's consumer pacts against this
