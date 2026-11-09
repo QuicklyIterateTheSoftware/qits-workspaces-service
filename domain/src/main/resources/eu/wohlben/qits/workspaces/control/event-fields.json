@@ -454,6 +454,10 @@
       "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
       "reason": "scalar"
     },
+    "AgentStopped": {
+      "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "by": "scalar", "previous": "scalar"
+    },
     "AgentObsolete": {
       "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar",
       "branch": "scalar", "commitSha": "scalar", "version": "scalar"

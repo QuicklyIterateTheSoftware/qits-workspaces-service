@@ -11,8 +11,8 @@ import java.util.UUID;
  * <p><b>The first of the agent lifecycle events, and the one that states the family's
  * conventions</b>, the way qits-ci's {@code RunnerCreated} states the runner events'. The family is
  * {@code AgentPlaced}, {@link AgentStarted}, {@link AgentStartRefused}, {@link AgentRequeued},
- * {@link AgentYielded}, {@link AgentResumed}, {@link AgentObsolete}, {@link AgentCleanupDeferred},
- * {@link AgentRemoved} and {@link AgentHarnessExited}, with {@link WorkspaceStarted}, {@link
+ * {@link AgentYielded}, {@link AgentResumed}, {@link AgentStopped}, {@link AgentObsolete}, {@link
+ * AgentCleanupDeferred}, {@link AgentRemoved} and {@link AgentHarnessExited}, with {@link WorkspaceStarted}, {@link
  * WorkspaceFailed} and {@link WorkspaceRemoved} for the slot underneath. Each is one fact, so a
  * subscriber that wants one fact subscribes to one name — {@code qits wait --event AgentRemoved
  * --when 'agentId=<id>'} is the shape this family exists for.

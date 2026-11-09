@@ -25,6 +25,7 @@ import eu.wohlben.qits.workspaces.events.AgentRequeued;
 import eu.wohlben.qits.workspaces.events.AgentResumed;
 import eu.wohlben.qits.workspaces.events.AgentStartRefused;
 import eu.wohlben.qits.workspaces.events.AgentStarted;
+import eu.wohlben.qits.workspaces.events.AgentStopped;
 import eu.wohlben.qits.workspaces.events.AgentYielded;
 import eu.wohlben.qits.workspaces.events.DeskWaitClosed;
 import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
@@ -71,6 +72,7 @@ class EventWireReflectionTest {
             AgentYielded.class,
             AgentNudged.class,
             AgentResumed.class,
+            AgentStopped.class,
             AgentObsolete.class,
             AgentCleanupDeferred.class,
             AgentRemoved.class,

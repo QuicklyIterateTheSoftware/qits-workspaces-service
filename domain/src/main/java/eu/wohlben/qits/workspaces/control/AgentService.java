@@ -29,6 +29,7 @@ import eu.wohlben.qits.workspaces.events.AgentRequeued;
 import eu.wohlben.qits.workspaces.events.AgentResumed;
 import eu.wohlben.qits.workspaces.events.AgentStartRefused;
 import eu.wohlben.qits.workspaces.events.AgentStarted;
+import eu.wohlben.qits.workspaces.events.AgentStopped;
 import eu.wohlben.qits.workspaces.events.AgentYielded;
 import eu.wohlben.qits.workspaces.events.WorkspaceRemoved;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
@@ -666,7 +667,9 @@ public class AgentService {
   /**
    * <b>Say this to the agent working on the item</b>. Never creates an agent: an item nobody
    * dispatched has nobody to tell, and that is answered, not refused. A yielded agent is RUNNING
-   * again at once to hear it (D16); a queued one hears it as part of its first turn.
+   * again at once to hear it (D16); a queued one hears it as part of its first turn. A STOPPED one
+   * is not started by it (qits-1970): the machine door is how qits-projects relays every comment,
+   * phase advance and hand-on, so the turn waits on the row for a person's prompt or a restart.
    *
    * <p>An OBSOLETE agent is told too. A release of its wrapper branch no longer marks an open item's
    * agent OBSOLETE (qits-1605) — only a closed item's — but a closed item can be reopened and go on,
@@ -685,7 +688,10 @@ public class AgentService {
     return deliver(found.get().id, text, compactFirst);
   }
 
-  /** {@link #deliver(UUID, String, boolean, String)} with no caller to name in the log. */
+  /**
+   * {@link #deliver(UUID, String, boolean, String)} with no caller: the machine form, which leaves a
+   * STOPPED agent stopped.
+   */
   public Delivery deliver(UUID id, String text, boolean compactFirst) {
     return deliver(id, text, compactFirst, null);
   }
@@ -693,10 +699,14 @@ public class AgentService {
   /**
    * <b>Say this to the agent</b> (epic qits-1667, {@code POST /agents/{id}/prompt}; the work-item
    * form above resolves the item's agent and comes here). A REMOVED agent has nobody to tell: 409.
-   * A STOPPED agent goes back to the scheduler as a YIELDED one (QUEUED, when it was stopped before
-   * it had a workspace): it starts again with this turn.
+   * A STOPPED agent told by a person ({@code by} set) goes back to the scheduler as a YIELDED one
+   * (QUEUED, when it was stopped before it had a workspace): it starts again with this turn. Told
+   * by the machine door ({@code by} null) it stays STOPPED (qits-1970): the turn is appended and
+   * waits for a person's prompt or a restart, and the answer is delivered but not launched — a
+   * stop that any relayed thread comment undid was no stop at all.
    *
-   * @param by the caller's principal, for the audit line; null logs none (the machine door)
+   * @param by the caller's principal, for the audit line; null is the machine door, which logs none
+   *     and never starts a STOPPED agent
    * @throws NotFoundException no such agent
    * @throws ConflictException the agent was removed
    */
@@ -722,19 +732,28 @@ public class AgentService {
                   }
                   before[0] = row.runState;
                   appendTurn(row, said, compactFirst);
-                  if (row.runState == AgentRunState.STOPPED) {
+                  if (row.runState == AgentRunState.STOPPED && by != null) {
                     // Back to the scheduler, as a yielded agent is: the resume runs it for this turn.
                     row.runState =
                         row.workspaceId == null ? AgentRunState.QUEUED : AgentRunState.YIELDED;
                   }
                   return row;
                 });
+    String agentId = id.toString();
+    if (agent.runState == AgentRunState.STOPPED) {
+      // The machine door on a stopped agent: nothing is brought up, the turn waits on the row.
+      return new Delivery(
+          agentId,
+          true,
+          false,
+          false,
+          "The agent is STOPPED; this turn waits on it until a person prompts or restarts it.");
+    }
     if (by != null) {
       audit(agent, "prompted", by, before[0], agent.runState);
     }
     bringUp(agent);
     kick();
-    String agentId = id.toString();
     if (before[0] == AgentRunState.STOPPED) {
       return new Delivery(
           agentId,
@@ -776,7 +795,7 @@ public class AgentService {
               true,
               false,
               "The agent waits for a workspace slot; this is part of its first turn.");
-      // Unreachable: a STOPPED agent was handed back to the scheduler above.
+      // Unreachable: a STOPPED agent was answered or handed back to the scheduler above.
       case STOPPED ->
           new Delivery(
               agentId, false, false, false, "The agent was stopped; it starts again with this turn.");
@@ -792,7 +811,9 @@ public class AgentService {
    * running since qits-1212 — and its worktree and workspace stay. A QUEUED agent gives up its queue
    * place. A STOPPED agent is a no-op. A daemon that does not answer still leaves the row STOPPED:
    * nothing will start the harness again, and the next start resumes its session. The container is
-   * never touched.
+   * never touched. Only a person's prompt or a restart starts it again; a turn the machine door
+   * delivers waits on the row (qits-1970). A stop is announced as {@link AgentStopped}, once: a
+   * STOPPED agent stopped again says nothing.
    *
    * @throws NotFoundException no such agent
    * @throws ConflictException the agent was removed
@@ -825,6 +846,15 @@ public class AgentService {
     }
     audit(stopped, "stopped", by, before[0], AgentRunState.STOPPED);
     if (before[0] != AgentRunState.STOPPED) {
+      announce(
+          new AgentStopped(
+              stopped.id.toString(),
+              stopped.workId,
+              idOf(stopped.workspaceId),
+              stopped.repositoryId,
+              by,
+              before[0].name(),
+              Instant.now()));
       settled(stopped);
     }
     return view(require(id));
@@ -1720,19 +1750,44 @@ public class AgentService {
   void resumeYielded() {
     synchronized (placeLock) {
       Instant now = Instant.now();
-      List<AgentResumed> resumed =
+      List<UUID> candidates =
           QuarkusTransaction.requiringNew()
               .call(
                   () ->
                       agents.findPlacedLive().stream()
                           .filter(a -> a.runState == AgentRunState.YIELDED && a.pendingText != null)
-                          .map(
-                              a -> {
-                                a.runState = AgentRunState.RUNNING;
-                                LOG.infof("Agent %s resumes in workspace %s", a.id, a.workspaceId);
-                                return resumed(a, AgentResumed.TURN_PENDING, now);
-                              })
+                          .map(a -> a.id)
                           .toList());
+      if (candidates.isEmpty()) {
+        return;
+      }
+      List<AgentResumed> resumed =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () -> {
+                    List<AgentResumed> out = new ArrayList<>();
+                    for (UUID candidate : candidates) {
+                      // Locked and read again in a transaction of its own (qits-1970), as every
+                      // other writer of the run state is: a stop committing between the read above
+                      // and this write was undone. Its own transaction, so the row is read fresh
+                      // under the lock rather than taken from the read's persistence context.
+                      AgentWorktree a =
+                          agents
+                              .findByIdOptional(
+                                  candidate, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                              .orElse(null);
+                      if (a == null
+                          || a.state == AgentState.REMOVED
+                          || a.runState != AgentRunState.YIELDED
+                          || a.pendingText == null) {
+                        continue;
+                      }
+                      a.runState = AgentRunState.RUNNING;
+                      LOG.infof("Agent %s resumes in workspace %s", a.id, a.workspaceId);
+                      out.add(resumed(a, AgentResumed.TURN_PENDING, now));
+                    }
+                    return out;
+                  });
       resumed.forEach(this::announce);
     }
   }
@@ -2538,12 +2593,21 @@ public class AgentService {
    * says the text as a turn (qits-1225). Without {@code withTurn} (a YIELDED agent, qits-1212), the
    * start carries no instruction and leaves the row's pending text and activity time alone: the
    * agent is only made to hold a harness again, and its turn is said once it is RUNNING.
+   *
+   * <p>A stop wins over a start (qits-1970). A row already STOPPED or REMOVED is not started, and
+   * one that became so while the daemon launched — the call blocks for minutes — is neither
+   * recorded nor announced as started: the harness just launched is stopped again with the
+   * daemon's yield, because {@link #stop} asked the daemon before there was anything to stop.
    */
   private void start(AgentWorktree agent, Workspace workspace, AgentDaemon port, boolean withTurn) {
+    AgentWorktree fresh = require(agent.id);
+    if (halted(fresh)) {
+      return;
+    }
     if (!agent.holdsToken()) {
       mintToken(agent.id);
+      fresh = require(agent.id);
     }
-    AgentWorktree fresh = require(agent.id);
     String instruction = withTurn ? fresh.pendingText : null;
     AgentDaemon.Started answer =
         port.start(
@@ -2569,28 +2633,51 @@ public class AgentService {
     }
     lastRefusal.remove(agent.id);
     requeued.remove(agent.id);
-    started.put(agent.id, workspace.id);
     boolean told = withTurn && answer.launched();
-    QuarkusTransaction.requiringNew()
-        .run(
-            () -> {
-              // Locked, as drive's clear is (qits-1603): the compare against the instruction below.
-              AgentWorktree row =
-                  agents
-                      .findByIdOptional(agent.id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
-                      .orElseThrow();
-              row.commandId = answer.commandId() == null ? row.commandId : answer.commandId();
-              row.sessionId = answer.sessionId() == null ? row.sessionId : answer.sessionId();
-              row.startedWorkspaceId = workspace.id;
-              row.startRefusal = null;
-              row.startRefusedAt = null;
-              if (told) {
-                row.lastActivityAt = Instant.now();
-                if (Objects.equals(row.pendingText, instruction)) {
-                  row.pendingText = null;
-                }
-              }
-            });
+    AgentWorktree live =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  // Locked, as drive's clear is (qits-1603): the compare against the instruction
+                  // below, and the stop that may have landed while the daemon launched (qits-1970).
+                  AgentWorktree row =
+                      agents
+                          .findByIdOptional(
+                              agent.id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                          .orElseThrow();
+                  if (halted(row)) {
+                    return null;
+                  }
+                  // Under the row's lock, so a stop that follows removes it after this put.
+                  started.put(agent.id, workspace.id);
+                  row.commandId = answer.commandId() == null ? row.commandId : answer.commandId();
+                  row.sessionId = answer.sessionId() == null ? row.sessionId : answer.sessionId();
+                  row.startedWorkspaceId = workspace.id;
+                  row.startRefusal = null;
+                  row.startRefusedAt = null;
+                  if (told) {
+                    row.lastActivityAt = Instant.now();
+                    if (Objects.equals(row.pendingText, instruction)) {
+                      row.pendingText = null;
+                    }
+                  }
+                  return row;
+                });
+    if (live == null) {
+      LOG.infof(
+          "Agent %s was stopped while workspace %s launched it; its harness is stopped again",
+          agent.id,
+          workspace.id);
+      // The daemon that just launched it, on the workspace it launched in: the daemon's yield.
+      if (port.yield(workspace.id, agent.id.toString()) == AgentDaemon.Outcome.UNREACHABLE) {
+        LOG.warnf(
+            "Agent %s is stopped, but workspace %s's daemon did not stop the harness it just"
+                + " launched: no daemon answered",
+            agent.id,
+            workspace.id);
+      }
+      return;
+    }
     LOG.infof(
         "Agent %s %s in workspace %s%s",
         agent.id,
@@ -3181,6 +3268,11 @@ public class AgentService {
       }
     }
     return awaitingInput ? AgentActivityState.IDLE.name() : AgentActivityState.BUSY.name();
+  }
+
+  /** A row no start may run: stopped by a person or the desk, or removed. */
+  private static boolean halted(AgentWorktree row) {
+    return row.runState == AgentRunState.STOPPED || row.state == AgentState.REMOVED;
   }
 
   /** {@code event} to the lifecycle port; call it only once the write it reports committed. */

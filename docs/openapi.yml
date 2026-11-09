@@ -1164,7 +1164,10 @@ paths:
             \ nothing was said and nothing created — a normal outcome. Otherwise one\
             \ of `delivered` (queued for the running agent: said once it is not busy,\
             \ or after the launch window), `launched` (its first turn, once it starts)\
-            \ or `resumed` (a yielded agent resumes to hear it)."
+            \ or `resumed` (a yielded agent resumes to hear it). A STOPPED agent is\
+            \ not started by this door (qits-1970): the turn waits on it until a person\
+            \ prompts or restarts it, answered `delivered` and neither `launched`\
+            \ nor `resumed`."
           content:
             application/json:
               schema:

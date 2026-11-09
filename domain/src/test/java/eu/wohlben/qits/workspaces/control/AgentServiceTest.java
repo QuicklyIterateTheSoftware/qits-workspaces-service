@@ -24,6 +24,7 @@ import eu.wohlben.qits.workspaces.events.AgentNudged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
 import eu.wohlben.qits.workspaces.events.AgentRequeued;
+import eu.wohlben.qits.workspaces.events.AgentStarted;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
@@ -620,6 +621,113 @@ public class AgentServiceTest {
       assertTrue(again.instruction().contains("carry on"), again.instruction());
       assertTrue(again.instruction().contains("ci run 1667"), "the wake is heard now");
     } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  /**
+   * qits-1970: the machine delivery door — qits-projects relays every thread comment, phase advance
+   * and hand-on through it — never starts a STOPPED agent, by work item or by id. The turn waits on
+   * the row; a person's prompt still starts it, and it hears both.
+   */
+  @Test
+  void aMachineDeliveryLeavesAStoppedAgentStoppedAndAPromptStillStartsIt() {
+    AgentService.Dispatch dispatched = dispatch("w-stop-relay", true, "go");
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      service.awaitSchedulerIdle();
+      service.stop(id, "alice");
+      service.awaitSchedulerIdle();
+      long starts = startsOf(agentId);
+
+      AgentService.Delivery relayed = service.deliver("w-stop-relay", "why", false);
+      assertEquals(agentId, relayed.agentId());
+      assertTrue(relayed.delivered(), "the turn is kept");
+      assertFalse(relayed.launched());
+      assertFalse(relayed.resumed());
+      assertTrue(relayed.detail().contains("STOPPED"), relayed.detail());
+      service.reconcile();
+      service.awaitSchedulerIdle();
+      assertEquals(AgentRunState.STOPPED, row(agentId).runState, "still stopped");
+      assertEquals("why", row(agentId).pendingText, "the turn waits on the row");
+      assertEquals(starts, startsOf(agentId), "not started");
+      assertFalse(service.isStarted(id));
+
+      // The UUID form with no caller is the machine door too.
+      AgentService.Delivery byId = service.deliver(id, "and this", false);
+      assertTrue(byId.delivered());
+      assertFalse(byId.launched() || byId.resumed());
+      service.reconcile();
+      service.awaitSchedulerIdle();
+      assertEquals(AgentRunState.STOPPED, row(agentId).runState);
+      assertEquals("why\n\nand this", row(agentId).pendingText);
+      assertEquals(starts, startsOf(agentId));
+
+      // A person's prompt starts it again, and it hears what waited.
+      AgentService.Delivery prompted = service.deliver(id, "carry on", false, "alice");
+      assertTrue(prompted.resumed(), "handed back as a yielded agent with a turn to hear");
+      service.reconcile();
+      service.awaitSchedulerIdle();
+      assertEquals(AgentRunState.RUNNING, row(agentId).runState);
+      String heard = lastStartOf(agentId).instruction();
+      assertTrue(heard.contains("why") && heard.contains("carry on"), heard);
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  /**
+   * qits-1970: a stop that lands while the daemon launches the agent wins. The start blocks in the
+   * daemon for as long as a real launch takes; the stop's daemon yield finds nothing yet, so the
+   * start, once answered, must neither record nor announce the agent as started, and stops the
+   * harness it just launched.
+   */
+  @Test
+  void aStopDuringALaunchIsNotUndoneByTheLaunchsAnswer() throws Exception {
+    AgentService.Dispatch dispatched = dispatch("w-stop-launch", true, "go");
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    service.awaitSchedulerIdle();
+    FakeAgentDaemon.Hold hold = daemon.holdNextStart(agentId);
+    liveness.markLive(slot);
+    ExecutorService pass = Executors.newSingleThreadExecutor();
+    try {
+      Future<?> reconciled = pass.submit(() -> service.reconcile());
+      assertTrue(hold.entered().await(30, TimeUnit.SECONDS), "the start is in the daemon");
+
+      assertEquals(AgentRunState.STOPPED, service.stop(id, "alice").runState());
+      hold.release().countDown();
+      reconciled.get(60, TimeUnit.SECONDS);
+      service.awaitSchedulerIdle();
+
+      assertEquals(AgentRunState.STOPPED, row(agentId).runState);
+      assertFalse(service.isStarted(id), "not recorded as started");
+      List<String> calls = daemon.callsFor(agentId);
+      int lastStart = -1;
+      for (int i = 0; i < calls.size(); i++) {
+        if (calls.get(i).startsWith("start ")) {
+          lastStart = i;
+        }
+      }
+      assertTrue(lastStart >= 0, calls.toString());
+      assertEquals(
+          "yield " + slot + " " + agentId,
+          calls.get(calls.size() - 1),
+          "the launched harness is stopped again: " + calls);
+      assertTrue(
+          calls.subList(lastStart + 1, calls.size()).stream().allMatch(c -> c.startsWith("yield ")),
+          calls.toString());
+      assertTrue(
+          announced.of(AgentStarted.class, e -> e.agentId().equals(agentId)).isEmpty(),
+          "never announced as started");
+    } finally {
+      hold.release().countDown();
+      pass.shutdownNow();
       liveness.markDead(slot);
     }
   }

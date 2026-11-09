@@ -73,6 +73,9 @@ class LifecycleEventsContractTest {
         new AgentResumed(AGENT, WORK, "385", REPO, AgentResumed.TURN_PENDING, AT),
         with(agent, "reason"));
     out.put(
+        new AgentStopped(AGENT, WORK, "385", REPO, "alice", "RUNNING", AT),
+        with(agent, "by", "previous"));
+    out.put(
         new AgentObsolete(AGENT, WORK, "385", REPO, "ticket/qits-1236", "2026.1014.1", "abc123", AT),
         with(agent, "branch", "commitSha", "version"));
     out.put(
@@ -148,6 +151,7 @@ class LifecycleEventsContractTest {
             "AgentYielded",
             "AgentNudged",
             "AgentResumed",
+            "AgentStopped",
             "AgentObsolete",
             "AgentCleanupDeferred",
             "AgentRemoved",

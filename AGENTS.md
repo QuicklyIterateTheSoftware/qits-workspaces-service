@@ -1218,7 +1218,9 @@ pass and the next frames: every placed agent, RUNNING or YIELDED, is started aga
 nudges, repairs or drives a STOPPED agent, and it holds no slot: a workspace whose agents are all
 YIELDED with nothing to say, or STOPPED, takes a queued agent. A wait that fires for it is closed and
 its wake appended to `pending_text` as for any agent — heard once it is restarted or prompted, not
-before. It keeps its `workspace_id` when it had one; one stopped while still QUEUED has none (`V35`
+before; so is a turn the machine delivery door relays (qits-1970). The resume takes each YIELDED
+candidate's row with a pessimistic lock and reads it again before writing RUNNING, so a stop
+committed after its read is not undone. It keeps its `workspace_id` when it had one; one stopped while still QUEUED has none (`V35`
 rewrote `ck_agent_worktree_placed` to admit that). Its attention is never `IDLE_NO_WAIT` (rule 3
 holds for RUNNING only). The old instance draining during a rolling deploy cannot read a STOPPED row
 (its enum lacks the word); a stop in that minute fails there and is the same click again.
@@ -1267,12 +1269,21 @@ holds for RUNNING only). The old instance draining during a rolling deploy canno
   `POST …/agents/{id}/prompt` `{text, compactFirst?}` → the delivery's answer — the work-item form
   (`agent-dispatches/delivery`) resolves `findLiveByWorkId` and calls the UUID form; a REMOVED agent
   is `409 AGENT_REMOVED`; a STOPPED one is handed back as YIELDED (QUEUED with no workspace), detail
-  "The agent was stopped; it starts again with this turn." `POST …/stop` → `AgentDto`: the row is
+  "The agent was stopped; it starts again with this turn." — but only on this door, a person's
+  (`by` set): the work-item form is the machine door qits-projects relays every comment, phase
+  advance and hand-on through, so there a STOPPED agent stays STOPPED, the turn is appended to
+  `pending_text` and nothing is brought up, answered `delivered` and neither `launched` nor
+  `resumed` (qits-1970; a desk's "stopped it because…" comment used to restart what it had just
+  stopped). `POST …/stop` → `AgentDto`: the row is
   written STOPPED **first**, so no pass drives what is being stopped, then a placed RUNNING or
   YIELDED agent's harness is stopped with the daemon's `POST agent-worktrees/{id}/yield`
   (`AgentDaemon.yield`) — YIELDED too, because a yielded harness keeps running since qits-1212; no
   daemon answering is a WARN and still STOPPED; QUEUED gives up its place with no daemon call;
-  STOPPED again is a no-op. `POST …/restart` → `AgentDto`: RUNNING is the daemon's yield, then the
+  STOPPED again is a no-op. A stop that is not a no-op announces `AgentStopped` after the daemon's
+  yield. A stop that lands while a start waits on the daemon wins (qits-1970): the start re-reads
+  the row under its lock once the daemon answered, and a STOPPED or REMOVED row is neither recorded
+  started nor announced `AgentStarted` — the harness just launched is yielded again on that
+  workspace's daemon. `POST …/restart` → `AgentDto`: RUNNING is the daemon's yield, then the
   next pass's start resumes `session_id` (no daemon is `503 AGENT_DAEMON_UNREACHABLE`); STOPPED or
   YIELDED become YIELDED (QUEUED with no workspace) and go through the resume path; QUEUED is `409
   AGENT_NOT_STARTED`. `POST …/yield` → `AgentDto`: the scheduler's own `writeYield` and
@@ -1578,6 +1589,7 @@ payload's top-level fields:
 | `AgentYielded` | the four | |
 | `AgentNudged` | the four, `nudgeCount` (this nudge included), `reason` | `IDLE`, `SELF_BLOCKED` |
 | `AgentResumed` | the four, `reason` | `TURN_PENDING`, `WORKS_AGAIN` |
+| `AgentStopped` | the four, `by` (the stopping caller's principal, absent when unknown), `previous` (the run state it had: `RUNNING`, `YIELDED` or `QUEUED`) — a person's or the desk's stop, once; a stop of a STOPPED agent says nothing (qits-1970) | |
 | `AgentObsolete` | the four, `branch`, `version`, `commitSha` (the release's refs, as stored when it consumed the branch if the item closed later; both absent for a dropped item, and for a closed item whose branch was gone or merged with no release) — one per agent | |
 | `AgentCleanupDeferred` | the four, `reason`, `detail` | `ITEM_NOT_CLOSED`, `RECENTLY_ACTIVE`, `TURN_PENDING`, `HARNESS_BUSY`, `DAEMON_NOT_CONNECTED`, `NO_DAEMON_CLIENT`, `CHECK_UNANSWERED`, `BUSY_IN_BACKGROUND`, `REMOVAL_UNANSWERED`, `LEFTOVER_WORK_PROMPTED`, `IN_RELEASE` |
 | `AgentRemoved` | the four, `reason`, `harnessStopped`, `detail`, `discardedBy` (qits-1694: the discarding caller's own principal, present only for `DISCARDED` and only when known) | `OBSOLETE_NEVER_PLACED`, `OBSOLETE_WORKSPACE_GONE`, `UNKNOWN_TO_DAEMON`, `RELEASED_IDLE_CLEAN`, `DROPPED_IDLE_CLEAN`, `DISCARDED` |
@@ -1608,7 +1620,8 @@ The rules they keep:
   `QuarkusTransaction.requiringNew()` block has returned (or, for `WorkspaceRemoved`, the
   `@Transactional` `discardWorkspace`). Where the write happens inside a lambda (`resumeYielded`,
   `onActivity`, `resolveReleasedBranch`, `markRemoved`) the event is built there and announced after.
-- **Once per transition.** `AgentRemoved` only from the call that flipped the row;
+- **Once per transition.** `AgentRemoved` only from the call that flipped the row; `AgentStopped`
+  only from a stop that found the agent not STOPPED;
   `WorkspaceStarted`/`WorkspaceFailed` only when the runtime status changed (a RUNNING row found
   running again by an inventory, or re-stamped by the DIRECT ladder's already-running short-circuit,
   says nothing); `AgentStartRefused` under the `lastRefusal` throttle; `AgentCleanupDeferred` under

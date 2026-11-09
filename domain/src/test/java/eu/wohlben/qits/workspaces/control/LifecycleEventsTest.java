@@ -22,6 +22,7 @@ import eu.wohlben.qits.workspaces.events.AgentRequeued;
 import eu.wohlben.qits.workspaces.events.AgentResumed;
 import eu.wohlben.qits.workspaces.events.AgentStartRefused;
 import eu.wohlben.qits.workspaces.events.AgentStarted;
+import eu.wohlben.qits.workspaces.events.AgentStopped;
 import eu.wohlben.qits.workspaces.events.AgentYielded;
 import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
 import eu.wohlben.qits.workspaces.events.WorkspaceRemoved;
@@ -215,6 +216,37 @@ public class LifecycleEventsTest {
         slot, typedInto.toString(), Boolean.FALSE, "s-1", "UserPromptSubmit", System.currentTimeMillis());
     AgentResumed worksAgain = only(AgentResumed.class, e -> e.agentId().equals(typedInto.toString()));
     assertEquals(AgentResumed.WORKS_AGAIN, worksAgain.reason());
+  }
+
+  // --- a person's stop ---------------------------------------------------------------------------
+
+  /** qits-1970: a stop is announced once, with who stopped it and what it was; again says nothing. */
+  @Test
+  void aStopIsAnnouncedOnceAndAStopOfAStoppedAgentSaysNothing() {
+    AgentService.Dispatch dispatched = dispatch("w-stopped", "go");
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      service.awaitSchedulerIdle();
+      assertEquals(AgentRunState.RUNNING, row(agentId).runState);
+
+      service.stop(id, "alice");
+
+      AgentStopped stopped = only(AgentStopped.class, e -> e.agentId().equals(agentId));
+      assertEquals("w-stopped", stopped.workId());
+      assertEquals(slot.toString(), stopped.workspaceId());
+      assertEquals(repoId, stopped.repositoryId());
+      assertEquals("alice", stopped.by());
+      assertEquals("RUNNING", stopped.previous());
+
+      service.stop(id, "bob");
+      only(AgentStopped.class, e -> e.agentId().equals(agentId));
+    } finally {
+      liveness.markDead(slot);
+    }
   }
 
   // --- obsolete, deferred, removed ----------------------------------------------------------------

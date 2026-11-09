@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A scripted {@link AgentDaemon} (qits-1152): every call is recorded, every workspace is reachable
@@ -54,7 +56,29 @@ public class FakeAgentDaemon implements AgentDaemon {
   /** Every start goes unanswered (qits-1750: a daemon connected whose API never bound). */
   private volatile boolean startsUnanswered;
 
+  /** The hold the next start waits in, once; null: starts answer at once. */
+  private volatile Hold startHold;
+
+  /**
+   * A start held in the daemon (qits-1970): {@code entered} once a start is inside it, which then
+   * answers only after {@code release} — the minutes a real launch takes, made a window a test can
+   * act in. Released after 30 s regardless, so a test that forgets fails rather than hangs.
+   */
+  public record Hold(String agentId, CountDownLatch entered, CountDownLatch release) {}
+
+  /** The next start of {@code agentId} waits in the returned hold until it is released. */
+  public Hold holdNextStart(String agentId) {
+    Hold hold = new Hold(agentId, new CountDownLatch(1), new CountDownLatch(1));
+    startHold = hold;
+    return hold;
+  }
+
   public void reset() {
+    Hold held = startHold;
+    if (held != null) {
+      held.release().countDown();
+    }
+    startHold = null;
     startsUnanswered = false;
     calls.clear();
     starts.clear();
@@ -130,6 +154,16 @@ public class FakeAgentDaemon implements AgentDaemon {
   public Started start(Long workspaceRowId, Start start) {
     calls.add("start " + workspaceRowId + " " + start.agentId() + " " + start.instruction());
     starts.add(start);
+    Hold hold = startHold;
+    if (hold != null && hold.agentId().equals(start.agentId())) {
+      startHold = null;
+      hold.entered().countDown();
+      try {
+        hold.release().await(30, TimeUnit.SECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+    }
     if (startsUnanswered) {
       return Started.of(Outcome.UNREACHABLE, "the daemon did not answer");
     }

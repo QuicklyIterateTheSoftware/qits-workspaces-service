@@ -249,7 +249,11 @@ public class AgentController {
   public AgentService.Delivery prompt(@PathParam("id") String id, @Valid PromptAgentRequest request) {
     UUID agentId = agentId(id);
     desk.requireAgent(id);
-    return agents.deliver(agentId, request.text(), request.compactFirst(), principal());
+    // Never null (qits-1970): a null caller is the machine door, which leaves a STOPPED agent
+    // stopped; this is a person's (or the desk's) prompt, which starts it again.
+    String by = principal();
+    return agents.deliver(
+        agentId, request.text(), request.compactFirst(), by == null ? "an unnamed caller" : by);
   }
 
   @POST
