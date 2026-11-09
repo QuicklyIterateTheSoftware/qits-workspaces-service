@@ -135,9 +135,10 @@ public class AgentWaitController {
 
   /**
    * The request's selection, bound by qits-eventstream's reader; a 400 with its reason otherwise.
-   * An event {@link EventPayloadCatalog} names is also checked against its payload fields
-   * (qits-1849), so a path the event never carries is a 400 naming the closest field rather than a
-   * wait that never matches. An event the catalog does not name is accepted unchecked.
+   * Its event is also checked against {@link EventPayloadCatalog}'s payload fields (qits-1849), so
+   * a path the event never carries is a 400 naming the closest field rather than a wait that never
+   * matches. An event the catalog does not name is a 400 naming the closest one it does
+   * (qits-1964).
    */
   static EventSelection selectionOf(CreateWaitRequest request) {
     if (request == null || request.selection() == null || request.selection().isNull()) {

@@ -185,19 +185,19 @@ class DeskWaitAccessTest {
   void anInvalidSelectionTimeoutOrProjectIsA400() {
     String project = UUID.randomUUID().toString();
     asDesk(project)
-        .body(Map.of("selection", Map.of("event", "X"), "timeout", "P31D"))
+        .body(Map.of("selection", Map.of("event", "BuildStatusChanged"), "timeout", "P31D"))
         .post(waits(project))
         .then()
         .statusCode(400);
     // The cap is a day (qits-1961), and the 400 names it.
     asDesk(project)
-        .body(Map.of("selection", Map.of("event", "X"), "timeout", "PT25H"))
+        .body(Map.of("selection", Map.of("event", "BuildStatusChanged"), "timeout", "PT25H"))
         .post(waits(project))
         .then()
         .statusCode(400)
         .body("message", containsString("24 hours"));
     asDesk(project)
-        .body(Map.of("selection", Map.of("event", "X"), "timeout", "two hours"))
+        .body(Map.of("selection", Map.of("event", "BuildStatusChanged"), "timeout", "two hours"))
         .post(waits(project))
         .then()
         .statusCode(400);

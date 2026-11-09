@@ -1482,9 +1482,16 @@ on a wait declared since; `expiry_is_ceiling` says the expiry is the ceiling:
   single value, a list passed through without `[]` (`entities.status`) and `exact`/`prefix` on a
   whole list or object are a 400 naming the closest field (`did you mean 'repoName'?`) and every
   field. `exists`/absent hold on any declared field, a bare list included. An event the catalog does
-  not name is taken unchecked. This repository's events are pinned against their records by
-  `EventPayloadCatalogDriftTest`; the qits-ci and qits-projects entries are transcribed by hand and
-  pinned by nothing, so a field renamed there is refused here until it is transcribed. The resource
+  not name is a 400 too (qits-1964), naming the closest event it does (`did you mean
+  'ReleaseRequestChanged'?`, none for a name of one or two letters): a misspelled event, or one
+  nobody transcribed, was a wait that never matched. So the catalog lists every event the estate
+  publishes, and a new event needs its entry before a wait can name it. This repository's events
+  are pinned against their records by `EventPayloadCatalogDriftTest`; every other entry (qits-ci,
+  qits-projects, qits-githost, qits-deployments, qits-system; the resource's `_comment` names
+  them) is transcribed by hand and pinned by nothing, so a field renamed there is refused here
+  until it is transcribed. An event with several publishers (`TargetLeaseChanged`,
+  `ReleaseRequestStateChanged`, `ApprovalRequirementChanged`, `RepositoryRenamed`) lists the union
+  of their fields. The resource
   is listed in `quarkus.native.resources.includes` (`NativeImageContractTest`).
 - **The desk's waits** (qits-1618, `V32`, `DeskWaitController`). A project's front desk — a Claude
   session qits-projects runs, with no agent row — declares waits on its project id, with the agent

@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
  * — never bound, so a native image needs no reflection for it, only the resource itself
  * ({@code quarkus.native.resources.includes} in {@code service}). Its {@code _comment} says which
  * entries are pinned by {@code EventPayloadCatalogDriftTest} (this repository's own events) and which
- * are transcribed by hand from qits-ci and qits-projects and pinned by nothing.
+ * are transcribed by hand from the other publishers' records and pinned by nothing.
  *
  * <p>{@link #refusal} walks every condition's path as {@code EventSelectionEvaluator} would and
  * refuses what can never match: a segment the event does not carry, {@code []} on a field that is no
@@ -38,7 +38,8 @@ import java.util.stream.Collectors;
  * exact}/{@code prefix} on a list or an object (it compares the whole JSON literal). {@code exists}
  * and {@code absent} hold on any declared field — every one is optional on the wire, since a null is
  * dropped from a payload — including a bare list ({@code !entities}). An event the catalog does not
- * name is not checked at all.
+ * name is refused too, with the closest name it does (qits-1964): a misspelled event, or one
+ * nobody transcribed, would otherwise be a wait that never matches.
  */
 public final class EventPayloadCatalog {
 
@@ -148,12 +149,12 @@ public final class EventPayloadCatalog {
 
   /**
    * Why the selection can never match its event, in one sentence for a 400; empty when every path
-   * can, or when the catalog does not name the event.
+   * can. An event the catalog does not name is refused (qits-1964).
    */
   public Optional<String> refusal(EventSelection selection) {
     Obj payload = events.get(selection.event());
     if (payload == null) {
-      return Optional.empty();
+      return Optional.of(unknownEvent(selection.event()));
     }
     for (List<Condition> group : selection.when()) {
       for (Condition condition : group) {
@@ -217,6 +218,20 @@ public final class EventPayloadCatalog {
       }
     }
     return Optional.empty();
+  }
+
+  /**
+   * The refusal for an event the catalog does not name, with the closest name it does. A name of
+   * one or two letters gets no hint: {@link #closest} takes a contained name as a match, and {@code
+   * X} would otherwise suggest {@code AgentHarnessExited}.
+   */
+  private String unknownEvent(String event) {
+    String hint =
+        (event.length() < 3 ? Optional.<String>empty() : closest(event, events()))
+            .map(name -> "; did you mean '" + name + "'?")
+            .orElse(".");
+    return "'" + event + "' is not an event the platform publishes" + hint
+        + " A new event needs an entry in " + RESOURCE + " first.";
   }
 
   private static String unknown(String event, String parent, String name, String path, Obj object) {

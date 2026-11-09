@@ -193,7 +193,7 @@ class AgentWaitAccessTest {
   /**
    * qits-1849: BuildStatusChanged carries {@code repoName}, never {@code repositoryName}, so the wait
    * could never match; the door refuses it and names the field meant. An event the catalog does not
-   * name is still taken unchecked.
+   * name is refused too (qits-1964).
    */
   @Test
   void aPathTheEventNeverCarriesIsA400NamingTheClosestField() {
@@ -237,7 +237,19 @@ class AgentWaitAccessTest {
                     List.of(List.of(Map.of("path", "whatever.it[].carries", "op", "exact", "value", "x"))))))
         .post(waits())
         .then()
-        .statusCode(201);
+        .statusCode(400)
+        .body(
+            "message",
+            equalTo(
+                "Invalid selection: 'SomeoneElsesEvent' is not an event the platform publishes. A new"
+                    + " event needs an entry in event-fields.json first."));
+    as(subject, "qits:agent")
+        .body(Map.of("selection", Map.of("event", "ReleaseReqeustChanged")))
+        .post(waits())
+        .then()
+        .statusCode(400)
+        .body("message", containsString("did you mean 'ReleaseRequestChanged'?"));
+    as(subject, "qits:agent").get(waits()).then().statusCode(200).body("waits", hasSize(0));
   }
 
   @Test
