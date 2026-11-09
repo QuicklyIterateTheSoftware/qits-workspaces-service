@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import eu.wohlben.qits.eventstream.selection.EventSelection;
 import eu.wohlben.qits.workspaces.dto.AgentDto;
+import eu.wohlben.qits.workspaces.dto.AgentPhase;
 import eu.wohlben.qits.workspaces.entity.AgentRunState;
 import eu.wohlben.qits.workspaces.entity.AgentState;
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
@@ -176,6 +177,110 @@ public class AgentServiceTest {
     AgentService.Dispatch again = dispatch("w-queued", false, "go");
     assertFalse(again.fresh());
     assertEquals(first.agent().agentId(), again.agent().agentId());
+  }
+
+  @Test
+  void aQueuedAgentReadsQueuedSinceItWasQueued() {
+    // qits-2007: a lease waits already, so the regular agent queues with no slot.
+    AgentService.Dispatch queued = dispatch("w-phase-queued", false, "go");
+    AgentWorktree row = row(queued.agent().agentId());
+
+    assertEquals(AgentRunState.QUEUED, row.runState);
+    assertNotNull(row.queuedAt);
+    assertEquals(row.createdAt, row.queuedAt, "queued from its creation");
+    assertNull(row.placedAt);
+    assertEquals(AgentPhase.QUEUED, queued.agent().phase());
+    assertEquals(row.queuedAt, queued.agent().phaseSince());
+  }
+
+  @Test
+  void anAgentsPhaseTimesFollowItsPlacementStartStopAndRequeue() {
+    // qits-2007: runState RUNNING is written at placement, before any container exists, and the
+    // activity is null until the harness reports; the phase says which of the two it is.
+    Instant dispatchedAt = Instant.now();
+    AgentService.Dispatch dispatched = dispatch("w-phase", true, "go");
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+
+    AgentWorktree placed = row(agentId);
+    assertEquals(AgentRunState.RUNNING, placed.runState);
+    assertNotNull(placed.placedAt, "placement records when");
+    assertFalse(placed.placedAt.isBefore(dispatchedAt));
+    assertNull(placed.startedAt, "not started yet");
+    assertEquals(
+        AgentPhase.PROVISIONING, service.get(id).phase(), "its slot's daemon has not connected");
+    assertEquals(placed.placedAt, service.get(id).phaseSince());
+
+    service.awaitSchedulerIdle();
+    QuarkusTransaction.requiringNew()
+        .run(() -> workspaces.findById(slot).runtimeStatus = WorkspaceRuntimeStatus.RUNNING);
+    liveness.markLive(slot);
+    try {
+      // The listing the agent doors answer: placed, daemon there, harness not started.
+      AgentDto starting =
+          service.list("w-phase", null, AgentState.ACTIVE).stream()
+              .filter(a -> a.agentId().equals(agentId))
+              .findFirst()
+              .orElseThrow();
+      assertEquals(AgentRunState.RUNNING, starting.runState(), "runState keeps its meaning");
+      assertNull(starting.activity(), "and so does activity");
+      assertEquals(AgentPhase.STARTING, starting.phase());
+      assertEquals(placed.placedAt, starting.phaseSince());
+
+      service.reconcile();
+      assertTrue(service.isStarted(id));
+      AgentWorktree started = row(agentId);
+      assertNotNull(started.startedAt, "the start records when");
+      assertEquals(placed.placedAt, started.placedAt, "a start does not move the placement");
+      AgentDto ready = service.get(id);
+      assertEquals(AgentPhase.READY, ready.phase());
+      assertEquals(started.startedAt, ready.phaseSince());
+      service.awaitSchedulerIdle();
+
+      // A stop takes its harness: neither placed nor started, and no phase.
+      AgentDto stopped = service.stop(id, "alice");
+      assertNull(stopped.phase());
+      assertNull(stopped.phaseSince());
+      assertNull(row(agentId).placedAt);
+      assertNull(row(agentId).startedAt);
+      service.awaitSchedulerIdle();
+
+      // Prompted, it resumes in its slot: placed and started again.
+      Instant promptedAt = Instant.now();
+      service.deliver(id, "carry on", false, "alice");
+      service.reconcile();
+      service.awaitSchedulerIdle();
+      AgentWorktree resumed = row(agentId);
+      assertEquals(AgentRunState.RUNNING, resumed.runState);
+      assertNotNull(resumed.placedAt);
+      assertFalse(resumed.placedAt.isBefore(promptedAt), "placed again by the resume");
+      assertNotNull(resumed.startedAt);
+      assertFalse(resumed.startedAt.isBefore(promptedAt), "started again");
+      assertEquals(AgentPhase.READY, service.get(id).phase());
+
+      // Its slot goes: requeued, so neither placed nor started there any more.
+      Instant goneAt = Instant.now();
+      QuarkusTransaction.requiringNew()
+          .run(() -> workspaces.findById(slot).status = WorkspaceStatus.ABANDONED);
+      service.reconcile();
+      AgentWorktree requeued = row(agentId);
+      assertNotEquals(slot, requeued.workspaceId, "taken out of the slot that is gone");
+      assertNull(requeued.startedAt);
+      assertNotNull(requeued.queuedAt);
+      assertFalse(requeued.queuedAt.isBefore(goneAt), "queued from the requeue");
+      if (requeued.runState == AgentRunState.QUEUED) {
+        assertNull(requeued.placedAt);
+        AgentDto queued = service.get(id);
+        assertEquals(AgentPhase.QUEUED, queued.phase());
+        assertEquals(requeued.queuedAt, queued.phaseSince());
+      } else {
+        // A pass kicked meanwhile placed it in a new slot already: placed after the requeue.
+        assertFalse(requeued.placedAt.isBefore(requeued.queuedAt));
+      }
+    } finally {
+      liveness.markDead(slot);
+    }
   }
 
   @Test

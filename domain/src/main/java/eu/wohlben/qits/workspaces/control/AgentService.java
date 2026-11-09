@@ -520,6 +520,7 @@ public class AgentService {
                 agent.pendingText = trimmed(request.instruction());
                 agent.gitRefs = GitRefs.write(gitRefsFor(wrapperBranch, defaultBranch));
                 agent.createdAt = Instant.now();
+                agent.queuedAt = agent.createdAt;
                 applyFacts(agent, request.facts(), null, null);
                 agents.persist(agent);
                 agents.flush();
@@ -609,6 +610,29 @@ public class AgentService {
     return revived.map(id -> new Found(id, true));
   }
 
+  /** The agent is no longer placed in its slot, nor started there (qits-2007). */
+  private static void unplaced(AgentWorktree agent) {
+    agent.placedAt = null;
+    agent.startedAt = null;
+  }
+
+  /** A run state just written: when it is QUEUED, the agent is queued from now (qits-2007). */
+  private static void queuedIfSo(AgentWorktree agent) {
+    if (agent.runState == AgentRunState.QUEUED) {
+      agent.queuedAt = Instant.now();
+    }
+  }
+
+  /**
+   * A resume to RUNNING (qits-2007): a yielded agent kept its placement and its harness, so its
+   * times stay; one stopped before has none, and is placed from {@code when}.
+   */
+  private static void placedIfNot(AgentWorktree agent, Instant when) {
+    if (agent.placedAt == null) {
+      agent.placedAt = when;
+    }
+  }
+
   /** Forgets that a release consumed the agent's wrapper branch (qits-1605). */
   private static void clearConsumed(AgentWorktree agent) {
     agent.branchConsumedAt = null;
@@ -666,6 +690,7 @@ public class AgentService {
                     }
                     agent.runState =
                         agent.workspaceId == null ? AgentRunState.QUEUED : AgentRunState.YIELDED;
+                    queuedIfSo(agent);
                   } else if (found.revived()) {
                     if (instruction != null) {
                       appendTurn(agent, instruction, false);
@@ -775,6 +800,7 @@ public class AgentService {
                     // Back to the scheduler, as a yielded agent is: the resume runs it for this turn.
                     row.runState =
                         row.workspaceId == null ? AgentRunState.QUEUED : AgentRunState.YIELDED;
+                    queuedIfSo(row);
                   }
                   return row;
                 });
@@ -867,6 +893,8 @@ public class AgentService {
                   AgentWorktree row = lockedLive(id);
                   before[0] = row.runState;
                   row.runState = AgentRunState.STOPPED;
+                  // Its harness is stopped: no longer placed or started, until it resumes (qits-2007).
+                  unplaced(row);
                   return row;
                 });
     // The row first, so no pass drives the harness the daemon is about to stop.
@@ -926,6 +954,9 @@ public class AgentService {
         }
         // The next pass starts it again: the drive's start resumes agent.sessionId.
         started.remove(id);
+        // STARTING again until that start (qits-2007).
+        QuarkusTransaction.requiringNew()
+            .run(() -> agents.findByIdOptional(id).ifPresent(row -> row.startedAt = null));
         audit(agent, "restarted", by, AgentRunState.RUNNING, AgentRunState.RUNNING);
       }
       case STOPPED, YIELDED -> {
@@ -942,6 +973,7 @@ public class AgentService {
                             locked.workspaceId == null
                                 ? AgentRunState.QUEUED
                                 : AgentRunState.YIELDED;
+                        queuedIfSo(locked);
                       }
                       return locked;
                     });
@@ -1502,6 +1534,7 @@ public class AgentService {
                       && agent.runState == AgentRunState.YIELDED
                       && agent.workspaceId != null) {
                     agent.runState = AgentRunState.RUNNING;
+                    placedIfNot(agent, when);
                     busyAgain.set(true);
                     wokeUp[0] = resumed(agent, AgentResumed.WORKS_AGAIN, when);
                     LOG.infof("Agent %s works again in workspace %s", agent.id, agent.workspaceId);
@@ -1823,6 +1856,7 @@ public class AgentService {
                         continue;
                       }
                       a.runState = AgentRunState.RUNNING;
+                      placedIfNot(a, now);
                       LOG.infof("Agent %s resumes in workspace %s", a.id, a.workspaceId);
                       out.add(resumed(a, AgentResumed.TURN_PENDING, now));
                     }
@@ -1893,6 +1927,9 @@ public class AgentService {
                       }
                       row.workspaceId = chosen;
                       row.runState = AgentRunState.RUNNING;
+                      // Placed now, and not started there yet (qits-2007).
+                      row.placedAt = Instant.now();
+                      row.startedAt = null;
                       agents.flush();
                       return true;
                     });
@@ -2465,6 +2502,8 @@ public class AgentService {
                 AgentWorktree row = agents.findById(agent.id);
                 row.workspaceId = null;
                 row.runState = AgentRunState.QUEUED;
+                unplaced(row);
+                row.queuedAt = Instant.now();
               });
       started.remove(agent.id);
       announce(
@@ -2581,6 +2620,8 @@ public class AgentService {
                   }
                   row.workspaceId = null;
                   row.runState = AgentRunState.QUEUED;
+                  unplaced(row);
+                  row.queuedAt = Instant.now();
                   return true;
                 });
     started.remove(agent.id);
@@ -2693,6 +2734,11 @@ public class AgentService {
                   row.commandId = answer.commandId() == null ? row.commandId : answer.commandId();
                   row.sessionId = answer.sessionId() == null ? row.sessionId : answer.sessionId();
                   row.startedWorkspaceId = workspace.id;
+                  // READY since this start (qits-2007); an attach to a harness that still ran (a
+                  // reconnect, a restart of this service) keeps the time it was started.
+                  if (row.startedAt == null || answer.launched()) {
+                    row.startedAt = Instant.now();
+                  }
                   row.startRefusal = null;
                   row.startRefusedAt = null;
                   if (told) {
@@ -3660,10 +3706,39 @@ public class AgentService {
           .computeIfAbsent(wait.agentId, id -> new ArrayList<>())
           .add(WaitView.of(AgentWaits.view(wait)));
     }
+    // One read of every listed agent's slot, and one liveness look per slot, for the phase
+    // (qits-2007).
+    Map<Long, AgentPhases.Slot> slots = new HashMap<>();
+    QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                workspaceRepository.findActiveByIds(
+                    rows.stream().map(a -> a.workspaceId).filter(Objects::nonNull).toList()))
+        .forEach(w -> slots.put(w.id, new AgentPhases.Slot(w.runtimeStatus, w.queuedAt)));
+    Map<Long, Boolean> connected = new HashMap<>();
+    slots.keySet().forEach(id -> connected.put(id, daemonLive(id)));
     return rows.stream()
         .map(
-            a ->
-                new AgentDto(
+            a -> {
+              AgentActivityState reported =
+                  a.state == AgentState.REMOVED || !activity.isResolvable()
+                      ? null
+                      // The reported state, not the raw one (qits-1601): an agent whose turn
+                      // ended while its own subagent still runs is working, not stalled. The
+                      // gates in drive and cleanup keep the raw activityOf.
+                      : activity.get().reportedActivityOf(a.id.toString()).orElse(null);
+              AgentPhases.Reading phase =
+                  AgentPhases.of(
+                      a.state,
+                      a.runState,
+                      a.queuedAt != null ? a.queuedAt : a.createdAt,
+                      a.workspaceId == null ? null : slots.get(a.workspaceId),
+                      a.workspaceId != null && connected.getOrDefault(a.workspaceId, false),
+                      a.placedAt,
+                      a.startedAt,
+                      started.containsKey(a.id),
+                      reported);
+              return new AgentDto(
                     a.id.toString(),
                     a.workspaceId,
                     a.repositoryId,
@@ -3681,12 +3756,7 @@ public class AgentService {
                     a.entityTitle,
                     a.entityStatus,
                     a.entityBlocked,
-                    a.state == AgentState.REMOVED || !activity.isResolvable()
-                        ? null
-                        // The reported state, not the raw one (qits-1601): an agent whose turn
-                        // ended while its own subagent still runs is working, not stalled. The
-                        // gates in drive and cleanup keep the raw activityOf.
-                        : activity.get().reportedActivityOf(a.id.toString()).orElse(null),
+                    reported,
                     a.waitingSince,
                     waitingOn.containsKey(a.id) ? waitingOn.get(a.id).labels() : null,
                     waitingOn.containsKey(a.id) ? waitingOn.get(a.id).since() : null,
@@ -3705,7 +3775,10 @@ public class AgentService {
                             a.attentionSince,
                             a.attentionWaitId == null ? null : a.attentionWaitId.toString()),
                     a.blockedAt,
-                    a.deskAskedAt))
+                    a.deskAskedAt,
+                    phase.phase(),
+                    phase.since());
+            })
         .toList();
   }
 

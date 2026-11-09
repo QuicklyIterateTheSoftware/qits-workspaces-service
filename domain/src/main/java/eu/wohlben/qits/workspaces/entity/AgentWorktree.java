@@ -233,6 +233,25 @@ public class AgentWorktree extends PanacheEntityBase implements CausedRow {
   @Column(name = "attention_wait_id")
   public UUID attentionWaitId;
 
+  /**
+   * When the agent was last placed in its slot (qits-2007, {@code V39}): QUEUED became RUNNING, or a
+   * stopped agent resumed. Null while it holds no slot, after a stop, and on a row placed before the
+   * column existed.
+   */
+  @Column(name = "placed_at")
+  public Instant placedAt;
+
+  /**
+   * When its harness was last started in its slot ({@code AgentStarted}, qits-2007); null until then,
+   * and cleared with {@link #placedAt}. A yield keeps it: the harness keeps running (qits-1212).
+   */
+  @Column(name = "started_at")
+  public Instant startedAt;
+
+  /** When it last became QUEUED (qits-2007); null on a row queued before the column existed. */
+  @Column(name = "queued_at")
+  public Instant queuedAt;
+
   @Column(name = "created_at", nullable = false, updatable = false)
   public Instant createdAt;
 
