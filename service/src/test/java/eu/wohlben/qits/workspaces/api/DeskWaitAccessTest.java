@@ -201,6 +201,13 @@ class DeskWaitAccessTest {
         .post(waits(project))
         .then()
         .statusCode(400);
+    // An event the catalog does not name is refused at the desk door too (qits-1964).
+    asDesk(project)
+        .body(Map.of("selection", Map.of("event", "ReleaseReqeustChanged")))
+        .post(waits(project))
+        .then()
+        .statusCode(400)
+        .body("message", containsString("did you mean 'ReleaseRequestChanged'?"));
     asDesk(project).body(Map.of("label", "x")).post(waits(project)).then().statusCode(400);
     asDesk(project).get(waits(project) + "?state=SOMETIMES").then().statusCode(400);
     asDesk(project).get(waits(project) + "?state=BROKEN").then().statusCode(200);
