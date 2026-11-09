@@ -185,22 +185,29 @@ class DeskWaitAccessTest {
   void anInvalidSelectionTimeoutOrProjectIsA400() {
     String project = UUID.randomUUID().toString();
     asDesk(project)
-        .body(Map.of("selection", Map.of("event", "X"), "timeout", "P31D"))
+        .body(Map.of("selection", Map.of("event", "BuildStatusChanged"), "timeout", "P31D"))
         .post(waits(project))
         .then()
         .statusCode(400);
     // The cap is a day (qits-1961), and the 400 names it.
     asDesk(project)
-        .body(Map.of("selection", Map.of("event", "X"), "timeout", "PT25H"))
+        .body(Map.of("selection", Map.of("event", "BuildStatusChanged"), "timeout", "PT25H"))
         .post(waits(project))
         .then()
         .statusCode(400)
         .body("message", containsString("24 hours"));
     asDesk(project)
-        .body(Map.of("selection", Map.of("event", "X"), "timeout", "two hours"))
+        .body(Map.of("selection", Map.of("event", "BuildStatusChanged"), "timeout", "two hours"))
         .post(waits(project))
         .then()
         .statusCode(400);
+    // An event the catalog does not name is refused at the desk door too (qits-1964).
+    asDesk(project)
+        .body(Map.of("selection", Map.of("event", "ReleaseReqeustChanged")))
+        .post(waits(project))
+        .then()
+        .statusCode(400)
+        .body("message", containsString("did you mean 'ReleaseRequestChanged'?"));
     asDesk(project).body(Map.of("label", "x")).post(waits(project)).then().statusCode(400);
     asDesk(project).get(waits(project) + "?state=SOMETIMES").then().statusCode(400);
     asDesk(project).get(waits(project) + "?state=BROKEN").then().statusCode(200);

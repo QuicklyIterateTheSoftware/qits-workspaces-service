@@ -157,9 +157,46 @@ class EventPayloadCatalogTest {
     assertTrue(CATALOG.refusal(selection).orElseThrow().contains("'repositoryName'"));
   }
 
+  /** qits-1964: an event the catalog does not name is refused, not a wait that never matches. */
   @Test
-  void anEventTheCatalogDoesNotNameIsNotChecked() {
-    admitted("SomethingElseEntirely", Condition.exact("anything.at[].all", "x"));
+  void anEventTheCatalogDoesNotNameIsRefused() {
+    assertEquals(
+        "'SomeoneElsesEvent' is not an event the platform publishes. A new event needs an entry in"
+            + " event-fields.json first.",
+        refused("SomeoneElsesEvent", Condition.exact("anything.at[].all", "x")));
+    assertTrue(CATALOG.refusal(EventSelection.of("SomethingElseEntirely")).isPresent());
+    String shortName = CATALOG.refusal(EventSelection.of("X")).orElseThrow();
+    assertTrue(!shortName.contains("did you mean"), shortName);
     assertEquals(Optional.empty(), CATALOG.refusal(EventSelection.of("BuildStatusChanged")));
+  }
+
+  @Test
+  void aMisspelledEventNamesTheClosestEvent() {
+    assertEquals(
+        "'ReleaseReqeustChanged' is not an event the platform publishes; did you mean"
+            + " 'ReleaseRequestChanged'? A new event needs an entry in event-fields.json first.",
+        refused("ReleaseReqeustChanged", Condition.exact("releaseRequestQualifiedId", "x")));
+  }
+
+  /** qits-1964: ReleaseRequestChanged was uncatalogued, so {@code qualifiedId} waited forever. */
+  @Test
+  void releaseRequestChangedIsChecked() {
+    assertTrue(
+        refused("ReleaseRequestChanged", Condition.exact("qualifiedId", "qits-qits-rr-1"))
+            .startsWith(
+                "ReleaseRequestChanged carries no field 'qualifiedId'; did you mean"
+                    + " 'releaseRequestQualifiedId'?"));
+    admitted("ReleaseRequestChanged", Condition.exact("releaseRequestQualifiedId", "qits-qits-rr-1"));
+    admitted("ReleaseRequestChanged", Condition.exact("downstreamTechnicalComponents[]", "qits-ci"));
+  }
+
+  /** Nested records in another repository's event are objects inside a list. */
+  @Test
+  void deploymentActivesNavigationIsAListOfObjects() {
+    admitted("DeploymentActive", Condition.exact("navigation[].slot", "main"));
+    admitted("TargetLeaseChanged", Condition.exact("oomScope", "node"));
+    assertTrue(
+        refused("DeploymentActive", Condition.exact("endpoints[].upstreamport", "80"))
+            .contains("did you mean 'endpoints[].upstreamPort'?"));
   }
 }

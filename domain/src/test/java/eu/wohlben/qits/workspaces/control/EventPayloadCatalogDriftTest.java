@@ -39,8 +39,10 @@ import org.junit.jupiter.api.Test;
  * workspaces-events}, read the way {@code CanonicalJson} writes them: every record component but
  * {@code QitsEvent}'s own ({@code eventId}, {@code occurredAt}), a record as an object, a {@code
  * List} as a list, anything else a single value. Every {@code QitsEvent} record in that package is
- * found on the classpath, so a new event without an entry fails here. The qits-ci and qits-projects
- * entries are transcribed by hand and are not pinned by this test.
+ * found on the classpath, so a new event without an entry fails here. Every other entry is
+ * transcribed by hand from another publisher and is not pinned by this test; that includes {@code
+ * TargetLeaseChanged}, whose qits-workspaces copy lives in {@code service}'s targethost package, not
+ * here.
  */
 class EventPayloadCatalogDriftTest {
 
