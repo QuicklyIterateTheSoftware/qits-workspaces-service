@@ -5,11 +5,21 @@
     "eventId and occurredAt ride the envelope and are never payload fields; a null field is dropped from a",
     "payload, so every field here is optional on the wire. Keys starting with '_' are comments.",
     "The qits-workspaces entries are pinned by EventPayloadCatalogDriftTest against workspaces-events' records.",
-    "The qits-ci entries (BuildStatusChanged, BuildSuccessful, BuildFailed, SoftwareRelease; ci-events) and the",
-    "qits-projects entries (ReleaseRequestStateChanged, EntityTransitioned, EntityCommented, BranchDeliveryChanged,",
-    "SCMRelease; service's bus package) are TRANSCRIBED BY HAND from those records on 2026-11-04 and are not",
-    "pinned by any test, unlike qits-maintenance's ForeignEventContractTest: a field renamed there makes this",
-    "door refuse a wait on the new name until it is transcribed here. An event named nowhere here is not checked."
+    "Every other entry is TRANSCRIBED BY HAND from its publisher's records and pinned by no test, unlike",
+    "qits-maintenance's ForeignEventContractTest: a field renamed there makes this door refuse a wait on the",
+    "new name until it is transcribed here. On 2026-11-04 (qits-1849): qits-ci's ci-events (BuildStatusChanged,",
+    "BuildSuccessful, BuildFailed, SoftwareRelease) and qits-projects' service bus package (ReleaseRequestStateChanged,",
+    "EntityTransitioned, EntityCommented, BranchDeliveryChanged, SCMRelease). On 2026-11-09 (qits-1964): the rest of",
+    "qits-projects' bus package (ReleaseRequestChanged, ReleaseRequestSourceMoved, ApprovalRequirementChanged,",
+    "RepositoryRenamed, WorkNeedMet, ProjectCreated, ProjectChanged, ProjectDeleted, IdeaCreated, IdeaUpdated,",
+    "IdeaArchived, IdeaUnarchived); qits-githost's githost-events (SCMPublishCommit, SCMPublishTag, SCMDeleteBranch,",
+    "SCMDeleteTag); qits-deployments' deployments-events (DeploymentQueued, DeploymentStarted, DeploymentActive,",
+    "DeploymentFailed, EnvironmentCreated, EnvironmentChanged, EnvironmentDeleted); qits-system's targets events",
+    "package (TargetConnectionChanged, TargetLoginChanged, TargetOomKilled, TargetLeaseChanged).",
+    "An event with several publishers lists the union of their fields: TargetLeaseChanged (qits-system, and the",
+    "copies in qits-ci, qits-projects and qits-workspaces' targethost packages), ReleaseRequestStateChanged,",
+    "ApprovalRequirementChanged and RepositoryRenamed (qits-ci's and qits-projects' bus packages).",
+    "An event named nowhere here is refused (qits-1964): a new event needs its entry before a wait can name it."
   ],
   "events": {
     "BuildStatusChanged": {
@@ -139,6 +149,284 @@
       "repository": "scalar",
       "repositoryName": "scalar",
       "version": "scalar"
+    },
+    "ReleaseRequestChanged": {
+      "backingBranch": "scalar",
+      "changedAt": "scalar",
+      "downstreamTechnicalComponents": ["scalar"],
+      "mergedSha": "scalar",
+      "preRun": "scalar",
+      "priority": "scalar",
+      "projectId": "scalar",
+      "releaseRequestId": "scalar",
+      "releaseRequestQualifiedId": "scalar",
+      "repoId": "scalar",
+      "repoName": "scalar"
+    },
+    "ReleaseRequestSourceMoved": {
+      "branch": "scalar",
+      "fromQualifiedId": "scalar",
+      "fromRequestId": "scalar",
+      "minted": "scalar",
+      "movedAt": "scalar",
+      "movedBy": "scalar",
+      "projectId": "scalar",
+      "reason": "scalar",
+      "repoId": "scalar",
+      "repoName": "scalar",
+      "toQualifiedId": "scalar",
+      "toRequestId": "scalar"
+    },
+    "ApprovalRequirementChanged": {
+      "admits": ["scalar"],
+      "authors": ["scalar"],
+      "changedAt": "scalar",
+      "excludesAuthors": "scalar",
+      "mergedSha": "scalar",
+      "projectId": "scalar",
+      "reason": "scalar",
+      "releaseRequestId": "scalar",
+      "releaseRequestQualifiedId": "scalar",
+      "repoId": "scalar",
+      "repoName": "scalar",
+      "requirementId": "scalar",
+      "state": "scalar"
+    },
+    "RepositoryRenamed": {
+      "newName": "scalar",
+      "oldName": "scalar",
+      "projectId": "scalar",
+      "renamedAt": "scalar",
+      "repositoryId": "scalar"
+    },
+    "WorkNeedMet": {
+      "allMet": "scalar",
+      "entityId": "scalar",
+      "metAt": "scalar",
+      "neededEntityId": "scalar",
+      "neededQualifiedId": "scalar",
+      "neededStatus": "scalar",
+      "projectId": "scalar",
+      "qualifiedId": "scalar",
+      "status": "scalar"
+    },
+    "ProjectCreated": {
+      "createdAt": "scalar",
+      "projectId": "scalar",
+      "projectName": "scalar",
+      "slug": "scalar",
+      "supportsEnvironments": "scalar"
+    },
+    "ProjectChanged": {
+      "changedAt": "scalar",
+      "frontDeskLifecycle": "scalar",
+      "projectId": "scalar",
+      "projectName": "scalar",
+      "slug": "scalar",
+      "supportsEnvironments": "scalar"
+    },
+    "ProjectDeleted": {
+      "deletedAt": "scalar",
+      "projectId": "scalar",
+      "slug": "scalar"
+    },
+    "IdeaCreated": {
+      "archiveReason": "scalar",
+      "archived": "scalar",
+      "changedAt": "scalar",
+      "changedBy": "scalar",
+      "ideaId": "scalar",
+      "projectId": "scalar",
+      "status": "scalar",
+      "statusBefore": "scalar",
+      "title": "scalar"
+    },
+    "IdeaUpdated": {
+      "archiveReason": "scalar",
+      "archived": "scalar",
+      "changedAt": "scalar",
+      "changedBy": "scalar",
+      "ideaId": "scalar",
+      "projectId": "scalar",
+      "status": "scalar",
+      "statusBefore": "scalar",
+      "title": "scalar"
+    },
+    "IdeaArchived": {
+      "archiveReason": "scalar",
+      "archived": "scalar",
+      "changedAt": "scalar",
+      "changedBy": "scalar",
+      "ideaId": "scalar",
+      "projectId": "scalar",
+      "status": "scalar",
+      "statusBefore": "scalar",
+      "title": "scalar"
+    },
+    "IdeaUnarchived": {
+      "archiveReason": "scalar",
+      "archived": "scalar",
+      "changedAt": "scalar",
+      "changedBy": "scalar",
+      "ideaId": "scalar",
+      "projectId": "scalar",
+      "status": "scalar",
+      "statusBefore": "scalar",
+      "title": "scalar"
+    },
+    "TargetLeaseChanged": {
+      "detail": "scalar",
+      "exitCode": "scalar",
+      "leaseId": "scalar",
+      "oomKills": "scalar",
+      "oomScope": "scalar",
+      "ownerApp": "scalar",
+      "ownerRef": "scalar",
+      "slotType": "scalar",
+      "state": "scalar",
+      "targetId": "scalar"
+    },
+    "SCMPublishCommit": {
+      "authorEmail": "scalar",
+      "authorName": "scalar",
+      "authoredAt": "scalar",
+      "branch": "scalar",
+      "committedAt": "scalar",
+      "message": "scalar",
+      "oldSha": "scalar",
+      "parents": ["scalar"],
+      "projectId": "scalar",
+      "receivedAt": "scalar",
+      "repoId": "scalar",
+      "repoName": "scalar",
+      "sha": "scalar"
+    },
+    "SCMPublishTag": {
+      "annotated": "scalar",
+      "message": "scalar",
+      "projectId": "scalar",
+      "receivedAt": "scalar",
+      "repoId": "scalar",
+      "repoName": "scalar",
+      "sha": "scalar",
+      "tagName": "scalar",
+      "taggerEmail": "scalar",
+      "taggerName": "scalar",
+      "targetSha": "scalar"
+    },
+    "SCMDeleteBranch": {
+      "branch": "scalar",
+      "projectId": "scalar",
+      "receivedAt": "scalar",
+      "repoId": "scalar",
+      "repoName": "scalar",
+      "sha": "scalar"
+    },
+    "SCMDeleteTag": {
+      "projectId": "scalar",
+      "receivedAt": "scalar",
+      "repoId": "scalar",
+      "repoName": "scalar",
+      "sha": "scalar",
+      "tagName": "scalar"
+    },
+    "DeploymentQueued": {
+      "applicationName": "scalar",
+      "commitSha": "scalar",
+      "deploymentId": "scalar",
+      "environmentId": "scalar",
+      "environmentName": "scalar",
+      "queuedAt": "scalar",
+      "runId": "scalar",
+      "version": "scalar"
+    },
+    "DeploymentStarted": {
+      "applicationName": "scalar",
+      "commitSha": "scalar",
+      "deploymentId": "scalar",
+      "environmentId": "scalar",
+      "environmentName": "scalar",
+      "runId": "scalar",
+      "startedAt": "scalar",
+      "version": "scalar"
+    },
+    "DeploymentActive": {
+      "apiDocsPath": "scalar",
+      "applicationName": "scalar",
+      "browserHost": "scalar",
+      "commitSha": "scalar",
+      "containerName": "scalar",
+      "deploymentId": "scalar",
+      "endpoints": [
+        {
+          "path": "scalar",
+          "upstreamHost": "scalar",
+          "upstreamPort": "scalar"
+        }
+      ],
+      "environmentId": "scalar",
+      "environmentName": "scalar",
+      "finishedAt": "scalar",
+      "navigation": [
+        {
+          "label": "scalar",
+          "position": "scalar",
+          "slot": "scalar",
+          "subpath": "scalar"
+        }
+      ],
+      "runId": "scalar",
+      "version": "scalar"
+    },
+    "DeploymentFailed": {
+      "applicationName": "scalar",
+      "commitSha": "scalar",
+      "deploymentId": "scalar",
+      "detail": "scalar",
+      "environmentId": "scalar",
+      "environmentName": "scalar",
+      "finishedAt": "scalar",
+      "runId": "scalar",
+      "status": "scalar",
+      "version": "scalar"
+    },
+    "EnvironmentCreated": {
+      "createdAt": "scalar",
+      "designated": "scalar",
+      "environmentId": "scalar",
+      "environmentName": "scalar"
+    },
+    "EnvironmentChanged": {
+      "changedAt": "scalar",
+      "designated": "scalar",
+      "environmentId": "scalar",
+      "environmentName": "scalar"
+    },
+    "EnvironmentDeleted": {
+      "deletedAt": "scalar",
+      "environmentId": "scalar",
+      "environmentName": "scalar"
+    },
+    "TargetConnectionChanged": {
+      "connected": "scalar",
+      "runnerVersion": "scalar",
+      "targetId": "scalar",
+      "targetName": "scalar"
+    },
+    "TargetLoginChanged": {
+      "checkedAt": "scalar",
+      "claude": "scalar",
+      "kimi": "scalar",
+      "targetId": "scalar",
+      "targetName": "scalar"
+    },
+    "TargetOomKilled": {
+      "delta": "scalar",
+      "kernelOomKills": "scalar",
+      "nodeOomKills": "scalar",
+      "projectIds": ["scalar"],
+      "targetId": "scalar",
+      "targetName": "scalar"
     },
     "AgentPlaced": {
       "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar"
