@@ -163,8 +163,9 @@ public class AgentDispatchController {
               + " running agent: said once it is not busy, or after the launch window),"
               + " `launched` (its first turn, once it starts) or `resumed` (a yielded agent"
               + " resumes to hear it). A STOPPED agent is not started by this door (qits-1970):"
-              + " the turn waits on it until a person prompts or restarts it, answered"
-              + " `delivered` and neither `launched` nor `resumed`.")
+              + " the turn waits on it until a person prompts or restarts it or the item is"
+              + " dispatched again (qits-1973), answered `delivered` and neither `launched` nor"
+              + " `resumed`.")
   @APIResponse(
       responseCode = "400",
       description = "A blank work item or text.",

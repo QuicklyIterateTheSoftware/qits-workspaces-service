@@ -186,6 +186,9 @@ public class AgentService {
   /** A branch name git and the daemon both take: no leading dash, no spaces or control characters. */
   private static final Pattern BRANCH = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]{0,199}");
 
+  /** Who the audit line names for a dispatch: the door carries no caller principal (qits-1973). */
+  private static final String DISPATCH_DOOR = "the dispatch door";
+
   /** What a dispatch did about the agent. */
   public enum AgentLaunch {
     /** The agent has a slot; it starts (or hears the instruction) once its daemon answers. */
@@ -469,7 +472,10 @@ public class AgentService {
    * (qits-1217); otherwise one is created and placed. Found or revived on the same wrapper branch,
    * the agent forgets that a release consumed its branch (qits-1605): it may make new work that
    * release does not hold, so closing the item alone no longer ends it — the next release does.
-   * Never a 409 for an existing agent: the caller presses this to reach a state. A freshly created agent is relayed to qits-projects as not
+   * Never a 409 for an existing agent: the caller presses this to reach a state. A STOPPED agent
+   * found here is started again with the instruction (qits-1973): a dispatch is a deliberate press,
+   * as a person's prompt or a restart is, unlike the machine delivery door, which leaves it STOPPED
+   * (qits-1970). A freshly created agent is relayed to qits-projects as not
    * waiting ({@link #CAUSE_DISPATCHED}, qits-1274), so the item does not keep a former agent's wait.
    *
    * @throws NotFoundException no such repository; nothing is created
@@ -614,10 +620,19 @@ public class AgentService {
    * A dispatch that found the item's agent: its facts refreshed, an idle one told the instruction.
    * A revived agent is told it whatever its run state, a running one included, as a delivery is:
    * it is a new instruction for an agent that has worked on the item before, not a re-press.
+   *
+   * <p>A STOPPED agent, revived or not, is started again (qits-1973): a dispatch is a deliberate
+   * press by a person or the delivery desk, so it acts as a person's prompt or a restart does, not
+   * as the machine delivery door (qits-1970). The instruction is appended after any turn that waited
+   * on the row — never dropped because one did — and the agent goes back to the scheduler as a
+   * YIELDED one (QUEUED, when it was stopped before it had a workspace), whose resume makes it
+   * RUNNING with {@code AgentResumed(TURN_PENDING)}; a QUEUED one is offered a slot at once, as a
+   * fresh agent is.
    */
   private Dispatch found(Found found, AgentRequest request) {
     UUID id = found.id();
     String instruction = trimmed(request.instruction());
+    boolean[] wasStopped = new boolean[1];
     AgentLaunch launch =
         QuarkusTransaction.requiringNew()
             .call(
@@ -642,7 +657,16 @@ public class AgentService {
                     // own transaction (qits-1562, activeOrRevived); this covers an ACTIVE agent.
                     agent.entityStatus = null;
                   }
-                  if (found.revived()) {
+                  if (agent.runState == AgentRunState.STOPPED) {
+                    // A deliberate press starts it again (qits-1973), as a person's prompt does:
+                    // appended after what the machine door left waiting, and back to the scheduler.
+                    wasStopped[0] = true;
+                    if (instruction != null) {
+                      appendTurn(agent, instruction, false);
+                    }
+                    agent.runState =
+                        agent.workspaceId == null ? AgentRunState.QUEUED : AgentRunState.YIELDED;
+                  } else if (found.revived()) {
                     if (instruction != null) {
                       appendTurn(agent, instruction, false);
                     }
@@ -657,6 +681,20 @@ public class AgentService {
                       : AgentLaunch.SCHEDULED;
                 });
     AgentWorktree agent = require(id);
+    if (wasStopped[0]) {
+      audit(agent, "dispatched", DISPATCH_DOOR, AgentRunState.STOPPED, agent.runState);
+      if (agent.runState == AgentRunState.QUEUED) {
+        // Stopped before it had a workspace: offered a slot now, as a fresh agent is.
+        placeQueued();
+        agent = require(id);
+        launch =
+            agent.runState == AgentRunState.QUEUED ? AgentLaunch.QUEUED : AgentLaunch.SCHEDULED;
+      }
+      bringUp(agent);
+      settled(agent);
+      kick();
+      return new Dispatch(view(agent), false, launch, agent.commissionedTokenSubject);
+    }
     if (launch != AgentLaunch.SKIPPED_RUNNING) {
       bringUp(agent);
     }
@@ -669,7 +707,8 @@ public class AgentService {
    * dispatched has nobody to tell, and that is answered, not refused. A yielded agent is RUNNING
    * again at once to hear it (D16); a queued one hears it as part of its first turn. A STOPPED one
    * is not started by it (qits-1970): the machine door is how qits-projects relays every comment,
-   * phase advance and hand-on, so the turn waits on the row for a person's prompt or a restart.
+   * phase advance and hand-on, so the turn waits on the row for a person's prompt, a restart or a
+   * dispatch of the item (qits-1973).
    *
    * <p>An OBSOLETE agent is told too. A release of its wrapper branch no longer marks an open item's
    * agent OBSOLETE (qits-1605) — only a closed item's — but a closed item can be reopened and go on,
@@ -702,8 +741,8 @@ public class AgentService {
    * A STOPPED agent told by a person ({@code by} set) goes back to the scheduler as a YIELDED one
    * (QUEUED, when it was stopped before it had a workspace): it starts again with this turn. Told
    * by the machine door ({@code by} null) it stays STOPPED (qits-1970): the turn is appended and
-   * waits for a person's prompt or a restart, and the answer is delivered but not launched — a
-   * stop that any relayed thread comment undid was no stop at all.
+   * waits for a person's prompt, a restart or a dispatch (qits-1973), and the answer is delivered
+   * but not launched — a stop that any relayed thread comment undid was no stop at all.
    *
    * @param by the caller's principal, for the audit line; null is the machine door, which logs none
    *     and never starts a STOPPED agent
@@ -747,7 +786,8 @@ public class AgentService {
           true,
           false,
           false,
-          "The agent is STOPPED; this turn waits on it until a person prompts or restarts it.");
+          "The agent is STOPPED; this turn waits on it until a person prompts or restarts it,"
+              + " or its item is dispatched again.");
     }
     if (by != null) {
       audit(agent, "prompted", by, before[0], agent.runState);
@@ -811,9 +851,9 @@ public class AgentService {
    * running since qits-1212 — and its worktree and workspace stay. A QUEUED agent gives up its queue
    * place. A STOPPED agent is a no-op. A daemon that does not answer still leaves the row STOPPED:
    * nothing will start the harness again, and the next start resumes its session. The container is
-   * never touched. Only a person's prompt or a restart starts it again; a turn the machine door
-   * delivers waits on the row (qits-1970). A stop is announced as {@link AgentStopped}, once: a
-   * STOPPED agent stopped again says nothing.
+   * never touched. Only a person's prompt, a restart or a dispatch of its item (qits-1973) starts it
+   * again; a turn the machine door delivers waits on the row (qits-1970). A stop is announced as
+   * {@link AgentStopped}, once: a STOPPED agent stopped again says nothing.
    *
    * @throws NotFoundException no such agent
    * @throws ConflictException the agent was removed
