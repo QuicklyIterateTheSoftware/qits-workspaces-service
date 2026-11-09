@@ -240,6 +240,36 @@ class AgentWaitAccessTest {
         .statusCode(201);
   }
 
+  /**
+   * qits-1960: the delivery ledger never follows {@code maintenance/*}, so a wait on it is refused
+   * at the door, naming the request to wait on instead.
+   */
+  @Test
+  void aBranchTheDeliveryLedgerNeverFollowsIsA400NamingTheRequestToWaitOn() {
+    as("alice", "qits:admin")
+        .body(
+            Map.of(
+                "selection",
+                Map.of(
+                    "event",
+                    "BranchDeliveryChanged",
+                    "when",
+                    List.of(
+                        List.of(
+                            Map.of(
+                                "path",
+                                "branch",
+                                "op",
+                                "exact",
+                                "value",
+                                "maintenance/automations/dependency-bump/x"))))))
+        .post(waits())
+        .then()
+        .statusCode(400)
+        .body("message", containsString("is never announced for"))
+        .body("message", containsString("ReleaseRequestStateChanged"));
+  }
+
   @Test
   void anUnknownAgentIsA404() {
     as("alice", "qits:admin")
