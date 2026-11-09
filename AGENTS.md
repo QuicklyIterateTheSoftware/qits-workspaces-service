@@ -250,6 +250,14 @@ ceiling, not a timeout the waiter asked for). It gives the OPEN rows standing at
 ceiling: no expiry becomes `greatest(created_at + 8 h, now() + 1 h)`, an expiry later than
 `created_at + 24 h` becomes `greatest(created_at + 24 h, now() + 1 h)`, both marked
 `expiry_is_ceiling`. Columns on a `CausedRow`, so no `ArchRulesTest` decision; see "Declared waits".
+**`V39__agent_phase_times.sql`** (qits-2007) adds `placed_at`, `started_at` and `queued_at` (all
+nullable, no backfill) to `agent_worktree`: when the agent was last placed in its slot, when its
+harness was last started there (`AgentStarted`), and when it last became QUEUED. The agent views
+compute `phase` (QUEUED, PROVISIONING, STARTING, READY) and `phaseSince` from them, the slot's
+runtime status and its daemon's connection (`AgentPhases`); `runState` and `activity` keep their
+meanings. A requeue and a stop clear the first two; a yield keeps both, since a yielded agent keeps
+its harness. A row placed before the migration falls back to whether this process started it or its
+daemon reports it. Columns on a `CausedRow`, so no `ArchRulesTest` decision.
 **`V30__workspace_leases.sql`** (epic qits-1481, qits-1532) retires the workspace runners: it first
 copies every row with a `runner_id` into `legacy_placement(row_id, old_runner_id, engine_id,
 hostname, runner_name)` — `engine_id` and `hostname` from the runner's `capabilities ->> 'engineId'`
