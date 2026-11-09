@@ -105,31 +105,8 @@ class ConsumerPactVerificationTest {
    * The pinned, deployed or rollback consumer pact interactions this provider cannot honour. Empty
    * when every consumer version the gate verifies holds; an entry stays only while its version is
    * pinned, deployed or a rollback target of its consumer.
-   *
-   * <p>The qits CLI's {@code 2026.1107.32045} pins {@code expiresAt} to {@code null} with no
-   * matcher on two {@code createAgentWait} interactions — ci-run and release-request waits — a
-   * value qits-1961 makes impossible: every wait now gets an expiry (an 8 h ceiling), so {@code
-   * createAgentWait} always answers a non-null {@code expiresAt}. The third {@code createAgentWait}
-   * interaction, for a work wait, already pins a timestamp with a regex matcher and passes. These
-   * entries stay until {@code 2026.1107.32045} is neither pinned, deployed nor a rollback target of
-   * the CLI.
    */
-  static final List<KnownWrong> KNOWN_WRONG =
-      List.of(
-          new KnownWrong(
-              "qits-platform-access-monorepo",
-              "2026.1107.32045",
-              "qits wait ci-run: createAgentWait",
-              "an agent declaring a wait on a CI run",
-              "pins expiresAt to null, but since qits-1961 every wait has an expiry (8 h ceiling);"
-                  + " the CLI loosens the row in its next pact (qits-1961)"),
-          new KnownWrong(
-              "qits-platform-access-monorepo",
-              "2026.1107.32045",
-              "qits wait release-request: createAgentWait",
-              "an agent declaring a wait on a release request",
-              "pins expiresAt to null, but since qits-1961 every wait has an expiry (8 h ceiling);"
-                  + " the CLI loosens the row in its next pact (qits-1961)"));
+  static final List<KnownWrong> KNOWN_WRONG = List.of();
 
   @Inject ProviderStates states;
 
