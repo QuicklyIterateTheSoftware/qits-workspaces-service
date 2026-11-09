@@ -99,6 +99,10 @@ components:
           $ref: "#/components/schemas/Instant"
         deskAskedAt:
           $ref: "#/components/schemas/Instant"
+        phase:
+          $ref: "#/components/schemas/AgentPhase"
+        phaseSince:
+          $ref: "#/components/schemas/Instant"
     AgentHarness:
       type: string
       enum:
@@ -110,6 +114,13 @@ components:
       - SCHEDULED
       - SKIPPED_RUNNING
       - QUEUED
+    AgentPhase:
+      type: string
+      enum:
+      - QUEUED
+      - PROVISIONING
+      - STARTING
+      - READY
     AgentRunState:
       type: string
       enum:

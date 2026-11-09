@@ -909,15 +909,15 @@
         },
         {
           "type" : "eu.wohlben.qits.workspaces.dto.AgentDto$Attention",
-          "kind" : "via",
-          "via" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "site" : "AgentDto.attention()"
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "AgentService.views(List)"
         },
         {
           "type" : "eu.wohlben.qits.workspaces.dto.AgentDto$Branch",
-          "kind" : "via",
-          "via" : "eu.wohlben.qits.workspaces.dto.AgentDto",
-          "site" : "AgentDto.branches()"
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "AgentService.views(List)"
         },
         {
           "type" : "eu.wohlben.qits.workspaces.dto.ArchivedSessionDto",
