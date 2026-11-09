@@ -366,6 +366,7 @@
       ],
       "environmentId": "scalar",
       "environmentName": "scalar",
+      "exposure": "scalar",
       "finishedAt": "scalar",
       "navigation": [
         {
@@ -376,6 +377,7 @@
         }
       ],
       "runId": "scalar",
+      "variant": "scalar",
       "version": "scalar"
     },
     "DeploymentFailed": {
@@ -388,6 +390,7 @@
       "finishedAt": "scalar",
       "runId": "scalar",
       "status": "scalar",
+      "variant": "scalar",
       "version": "scalar"
     },
     "EnvironmentCreated": {
