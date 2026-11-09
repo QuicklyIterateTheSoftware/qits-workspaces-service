@@ -258,6 +258,54 @@
       ]
     },
     {
+      "name": "a project with agents starting up",
+      "slug": "a-project-with-agents-starting-up",
+      "params": {
+        "bugTicketId": "00000000-0000-4000-8000-000000000001",
+        "bugTicketQualifiedId": "contract-00000001-9",
+        "epicId": "00000000-0000-4000-8000-000000000005",
+        "featureId": "00000000-0000-4000-8000-000000000006",
+        "improvementTicketId": "00000000-0000-4000-8000-00000000000a",
+        "improvementTicketQualifiedId": "contract-00000001-10",
+        "projectId": "00000000-0000-4000-8000-00000000000e",
+        "repositoryId": "00000000-0000-4000-8000-00000000001a",
+        "taskId": "00000000-0000-4000-8000-000000000010"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listAgents",
+          "method": "GET",
+          "path": "/workspaces/api/agents",
+          "query": {
+            "projectId": "{projectId}",
+            "state": "ACTIVE"
+          },
+          "status": 200,
+          "file": "a-project-with-agents-starting-up/listAgents.json",
+          "frozen": {
+            "ids": [
+              "$.agents[*].agentId",
+              "$.agents[*].repositoryId",
+              "$.agents[*].workId",
+              "$.agents[*].ticketId",
+              "$.agents[*].epicId"
+            ],
+            "instants": [
+              "$.agents[*].lastActivityAt",
+              "$.agents[*].createdAt",
+              "$.agents[*].phaseSince"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.agents[*].workspaceRowId"
+            ],
+            "listFilteredTo": "$.agents"
+          }
+        }
+      ]
+    },
+    {
       "name": "a project with workspace slots hosting agents",
       "slug": "a-project-with-workspace-slots-hosting-agents",
       "params": {
@@ -295,6 +343,7 @@
             "instants": [
               "$.agents[*].lastActivityAt",
               "$.agents[*].createdAt",
+              "$.agents[*].phaseSince",
               "$.agents[*].waitingOnSince",
               "$.agents[*].waits[*].createdAt",
               "$.agents[*].waits[*].expiresAt"
@@ -976,7 +1025,8 @@
               "$.agent.ticketId"
             ],
             "instants": [
-              "$.agent.createdAt"
+              "$.agent.createdAt",
+              "$.agent.phaseSince"
             ],
             "strings": [
               "$.agentIdentity"
@@ -1010,7 +1060,8 @@
               "$.agent.ticketId"
             ],
             "instants": [
-              "$.agent.createdAt"
+              "$.agent.createdAt",
+              "$.agent.phaseSince"
             ],
             "strings": [
               "$.agentIdentity"

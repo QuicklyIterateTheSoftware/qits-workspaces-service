@@ -75,7 +75,9 @@
         "waitId": "00000000-0000-4000-8000-0000000000b2"
       },
       "blockedAt": null,
-      "deskAskedAt": null
+      "deskAskedAt": null,
+      "phase": "QUEUED",
+      "phaseSince": null
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000a7",
@@ -113,7 +115,9 @@
         "waitId": null
       },
       "blockedAt": "2026-01-01T00:00:00Z",
-      "deskAskedAt": "2026-01-01T00:00:00Z"
+      "deskAskedAt": "2026-01-01T00:00:00Z",
+      "phase": "QUEUED",
+      "phaseSince": null
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000a8",
@@ -151,7 +155,9 @@
         "waitId": null
       },
       "blockedAt": null,
-      "deskAskedAt": null
+      "deskAskedAt": null,
+      "phase": "QUEUED",
+      "phaseSince": null
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000a9",
@@ -228,7 +234,9 @@
         "waitId": "00000000-0000-4000-8000-0000000000b3"
       },
       "blockedAt": null,
-      "deskAskedAt": null
+      "deskAskedAt": null,
+      "phase": "QUEUED",
+      "phaseSince": null
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000aa",
@@ -328,7 +336,9 @@
       ],
       "attention": null,
       "blockedAt": null,
-      "deskAskedAt": null
+      "deskAskedAt": null,
+      "phase": "QUEUED",
+      "phaseSince": null
     }
   ]
 }

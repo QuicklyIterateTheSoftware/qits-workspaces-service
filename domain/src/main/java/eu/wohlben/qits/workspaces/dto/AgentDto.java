@@ -36,6 +36,12 @@ import org.eclipse.microprofile.openapi.annotations.media.Schema;
  * @param blockedAt when its item's explicit block ({@code EXPLICIT} or {@code BOTH}) began; null
  *     while there is none
  * @param deskAskedAt when its item was last commented with an {@code @desk} mention; null when never
+ * @param phase where it is in coming up (qits-2007): QUEUED for a slot or a lease, PROVISIONING
+ *     while its slot's container or daemon is not there yet, STARTING until its harness is started,
+ *     then READY. Null for an agent that is not QUEUED or RUNNING, and for a REMOVED one. Neither
+ *     {@code runState} nor {@code activity} changes meaning with it
+ * @param phaseSince since when it is in {@code phase}; null with it, and null where the time is not
+ *     known (an agent placed before the phase was recorded)
  */
 public record AgentDto(
     String agentId,
@@ -68,7 +74,9 @@ public record AgentDto(
     List<WaitView> waits,
     Attention attention,
     Instant blockedAt,
-    Instant deskAskedAt) {
+    Instant deskAskedAt,
+    AgentPhase phase,
+    Instant phaseSince) {
 
   /**
    * What an ACTIVE agent needs a person for (epic qits-1681).

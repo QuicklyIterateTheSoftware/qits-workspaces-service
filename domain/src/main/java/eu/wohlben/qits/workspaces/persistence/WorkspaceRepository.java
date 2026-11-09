@@ -47,6 +47,15 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
         .firstResultOptional();
   }
 
+  /** The active workspaces among {@code ids}, in one read (qits-2007: the agent views' slots). */
+  public List<Workspace> findActiveByIds(Collection<Long> ids) {
+    List<Long> wanted =
+        ids == null ? List.of() : ids.stream().filter(Objects::nonNull).distinct().toList();
+    return wanted.isEmpty()
+        ? List.of()
+        : list("id in ?1 and status = ?2", wanted, WorkspaceStatus.ACTIVE);
+  }
+
   public List<Workspace> findActiveByRepositoryId(String repositoryId) {
     return list("repositoryId = ?1 and status = ?2", repositoryId, WorkspaceStatus.ACTIVE);
   }
