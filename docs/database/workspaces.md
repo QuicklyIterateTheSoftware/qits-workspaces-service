@@ -97,12 +97,15 @@ erDiagram
     instant obsolete_at
     boolean pending_compact "not null"
     text pending_text
+    instant placed_at
+    instant queued_at
     instant removed_at
     string repository_id "not null"
     enum run_state "not null"
     text session_id
     text start_refusal
     instant start_refused_at
+    instant started_at
     long started_workspace_id
     enum state "not null"
     text ticket_id
