@@ -138,10 +138,7 @@ public class AgentWaitController {
    * The request's selection, bound by qits-eventstream's reader; a 400 with its reason otherwise.
    * An event {@link EventPayloadCatalog} names is also checked against its payload fields
    * (qits-1849), so a path the event never carries is a 400 naming the closest field rather than a
-   * wait that never matches. An event the catalog does not name is accepted unchecked. A {@code
-   * BranchDeliveryChanged} wait naming a branch the delivery ledger never follows — {@code main},
-   * {@code release/*}, {@code maintenance/*} or a tag — is likewise refused ({@link
-   * UnfollowedBranches}, qits-1960), naming the request to wait on instead.
+   * wait that never matches. An event the catalog does not name is accepted unchecked.
    */
   static EventSelection selectionOf(CreateWaitRequest request) {
     if (request == null || request.selection() == null || request.selection().isNull()) {
@@ -159,6 +156,8 @@ public class AgentWaitController {
             reason -> {
               throw new BadRequestException("Invalid selection: " + reason);
             });
+    // qits-1960: a BranchDeliveryChanged wait on a branch the delivery ledger never follows (main,
+    // release/*, maintenance/*, a tag) is refused too, naming the request to wait on instead.
     UnfollowedBranches.refusal(selection)
         .ifPresent(
             reason -> {
