@@ -24,6 +24,7 @@ import eu.wohlben.qits.workspaces.events.AgentNudged;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
 import eu.wohlben.qits.workspaces.events.AgentRequeued;
+import eu.wohlben.qits.workspaces.events.AgentResumed;
 import eu.wohlben.qits.workspaces.events.AgentStarted;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
@@ -730,6 +731,79 @@ public class AgentServiceTest {
       pass.shutdownNow();
       liveness.markDead(slot);
     }
+  }
+
+  /**
+   * qits-1973: a dispatch of a STOPPED agent's item starts it again, as a person's prompt does — the
+   * machine door's turn that waited on the row is kept and the instruction appended after it, not
+   * dropped because something waited. It goes back to the scheduler as YIELDED, and the resume makes
+   * it RUNNING, announced once.
+   */
+  @Test
+  void aDispatchOfAStoppedAgentsItemStartsItAgainWithEveryWaitingTurn() {
+    AgentService.Dispatch dispatched = dispatch("w-stop-dispatch", true, "go");
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      service.awaitSchedulerIdle();
+      service.stop(id, "person");
+      service.awaitSchedulerIdle();
+      service.deliver("w-stop-dispatch", "comment", false);
+      service.awaitSchedulerIdle();
+      assertEquals(AgentRunState.STOPPED, row(agentId).runState, "the machine door leaves it");
+      assertEquals("comment", row(agentId).pendingText);
+      long starts = startsOf(agentId);
+
+      AgentService.Dispatch again = dispatch("w-stop-dispatch", true, "phase");
+      assertFalse(again.fresh());
+      assertEquals(agentId, again.agent().agentId());
+      assertEquals(AgentService.AgentLaunch.SCHEDULED, again.agentLaunch());
+      assertEquals(AgentRunState.YIELDED, again.agent().runState(), "back to the scheduler");
+
+      service.reconcile();
+      service.awaitSchedulerIdle();
+      assertEquals(AgentRunState.RUNNING, row(agentId).runState);
+      assertEquals(starts + 1, startsOf(agentId), "its harness is started again");
+      String heard = lastStartOf(agentId).instruction();
+      assertTrue(heard.contains("comment") && heard.contains("phase"), heard);
+      assertEquals(
+          1,
+          announced.of(AgentResumed.class, e -> e.agentId().equals(agentId)).size(),
+          "resumed once");
+      assertEquals(
+          AgentResumed.TURN_PENDING,
+          announced.of(AgentResumed.class, e -> e.agentId().equals(agentId)).get(0).reason());
+    } finally {
+      liveness.markDead(slot);
+    }
+  }
+
+  /**
+   * qits-1973: an agent stopped before it had a workspace is queued again by a dispatch of its item,
+   * holding both turns, and is offered a slot as a fresh agent is — here none is free.
+   */
+  @Test
+  void aDispatchOfAnAgentStoppedWhileQueuedQueuesItAgain() {
+    AgentService.Dispatch dispatched = dispatch("w-stop-queued", false, "go");
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    assertEquals(AgentRunState.QUEUED, dispatched.agent().runState());
+    service.stop(id, "person");
+    service.awaitSchedulerIdle();
+    assertEquals(AgentRunState.STOPPED, row(agentId).runState);
+
+    AgentService.Dispatch again = dispatch("w-stop-queued", false, "phase");
+    assertFalse(again.fresh());
+    assertEquals(AgentService.AgentLaunch.QUEUED, again.agentLaunch());
+    assertEquals(AgentRunState.QUEUED, again.agent().runState());
+    service.awaitSchedulerIdle();
+    AgentWorktree queued = row(agentId);
+    assertEquals(AgentRunState.QUEUED, queued.runState, "a lease waits already: no slot");
+    assertNull(queued.workspaceId);
+    assertEquals("go\n\nphase", queued.pendingText);
   }
 
   @Test

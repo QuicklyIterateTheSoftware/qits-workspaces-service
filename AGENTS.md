@@ -1217,8 +1217,9 @@ pass and the next frames: every placed agent, RUNNING or YIELDED, is started aga
 **STOPPED: a person stopped it** (epic qits-1667, `V35`). No step above ever places, resumes,
 nudges, repairs or drives a STOPPED agent, and it holds no slot: a workspace whose agents are all
 YIELDED with nothing to say, or STOPPED, takes a queued agent. A wait that fires for it is closed and
-its wake appended to `pending_text` as for any agent — heard once it is restarted or prompted, not
-before; so is a turn the machine delivery door relays (qits-1970). The resume takes each YIELDED
+its wake appended to `pending_text` as for any agent — heard once it is restarted, prompted or its
+item dispatched again (qits-1973), not before; so is a turn the machine delivery door relays
+(qits-1970). The resume takes each YIELDED
 candidate's row with a pessimistic lock and reads it again before writing RUNNING, so a stop
 committed after its read is not undone. It keeps its `workspace_id` when it had one; one stopped while still QUEUED has none (`V35`
 rewrote `ck_agent_worktree_placed` to admit that). Its attention is never `IDLE_NO_WAIT` (rule 3
@@ -1234,7 +1235,15 @@ holds for RUNNING only). The old instance draining during a rolling deploy canno
   agent on the same wrapper branch is made ACTIVE again (its obsolete, cleanup and consumed marks
   cleared) and is the answer, told the instruction whatever its run state (qits-1217): a closed
   item can be reopened, and a second agent on that branch would collide with the first's worktree.
-  An ACTIVE agent found on the same wrapper branch has its consumed mark cleared (qits-1605). An OBSOLETE agent on another wrapper branch gets a new agent beside it. `admin: true` is refused (400): an admin
+  An ACTIVE agent found on the same wrapper branch has its consumed mark cleared (qits-1605). A
+  STOPPED agent found, revived or not, is started again (qits-1973): a dispatch is a deliberate press
+  by a person or the delivery desk, so it acts as a prompt or a restart does, not as the machine
+  delivery door — the instruction is appended after whatever turns waited on the row (it used to be
+  set only when nothing waited, and lost), the row becomes YIELDED (QUEUED with no workspace, offered
+  a slot at once as a fresh agent is), the audit line reads `dispatched by the dispatch door`, and
+  the answer is SCHEDULED (QUEUED while no slot is free); the next resume makes it RUNNING with
+  `AgentResumed(TURN_PENDING)`. Before, it was answered SCHEDULED and left STOPPED, and nothing ran.
+  An OBSOLETE agent on another wrapper branch gets a new agent beside it. `admin: true` is refused (400): an admin
   agent holds the host's docker socket, so only the person door below makes one, never a door
   `qits:system` may press.
 - `GET …/agent-dispatches/references?workId=…` (repeating; `ticketId`/`epicId` read as work ids) →
@@ -1283,7 +1292,8 @@ holds for RUNNING only). The old instance draining during a rolling deploy canno
   yield. A stop that lands while a start waits on the daemon wins (qits-1970): the start re-reads
   the row under its lock once the daemon answered, and a STOPPED or REMOVED row is neither recorded
   started nor announced `AgentStarted` — the harness just launched is yielded again on that
-  workspace's daemon. `POST …/restart` → `AgentDto`: RUNNING is the daemon's yield, then the
+  workspace's daemon. A STOPPED agent starts again only from a person's prompt, a restart or a
+  dispatch of its item (qits-1973). `POST …/restart` → `AgentDto`: RUNNING is the daemon's yield, then the
   next pass's start resumes `session_id` (no daemon is `503 AGENT_DAEMON_UNREACHABLE`); STOPPED or
   YIELDED become YIELDED (QUEUED with no workspace) and go through the resume path; QUEUED is `409
   AGENT_NOT_STARTED`. `POST …/yield` → `AgentDto`: the scheduler's own `writeYield` and
