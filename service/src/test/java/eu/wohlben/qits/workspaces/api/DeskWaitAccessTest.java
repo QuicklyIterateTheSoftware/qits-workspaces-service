@@ -234,4 +234,27 @@ class DeskWaitAccessTest {
         .body("message", containsString("did you mean 'repoName'?"));
     asDesk(project).get(waits(project)).then().statusCode(200).body("waits", hasSize(0));
   }
+
+  /**
+   * qits-1960: the delivery ledger never follows {@code main}, so a wait on it is refused at the
+   * door, naming the request to wait on instead.
+   */
+  @Test
+  void aBranchTheDeliveryLedgerNeverFollowsIsA400NamingTheRequestToWaitOn() {
+    String project = UUID.randomUUID().toString();
+    asDesk(project)
+        .body(
+            Map.of(
+                "selection",
+                Map.of(
+                    "event",
+                    "BranchDeliveryChanged",
+                    "when",
+                    List.of(List.of(Map.of("path", "branch", "op", "exact", "value", "main"))))))
+        .post(waits(project))
+        .then()
+        .statusCode(400)
+        .body("message", containsString("is never announced for"))
+        .body("message", containsString("ReleaseRequestStateChanged"));
+  }
 }

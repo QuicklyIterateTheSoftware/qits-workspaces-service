@@ -1493,6 +1493,14 @@ on a wait declared since; `expiry_is_ceiling` says the expiry is the ceiling:
   `ReleaseRequestStateChanged`, `ApprovalRequirementChanged`, `RepositoryRenamed`) lists the union
   of their fields. The resource
   is listed in `quarkus.native.resources.includes` (`NativeImageContractTest`).
+- **Branches the delivery ledger never follows are refused** (qits-1960, `control/UnfollowedBranches`).
+  A `BranchDeliveryChanged` wait naming `branch` exactly or by prefix as `main`, `release/*`,
+  `maintenance/*` or a tag (`refs/tags/…`, or the released `YYYY.MMDD.HHMMSS` form) is a 400, same
+  seam as qits-1849's: it transcribes qits-projects-service's `BranchDeliveries.considered` by hand,
+  with no compile-time link and nothing pinning it against a rename or a widened rule over there.
+  The 400 points at waiting on the branch's request instead (`ReleaseRequestStateChanged`
+  `branches[]`), named or, for a bump whose name is not known yet, by `repoName` and a
+  `maintenance/` prefix.
 - **The desk's waits** (qits-1618, `V32`, `DeskWaitController`). A project's front desk — a Claude
   session qits-projects runs, with no agent row — declares waits on its project id, with the agent
   door's bodies (`agentId: null`), selection rules and limits (8 OPEN per project, counted under a
