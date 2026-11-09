@@ -311,6 +311,13 @@ class GoldenMasterRecordingTest {
               "listAgents",
               WORKSPACES + "/agents?projectId={projectId}&state=ACTIVE",
               "$.agents"),
+          // qits-2007: a project's ACTIVE agents, one per lifecycle phase — the landing app's
+          // "starting up" reading of an agent that holds a slot but cannot work yet.
+          Interaction.read(
+              ProviderStates.A_PROJECT_WITH_AGENTS_STARTING_UP,
+              "listAgents",
+              WORKSPACES + "/agents?projectId={projectId}&state=ACTIVE",
+              "$.agents"),
           Interaction.write(
               ProviderStates.REPOSITORIES_WITH_MERGED_BRANCHES,
               "sweepBranches",

@@ -39,7 +39,9 @@
         "waits": [],
         "attention": null,
         "blockedAt": null,
-        "deskAskedAt": null
+        "deskAskedAt": null,
+        "phase": "PROVISIONING",
+        "phaseSince": null
       }
     },
     {
@@ -74,7 +76,9 @@
         "waits": [],
         "attention": null,
         "blockedAt": null,
-        "deskAskedAt": null
+        "deskAskedAt": null,
+        "phase": null,
+        "phaseSince": null
       }
     },
     {
@@ -109,7 +113,9 @@
         "waits": [],
         "attention": null,
         "blockedAt": null,
-        "deskAskedAt": null
+        "deskAskedAt": null,
+        "phase": null,
+        "phaseSince": null
       }
     }
   ]

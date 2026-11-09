@@ -68,7 +68,9 @@
     ],
     "attention": null,
     "blockedAt": null,
-    "deskAskedAt": null
+    "deskAskedAt": null,
+    "phase": "PROVISIONING",
+    "phaseSince": null
   },
   "fresh": false,
   "agentLaunch": "SCHEDULED",

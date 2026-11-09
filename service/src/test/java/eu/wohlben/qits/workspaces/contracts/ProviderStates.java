@@ -8,6 +8,10 @@ import eu.wohlben.qits.workspaces.control.TargetPlacement;
 import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlane;
 import eu.wohlben.qits.workspaces.control.WorkspacePromptDraftService;
 import eu.wohlben.qits.workspaces.daemonhost.StubDaemonTunnels;
+import eu.wohlben.qits.workspaces.daemonhost.WorkspaceDaemonRegistry;
+import eu.wohlben.qits.workspacedaemon.protocol.AgentActivity;
+import eu.wohlben.qits.workspacedaemon.protocol.DaemonProtocol;
+import io.quarkus.websockets.next.WebSocketConnection;
 import eu.wohlben.qits.workspaces.transcripthost.ShippedClaudeTranscripts;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServer;
@@ -110,6 +114,10 @@ public class ProviderStates {
   // healthy one, their waits on every kind of subject.
   public static final String A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION =
       "a project with agents needing attention";
+  // Where a project's agents are in coming up (qits-2007): one agent per lifecycle phase, and READY
+  // both idle and busy.
+  public static final String A_PROJECT_WITH_AGENTS_STARTING_UP =
+      "a project with agents starting up";
   public static final String REPOSITORIES_WITH_MERGED_BRANCHES =
       "repositories with merged branches";
   public static final String A_CONFIGURED_WORKSPACE_IMAGE = "a configured workspace image";
@@ -241,6 +249,8 @@ public class ProviderStates {
 
   @Inject ShippedClaudeTranscripts shippedTranscripts;
 
+  @Inject WorkspaceDaemonRegistry daemons;
+
   @ConfigProperty(name = "qits.test.origins-dir")
   String originsDir;
 
@@ -263,6 +273,7 @@ public class ProviderStates {
         AN_AGENT_WAITING_ON_A_RELEASE_REQUEST,
         AN_AGENT_WAITING_ON_A_CI_RUN,
         A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION,
+        A_PROJECT_WITH_AGENTS_STARTING_UP,
         REPOSITORIES_WITH_MERGED_BRANCHES,
         A_CONFIGURED_WORKSPACE_IMAGE,
         A_PROJECT_WITH_WORKSPACE_SLOTS,
@@ -304,6 +315,7 @@ public class ProviderStates {
       case AN_AGENT_WAITING_ON_A_RELEASE_REQUEST -> agentDeclaringAWait("releaseRequestId", RELEASE_REQUEST_ID);
       case AN_AGENT_WAITING_ON_A_CI_RUN -> agentDeclaringAWait("runId", CI_RUN_ID);
       case A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION -> agentsNeedingAttention();
+      case A_PROJECT_WITH_AGENTS_STARTING_UP -> agentsStartingUp();
       case REPOSITORIES_WITH_MERGED_BRANCHES -> mergedBranches();
       case A_CONFIGURED_WORKSPACE_IMAGE -> new Setup(new TreeMap<>(), List.of());
       case A_PROJECT_WITH_WORKSPACE_SLOTS -> slotsHostingAgents(false);
@@ -335,6 +347,7 @@ public class ProviderStates {
     // next state writes its rows, or it places that state's queued agent mid-recording (qits-1667).
     agentService.awaitSchedulerIdle();
     bearers.reset();
+    disconnectStartupDaemon();
     endStartingProcess();
     endLeftoverProcesses();
     tearDownGitWorkspaces();
@@ -354,6 +367,8 @@ public class ProviderStates {
               workspaces.delete("repositoryId = ?1", WAITING_REPOSITORY_ID);
               agentRows.delete("repositoryId = ?1", ATTENTION_REPOSITORY_ID);
               workspaces.delete("repositoryId = ?1", ATTENTION_REPOSITORY_ID);
+              agentRows.delete("repositoryId = ?1", STARTUP_REPOSITORY_ID);
+              workspaces.delete("repositoryId = ?1", STARTUP_REPOSITORY_ID);
               // The desk's waits name no agent, so no agent's delete takes them (qits-1937).
               agentWaits.delete("deskProjectId = ?1", UUID.fromString(PROJECT_ID));
               workspaces.delete("repositoryId = ?1", HISTORY_REPOSITORY_ID);
@@ -819,6 +834,185 @@ public class ProviderStates {
     wait.subjectStateAt = stateAt;
     wait.subjectResolvedAt = createdAt;
     return wait;
+  }
+
+  // --- agents starting up (qits-2007) -------------------------------------------------------------
+
+  /**
+   * The repository the starting-up state's agents stand in: a wrapper of {@link #PROJECT_ID} of its
+   * own, as {@link #ATTENTION_REPOSITORY_ID} is, for the same reason.
+   */
+  static final String STARTUP_REPOSITORY_ID = "00000000-0000-4000-8000-00000000001a";
+
+  static final String AGENT_STARTUP_QUEUED_ID = "00000000-0000-4000-8000-0000000000ab";
+  static final String AGENT_STARTUP_PROVISIONING_ID = "00000000-0000-4000-8000-0000000000ac";
+  static final String AGENT_STARTUP_STARTING_ID = "00000000-0000-4000-8000-0000000000ad";
+  static final String AGENT_STARTUP_IDLE_ID = "00000000-0000-4000-8000-0000000000ae";
+  static final String AGENT_STARTUP_BUSY_ID = "00000000-0000-4000-8000-0000000000af";
+
+  /** The fake control socket {@link #agentsStartingUp} connects its running slot's daemon with. */
+  private volatile StartupDaemon startupDaemon;
+
+  private record StartupDaemon(Long slot, WebSocketConnection connection) {}
+
+  /**
+   * The project's five ACTIVE agents, one per lifecycle phase, newest first: the improvement
+   * ticket's is QUEUED with no slot (a lease of this service waits already, so none is made for it);
+   * the epic's holds a slot still PROVISIONING; the bug ticket's holds a RUNNING slot whose daemon is
+   * connected and has not been started there (STARTING); the feature's and the task's were started
+   * in that slot and their daemon reports them IDLE and BUSY (READY). The daemon's control socket is
+   * a stand-in registered with the real registry, and the two reports are frames through it, so
+   * {@code activity} is what the registry answers for them. It never says Hello, so no tunnel opens
+   * and a scheduler pass's start of the bug ticket's agent answers UNREACHABLE: it stays STARTING.
+   */
+  private Setup agentsStartingUp() {
+    repositories.registerWrapper(STARTUP_REPOSITORY_ID, PROJECT_ID, "contract-qits");
+    Instant now = Instant.now();
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              // A lease of this service waits, so the queued agent is offered no new slot.
+              Workspace waiting = new Workspace();
+              waiting.repositoryId = WAITING_REPOSITORY_ID;
+              waiting.workspaceId = "contract-waiting";
+              waiting.branch = "contract-waiting";
+              waiting.status = WorkspaceStatus.ACTIVE;
+              waiting.runtimeStatus = WorkspaceRuntimeStatus.QUEUED;
+              waiting.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
+              waiting.leaseId = UUID.randomUUID();
+              waiting.queuedAt = now.minusSeconds(600);
+              workspaces.persist(waiting);
+
+              Long provisioning = startupSlot(WorkspaceRuntimeStatus.PROVISIONING, "ws-contract-1");
+              ids.add(provisioning);
+              Long running = startupSlot(WorkspaceRuntimeStatus.RUNNING, "ws-contract-2");
+              ids.add(running);
+
+              AgentWorktree queued =
+                  startupAgent(
+                      AGENT_STARTUP_QUEUED_ID, null, AgentRunState.QUEUED, IMPROVEMENT_TICKET, now, 1);
+              queued.queuedAt = now.minusSeconds(60);
+
+              AgentWorktree placing =
+                  startupAgent(
+                      AGENT_STARTUP_PROVISIONING_ID, provisioning, AgentRunState.RUNNING, EPIC, now, 2);
+              placing.placedAt = now.minusSeconds(110);
+
+              AgentWorktree starting =
+                  startupAgent(
+                      AGENT_STARTUP_STARTING_ID, running, AgentRunState.RUNNING, BUG_TICKET, now, 3);
+              starting.placedAt = now.minusSeconds(170);
+
+              for (String[] started :
+                  List.of(
+                      new String[] {AGENT_STARTUP_IDLE_ID, "4"},
+                      new String[] {AGENT_STARTUP_BUSY_ID, "5"})) {
+                AgentWorktree agent =
+                    startupAgent(
+                        started[0],
+                        running,
+                        AgentRunState.RUNNING,
+                        started[0].equals(AGENT_STARTUP_IDLE_ID) ? FEATURE : TASK,
+                        now,
+                        Integer.parseInt(started[1]));
+                agent.placedAt = now.minusSeconds(60L * Integer.parseInt(started[1]) - 10);
+                agent.startedAt = agent.placedAt.plusSeconds(5);
+                agent.startedWorkspaceId = running;
+              }
+            });
+    Long running = ids.get(1);
+    WebSocketConnection connection = contractDaemonConnection(running);
+    daemons.register(running, connection);
+    startupDaemon = new StartupDaemon(running, connection);
+    report(running, AGENT_STARTUP_IDLE_ID, DaemonProtocol.AgentState.IDLE, "Stop");
+    report(running, AGENT_STARTUP_BUSY_ID, DaemonProtocol.AgentState.BUSY, "UserPromptSubmit");
+    Map<String, String> params = params();
+    params.put("repositoryId", STARTUP_REPOSITORY_ID);
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  /** An ACTIVE slot of {@link #STARTUP_REPOSITORY_ID}, on no lease. */
+  private Long startupSlot(WorkspaceRuntimeStatus runtime, String label) {
+    Workspace row = new Workspace();
+    row.repositoryId = STARTUP_REPOSITORY_ID;
+    row.workspaceId = label;
+    row.status = WorkspaceStatus.ACTIVE;
+    row.runtimeStatus = runtime;
+    row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
+    workspaces.persist(row);
+    workspaces.flush();
+    return row.id;
+  }
+
+  /** An ACTIVE agent of the starting-up state, {@code age} minutes old: older is listed later. */
+  private AgentWorktree startupAgent(
+      String id, Long slot, AgentRunState runState, Item item, Instant now, int age) {
+    agent(id, slot, AgentState.ACTIVE, runState, item, now.minusSeconds(60L * age));
+    AgentWorktree agent = agentRows.findById(UUID.fromString(id));
+    agent.repositoryId = STARTUP_REPOSITORY_ID;
+    return agent;
+  }
+
+  /**
+   * One activity frame from the slot's daemon for {@code agentId}, as a daemon at capability 12
+   * sends it with nothing in flight in the background. {@code awaitingInput} is left unsaid, so the
+   * frame moves no {@code waitingSince} and the agent is never a yield candidate.
+   */
+  private void report(Long slot, String agentId, String state, String hookEvent) {
+    daemons.onMessage(
+        slot,
+        startupDaemon.connection(),
+        new AgentActivity(
+            "contract-command-" + agentId.substring(agentId.length() - 2),
+            null,
+            state,
+            hookEvent,
+            null,
+            null,
+            System.currentTimeMillis(),
+            null,
+            null,
+            null,
+            agentId,
+            false));
+  }
+
+  /**
+   * A control socket that is open and does nothing else: what the registry holds for a daemon that
+   * dialled home. Anything sent over it fails, as a send on a socket nobody reads would.
+   */
+  private static WebSocketConnection contractDaemonConnection(Long slot) {
+    String id = "contract-daemon-" + slot;
+    return (WebSocketConnection)
+        java.lang.reflect.Proxy.newProxyInstance(
+            WebSocketConnection.class.getClassLoader(),
+            new Class<?>[] {WebSocketConnection.class},
+            (proxy, method, args) ->
+                switch (method.getName()) {
+                  case "id", "toString" -> id;
+                  case "isOpen" -> true;
+                  case "isClosed" -> false;
+                  case "hashCode" -> System.identityHashCode(proxy);
+                  case "equals" -> proxy == args[0];
+                  default ->
+                      throw new UnsupportedOperationException(
+                          "the contract daemon's socket does not " + method.getName());
+                });
+  }
+
+  /** Disconnects the daemon {@link #agentsStartingUp} connected, which drops its reports too. */
+  private void disconnectStartupDaemon() {
+    StartupDaemon connected = startupDaemon;
+    startupDaemon = null;
+    if (connected == null) {
+      return;
+    }
+    try {
+      daemons.unregister(connected.slot(), connected.connection());
+    } catch (RuntimeException e) {
+      // The socket and the reports are dropped first; only the tunnels' notice can fail here.
+    }
   }
 
   // --- the landing app's workspace pages (epic qits-1230) -----------------------------------------
