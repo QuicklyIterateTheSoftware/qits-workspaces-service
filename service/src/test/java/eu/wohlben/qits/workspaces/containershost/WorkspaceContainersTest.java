@@ -114,6 +114,9 @@ class WorkspaceContainersTest {
     // The pin is a version, so what is local under that name IS the release — the inspect-then-pull
     // this service used to do itself, enforced one hop out.
     assertEquals(PullPolicy.MISSING, spec.pullPolicy());
+    // A DIRECT container sits beside the swarm, so it asks qits-containers for the private overlay
+    // and the private edge's resolver (qits-1991); qits-containers degrades to today without them.
+    assertEquals(Boolean.TRUE, spec.privateEdge());
     // An ordinary workspace container never gets the host's docker socket — only a workspace whose
     // row says admin does, and this one's does not.
     assertFalse(spec.hostDockerSocket());
@@ -202,7 +205,8 @@ class WorkspaceContainersTest {
             admin.pullPolicy(),
             admin.explicitName(),
             admin.user(),
-            admin.init());
+            admin.init())
+            .withPrivateEdge(Boolean.TRUE.equals(admin.privateEdge()));
     assertEquals(ordinary, adminWithoutTheSocket);
   }
 

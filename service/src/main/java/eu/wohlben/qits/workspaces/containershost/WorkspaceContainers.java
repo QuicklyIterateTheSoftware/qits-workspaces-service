@@ -401,7 +401,16 @@ public class WorkspaceContainers implements ContainerRuntime {
             PullPolicy.MISSING,
             described.name(),
             described.user(),
-            true);
+            true)
+            // ON THE PRIVATE OVERLAY, WITH THE PRIVATE EDGE AS FIRST RESOLVER (qits-1991). This path
+            // is the DIRECT one — a container on the platform host, beside the swarm — and the owner
+            // ruled that such a container reaches the private edge over qits-private directly, with
+            // no tunnel. Only qits-containers can make that true: it joins qits-private and resolves
+            // the edge's VIP there and the host's own upstream resolvers at each run, and it degrades
+            // to exactly today's container when either is missing. The flag is never stored or
+            // hashed there, so turning it on recreates no running workspace; one picks it up at its
+            // next create. A runner lease (RunnerWorkspaceSpecs) never carries it: that is qits-1979.
+            .withPrivateEdge(true);
     // EXPLICIT: a workspace lives until somebody says otherwise, only a delete ends it, and the
     // orchestrator keeps it restarted. It is also what makes a spec change recreatable rather than a
     // SPEC_CONFLICT, which is what Recreate.ifChanged below relies on.
