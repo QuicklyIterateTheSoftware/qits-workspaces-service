@@ -19,6 +19,8 @@
     "An event with several publishers lists the union of their fields: TargetLeaseChanged (qits-system, and the",
     "copies in qits-ci, qits-projects and qits-workspaces' targethost packages), ReleaseRequestStateChanged,",
     "ApprovalRequirementChanged and RepositoryRenamed (qits-ci's and qits-projects' bus packages).",
+    "On 2026-11-11 (qits-1979): qits-network-access's events (PeerRegistered, PeerRevoked) and qits-edge's",
+    "PrivateEdgeAnnounced.",
     "An event named nowhere here is refused (qits-1964): a new event needs its entry before a wait can name it."
   ],
   "events": {
@@ -430,6 +432,34 @@
       "projectIds": ["scalar"],
       "targetId": "scalar",
       "targetName": "scalar"
+    },
+    "PeerRegistered": {
+      "kind": "scalar",
+      "ownerUserId": "scalar",
+      "peerId": "scalar",
+      "peerName": "scalar",
+      "publicKey": "scalar",
+      "targetId": "scalar",
+      "tunnelIp": "scalar"
+    },
+    "PeerRevoked": {
+      "kind": "scalar",
+      "peerId": "scalar",
+      "peerName": "scalar",
+      "publicKey": "scalar",
+      "reason": "scalar",
+      "tunnelIp": "scalar"
+    },
+    "PrivateEdgeAnnounced": {
+      "application": "scalar",
+      "dnsAddress": "scalar",
+      "domain": "scalar",
+      "listenPort": "scalar",
+      "mtu": "scalar",
+      "publicAddress": "scalar",
+      "publicKey": "scalar",
+      "tunnelAddress": "scalar",
+      "tunnelCidr": "scalar"
     },
     "AgentPlaced": {
       "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar"

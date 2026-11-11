@@ -199,4 +199,16 @@ class EventPayloadCatalogTest {
         refused("DeploymentActive", Condition.exact("endpoints[].upstreamport", "80"))
             .contains("did you mean 'endpoints[].upstreamPort'?"));
   }
+
+  /** qits-1979: qits-network-access's PeerRegistered, transcribed by hand like qits-edge's below. */
+  @Test
+  void peerRegisteredIsChecked() {
+    admitted(
+        "PeerRegistered",
+        Condition.exact("kind", "NODE"),
+        Condition.exact("targetId", "t"));
+    assertTrue(
+        refused("PeerRegistered", Condition.exact("peerLabel", "x"))
+            .contains("did you mean 'peerName'?"));
+  }
 }
