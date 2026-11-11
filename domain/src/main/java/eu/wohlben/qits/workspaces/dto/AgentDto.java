@@ -81,15 +81,22 @@ public record AgentDto(
   /**
    * What an ACTIVE agent needs a person for (epic qits-1681).
    *
-   * @param code {@code WAIT_SUBJECT_PASSED}, {@code BLOCKED_NO_DESK}, {@code IDLE_NO_WAIT} or
-   *     {@code WAIT_OVERDUE}
+   * @param code {@code WAIT_SUBJECT_PASSED}, {@code BLOCKED_NO_DESK}, {@code IDLE_NO_WAIT}, {@code
+   *     WAIT_OVERDUE} or {@code TARGET_LOGIN_ABSENT} (qits-2088)
    * @param reason one line this service wrote, e.g. {@code Idle 42 min with no wait and no block}
    * @param since since when it holds
    * @param waitId the wait it is about, for {@code WAIT_SUBJECT_PASSED} and {@code WAIT_OVERDUE};
    *     null otherwise
    */
   public record Attention(
-      @Schema(enumeration = {"WAIT_SUBJECT_PASSED", "BLOCKED_NO_DESK", "IDLE_NO_WAIT", "WAIT_OVERDUE"})
+      @Schema(
+              enumeration = {
+                "WAIT_SUBJECT_PASSED",
+                "BLOCKED_NO_DESK",
+                "IDLE_NO_WAIT",
+                "WAIT_OVERDUE",
+                "TARGET_LOGIN_ABSENT"
+              })
           String code,
       String reason,
       Instant since,

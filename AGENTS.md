@@ -1230,7 +1230,7 @@ item dispatched again (qits-1973), not before; so is a turn the machine delivery
 (qits-1970). The resume takes each YIELDED
 candidate's row with a pessimistic lock and reads it again before writing RUNNING, so a stop
 committed after its read is not undone. It keeps its `workspace_id` when it had one; one stopped while still QUEUED has none (`V35`
-rewrote `ck_agent_worktree_placed` to admit that). Its attention is never `IDLE_NO_WAIT` (rule 3
+rewrote `ck_agent_worktree_placed` to admit that). Its attention is never `IDLE_NO_WAIT` (rule 4
 holds for RUNNING only). The old instance draining during a rolling deploy cannot read a STOPPED row
 (its enum lacks the word); a stop in that minute fails there and is the same click again.
 
@@ -1555,15 +1555,16 @@ bean). What an ACTIVE agent needs a person for, in one code and one line, stored
 
 | # | `code` | holds when | `since` | reason, e.g. |
 |---|---|---|---|---|
-| 1 | `WAIT_SUBJECT_PASSED` | an OPEN wait whose `subject_state` is one of its `target_states` (a final state that is not one of them breaks the wait since qits-1961, "Declared waits") | `subject_state_at` | `Waits on qits-projects-service-rr-368 to end; it is FINALIZED since 10:42` |
-| 2 | `BLOCKED_NO_DESK` | `entity_blocked` with `block_source` `EXPLICIT` or `BOTH`, `blocked_at` at least `blocked-after` ago, and no `desk_asked_at` at or after `blocked_at` | `blocked_at` | `Blocked 50 min by <blockAuthor>, no @desk comment since` |
-| 3 | `IDLE_NO_WAIT` | `run_state` RUNNING, `waiting_since` at least `idle-after` ago, no OPEN wait, no `pending_text`, no explicit block (as the nudge reads it: `EXPLICIT`, `BOTH` or no source; the derived `AGENT_WAITING` block alone does not excuse it), not `BETWEEN_PHASES` | `waiting_since` | `Idle 42 min with no wait and no block` |
-| 4 | `WAIT_OVERDUE` | an OPEN `CI_RUN` wait QUEUED or RUNNING past `subject_expected_by`; or an OPEN `RELEASE_REQUEST` wait in a state that is not final, unchanged for `request-overdue-after` | `subject_expected_by`, or `subject_state_at + request-overdue-after` | `Run 9677c59a RUNNING for 1 h 40 min, expected about 35 min` / `qits-qits-rr-12 PENDING, unchanged for 3 h 10 min` |
+| 1 | `TARGET_LOGIN_ABSENT` | `run_state` RUNNING, and the execution target the agent's workspace runs on (`workspace.target_id`) is reported signed out of the agent's harness (`claude`, or `kimi` for a KIMI agent): qits-system's latest value is `ABSENT` (qits-2088, `control/TargetLogins`). First because it is the cause behind every other rule: the harness acts on no wake, desk answer or nudge until a person signs the target in | when the target was first seen `ABSENT` (the probe's `checkedAt`) | `Target lab lost its claude sign-in at 10:42` |
+| 2 | `WAIT_SUBJECT_PASSED` | an OPEN wait whose `subject_state` is one of its `target_states` (a final state that is not one of them breaks the wait since qits-1961, "Declared waits") | `subject_state_at` | `Waits on qits-projects-service-rr-368 to end; it is FINALIZED since 10:42` |
+| 3 | `BLOCKED_NO_DESK` | `entity_blocked` with `block_source` `EXPLICIT` or `BOTH`, `blocked_at` at least `blocked-after` ago, and no `desk_asked_at` at or after `blocked_at` | `blocked_at` | `Blocked 50 min by <blockAuthor>, no @desk comment since` |
+| 4 | `IDLE_NO_WAIT` | `run_state` RUNNING, `waiting_since` at least `idle-after` ago, no OPEN wait, no `pending_text`, no explicit block (as the nudge reads it: `EXPLICIT`, `BOTH` or no source; the derived `AGENT_WAITING` block alone does not excuse it), not `BETWEEN_PHASES` | `waiting_since` | `Idle 42 min with no wait and no block` |
+| 5 | `WAIT_OVERDUE` | an OPEN `CI_RUN` wait QUEUED or RUNNING past `subject_expected_by`; or an OPEN `RELEASE_REQUEST` wait in a state that is not final, unchanged for `request-overdue-after` | `subject_expected_by`, or `subject_state_at + request-overdue-after` | `Run 9677c59a RUNNING for 1 h 40 min, expected about 35 min` / `qits-qits-rr-12 PENDING, unchanged for 3 h 10 min` |
 
 Times are UTC `HH:mm`, durations `N min` or, from an hour, `N h M min` (whole minutes, rounded
 down). A run is named `run <first 8 of its id>`, anything else by its qualified id, else its ref.
 "Expected about" is `subject_expected_by − subject_state_at` (a RUNNING run's start); a QUEUED one
-says `past its expected finish at HH:mm`. Codes 1 and 4 name the wait. Keys:
+says `past its expected finish at HH:mm`. Codes 2 and 5 name the wait. Keys:
 `qits.workspaces.attention.idle-after` (PT30M), `…blocked-after` (PT30M) and
 `…request-overdue-after` (PT3H), beside the run's three above.
 
@@ -1591,6 +1592,19 @@ says `past its expected finish at HH:mm`. Codes 1 and 4 name the wait. Keys:
   binds to `bus/EntityCommented`, a transcribed record of the three fields read (`entityId`,
   `mentions`, `commentedAt`), registered in `EventWireReflection`; one that does not bind is
   settled with a WARN.
+- **A target's sign-in** (qits-2088; `targethost/TargetLoginEvents`, a live `QitsEventListener` on
+  the transcribed `targethost/TargetLoginChanged`, registered in `EventWireReflection`, and
+  `control/TargetLogins`). qits-system's `TargetLoginChanged` as it happens, and its target listing
+  (`listTargets`, each target's `login`) every `qits.workspaces.target-logins.reconcile-interval`
+  (PT5M; `off` in `%test` and the stories), whose first run is at boot. **In memory, no table**:
+  the listing carries the whole state, so the boot pass is the seed the stream (no replay) cannot
+  give, and a missed event costs at most an interval; what a restart loses is only when an absence
+  began (the seed takes the newest probe's `checkedAt`). Only `ABSENT` is an absence — `PRESENT`
+  and `UNKNOWN` clear it — and a confirming probe keeps its start. An absence that began or ended,
+  or a target no longer listed, evaluates every agent (`reevaluateAll`); the scheduler pass picks up
+  an agent whose workspace moved onto or off such a target. The workspace rows are read only while
+  some target is signed out. The reconcile's `listTargets` is its own row of `SystemContract`
+  (trigger `TargetLoginEvents.reconcile`, `a declared target`, the `login` fields bound).
 
 **The lifecycle events** (qits-1236; the records in `workspaces-events/`, the port
 `control/LifecycleAnnouncer`, the publisher `bus/EventstreamLifecycleAnnouncer`). What the scheduler
@@ -1620,7 +1634,7 @@ payload's top-level fields:
 | `AgentWaitChanged` | the four, `projectId`, `waitId`, `subjectKind`, `subjectRef`, `subjectQualifiedId`, `subjectState`, `subjectStateAt` — an event of the wait's name moved its subject's recorded state (epic qits-1681) | |
 | `AgentWaitClosed` | the four, `projectId`, `waitId`, `state`, `matchedEventId` (a match only), `label` and `reason` (BROKEN only, qits-1961) — an agent's wait matched, broke, timed out, was cancelled, or went with its agent (epic qits-1681) | `state`: `MATCHED`, `TIMED_OUT`, `BROKEN`, `CANCELLED` |
 | `AgentActivityChanged` | the four, `projectId`, `activity`, `waitingSince` (absent once it works), `at` — the waiting flip `onActivity` relays to qits-projects, and no other frame (epic qits-1681) | `activity`: `IDLE`, `BUSY`, `WAITING`, `ENDED` |
-| `AgentAttentionChanged` | the four, `projectId`, `code` (absent once cleared), `reason` (this service's one line), `since`, `waitId` (codes 1 and 4) — what an ACTIVE agent needs a person for changed code or wait ("Attention"; epic qits-1681) | `code`: `WAIT_SUBJECT_PASSED`, `BLOCKED_NO_DESK`, `IDLE_NO_WAIT`, `WAIT_OVERDUE` |
+| `AgentAttentionChanged` | the four, `projectId`, `code` (absent once cleared), `reason` (this service's one line), `since`, `waitId` (codes 2 and 5) — what an ACTIVE agent needs a person for changed code or wait ("Attention"; epic qits-1681) | `code`: `WAIT_SUBJECT_PASSED`, `BLOCKED_NO_DESK`, `IDLE_NO_WAIT`, `WAIT_OVERDUE` |
 
 The rules they keep:
 

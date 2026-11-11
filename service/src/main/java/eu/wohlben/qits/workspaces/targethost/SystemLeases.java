@@ -42,7 +42,8 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
       SystemLeases.LeaseSpec.class,
       SystemLeases.Limits.class,
       SystemLeases.LeaseView.class,
-      SystemLeases.TargetView.class
+      SystemLeases.TargetView.class,
+      SystemLeases.TargetLogin.class
     })
 public interface SystemLeases {
 
@@ -128,8 +129,16 @@ public interface SystemLeases {
 
   /**
    * qits-system's {@code Target}, narrowed to what a legacy pin matches on: its id, its name, and
-   * the docker engine's host name and id its runner reported (each null until it did).
+   * the docker engine's host name and id its runner reported (each null until it did); and its
+   * sign-in ({@code login}), which {@code TargetLoginEvents}' reconcile reads (qits-2088).
    */
   @JsonIgnoreProperties(ignoreUnknown = true)
-  record TargetView(UUID id, String name, String hostname, String engineId) {}
+  record TargetView(UUID id, String name, String hostname, String engineId, TargetLogin login) {}
+
+  /**
+   * qits-system's {@code TargetLogin}: each harness's sign-in ({@code PRESENT}, {@code ABSENT},
+   * {@code UNKNOWN}) and when the runner last probed it.
+   */
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  record TargetLogin(String claude, String kimi, Instant checkedAt) {}
 }

@@ -362,11 +362,17 @@ class LifecycleEventsContractTest {
         CanonicalJson.payload(
             new AgentAttentionChanged(AGENT, WORK, "385", REPO, PROJECT, null, null, null, null, AT)));
     assertEquals(
-        List.of("WAIT_SUBJECT_PASSED", "BLOCKED_NO_DESK", "IDLE_NO_WAIT", "WAIT_OVERDUE"),
+        List.of(
+            "WAIT_SUBJECT_PASSED",
+            "BLOCKED_NO_DESK",
+            "IDLE_NO_WAIT",
+            "WAIT_OVERDUE",
+            "TARGET_LOGIN_ABSENT"),
         List.of(
             AgentAttentionChanged.WAIT_SUBJECT_PASSED,
             AgentAttentionChanged.BLOCKED_NO_DESK,
             AgentAttentionChanged.IDLE_NO_WAIT,
-            AgentAttentionChanged.WAIT_OVERDUE));
+            AgentAttentionChanged.WAIT_OVERDUE,
+            AgentAttentionChanged.TARGET_LOGIN_ABSENT));
   }
 }

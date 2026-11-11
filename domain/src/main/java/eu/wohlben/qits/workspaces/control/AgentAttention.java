@@ -24,6 +24,11 @@ import java.util.UUID;
  * <p>Only an ACTIVE agent needs attention. The first rule that holds wins:
  *
  * <ol>
+ *   <li>{@link Code#TARGET_LOGIN_ABSENT} (qits-2088) — RUNNING on an execution target that
+ *       qits-system reports signed out of the agent's harness ({@link TargetLogins}). Since it was
+ *       first seen ABSENT. First because it is the cause behind every other: an agent whose harness
+ *       cannot reach its model acts on no wake, no desk answer and no nudge until a person signs
+ *       the target in again.
  *   <li>{@link Code#WAIT_SUBJECT_PASSED} — an OPEN wait whose subject's recorded state is one the
  *       wait names (it should have matched). Since the state was seen to begin. A subject final for
  *       its kind and not one the wait names (it never will) is no longer reported here: since
@@ -43,7 +48,7 @@ import java.util.UUID;
  * </ol>
  *
  * Times in a reason are UTC {@code HH:mm}; durations {@code N min}, or {@code N h M min} from an
- * hour on. Codes 1 and 4 name the wait.
+ * hour on. {@link Code#WAIT_SUBJECT_PASSED} and {@link Code#WAIT_OVERDUE} name the wait.
  */
 public final class AgentAttention {
 
@@ -52,7 +57,8 @@ public final class AgentAttention {
     WAIT_SUBJECT_PASSED,
     BLOCKED_NO_DESK,
     IDLE_NO_WAIT,
-    WAIT_OVERDUE
+    WAIT_OVERDUE,
+    TARGET_LOGIN_ABSENT
   }
 
   /**
@@ -83,6 +89,21 @@ public final class AgentAttention {
   /** What {@code agent} needs a person for at {@code now}; empty when nothing (or not ACTIVE). */
   public static Optional<Attention> evaluate(
       AgentWorktree agent, List<AgentWait> openWaits, Instant now, Config config) {
+    return evaluate(agent, openWaits, null, now, config);
+  }
+
+  /**
+   * {@link #evaluate(AgentWorktree, List, Instant, Config)}, knowing whether the agent's harness is
+   * signed out on the target its workspace runs on.
+   *
+   * @param loginAbsence that absence, or null when it is signed in (or not on a target)
+   */
+  public static Optional<Attention> evaluate(
+      AgentWorktree agent,
+      List<AgentWait> openWaits,
+      TargetLogins.Absence loginAbsence,
+      Instant now,
+      Config config) {
     if (agent == null || agent.state != AgentState.ACTIVE) {
       return Optional.empty();
     }
@@ -95,13 +116,31 @@ public final class AgentAttention {
                         (AgentWait w) -> w.createdAt,
                         Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
-    return subjectPassed(open)
+    return targetLoginAbsent(agent, loginAbsence)
+        .or(() -> subjectPassed(open))
         .or(() -> blockedNoDesk(agent, now, config))
         .or(() -> idleNoWait(agent, open, now, config))
         .or(() -> overdue(open, now, config));
   }
 
-  // --- the four rules -----------------------------------------------------------------------------
+  // --- the five rules -----------------------------------------------------------------------------
+
+  private static Optional<Attention> targetLoginAbsent(
+      AgentWorktree agent, TargetLogins.Absence absence) {
+    // RUNNING only, as IDLE_NO_WAIT reads it: a QUEUED agent has not started, and a YIELDED or
+    // STOPPED one is not using the target's sign-in.
+    if (absence == null || agent.runState != AgentRunState.RUNNING) {
+      return Optional.empty();
+    }
+    String reason =
+        "Target "
+            + absence.targetName()
+            + " lost its "
+            + absence.harness()
+            + " sign-in"
+            + (absence.since() == null ? "" : " at " + HH_MM.format(absence.since()));
+    return Optional.of(new Attention(Code.TARGET_LOGIN_ABSENT, reason, absence.since(), null));
+  }
 
   private static Optional<Attention> subjectPassed(List<AgentWait> open) {
     for (AgentWait wait : open) {

@@ -39,7 +39,9 @@ import java.util.UUID;
  *       resolution, an EXITED or FAILED lease);
  *   <li>{@code purgeWorkVolume} — {@code deleteWorkspaceContainer} (and recreate, and a resolved
  *       row's ENDED lease);
- *   <li>{@code listLeases} — {@code TargetLeaseEvents}' reconcile.
+ *   <li>{@code listLeases} — {@code TargetLeaseEvents}' reconcile;
+ *   <li>{@code listTargets} again — {@code TargetLoginEvents}' reconcile, for each target's sign-in
+ *       (qits-2088).
  * </ul>
  *
  * <p>Every row is live since {@code qits-system-golden-masters} 2026.1023.213531, the first to
@@ -58,6 +60,7 @@ public final class SystemContract {
   static final Trigger STOP = Trigger.operation("stopWorkspaceContainer");
   static final Trigger DELETE = Trigger.operation("deleteWorkspaceContainer");
   static final Trigger RECONCILE = Trigger.schedule("TargetLeaseEvents.reconcile");
+  static final Trigger LOGIN_RECONCILE = Trigger.schedule("TargetLoginEvents.reconcile");
 
   /** The lease answer's fields this service reads ({@code SystemLeases.LeaseView}). */
   static final List<String> LEASE =
@@ -189,6 +192,25 @@ public final class SystemContract {
                             placementAgainst(url, params).targets();
                         assertFalse(targets.isEmpty());
                         assertNotNull(targets.get(0).name());
+                      }),
+              ContractRow.of(
+                      LOGIN_RECONCILE,
+                      A_DECLARED_TARGET,
+                      "listTargets",
+                      Request.NONE,
+                      List.of(
+                          "$[*].id",
+                          "$[*].name",
+                          "$[*].login.claude",
+                          "$[*].login.kimi",
+                          "$[*].login.checkedAt"),
+                      (url, params) -> {
+                        List<TargetPlacement.Target> targets =
+                            placementAgainst(url, params).targets();
+                        assertFalse(targets.isEmpty());
+                        assertNotNull(targets.get(0).id());
+                        assertNotNull(targets.get(0).claudeLogin());
+                        assertNotNull(targets.get(0).loginCheckedAt());
                       })));
 
   private SystemContract() {}

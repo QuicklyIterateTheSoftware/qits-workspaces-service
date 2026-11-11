@@ -87,11 +87,12 @@ class EventWireReflectionTest {
             AgentActivityChanged.class,
             AgentAttentionChanged.class,
             eu.wohlben.qits.workspaces.targethost.TargetLeaseChanged.class,
+            eu.wohlben.qits.workspaces.targethost.TargetLoginChanged.class,
             EntityCommented.class,
             EventEnvelope.class,
             EventFrame.class),
         Set.of(registration.targets()),
-        "the fourteen lifecycle events and DeskWaitClosed out, qits-system's lease event in, the PUT body, the frame — a new wire type is added"
+        "the fourteen lifecycle events and DeskWaitClosed out, qits-system's lease and sign-in events in, the PUT body, the frame — a new wire type is added"
             + " here");
   }
 

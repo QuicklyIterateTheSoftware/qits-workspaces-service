@@ -115,9 +115,24 @@ public interface TargetPlacement {
 
   /**
    * One target, as the listing shows it. {@code engineId} and {@code hostname} are null when the
-   * listing does not carry them.
+   * listing does not carry them. {@code claudeLogin} and {@code kimiLogin} are the target's
+   * sign-in per harness ({@code PRESENT}, {@code ABSENT}, {@code UNKNOWN}) and {@code
+   * loginCheckedAt} the probe's instant (qits-2088), each null when the listing does not carry it.
    */
-  record Target(UUID id, String name, String engineId, String hostname) {}
+  record Target(
+      UUID id,
+      String name,
+      String engineId,
+      String hostname,
+      String claudeLogin,
+      String kimiLogin,
+      Instant loginCheckedAt) {
+
+    /** A target whose sign-in the listing does not say. */
+    public Target(UUID id, String name, String engineId, String hostname) {
+      this(id, name, engineId, hostname, null, null, null);
+    }
+  }
 
   /**
    * qits-system refused or did not answer a lease call.

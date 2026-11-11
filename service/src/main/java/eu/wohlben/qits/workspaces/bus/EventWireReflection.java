@@ -24,6 +24,7 @@ import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
 import eu.wohlben.qits.workspaces.events.WorkspaceRemoved;
 import eu.wohlben.qits.workspaces.events.WorkspaceStarted;
 import eu.wohlben.qits.workspaces.targethost.TargetLeaseChanged;
+import eu.wohlben.qits.workspaces.targethost.TargetLoginChanged;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 /**
@@ -41,7 +42,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
  *
  * <p><b>Why these types.</b> The fourteen lifecycle records and {@link DeskWaitClosed} (qits-1618)
  * are what {@link EventstreamLifecycleAnnouncer} publishes. {@link TargetLeaseChanged} is qits-system's, which {@code
- * targethost/TargetLeaseEvents} receives bound to that record (epic qits-1481), and {@link
+ * targethost/TargetLeaseEvents} receives bound to that record (epic qits-1481), as is {@link
+ * TargetLoginChanged}, which {@code targethost/TargetLoginEvents} receives (qits-2088), and {@link
  * EntityCommented} is qits-projects', which {@link DeskMentionListener} binds the same way (epic
  * qits-1681). {@link EventEnvelope} is the PUT body. {@link EventFrame} is what arrives on {@code
  * /events/stream} for {@link AgentWaitListener}, which reads the frame's fields and hands the
@@ -76,6 +78,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
       AgentActivityChanged.class,
       AgentAttentionChanged.class,
       TargetLeaseChanged.class,
+      TargetLoginChanged.class,
       EntityCommented.class,
       EventEnvelope.class,
       EventFrame.class

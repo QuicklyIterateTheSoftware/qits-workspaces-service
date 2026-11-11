@@ -7,7 +7,8 @@ import java.util.UUID;
 /**
  * What an ACTIVE agent needs a person for changed (epic qits-1681, "Attention"): {@link
  * AgentWaitOpened}'s five ids, the {@code code} ({@code WAIT_SUBJECT_PASSED}, {@code
- * BLOCKED_NO_DESK}, {@code IDLE_NO_WAIT} or {@code WAIT_OVERDUE}; absent once it needs nothing),
+ * BLOCKED_NO_DESK}, {@code IDLE_NO_WAIT}, {@code WAIT_OVERDUE} or {@code TARGET_LOGIN_ABSENT}
+ * (qits-2088); absent once it needs nothing),
  * the one-line {@code reason} this service wrote, {@code since} (ISO-8601) and the {@code waitId} it
  * is about (codes {@code WAIT_SUBJECT_PASSED} and {@code WAIT_OVERDUE} only). Said when the code or
  * the wait changes, never when only the reason's minutes moved; an agent that stops being ACTIVE
@@ -31,6 +32,7 @@ public record AgentAttentionChanged(
   public static final String BLOCKED_NO_DESK = "BLOCKED_NO_DESK";
   public static final String IDLE_NO_WAIT = "IDLE_NO_WAIT";
   public static final String WAIT_OVERDUE = "WAIT_OVERDUE";
+  public static final String TARGET_LOGIN_ABSENT = "TARGET_LOGIN_ABSENT";
 
   public AgentAttentionChanged {
     if (eventId == null) {

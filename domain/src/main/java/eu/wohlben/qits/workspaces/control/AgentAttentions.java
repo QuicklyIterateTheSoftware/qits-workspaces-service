@@ -3,9 +3,11 @@ package eu.wohlben.qits.workspaces.control;
 import eu.wohlben.qits.workspaces.entity.AgentState;
 import eu.wohlben.qits.workspaces.entity.AgentWait;
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
+import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.events.AgentAttentionChanged;
 import eu.wohlben.qits.workspaces.persistence.AgentWaitRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
+import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -16,6 +18,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -39,8 +42,10 @@ import org.jboss.logging.Logger;
  * <p><b>When it is asked</b>: after a wait of the agent opens, changes, closes or is cancelled
  * ({@link AgentWaits}); after an activity flip ({@code AgentService.onActivity}); after an entity
  * mark ({@code markBlocked}, {@code markEntity}); after an {@code @desk} comment ({@link
- * #onDeskMention}); and for every candidate on each scheduler pass ({@link #reevaluateAll}), which
- * is what announces the codes that only time brings. Nothing here throws into a caller.
+ * #onDeskMention}); after a target's sign-in began or stopped being ABSENT ({@code
+ * targethost/TargetLoginEvents}, through {@link #reevaluateAll}; qits-2088); and for every
+ * candidate on each scheduler pass ({@link #reevaluateAll}), which is what announces the codes that
+ * only time brings. Nothing here throws into a caller.
  */
 @ApplicationScoped
 public class AgentAttentions {
@@ -55,6 +60,10 @@ public class AgentAttentions {
   @Inject AgentWaitRepository waits;
 
   @Inject AgentWaits agentWaits;
+
+  @Inject WorkspaceRepository workspaces;
+
+  @Inject TargetLogins logins;
 
   @Inject Instance<LifecycleAnnouncer> lifecycle;
 
@@ -116,10 +125,16 @@ public class AgentAttentions {
                     Map<UUID, List<AgentWait>> open =
                         waits.findOpenByAgents(rows.stream().map(a -> a.id).toList()).stream()
                             .collect(Collectors.groupingBy(w -> w.agentId));
+                    Map<Long, UUID> targets = targetsOf(rows);
                     List<UUID> out = new ArrayList<>();
                     for (AgentWorktree row : rows) {
                       Optional<AgentAttention.Attention> attention =
-                          AgentAttention.evaluate(row, open.getOrDefault(row.id, List.of()), now, config());
+                          AgentAttention.evaluate(
+                              row,
+                              open.getOrDefault(row.id, List.of()),
+                              loginAbsence(row, targets),
+                              now,
+                              config());
                       if (!stored(row, attention)) {
                         out.add(row.id);
                       }
@@ -263,7 +278,35 @@ public class AgentAttentions {
   private Optional<AgentAttention.Attention> evaluate(AgentWorktree row, Instant now) {
     List<AgentWait> open =
         row.state == AgentState.ACTIVE ? waits.findOpenByAgents(List.of(row.id)) : List.of();
-    return AgentAttention.evaluate(row, open, now, config());
+    Map<Long, UUID> targets = row.state == AgentState.ACTIVE ? targetsOf(List.of(row)) : Map.of();
+    return AgentAttention.evaluate(row, open, loginAbsence(row, targets), now, config());
+  }
+
+  /**
+   * The target each row's workspace runs on (qits-2088), by workspace row id — read only while some
+   * target is signed out, so an estate with none asks the database nothing more.
+   */
+  private Map<Long, UUID> targetsOf(List<AgentWorktree> rows) {
+    if (!logins.anyAbsent()) {
+      return Map.of();
+    }
+    List<Long> ids = rows.stream().map(a -> a.workspaceId).filter(Objects::nonNull).distinct().toList();
+    if (ids.isEmpty()) {
+      return Map.of();
+    }
+    Map<Long, UUID> out = new HashMap<>();
+    for (Workspace ws : workspaces.list("id in ?1", ids)) {
+      if (ws.targetId != null) {
+        out.put(ws.id, ws.targetId);
+      }
+    }
+    return out;
+  }
+
+  /** The agent's harness signed out on the target its workspace runs on, or null. */
+  private TargetLogins.Absence loginAbsence(AgentWorktree row, Map<Long, UUID> targets) {
+    UUID targetId = row.workspaceId == null ? null : targets.get(row.workspaceId);
+    return targetId == null ? null : logins.absence(targetId, row.harness).orElse(null);
   }
 
   /** Whether the row stores exactly {@code attention} (an empty one: nothing). */
