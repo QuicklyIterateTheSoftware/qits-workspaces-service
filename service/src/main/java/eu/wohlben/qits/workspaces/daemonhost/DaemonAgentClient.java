@@ -3,6 +3,7 @@ package eu.wohlben.qits.workspaces.daemonhost;
 import eu.wohlben.qits.workspaces.control.AgentDaemon;
 import eu.wohlben.qits.workspaces.control.ContainerProxyPath;
 import eu.wohlben.qits.workspaces.control.EntityFacts;
+import eu.wohlben.qits.workspaces.transcripthost.ShippedClaudeTranscripts;
 import io.vertx.core.Future;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpMethod;
@@ -38,6 +39,12 @@ import org.jboss.logging.Logger;
  *
  * <p>Bodies are hand-built {@code JsonObject}s, matching the daemon's own JSON: a handful of keys,
  * no databind registration for the native image.
+ *
+ * <p><b>A start restores the session this service holds</b> (qits-2088). A start of a Claude
+ * session whose transcript is in the transcript store says {@code restorable}; a daemon whose
+ * credential volume lost the files answers 409 {@code session-missing}, and the start sends them
+ * back ({@link SessionRestore}) and starts again without it — resuming the session, or a new one
+ * when the restore failed. A daemon that predates the field ignores it and starts fresh, as before.
  */
 @ApplicationScoped
 public class DaemonAgentClient implements AgentDaemon {
@@ -65,6 +72,9 @@ public class DaemonAgentClient implements AgentDaemon {
 
   @Inject WorkspaceTunnels tunnels;
 
+  /** The sessions the daemons shipped, which a restorable start puts back (qits-2088). */
+  @Inject ShippedClaudeTranscripts transcripts;
+
   @ConfigProperty(name = "qits.workspace.daemon-api-token", defaultValue = "qits-workspace-daemon")
   String daemonApiToken;
 
@@ -83,7 +93,31 @@ public class DaemonAgentClient implements AgentDaemon {
     if (route == null) {
       return Started.of(Outcome.UNREACHABLE, "the daemon is not connected");
     }
-    Answer answer = send(route, HttpMethod.POST, BASE, startBody(start));
+    boolean restorable =
+        "CLAUDE".equals(start.harness())
+            && SessionRestore.holds(transcripts.store(), start.agentId(), start.sessionId());
+    Answer answer = send(route, HttpMethod.POST, BASE, startBody(start, restorable));
+    if (restorable && sessionMissing(answer)) {
+      SessionRestore.Outcome restored =
+          SessionRestore.restore(
+              transcripts.store(),
+              start.agentId(),
+              start.sessionId(),
+              chunk -> uploadChunk(route, start.agentId(), chunk),
+              SessionRestore.CHUNK_BYTES);
+      if (restored.result() == SessionRestore.Result.RESTORED) {
+        LOG.infof(
+            "workspace %s's daemon had lost agent %s's session %s; restored it from the transcript"
+                + " store (%s)",
+            workspaceRowId, start.agentId(), start.sessionId(), restored.detail());
+      } else {
+        LOG.warnf(
+            "workspace %s's daemon has lost agent %s's session %s and it could not be restored"
+                + " (%s); the agent starts a new session",
+            workspaceRowId, start.agentId(), start.sessionId(), restored.detail());
+      }
+      answer = send(route, HttpMethod.POST, BASE, startBody(start, false));
+    }
     if (answer == null) {
       return Started.of(Outcome.UNREACHABLE, "the daemon did not answer");
     }
@@ -108,6 +142,14 @@ public class DaemonAgentClient implements AgentDaemon {
    * ignores an object it does not read. Package-private for its test.
    */
   static JsonObject startBody(Start start) {
+    return startBody(start, false);
+  }
+
+  /**
+   * {@link #startBody(Start)}, with {@code restorable: true} when this service holds the session
+   * (qits-2088). Absent otherwise, so every other start is byte-identical to one before it.
+   */
+  static JsonObject startBody(Start start, boolean restorable) {
     JsonObject env = new JsonObject();
     if (start.env() != null) {
       for (Map.Entry<String, String> entry : start.env().entrySet()) {
@@ -128,6 +170,9 @@ public class DaemonAgentClient implements AgentDaemon {
             .put("mode", MODE);
     if (start.sessionId() != null) {
       body.put("sessionId", start.sessionId());
+      if (restorable) {
+        body.put("restorable", true);
+      }
     }
     if (start.instruction() != null) {
       body.put("instruction", start.instruction());
@@ -150,6 +195,40 @@ public class DaemonAgentClient implements AgentDaemon {
               .put("repositoryPath", agentConfig.repositoryPath()));
     }
     return body;
+  }
+
+  /** The daemon's code for a restorable start whose session files it does not have (qits-2088). */
+  static final String SESSION_MISSING = "session-missing";
+
+  /** Whether {@code answer} is a restorable start's 409 {@code session-missing}. */
+  static boolean sessionMissing(Answer answer) {
+    if (answer == null || answer.status() != 409) {
+      return false;
+    }
+    JsonObject json = json(answer.body());
+    return json != null && SESSION_MISSING.equals(json.getString("error"));
+  }
+
+  /** One start, as sent, with no restore after it: its answer, or null. For its contract row. */
+  Answer startAnswer(Long workspaceRowId, Start start, boolean restorable) {
+    Route route = route(workspaceRowId);
+    return route == null ? null : send(route, HttpMethod.POST, BASE, startBody(start, restorable));
+  }
+
+  /** One {@code session-files} chunk: the daemon's status, or -1. For its contract row. */
+  int uploadChunk(Long workspaceRowId, String agentId, JsonObject chunk) {
+    Route route = route(workspaceRowId);
+    return route == null ? -1 : uploadChunk(route, agentId, chunk);
+  }
+
+  private int uploadChunk(Route route, String agentId, JsonObject chunk) {
+    Answer answer = send(route, HttpMethod.POST, path(agentId, "session-files"), chunk);
+    if (answer != null && (answer.status() < 200 || answer.status() >= 300)) {
+      LOG.debugf(
+          "workspace %s's daemon refused a session-files chunk for agent %s with %s: %s",
+          route.workspaceRowId(), agentId, Integer.valueOf(answer.status()), answer.body());
+    }
+    return answer == null ? -1 : answer.status();
   }
 
   /**
@@ -380,7 +459,7 @@ public class DaemonAgentClient implements AgentDaemon {
 
   private record Route(Long workspaceRowId, HttpClient client, String host, int port) {}
 
-  private record Answer(int status, String body) {}
+  record Answer(int status, String body) {}
 
   private Route route(Long workspaceRowId) {
     if (workspaceRowId == null) {
