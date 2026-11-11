@@ -114,6 +114,11 @@ public class ProviderStates {
   // healthy one, their waits on every kind of subject.
   public static final String A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION =
       "a project with agents needing attention";
+  // An overdue wait an in-app exit reaches (qits-2040): a release request, not a run, and a
+  // COMMENTS wait resolved to its ticket's qualified id. A state of its own, because the
+  // attention state's list length is pinned by a deployed consumer pact.
+  public static final String AN_AGENT_OVERDUE_ON_A_RELEASE_REQUEST =
+      "a project with an agent overdue on a release request";
   // Where a project's agents are in coming up (qits-2007): one agent per lifecycle phase, and READY
   // both idle and busy.
   public static final String A_PROJECT_WITH_AGENTS_STARTING_UP =
@@ -176,6 +181,7 @@ public class ProviderStates {
   static final String EPIC_ID = PROJECTS_SEED.get("epicId");
   static final String FEATURE_ID = PROJECTS_SEED.get("featureId");
   static final String IMPROVEMENT_TICKET_ID = PROJECTS_SEED.get("improvementTicketId");
+  static final String MAINTENANCE_TICKET_ID = PROJECTS_SEED.get("maintenanceTicketId");
   static final String TASK_ID = PROJECTS_SEED.get("taskId");
 
   static final String BUG_TICKET_QUALIFIED_ID = projectsQualifiedId("a bug ticket in detail");
@@ -184,6 +190,8 @@ public class ProviderStates {
   static final String EPIC_QUALIFIED_ID = projectsQualifiedId("an epic in detail");
   static final String FEATURE_QUALIFIED_ID = projectsQualifiedId("a feature in detail");
   static final String TASK_QUALIFIED_ID = projectsQualifiedId("a task in detail");
+  static final String MAINTENANCE_TICKET_QUALIFIED_ID =
+      projectsQualifiedId("a maintenance ticket in detail");
 
   static final String WRAPPER_REPOSITORY_ID = "00000000-0000-4000-8000-000000000013";
   static final String DISPATCH_REPOSITORY_ID = "00000000-0000-4000-8000-000000000014";
@@ -273,6 +281,7 @@ public class ProviderStates {
         AN_AGENT_WAITING_ON_A_RELEASE_REQUEST,
         AN_AGENT_WAITING_ON_A_CI_RUN,
         A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION,
+        AN_AGENT_OVERDUE_ON_A_RELEASE_REQUEST,
         A_PROJECT_WITH_AGENTS_STARTING_UP,
         REPOSITORIES_WITH_MERGED_BRANCHES,
         A_CONFIGURED_WORKSPACE_IMAGE,
@@ -315,6 +324,7 @@ public class ProviderStates {
       case AN_AGENT_WAITING_ON_A_RELEASE_REQUEST -> agentDeclaringAWait("releaseRequestId", RELEASE_REQUEST_ID);
       case AN_AGENT_WAITING_ON_A_CI_RUN -> agentDeclaringAWait("runId", CI_RUN_ID);
       case A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION -> agentsNeedingAttention();
+      case AN_AGENT_OVERDUE_ON_A_RELEASE_REQUEST -> agentOverdueOnARequest();
       case A_PROJECT_WITH_AGENTS_STARTING_UP -> agentsStartingUp();
       case REPOSITORIES_WITH_MERGED_BRANCHES -> mergedBranches();
       case A_CONFIGURED_WORKSPACE_IMAGE -> new Setup(new TreeMap<>(), List.of());
@@ -796,6 +806,75 @@ public class ProviderStates {
       attentions.reevaluate(UUID.fromString(agent));
     }
     Map<String, String> params = params();
+    return new Setup(params, List.copyOf(ids));
+  }
+
+  static final String AGENT_REQUEST_OVERDUE_ID = "00000000-0000-4000-8000-0000000000b7";
+  static final String REQUEST_OVERDUE_WAIT_ID = "00000000-0000-4000-8000-0000000000b8";
+  static final String MAINTENANCE_COMMENTS_WAIT_ID = "00000000-0000-4000-8000-0000000000b9";
+  /** The release request that agent waits on, unchanged past its overdue bound. */
+  static final String OVERDUE_RELEASE_REQUEST_ID = "00000000-0000-4000-8000-0000000000ba";
+
+  static final Item MAINTENANCE_TICKET =
+      new Item(
+          MAINTENANCE_TICKET_ID,
+          MAINTENANCE_TICKET_QUALIFIED_ID,
+          false,
+          "Release request for billing-service is stuck");
+
+  /**
+   * One ACTIVE agent of {@link #PROJECT_ID}, RUNNING in a slot of {@link #ATTENTION_REPOSITORY_ID}
+   * (whose cleanup already covers it), on the maintenance ticket: it waits on a release request
+   * RELEASED and unchanged for 3 h 5 min ({@code WAIT_OVERDUE}, an in-app exit, where the attention
+   * state's overdue wait is on a run), and on its own ticket's comments, resolved to the ticket's id
+   * and qualified id as {@code HttpWaitSubjectResolver} resolves a COMMENTS wait (qits-2040).
+   */
+  private Setup agentOverdueOnARequest() {
+    repositories.registerWrapper(ATTENTION_REPOSITORY_ID, PROJECT_ID, "contract-qits");
+    Instant now = Instant.now();
+    List<Long> ids = new ArrayList<>();
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              Workspace row = new Workspace();
+              row.repositoryId = ATTENTION_REPOSITORY_ID;
+              row.workspaceId = SLOT_LABEL;
+              row.status = WorkspaceStatus.ACTIVE;
+              row.runtimeStatus = WorkspaceRuntimeStatus.QUEUED;
+              row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
+              workspaces.persist(row);
+              workspaces.flush();
+              Long slot = row.id;
+              ids.add(slot);
+
+              AgentWorktree stuck =
+                  attentionAgent(AGENT_REQUEST_OVERDUE_ID, slot, MAINTENANCE_TICKET, now, 1);
+              AgentWait request =
+                  subjectWait(
+                      REQUEST_OVERDUE_WAIT_ID, stuck, "release request contract-qits-rr-369 to end",
+                      "ReleaseRequestStateChanged", "releaseRequestId", OVERDUE_RELEASE_REQUEST_ID,
+                      "RELEASE_REQUEST",
+                      "[\"FINALIZED\",\"REJECTED\",\"FAILED\",\"WITHDRAWN\",\"OBSOLETE\"]",
+                      "RELEASED", now.minusSeconds(3 * 3600 + 5 * 60 + 5),
+                      now.minusSeconds(4 * 3600));
+              request.subjectId = OVERDUE_RELEASE_REQUEST_ID;
+              request.subjectQualifiedId = "contract-qits-rr-369";
+              agentWaits.persist(request);
+              AgentWait comments =
+                  subjectWait(
+                      MAINTENANCE_COMMENTS_WAIT_ID, stuck,
+                      "a comment on " + MAINTENANCE_TICKET_QUALIFIED_ID, "EntityCommented",
+                      "entityId", MAINTENANCE_TICKET_ID, "COMMENTS", "[]", null, null,
+                      now.minusSeconds(3 * 3600));
+              comments.subjectId = MAINTENANCE_TICKET_ID;
+              comments.subjectQualifiedId = MAINTENANCE_TICKET_QUALIFIED_ID;
+              agentWaits.persist(comments);
+            });
+    attentions.reevaluate(UUID.fromString(AGENT_REQUEST_OVERDUE_ID));
+    Map<String, String> params = new TreeMap<>();
+    params.put("maintenanceTicketId", MAINTENANCE_TICKET_ID);
+    params.put("maintenanceTicketQualifiedId", MAINTENANCE_TICKET_QUALIFIED_ID);
+    params.put("projectId", PROJECT_ID);
     return new Setup(params, List.copyOf(ids));
   }
 

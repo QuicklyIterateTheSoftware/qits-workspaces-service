@@ -1,0 +1,115 @@
+{
+  "agents": [
+    {
+      "agentId": "00000000-0000-4000-8000-0000000000b7",
+      "workspaceRowId": 1,
+      "repositoryId": "00000000-0000-4000-8000-000000000018",
+      "workId": "00000000-0000-4000-8000-00000000000b",
+      "entityId": "contract-00000001-11",
+      "ticketId": "00000000-0000-4000-8000-00000000000b",
+      "epicId": null,
+      "wrapperBranch": "ticket/contract-00000001-11",
+      "branches": [],
+      "state": "ACTIVE",
+      "runState": "RUNNING",
+      "admin": false,
+      "harness": "CLAUDE",
+      "sessionId": null,
+      "entityTitle": "Release request for billing-service is stuck",
+      "entityStatus": "IMPLEMENTING",
+      "entityBlocked": false,
+      "activity": null,
+      "waitingSince": null,
+      "waitingOn": "release request contract-qits-rr-369 to end; a comment on contract-00000001-11",
+      "waitingOnSince": "2026-01-01T00:00:00Z",
+      "lastActivityAt": "2026-01-01T00:00:00Z",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "obsoleteAt": null,
+      "removedAt": null,
+      "startRefusal": null,
+      "startRefusedAt": null,
+      "waits": [
+        {
+          "id": "00000000-0000-4000-8000-0000000000b8",
+          "agentId": "00000000-0000-4000-8000-0000000000b7",
+          "label": "release request contract-qits-rr-369 to end",
+          "selection": {
+            "event": "ReleaseRequestStateChanged",
+            "when": [
+              [
+                {
+                  "path": "releaseRequestId",
+                  "op": "exact",
+                  "value": "00000000-0000-4000-8000-0000000000ba"
+                }
+              ]
+            ]
+          },
+          "state": "OPEN",
+          "createdAt": "2026-01-01T00:00:00Z",
+          "expiresAt": null,
+          "matchedEventId": null,
+          "closedAt": null,
+          "subjectKind": "RELEASE_REQUEST",
+          "subjectRef": "00000000-0000-4000-8000-0000000000ba",
+          "subjectId": "00000000-0000-4000-8000-0000000000ba",
+          "subjectQualifiedId": "contract-qits-rr-369",
+          "targetStates": [
+            "FINALIZED",
+            "REJECTED",
+            "FAILED",
+            "WITHDRAWN",
+            "OBSOLETE"
+          ],
+          "subjectState": "RELEASED",
+          "subjectStateAt": "2026-01-01T00:00:00Z",
+          "subjectExpectedBy": null,
+          "subjectError": null,
+          "brokenReason": null
+        },
+        {
+          "id": "00000000-0000-4000-8000-0000000000b9",
+          "agentId": "00000000-0000-4000-8000-0000000000b7",
+          "label": "a comment on contract-00000001-11",
+          "selection": {
+            "event": "EntityCommented",
+            "when": [
+              [
+                {
+                  "path": "entityId",
+                  "op": "exact",
+                  "value": "00000000-0000-4000-8000-00000000000b"
+                }
+              ]
+            ]
+          },
+          "state": "OPEN",
+          "createdAt": "2026-01-01T00:00:00Z",
+          "expiresAt": null,
+          "matchedEventId": null,
+          "closedAt": null,
+          "subjectKind": "COMMENTS",
+          "subjectRef": "00000000-0000-4000-8000-00000000000b",
+          "subjectId": "00000000-0000-4000-8000-00000000000b",
+          "subjectQualifiedId": "contract-00000001-11",
+          "targetStates": [],
+          "subjectState": null,
+          "subjectStateAt": null,
+          "subjectExpectedBy": null,
+          "subjectError": null,
+          "brokenReason": null
+        }
+      ],
+      "attention": {
+        "code": "WAIT_OVERDUE",
+        "reason": "contract-qits-rr-369 RELEASED, unchanged for 3 h 5 min",
+        "since": "2026-01-01T00:00:00Z",
+        "waitId": "00000000-0000-4000-8000-0000000000b8"
+      },
+      "blockedAt": null,
+      "deskAskedAt": null,
+      "phase": "QUEUED",
+      "phaseSince": null
+    }
+  ]
+}

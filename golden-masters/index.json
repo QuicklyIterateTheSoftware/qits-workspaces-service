@@ -306,6 +306,56 @@
       ]
     },
     {
+      "name": "a project with an agent overdue on a release request",
+      "slug": "a-project-with-an-agent-overdue-on-a-release-request",
+      "params": {
+        "maintenanceTicketId": "00000000-0000-4000-8000-00000000000b",
+        "maintenanceTicketQualifiedId": "contract-00000001-11",
+        "projectId": "00000000-0000-4000-8000-00000000000e"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listAgents",
+          "method": "GET",
+          "path": "/workspaces/api/agents",
+          "query": {
+            "projectId": "{projectId}",
+            "state": "ACTIVE"
+          },
+          "status": 200,
+          "file": "a-project-with-an-agent-overdue-on-a-release-request/listAgents.json",
+          "frozen": {
+            "ids": [
+              "$.agents[*].agentId",
+              "$.agents[*].repositoryId",
+              "$.agents[*].workId",
+              "$.agents[*].ticketId",
+              "$.agents[*].waits[*].id",
+              "$.agents[*].waits[*].agentId",
+              "$.agents[*].waits[*].selection.when[*][*].value",
+              "$.agents[*].waits[*].subjectRef",
+              "$.agents[*].waits[*].subjectId",
+              "$.agents[*].attention.waitId"
+            ],
+            "instants": [
+              "$.agents[*].waitingOnSince",
+              "$.agents[*].lastActivityAt",
+              "$.agents[*].createdAt",
+              "$.agents[*].waits[*].createdAt",
+              "$.agents[*].waits[*].subjectStateAt",
+              "$.agents[*].attention.since"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.agents[*].workspaceRowId"
+            ],
+            "listFilteredTo": "$.agents"
+          }
+        }
+      ]
+    },
+    {
       "name": "a project with workspace slots hosting agents",
       "slug": "a-project-with-workspace-slots-hosting-agents",
       "params": {
@@ -717,6 +767,23 @@
           },
           "status": 200,
           "file": "a-work-item-with-no-workspaces/deliverAgentTurn.json",
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "listAgents",
+          "method": "GET",
+          "path": "/workspaces/api/agents",
+          "query": {
+            "workId": "{improvementTicketId}"
+          },
+          "status": 200,
+          "file": "a-work-item-with-no-workspaces/listAgents.json",
           "frozen": {
             "ids": [],
             "instants": [],
