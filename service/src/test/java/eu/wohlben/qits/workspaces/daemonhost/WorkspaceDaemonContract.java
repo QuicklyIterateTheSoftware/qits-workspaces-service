@@ -217,8 +217,7 @@ public final class WorkspaceDaemonContract {
                           assertTrue(
                               DaemonAgentClient.sessionMissing(
                                   client.startAnswer(row, restorableStart(agentId), true)),
-                              "the daemon asks for the session"))
-                  .waiting(),
+                              "the daemon asks for the session")),
               row(
                       SESSION_FILES_GONE,
                       "restoreAgentSessionFile",
@@ -231,8 +230,7 @@ public final class WorkspaceDaemonContract {
                                   row,
                                   agentId,
                                   SessionRestore.chunkBody(
-                                      RESTORED_SESSION, "main", 0, SESSION_LINE, true))))
-                  .waiting(),
+                                      RESTORED_SESSION, "main", 0, SESSION_LINE, true)))),
               // --- a person's controls (epic qits-1667) ----------------------------------------
               // A stop and a restart of a running agent stop its harness on the daemon; the
               // scheduler's own yield makes no daemon call (qits-1212).
