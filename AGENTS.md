@@ -1963,7 +1963,9 @@ discard never deletes a main workspace's branch (qits-780), on both placements.
   `qits.workspaces.target-leases.refresh-settle` (PT60S) for the daemon's socket to drop. A busy
   slot is skipped (DEBUG) and asked again next pass; a refresh is one INFO line (row, lease,
   generation, `resolvers stale`); a refusal (409 `LEASE_NOT_RUNNING`) is an INFO and the pass goes
-  on. A lease this process refreshed is not refreshed again at the generation the refresh answered.
+  on. A lease this process refreshed is not refreshed again at the generation the refresh answered
+  for `qits.workspaces.target-leases.refresh-cooldown` (PT30M); after it, one still stale there (the
+  tunnel was down at the recreate) is refreshed again, idle and under the lock as before.
   Never the delete or recreate path: they purge the volume. The recreated container's daemon
   dials home as after any daemon restart: its disconnect re-starts the agents on reconnect
   (`onDaemonConnection`), and the lease, still RUNNING, moves nothing on the row.

@@ -12,7 +12,9 @@ import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -47,8 +49,10 @@ import org.jboss.logging.Logger;
  *       qits.workspaces.target-leases.refresh-settle}, for the slot's daemon to drop its control
  *       socket, so the next pass does not say a turn into a container about to be recreated;
  *   <li>a lease this process refreshed is not refreshed again at the generation the refresh
- *       answered: still stale there means the runner has not reported the new container yet, or a
- *       new container did not cure it, and another recreate would cure neither.
+ *       answered for {@code qits.workspaces.target-leases.refresh-cooldown} (PT30M): until then,
+ *       still stale there most likely means the runner has not reported the new container yet.
+ *       After it, a lease still stale at that generation — the node's tunnel was down when the
+ *       container was recreated — is refreshed again, idle and between passes as before.
  * </ul>
  *
  * <p>Never the delete or recreate paths: they purge the work volume. A refusal (409 {@code
@@ -80,8 +84,27 @@ public class StaleResolverRefresh {
   @ConfigProperty(name = "qits.workspaces.target-leases.refresh-settle", defaultValue = "PT60S")
   Duration settle;
 
-  /** The generation each lease this process refreshed was answered with. */
-  private final Map<UUID, Long> refreshedTo = new ConcurrentHashMap<>();
+  /** How long a lease is not refreshed again at the generation its refresh answered. */
+  @ConfigProperty(name = "qits.workspaces.target-leases.refresh-cooldown", defaultValue = "PT30M")
+  Duration cooldown;
+
+  private volatile Clock clock = Clock.systemUTC();
+
+  /** A refresh this process made: the generation it answered, and when. */
+  private record Refreshed(long generation, Instant at) {}
+
+  /** The refresh this process last made of each listed lease. */
+  private final Map<UUID, Refreshed> refreshedTo = new ConcurrentHashMap<>();
+
+  /** For tests: the clock the cooldown is read on. */
+  void clock(Clock clock) {
+    this.clock = clock == null ? Clock.systemUTC() : clock;
+  }
+
+  /** For tests: forgets every refresh made, as a restart would. */
+  void forgetRefreshes() {
+    refreshedTo.clear();
+  }
 
   /** What one pass did, by row id, for the scheduler's caller and the tests. */
   public record Pass(List<Long> refreshed, List<Long> busy, List<Long> refused) {
@@ -116,12 +139,14 @@ public class StaleResolverRefresh {
       if (lease.id() == null || lease.state() != LeaseState.RUNNING || !lease.resolversStale()) {
         continue;
       }
-      Long done = refreshedTo.get(lease.id());
-      if (done != null && done == lease.generation()) {
+      Refreshed done = refreshedTo.get(lease.id());
+      if (done != null
+          && done.generation() == lease.generation()
+          && clock.instant().isBefore(done.at().plus(cooldown))) {
         LOG.debugf(
             "Lease %s still reads its resolvers stale at generation %d, which this service"
-                + " refreshed it to; not refreshed again",
-            lease.id(), lease.generation());
+                + " refreshed it to at %s; not refreshed again before %s",
+            lease.id(), lease.generation(), done.at(), cooldown);
         continue;
       }
       Workspace row =
@@ -175,7 +200,7 @@ public class StaleResolverRefresh {
       return Outcome.REFUSED;
     }
     long generation = refreshed == null ? -1 : refreshed.generation();
-    refreshedTo.put(leaseId, generation);
+    refreshedTo.put(leaseId, new Refreshed(generation, clock.instant()));
     LOG.infof(
         "Refreshed workspace %s's lease %s to generation %d: %s; its container is recreated on the"
             + " same work volume",

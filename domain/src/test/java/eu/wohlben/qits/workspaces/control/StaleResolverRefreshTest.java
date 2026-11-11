@@ -16,7 +16,10 @@ import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -73,6 +76,8 @@ public class StaleResolverRefreshTest {
                             .findByIdOptional(id)
                             .filter(w -> w.status == WorkspaceStatus.ACTIVE)
                             .ifPresent(w -> w.status = WorkspaceStatus.ABANDONED)));
+    refresh.clock(null);
+    refresh.forgetRefreshes();
     agents.retireAll();
     agentDaemon.reset();
     rows.clear();
@@ -105,6 +110,33 @@ public class StaleResolverRefreshTest {
     assertEquals(WorkspaceRuntimeStatus.RUNNING, status, "the row is left as it was");
     assertFalse(placement.calls().contains("end:" + leaseId), "never ended");
     assertEquals(List.of(), placement.purged(), "the work volume is never purged");
+  }
+
+  @Test
+  public void aLeaseStillStaleAtItsRefreshedGenerationIsRefreshedAgainOnlyAfterTheCooldown()
+      throws Exception {
+    Instant start = Instant.parse("2026-11-11T12:00:00Z");
+    refresh.clock(Clock.fixed(start, ZoneOffset.UTC));
+    Workspace row = runningTargetRow("stale-cooldown");
+    UUID leaseId = row.leaseId;
+    placement.resolversStale(leaseId, true);
+
+    assertEquals(List.of(row.id), refresh.refreshStale().refreshed());
+    assertEquals(1, placement.lease(leaseId).generation());
+
+    refresh.clock(Clock.fixed(start.plus(Duration.ofMinutes(29)), ZoneOffset.UTC));
+    assertEquals(List.of(), refresh.refreshStale().refreshed(), "within the cooldown");
+    assertEquals(1, refreshes().size());
+
+    refresh.clock(Clock.fixed(start.plus(Duration.ofMinutes(30)), ZoneOffset.UTC));
+    assertEquals(List.of(row.id), refresh.refreshStale().refreshed(), "the cooldown is over");
+    assertEquals(2, refreshes().size());
+    assertEquals(2, placement.lease(leaseId).generation());
+
+    // A new cooldown runs from the second refresh.
+    refresh.clock(Clock.fixed(start.plus(Duration.ofMinutes(31)), ZoneOffset.UTC));
+    assertEquals(List.of(), refresh.refreshStale().refreshed());
+    assertEquals(2, refreshes().size(), "refreshed once after the cooldown");
   }
 
   @Test
