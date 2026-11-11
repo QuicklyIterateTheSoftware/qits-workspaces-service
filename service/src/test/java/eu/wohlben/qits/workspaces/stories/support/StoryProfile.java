@@ -190,6 +190,7 @@ public class StoryProfile implements QuarkusTestProfile, NecessaryTestProfileDup
     // leases — an arrow in whichever story is open, and half of one. No story covers leases; the
     // @QuarkusTest suites drive TargetLeaseEvents.reconcile() against a stub.
     config.put("qits.workspaces.target-leases.reconcile-interval", "off");
+    config.put("qits.workspaces.target-leases.resolver-refresh-interval", "off");
     // The commission reconcile's interval stays the shipped hour, as the class javadoc has it: the
     // %test properties switch it off for the @QuarkusTest suites (qits-1753), not for the stories.
     config.put("qits.workspace.commission.reconcile-interval", "1h");

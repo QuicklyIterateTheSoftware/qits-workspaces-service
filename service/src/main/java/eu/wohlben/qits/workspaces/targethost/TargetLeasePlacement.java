@@ -22,8 +22,8 @@ import org.eclipse.microprofile.rest.client.inject.RestClient;
  * qits-1532): it replaces the runner socket's {@code RunnerPlacementDriver}. A WORKSPACE lease per
  * TARGET row — {@code slotType WORKSPACE}, {@code ownerRef <rowId>}, {@code workKey ws-<rowId>},
  * {@code priority 0} and the spec {@code RunnerWorkspaceSpecs.compose} made — ended with {@code
- * DELETE /system/api/leases/{id}}, its work volume purged with {@code DELETE
- * /system/api/work-volumes/ws-<rowId>}.
+ * DELETE /system/api/leases/{id}}, refreshed with {@code POST /system/api/leases/{id}/refresh}
+ * (qits-2091), its work volume purged with {@code DELETE /system/api/work-volumes/ws-<rowId>}.
  *
  * <p><b>The bearer is this service's own</b> ({@link IdpProjectsBearer}: the {@code qits} oidc
  * client, {@code qits:system}, audience {@code qits-platform}). qits-system makes the lease's owner
@@ -91,6 +91,12 @@ public class TargetLeasePlacement implements TargetPlacement {
   @Override
   public Optional<Lease> get(UUID leaseId) {
     return optional("read lease " + leaseId, () -> system.getLease(authorization(), leaseId));
+  }
+
+  @Override
+  public Lease refresh(UUID leaseId) {
+    return view(
+        call("refresh lease " + leaseId, () -> system.refreshLease(authorization(), leaseId)));
   }
 
   @Override
@@ -191,7 +197,9 @@ public class TargetLeasePlacement implements TargetPlacement {
         view.detail(),
         view.oomKills(),
         view.oomScope(),
-        view.requestedAt());
+        view.requestedAt(),
+        Boolean.TRUE.equals(view.resolversStale()),
+        view.generation() == null ? 0 : view.generation());
   }
 
   private static Map<String, String> adopt(Adopt adopt) {

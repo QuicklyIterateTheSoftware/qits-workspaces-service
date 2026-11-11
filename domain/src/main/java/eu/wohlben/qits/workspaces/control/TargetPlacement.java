@@ -91,6 +91,12 @@ public interface TargetPlacement {
    *     reading qits-system has reported; null until one is
    * @param oomScope which killer acted: {@code LEASE} or {@code NODE}; null exactly when {@code
    *     oomKills} is
+   * @param resolversStale whether the target now has a DNS resolver the lease's container lacks
+   *     (qits-2091): the runner decides a container's resolvers only at its create, so a container
+   *     created before the node's tunnel answered keeps public DNS until it is {@linkplain
+   *     TargetPlacement#refresh refreshed}; false where qits-system does not say
+   * @param generation the lease's refresh counter (qits-2091), raised by one per refresh; 0 where
+   *     qits-system does not say
    */
   record Lease(
       UUID id,
@@ -101,7 +107,23 @@ public interface TargetPlacement {
       String detail,
       Long oomKills,
       String oomScope,
-      Instant requestedAt) {
+      Instant requestedAt,
+      boolean resolversStale,
+      long generation) {
+
+    /** A lease that says nothing of its resolvers: not stale, generation 0. */
+    public Lease(
+        UUID id,
+        String ownerRef,
+        LeaseState state,
+        UUID targetId,
+        Integer exitCode,
+        String detail,
+        Long oomKills,
+        String oomScope,
+        Instant requestedAt) {
+      this(id, ownerRef, state, targetId, exitCode, detail, oomKills, oomScope, requestedAt, false, 0);
+    }
 
     /** The row this lease was asked for, or null when its owner ref is not one of ours. */
     public Long rowId() {
@@ -160,6 +182,17 @@ public interface TargetPlacement {
 
   /** {@code GET /system/api/leases/{id}}; empty when there is no such lease. */
   Optional<Lease> get(UUID leaseId);
+
+  /**
+   * {@code POST /system/api/leases/{id}/refresh} (qits-2091): the RUNNING lease's generation raised
+   * by one, on which its runner recreates the container with the same work volume — the files
+   * survive, every process in the container (the harness, the daemon) is restarted. Answers the
+   * lease with its new generation.
+   *
+   * @throws LeaseRefused 409 {@code LEASE_NOT_RUNNING} when the lease is not RUNNING, 404 when there
+   *     is no such lease
+   */
+  Lease refresh(UUID leaseId);
 
   /** {@code GET /system/api/leases}: this service's own leases, oldest first. Throws when unreadable. */
   List<Lease> list();

@@ -21,9 +21,9 @@ import java.util.UUID;
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
 
 /**
- * qits-system's lease, work-volume and target doors (epic qits-1481), the six calls {@link
+ * qits-system's lease, work-volume and target doors (epic qits-1481), the seven calls {@link
  * TargetLeasePlacement} makes: {@code createLease}, {@code listLeases}, {@code getLease}, {@code
- * endLease}, {@code purgeWorkVolume} and {@code listTargets}. The address is {@code
+ * endLease}, {@code refreshLease} (qits-2091), {@code purgeWorkVolume} and {@code listTargets}. The address is {@code
  * qits.system.url} (scheme, host and port, no path); qits-system serves its own {@code /system/api}
  * segment. The bearer is this service's own {@code qits} oidc client's ({@code qits:system},
  * audience {@code qits-platform}); qits-system names the lease's owner from it, never from a body
@@ -70,6 +70,13 @@ public interface SystemLeases {
   LeaseView endLease(
       @HeaderParam(HttpHeaders.AUTHORIZATION) String authorization, @PathParam("id") UUID id);
 
+  /** No body: the lease's generation is raised and its runner recreates the container. */
+  @POST
+  @Path("/leases/{id}/refresh")
+  @Produces(MediaType.APPLICATION_JSON)
+  LeaseView refreshLease(
+      @HeaderParam(HttpHeaders.AUTHORIZATION) String authorization, @PathParam("id") UUID id);
+
   @DELETE
   @Path("/work-volumes/{workKey}")
   @Produces(MediaType.APPLICATION_JSON)
@@ -112,7 +119,9 @@ public interface SystemLeases {
   /**
    * qits-system's {@code Lease}, narrowed to what this service reads. {@code oomKills} and {@code
    * oomScope} (qits-1818) are the lease's reported OOM kills and which killer acted ({@code LEASE}
-   * or {@code NODE}); both null until a kill is reported.
+   * or {@code NODE}); both null until a kill is reported. {@code resolversStale} and {@code
+   * generation} (qits-2091) are whether the node has a resolver the container lacks, and the
+   * lease's refresh counter; null from a qits-system that does not say them.
    */
   @JsonIgnoreProperties(ignoreUnknown = true)
   record LeaseView(
@@ -124,7 +133,9 @@ public interface SystemLeases {
       String detail,
       Long oomKills,
       String oomScope,
-      Instant requestedAt) {}
+      Instant requestedAt,
+      Boolean resolversStale,
+      Long generation) {}
 
   /**
    * qits-system's {@code Target}, narrowed to what a legacy pin matches on: its id, its name, and

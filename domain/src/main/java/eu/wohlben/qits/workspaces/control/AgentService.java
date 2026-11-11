@@ -68,6 +68,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -1778,6 +1779,18 @@ public class AgentService {
         throw new IllegalStateException("the agent scheduler did not settle", e);
       }
     } while (kicked.get());
+  }
+
+  /**
+   * Runs {@code work} while no scheduler pass runs, and so while no agent is started and no turn is
+   * said on any slot (qits-2091): every start and every turn is {@link #drive}'s, under the pass
+   * lock, and the doors only write rows. What must see a slot idle and act on it before a turn can
+   * begin there — the stale-resolver refresh — runs its check and its act in here.
+   */
+  public <T> T betweenPasses(Supplier<T> work) {
+    synchronized (passLock) {
+      return work.get();
+    }
   }
 
   /** One scheduler pass; see the class javadoc. Serialised: one pass at a time. */

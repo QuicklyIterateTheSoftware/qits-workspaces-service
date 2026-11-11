@@ -1896,7 +1896,7 @@ discard never deletes a main workspace's branch (qits-780), on both placements.
   `WorkspaceTargetPlacementTest.aDirectRowNeverReachesThePortAndKeepsItsLadder` is the seam's test.
 - **The port is `control/TargetPlacement`**, implemented by `targethost/TargetLeasePlacement` over
   qits-system's doors (`targethost/SystemLeases`: `createLease`, `listLeases`, `getLease`,
-  `endLease`, `purgeWorkVolume`, `listTargets`; `qits.system.url`, the `qits` oidc client's bearer,
+  `endLease`, `refreshLease`, `purgeWorkVolume`, `listTargets`; `qits.system.url`, the `qits` oidc client's bearer,
   `@DefaultBean` so the suites' `FakeTargetPlacement` wins). Absent reads as "no target can be had".
 - **Start** (`beginTargetStart`): the edge plane first (`EDGE_PLANE_UNCONFIGURED` fails the row);
   a previous lease the row still names is ended and waited for (`TargetPlacement.ENDING_DEADLINE`,
@@ -1949,6 +1949,24 @@ discard never deletes a main workspace's branch (qits-780), on both placements.
   lease is never looked at there. A start no-ops only for a live row that holds a lease, so a
   lease-less RUNNING row starts again and asks for its lease (`recordLease`'s compare-and-swap
   admits it).
+- **Stale resolvers** (qits-2091, `control/StaleResolverRefresh`, run by `targethost/StaleResolverSweep`
+  every `qits.workspaces.target-leases.resolver-refresh-interval`, PT5M, `off` in the suites). The
+  runner decides a lease container's DNS resolvers only at create, so a container created before
+  its node's tunnel answered keeps public DNS; qits-system says so as the lease's `resolversStale`.
+  One `listLeases` per pass; a RUNNING, stale lease whose row is ACTIVE, TARGET and RUNNING is
+  refreshed (`POST /system/api/leases/{id}/refresh`: its `generation` raised, the runner recreates
+  the container on the same work volume — files kept, every process in it restarted) **only when
+  the slot is idle**: `AgentWorktreeGuard.notIdle`, the recreate gate's busy question without its
+  leftover-work one (a live agent whose daemon says `busy`, or cannot be asked, holds it). The
+  check and the refresh run inside `AgentService.betweenPasses` — the scheduler's pass lock, under
+  which every agent start and turn is said — and the pass then waits there up to
+  `qits.workspaces.target-leases.refresh-settle` (PT60S) for the daemon's socket to drop. A busy
+  slot is skipped (DEBUG) and asked again next pass; a refresh is one INFO line (row, lease,
+  generation, `resolvers stale`); a refusal (409 `LEASE_NOT_RUNNING`) is an INFO and the pass goes
+  on. A lease this process refreshed is not refreshed again at the generation the refresh answered.
+  Never the delete or recreate path: they purge the volume. The recreated container's daemon
+  dials home as after any daemon restart: its disconnect re-starts the agents on reconnect
+  (`onDaemonConnection`), and the lease, still RUNNING, moves nothing on the row.
 - **`targethost/LegacyRunnerClients`** gives back, at every boot, the idp clients and tokens of
   kinds `workspaces-runner` and `workspaces-runner-registration`; idempotent, a failure is a WARN.
 - **The agent scheduler** asks for a new regular workspace only while no TARGET row waits QUEUED

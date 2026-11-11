@@ -150,6 +150,34 @@ public class AgentWorktreeGuard {
   }
 
   /**
+   * Why the slot is not idle (qits-2091), or empty when no harness on it works: {@link #refusal}'s
+   * busy question alone, asked the same way of the same agents. A live agent whose daemon answers
+   * {@code busy} — a turn, or background work after one — names it; so does one whose daemon cannot
+   * be asked, because a harness that cannot be seen is not known to be idle. Leftover work is not a
+   * reason here: what asks this keeps the slot's work volume.
+   */
+  public Optional<String> notIdle(Long workspaceRowId) {
+    List<AgentWorktree> live =
+        QuarkusTransaction.requiringNew().call(() -> agents.findLiveByWorkspace(workspaceRowId));
+    List<String> reasons = new ArrayList<>();
+    for (AgentWorktree agent : live) {
+      if (!mayHoldWorktree(agent, workspaceRowId)) {
+        continue;
+      }
+      AgentDaemon.CleanupAnswer answer = check(workspaceRowId, agent.id.toString());
+      if (answer.isUnknownAgent()) {
+        continue;
+      }
+      if (!answer.isFound()) {
+        reasons.add(name(agent) + " cannot be checked (" + answer.detail() + ")");
+      } else if (answer.check().busy()) {
+        reasons.add(name(agent) + " is busy");
+      }
+    }
+    return reasons.isEmpty() ? Optional.empty() : Optional.of(String.join("; ", reasons));
+  }
+
+  /**
    * Whether the agent's worktree may live in workspace {@code workspaceRowId}'s volume (qits-1233):
    * a start was accepted there last, or — a row from before {@code started_workspace_id} — it was
    * started somewhere (it holds a command id) and no start was recorded since. The one rule both

@@ -39,7 +39,11 @@ import java.util.UUID;
  *       resolution, an EXITED or FAILED lease);
  *   <li>{@code purgeWorkVolume} — {@code deleteWorkspaceContainer} (and recreate, and a resolved
  *       row's ENDED lease);
- *   <li>{@code listLeases} — {@code TargetLeaseEvents}' reconcile.
+ *   <li>{@code listLeases} — {@code TargetLeaseEvents}' reconcile, and {@code
+ *       StaleResolverSweep}'s pass, which reads each lease's {@code resolversStale} and {@code
+ *       generation} too (qits-2091);
+ *   <li>{@code refreshLease} — that pass, for a RUNNING lease whose resolvers are stale on an idle
+ *       slot (qits-2091).
  * </ul>
  *
  * <p>Every row is live since {@code qits-system-golden-masters} 2026.1023.213531, the first to
@@ -58,10 +62,31 @@ public final class SystemContract {
   static final Trigger STOP = Trigger.operation("stopWorkspaceContainer");
   static final Trigger DELETE = Trigger.operation("deleteWorkspaceContainer");
   static final Trigger RECONCILE = Trigger.schedule("TargetLeaseEvents.reconcile");
+  static final Trigger REFRESH_STALE = Trigger.schedule("StaleResolverSweep.sweep");
 
   /** The lease answer's fields this service reads ({@code SystemLeases.LeaseView}). */
   static final List<String> LEASE =
       List.of("$.id", "$.ownerRef", "$.state", "$.targetId", "$.exitCode", "$.detail", "$.requestedAt");
+
+  /** The listing's fields the reconcile reads. */
+  static final List<String> RECONCILED =
+      List.of(
+          "$[*].id",
+          "$[*].ownerRef",
+          "$[*].state",
+          "$[*].targetId",
+          "$[*].exitCode",
+          "$[*].detail",
+          "$[*].requestedAt");
+
+  /**
+   * The listing's fields the stale-resolver pass reads (qits-2091): its own two besides the
+   * reconcile's. {@code resolvers} itself is never read, so its length is bound by nothing here.
+   */
+  static final List<String> LISTED =
+      java.util.stream.Stream.concat(
+              RECONCILED.stream(), java.util.stream.Stream.of("$[*].resolversStale", "$[*].generation"))
+          .toList();
 
   /**
    * The row id the create below asks for: 18, not the queued lease's 17. qits-system records its
@@ -105,14 +130,7 @@ public final class SystemContract {
                       A_QUEUED_LEASE,
                       "listLeases",
                       Request.NONE.header("Authorization", BEARER),
-                      List.of(
-                          "$[*].id",
-                          "$[*].ownerRef",
-                          "$[*].state",
-                          "$[*].targetId",
-                          "$[*].exitCode",
-                          "$[*].detail",
-                          "$[*].requestedAt"),
+                      RECONCILED,
                       (url, params) ->
                           assertFalse(placementAgainst(url, params).list().isEmpty())),
               ContractRow.of(
@@ -145,14 +163,7 @@ public final class SystemContract {
                       A_RUNNING_LEASE,
                       "listLeases",
                       Request.NONE.header("Authorization", BEARER),
-                      List.of(
-                          "$[*].id",
-                          "$[*].ownerRef",
-                          "$[*].state",
-                          "$[*].targetId",
-                          "$[*].exitCode",
-                          "$[*].detail",
-                          "$[*].requestedAt"),
+                      RECONCILED,
                       (url, params) ->
                           assertFalse(placementAgainst(url, params).list().isEmpty())),
               ContractRow.of(
@@ -168,6 +179,31 @@ public final class SystemContract {
                                   .end(leaseId(params))
                                   .orElseThrow()
                                   .state())),
+              ContractRow.of(
+                      REFRESH_STALE,
+                      A_RUNNING_LEASE,
+                      "listLeases",
+                      Request.NONE.header("Authorization", BEARER),
+                      LISTED,
+                      (url, params) -> {
+                        TargetPlacement.Lease lease =
+                            placementAgainst(url, params).list().get(0);
+                        assertEquals(TargetPlacement.LeaseState.RUNNING, lease.state());
+                        assertFalse(lease.resolversStale());
+                      }),
+              ContractRow.of(
+                      REFRESH_STALE,
+                      A_RUNNING_LEASE,
+                      "refreshLease",
+                      Request.NONE.header("Authorization", BEARER),
+                      List.of("$.id", "$.state", "$.generation"),
+                      (url, params) -> {
+                        TargetPlacement.Lease lease =
+                            placementAgainst(url, params).refresh(leaseId(params));
+                        assertEquals(leaseId(params), lease.id());
+                        assertEquals(TargetPlacement.LeaseState.RUNNING, lease.state());
+                        assertTrue(lease.generation() > 0, "the refresh raised the generation");
+                      }),
               ContractRow.of(
                       DELETE,
                       AN_UNUSED_WORK_VOLUME,

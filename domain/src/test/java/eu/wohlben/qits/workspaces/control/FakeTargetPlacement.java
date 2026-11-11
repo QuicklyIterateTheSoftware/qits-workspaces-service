@@ -33,6 +33,7 @@ public class FakeTargetPlacement implements TargetPlacement {
   private final List<String> purged = Collections.synchronizedList(new ArrayList<>());
   private volatile LeaseRefused refusal;
   private volatile LeaseRefused unreachable;
+  private volatile LeaseRefused refreshRefusal;
   private volatile boolean endsAtOnce;
   private volatile List<Target> targets = List.of();
   private volatile Runnable onList;
@@ -100,9 +101,25 @@ public class FakeTargetPlacement implements TargetPlacement {
     Lease moved =
         new Lease(
             leaseId, was.ownerRef(), state, targetId, exitCode, detail, oomKills, oomScope,
-            was.requestedAt());
+            was.requestedAt(), was.resolversStale(), was.generation());
     leases.put(leaseId, moved);
     return moved;
+  }
+
+  /** The lease as its runner reports its resolvers (qits-2091): stale or not, generation kept. */
+  public Lease resolversStale(UUID leaseId, boolean stale) {
+    Lease was = leases.get(leaseId);
+    Lease marked =
+        new Lease(
+            leaseId, was.ownerRef(), was.state(), was.targetId(), was.exitCode(), was.detail(),
+            was.oomKills(), was.oomScope(), was.requestedAt(), stale, was.generation());
+    leases.put(leaseId, marked);
+    return marked;
+  }
+
+  /** Every refresh from now on throws {@code refused}. */
+  public void refuseRefreshes(LeaseRefused refused) {
+    refreshRefusal = refused;
   }
 
   /** The lease with this id as the fake holds it. */
@@ -149,6 +166,7 @@ public class FakeTargetPlacement implements TargetPlacement {
     purged.clear();
     refusal = null;
     unreachable = null;
+    refreshRefusal = null;
     endsAtOnce = false;
     targets = List.of();
     onList = null;
@@ -202,6 +220,36 @@ public class FakeTargetPlacement implements TargetPlacement {
     calls.add("get:" + leaseId);
     failIfUnreachable();
     return Optional.ofNullable(leases.get(leaseId));
+  }
+
+  /**
+   * Raises the RUNNING lease's generation by one, as qits-system does; the runner's report that
+   * cures the staleness is a test's {@link #resolversStale} call. 409 {@code LEASE_NOT_RUNNING}
+   * otherwise, 404 for a lease it does not hold.
+   */
+  @Override
+  public Lease refresh(UUID leaseId) {
+    calls.add("refresh:" + leaseId);
+    failIfUnreachable();
+    LeaseRefused refused = refreshRefusal;
+    if (refused != null) {
+      throw refused;
+    }
+    Lease was = leases.get(leaseId);
+    if (was == null) {
+      throw new LeaseRefused(404, null, "No lease " + leaseId, null);
+    }
+    if (was.state() != LeaseState.RUNNING) {
+      throw new LeaseRefused(
+          409, "LEASE_NOT_RUNNING", "Lease " + leaseId + " is " + was.state(), null);
+    }
+    Lease refreshed =
+        new Lease(
+            leaseId, was.ownerRef(), was.state(), was.targetId(), was.exitCode(), was.detail(),
+            was.oomKills(), was.oomScope(), was.requestedAt(), was.resolversStale(),
+            was.generation() + 1);
+    leases.put(leaseId, refreshed);
+    return refreshed;
   }
 
   @Override
