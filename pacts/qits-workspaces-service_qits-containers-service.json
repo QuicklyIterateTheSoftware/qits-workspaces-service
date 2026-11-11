@@ -18,7 +18,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1110.60123"
+            "version": "2026.1111.30449"
           }
         }
       },
@@ -97,7 +97,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1110.60123"
+            "version": "2026.1111.30449"
           }
         }
       },
@@ -167,7 +167,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1110.60123"
+            "version": "2026.1111.30449"
           }
         }
       },
@@ -336,7 +336,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1110.60123"
+            "version": "2026.1111.30449"
           }
         }
       },
@@ -502,7 +502,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1110.60123"
+            "version": "2026.1111.30449"
           }
         }
       },
@@ -572,7 +572,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1110.60123"
+            "version": "2026.1111.30449"
           }
         }
       },
@@ -657,7 +657,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1110.60123"
+            "version": "2026.1111.30449"
           }
         }
       },
@@ -705,7 +705,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1110.60123"
+            "version": "2026.1111.30449"
           }
         }
       },
@@ -813,7 +813,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1110.60123"
+            "version": "2026.1111.30449"
           }
         }
       },
