@@ -255,6 +255,11 @@ class ConsumerPactVerificationTest {
     return states.params(ProviderStates.A_PROJECT_WITH_AGENTS_STARTING_UP);
   }
 
+  @State(ProviderStates.AN_AGENT_OVERDUE_ON_A_RELEASE_REQUEST)
+  Map<String, String> anAgentOverdueOnAReleaseRequest() {
+    return states.params(ProviderStates.AN_AGENT_OVERDUE_ON_A_RELEASE_REQUEST);
+  }
+
   @State(ProviderStates.A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION)
   Map<String, String> aProjectWithAgentsNeedingAttention() {
     return states.params(ProviderStates.A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION);

@@ -196,6 +196,12 @@ class GoldenMasterRecordingTest {
               "listWorkItemWorkspaces",
               WORKSPACES + "/work/{improvementTicketId}/workspaces",
               null),
+          // The landing app's work-agent layout with no agent on the item (qits-2040): an empty list.
+          Interaction.read(
+              ProviderStates.A_WORK_ITEM_WITH_NO_WORKSPACES,
+              "listAgents",
+              WORKSPACES + "/agents?workId={improvementTicketId}",
+              null),
           Interaction.read(
               ProviderStates.NO_WORK_ITEM_HAS_AN_OPEN_WORKSPACE,
               "listOpenWorkspaces",
@@ -308,6 +314,12 @@ class GoldenMasterRecordingTest {
           // person for — the landing app's attention list.
           Interaction.read(
               ProviderStates.A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION,
+              "listAgents",
+              WORKSPACES + "/agents?projectId={projectId}&state=ACTIVE",
+              "$.agents"),
+          // qits-2040: an agent overdue on a release request, its comments wait resolved.
+          Interaction.read(
+              ProviderStates.AN_AGENT_OVERDUE_ON_A_RELEASE_REQUEST,
               "listAgents",
               WORKSPACES + "/agents?projectId={projectId}&state=ACTIVE",
               "$.agents"),
