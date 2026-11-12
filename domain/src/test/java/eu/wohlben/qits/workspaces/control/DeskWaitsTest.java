@@ -35,6 +35,8 @@ import org.junit.jupiter.api.Test;
  * instead of a wake, the announcement marked once taken and published again by the sweep while it
  * is not, and a desk wait never cancelled for want of an ACTIVE agent. {@link
  * RecordingLifecycleAnnouncer} takes every event as it is announced, so the mark is synchronous here.
+ * The tests sweep through {@link #sweep()}, because the scheduler sweeps too (qits-2103): a bare
+ * call can return while a background pass that closed and announced the row has not marked it yet.
  */
 @QuarkusTest
 public class DeskWaitsTest {
@@ -43,6 +45,20 @@ public class DeskWaitsTest {
   @Inject AgentWaitRepository waitRows;
   @Inject AgentWorktreeRepository agents;
   @Inject RecordingLifecycleAnnouncer announced;
+  @Inject AgentService agentService;
+
+  /**
+   * The test's sweep, under the scheduler's pass lock (qits-2103): a background pass that closed
+   * and announced the row has marked it by the time this sweep starts, and none starts until it
+   * returns.
+   */
+  private void sweep() {
+    agentService.betweenPasses(
+        () -> {
+          waits.sweep();
+          return null;
+        });
+  }
 
   private static EventSelection finalized(String id) {
     return EventSelection.of("DeskTestRequestFinalized", Condition.exact("requestId", id));
@@ -220,7 +236,7 @@ public class DeskWaitsTest {
         waits.createForDesk(project, "ci run 9", EventSelection.of("DeskTestBuildStatusChanged"), Duration.ofHours(2), null);
     expire(wait.id());
 
-    waits.sweep();
+    sweep();
 
     AgentWait row = waitRow(wait.id());
     assertEquals(AgentWaitState.TIMED_OUT, row.state);
@@ -282,8 +298,8 @@ public class DeskWaitsTest {
     AgentWaitDto wait =
         waits.createForDesk(UUID.randomUUID(), "open", EventSelection.of("DeskTestBuildStatusChanged"), null, null);
 
-    waits.sweep();
-    waits.sweep();
+    sweep();
+    sweep();
 
     assertEquals(AgentWaitState.OPEN, waitRow(wait.id()).state);
     assertEquals(List.of(), closedOf(wait.id()));
@@ -294,13 +310,13 @@ public class DeskWaitsTest {
     AgentWaitDto wait =
         waits.createForDesk(UUID.randomUUID(), "again", EventSelection.of("DeskTestBuildStatusChanged"), Duration.ofHours(2), null);
     expire(wait.id());
-    waits.sweep();
+    sweep();
     UUID eventId = waitRow(wait.id()).closedEventId;
     // As if the process stopped before the bus took it.
     QuarkusTransaction.requiringNew()
         .run(() -> waitRows.update("announcedAt = null where id = ?1", UUID.fromString(wait.id())));
 
-    waits.sweep();
+    sweep();
 
     List<DeskWaitClosed> events = closedOf(wait.id());
     assertEquals(2, events.size());
@@ -308,7 +324,7 @@ public class DeskWaitsTest {
     assertEquals(events.get(0), events.get(1), "the same facts, under the same id");
     assertNotNull(waitRow(wait.id()).announcedAt);
 
-    waits.sweep();
+    sweep();
     assertEquals(2, closedOf(wait.id()).size(), "a marked row is not published again");
   }
 
