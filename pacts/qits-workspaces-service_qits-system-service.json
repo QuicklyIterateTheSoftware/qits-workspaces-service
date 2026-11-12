@@ -688,6 +688,127 @@
         "references": {
           "qits-call": {
             "app": "qits-system-service",
+            "operationId": "listTargets"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "TargetLoginEvents.reconcile"
+          }
+        }
+      },
+      "description": "TargetLoginEvents.reconcile: listTargets",
+      "key": "207dabd0",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a declared target",
+          "params": {
+            "targetId": "00000000-0000-4000-8000-000000000001"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/system/api/targets"
+      },
+      "response": {
+        "body": {
+          "content": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "login": {
+                "checkedAt": "2026-01-01T00:00:00Z",
+                "claude": "PRESENT",
+                "kimi": "ABSENT"
+              },
+              "name": "lab"
+            }
+          ],
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "max": 1,
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].login.checkedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:?\\d{2})$"
+                }
+              ]
+            },
+            "$[*].login.claude": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].login.kimi": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-system-service",
             "operationId": "purgeWorkVolume"
           },
           "qits-trigger": {

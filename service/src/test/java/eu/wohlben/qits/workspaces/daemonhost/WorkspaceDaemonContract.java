@@ -56,6 +56,15 @@ public final class WorkspaceDaemonContract {
   static final String LEFTOVER_WORK =
       "a workspace daemon with an agent whose worktree holds uncommitted work";
   static final String BUSY = "a workspace daemon with an agent busy in the background";
+  // qits-2088: the credential volume lost the session, and the restorable start was refused.
+  static final String SESSION_FILES_GONE =
+      "a workspace daemon with an agent whose session files are gone";
+
+  /** The session {@link #SESSION_FILES_GONE} lost, as the daemon's state starts it. */
+  private static final String RESTORED_SESSION = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
+
+  /** The one line of the restored session's main file. */
+  private static final String SESSION_LINE = "{\"type\":\"user\"}\n";
 
   static final Trigger RECONCILE = Trigger.schedule("AgentService.reconcile");
 
@@ -194,6 +203,34 @@ public final class WorkspaceDaemonContract {
                   List.of("$.clean", "$.busy"),
                   (client, row, agentId) ->
                       assertEquals(AgentDaemon.Outcome.BUSY, client.remove(row, agentId, false))),
+              // --- restoring a lost session (qits-2088) ----------------------------------------
+              // A start of a session the transcript store holds says restorable; a daemon whose
+              // credential volume lost it answers session-missing, and the start sends each held
+              // file back before it starts again. Each exchange is its own row, so each call is
+              // the client's single request; DaemonAgentClient.start chains them.
+              row(
+                      SESSION_FILES_GONE,
+                      "startAgentWorktree",
+                      restorableStartBody(),
+                      List.of("$.error"),
+                      (client, row, agentId) ->
+                          assertTrue(
+                              DaemonAgentClient.sessionMissing(
+                                  client.startAnswer(row, restorableStart(agentId), true)),
+                              "the daemon asks for the session")),
+              row(
+                      SESSION_FILES_GONE,
+                      "restoreAgentSessionFile",
+                      sessionFileBody(),
+                      List.of(),
+                      (client, row, agentId) ->
+                          assertEquals(
+                              200,
+                              client.uploadChunk(
+                                  row,
+                                  agentId,
+                                  SessionRestore.chunkBody(
+                                      RESTORED_SESSION, "main", 0, SESSION_LINE, true)))),
               // --- a person's controls (epic qits-1667) ----------------------------------------
               // A stop and a restart of a running agent stop its harness on the daemon; the
               // scheduler's own yield makes no daemon call (qits-1212).
@@ -297,6 +334,22 @@ public final class WorkspaceDaemonContract {
         new AgentDaemon.AgentConfig(AGENT_CONFIG_REPOSITORY_ID, AGENT_CONFIG_REPOSITORY_PATH));
   }
 
+  /** {@link #start}, resuming the session {@link #SESSION_FILES_GONE} lost. */
+  private static AgentDaemon.Start restorableStart(String agentId) {
+    return new AgentDaemon.Start(
+        agentId,
+        WORK_ID,
+        ENTITY_ID,
+        WRAPPER_BRANCH,
+        "CLAUDE",
+        RESTORED_SESSION,
+        Map.of(),
+        "Work the ticket.",
+        null,
+        null,
+        null);
+  }
+
   private static EntityFacts facts() {
     return new EntityFacts("Fix the login", "IMPLEMENTING", false);
   }
@@ -325,6 +378,23 @@ public final class WorkspaceDaemonContract {
         .stringType("repositoryPath", AGENT_CONFIG_REPOSITORY_PATH)
         .closeObject();
     return body;
+  }
+
+  /** {@link #startBody()}, resuming a session this service holds a copy of (qits-2088). */
+  private static DslPart restorableStartBody() {
+    PactDslJsonBody body = (PactDslJsonBody) startBody();
+    body.stringValue("sessionId", RESTORED_SESSION).booleanValue("restorable", true);
+    return body;
+  }
+
+  /** One chunk of a held session file: the state's session, so the daemon takes it. */
+  private static DslPart sessionFileBody() {
+    return new PactDslJsonBody()
+        .stringValue("sessionId", RESTORED_SESSION)
+        .stringValue("file", "main")
+        .integerType("offset", 0)
+        .stringType("data", SESSION_LINE)
+        .booleanValue("last", true);
   }
 
   /** The {@code {}} a yield and an interrupt send: the daemon reads nothing of it. */

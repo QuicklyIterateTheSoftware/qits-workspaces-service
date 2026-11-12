@@ -229,4 +229,57 @@ class TranscriptStoreTest {
       throw new AssertionError(e);
     }
   }
+
+  // --- reading back for a restore (qits-2088) ----------------------------------------------------
+
+  @Test
+  void aHeldSessionListsItsSidechainsAndThenItsMainFile() throws IOException {
+    TranscriptStore store = store();
+    store.append(AGENT, SESSION, "subagents/agent-b.jsonl", 0, "{}\n");
+    store.append(AGENT, SESSION, "main", 0, "{}\n");
+    store.append(AGENT, SESSION, "subagents/agent-a.jsonl", 0, "{}\n");
+
+    assertEquals(
+        List.of("subagents/agent-a.jsonl", "subagents/agent-b.jsonl", "main"),
+        store.files(AGENT, SESSION));
+  }
+
+  @Test
+  void aSessionWithNoMainFileIsNothingToRestore() throws IOException {
+    TranscriptStore store = store();
+    store.append(AGENT, SESSION, "subagents/agent-a.jsonl", 0, "{}\n");
+
+    assertEquals(List.of(), store.files(AGENT, SESSION));
+    assertEquals(List.of(), store.files(AGENT, "22222222-2222-2222-2222-222222222222"));
+    assertThrows(IllegalArgumentException.class, () -> store.files(AGENT, "../x"));
+  }
+
+  @Test
+  void aFileIsReadBackInChunksThatNeverSplitACharacter() throws IOException {
+    TranscriptStore store = store();
+    // "é" is two bytes and "€" three: a 4-byte cap lands inside one of them more than once.
+    String held = "{\"t\":\"héllo €uro\"}\n" + turn("user", "2026-10-30T10:00:00Z", "zwei €");
+    store.append(AGENT, SESSION, "main", 0, held);
+
+    StringBuilder back = new StringBuilder();
+    long offset = 0;
+    boolean last = false;
+    int chunks = 0;
+    while (!last) {
+      TranscriptStore.Chunk chunk = store.read(AGENT, SESSION, "main", offset, 4);
+      assertTrue(bytes(chunk.data()) <= 4, chunk.data());
+      assertEquals(offset + bytes(chunk.data()), chunk.next(), "offsets count bytes on disk");
+      back.append(chunk.data());
+      offset = chunk.next();
+      last = chunk.last();
+      chunks++;
+    }
+
+    assertEquals(held, back.toString());
+    assertEquals(bytes(held), offset);
+    assertTrue(chunks > 1);
+    TranscriptStore.Chunk whole = store.read(AGENT, SESSION, "main", 0, 1 << 20);
+    assertEquals(held, whole.data());
+    assertTrue(whole.last());
+  }
 }

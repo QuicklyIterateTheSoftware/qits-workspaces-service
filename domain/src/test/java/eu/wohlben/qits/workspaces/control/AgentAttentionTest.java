@@ -411,6 +411,66 @@ class AgentAttentionTest {
     assertTrue(evaluate(agent(), matched).isEmpty());
   }
 
+  // --- TARGET_LOGIN_ABSENT, the first rule (qits-2088) --------------------------------------------
+
+  private static final TargetLogins.Absence SIGNED_OUT =
+      new TargetLogins.Absence(
+          UUID.randomUUID(), "lab", "claude", Instant.parse("2026-10-28T10:42:00Z"));
+
+  @Test
+  void aRunningAgentOnASignedOutTargetNeedsAttention() {
+    Attention a =
+        AgentAttention.evaluate(agent(), List.of(), SIGNED_OUT, NOW, CONFIG).orElseThrow();
+
+    assertEquals(Code.TARGET_LOGIN_ABSENT, a.code());
+    assertEquals("Target lab lost its claude sign-in at 10:42", a.reason());
+    assertEquals(SIGNED_OUT.since(), a.since());
+    assertNull(a.waitId());
+    // Signed in (no absence): nothing.
+    assertTrue(AgentAttention.evaluate(agent(), List.of(), null, NOW, CONFIG).isEmpty());
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @CsvSource({"QUEUED", "YIELDED", "STOPPED"})
+  void onlyARunningAgentIsReportedForItsTargetsSignIn(AgentRunState runState) {
+    AgentWorktree a = agent();
+    a.runState = runState;
+    assertTrue(AgentAttention.evaluate(a, List.of(), SIGNED_OUT, NOW, CONFIG).isEmpty());
+  }
+
+  @Test
+  void aSignedOutTargetOutranksEveryOtherRule() {
+    AgentWait passed =
+        wait("RELEASE_REQUEST", "rr-1", ENDS, "FINALIZED", NOW.minus(Duration.ofMinutes(20)));
+    AgentWorktree idleAndBlocked = blocked("EXPLICIT", 50);
+    idleAndBlocked.waitingSince = NOW.minus(Duration.ofHours(2));
+
+    assertEquals(
+        Code.TARGET_LOGIN_ABSENT,
+        AgentAttention.evaluate(idle(42), List.of(), SIGNED_OUT, NOW, CONFIG).orElseThrow().code());
+    assertEquals(
+        Code.TARGET_LOGIN_ABSENT,
+        AgentAttention.evaluate(agent(), List.of(passed), SIGNED_OUT, NOW, CONFIG)
+            .orElseThrow()
+            .code());
+    assertEquals(
+        Code.TARGET_LOGIN_ABSENT,
+        AgentAttention.evaluate(idleAndBlocked, List.of(), SIGNED_OUT, NOW, CONFIG)
+            .orElseThrow()
+            .code());
+    // Signed in again, the rule it hid holds.
+    assertEquals(
+        Code.WAIT_SUBJECT_PASSED,
+        AgentAttention.evaluate(agent(), List.of(passed), null, NOW, CONFIG).orElseThrow().code());
+  }
+
+  @Test
+  void aSignedOutTargetIsNoneOfAnInactiveAgentsBusiness() {
+    AgentWorktree a = agent();
+    a.state = AgentState.REMOVED;
+    assertTrue(AgentAttention.evaluate(a, List.of(), SIGNED_OUT, NOW, CONFIG).isEmpty());
+  }
+
   // --- formats ------------------------------------------------------------------------------------
 
   @ParameterizedTest(name = "{0} s -> {1}")

@@ -167,6 +167,40 @@ class DaemonAgentClientAnswersTest {
     assertEquals("proj-1/qits-agent-config", agentConfig.getString("repositoryPath"));
   }
 
+  @Test
+  void aRestorableStartSaysSoAndEveryOtherStartIsUnchanged() {
+    // qits-2088: only a start that names a session this service holds carries the flag.
+    AgentDaemon.Start resumed =
+        new AgentDaemon.Start(
+            "a1", "w1", "e1", "ticket/w1", "CLAUDE", "s-1", Map.of(), null, null, null, null);
+    JsonObject restorable = DaemonAgentClient.startBody(resumed, true);
+    assertEquals("s-1", restorable.getString("sessionId"));
+    assertEquals(Boolean.TRUE, restorable.getBoolean("restorable"));
+    assertFalse(DaemonAgentClient.startBody(resumed).containsKey("restorable"));
+    assertFalse(DaemonAgentClient.startBody(resumed, false).containsKey("restorable"));
+    assertFalse(
+        DaemonAgentClient.startBody(start(null), true).containsKey("restorable"),
+        "no session, nothing to restore");
+  }
+
+  @Test
+  void onlyASessionMissingConflictAsksForARestore() {
+    assertTrue(
+        DaemonAgentClient.sessionMissing(
+            new DaemonAgentClient.Answer(
+                409, "{\"error\":\"session-missing\",\"sessionId\":\"s-1\"}")));
+    assertFalse(
+        DaemonAgentClient.sessionMissing(
+            new DaemonAgentClient.Answer(409, "{\"error\":\"not-signed-in\"}")));
+    assertFalse(
+        DaemonAgentClient.sessionMissing(
+            new DaemonAgentClient.Answer(409, "{\"message\":\"branch held\"}")));
+    assertFalse(
+        DaemonAgentClient.sessionMissing(
+            new DaemonAgentClient.Answer(200, "{\"error\":\"session-missing\"}")));
+    assertFalse(DaemonAgentClient.sessionMissing(null), "no answer");
+  }
+
   /** A start otherwise shaped like a fresh agent's, carrying {@code agentConfig} or null. */
   private static AgentDaemon.Start start(AgentDaemon.AgentConfig agentConfig) {
     return new AgentDaemon.Start(

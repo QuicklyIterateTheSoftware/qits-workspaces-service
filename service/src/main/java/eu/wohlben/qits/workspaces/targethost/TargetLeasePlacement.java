@@ -129,7 +129,14 @@ public class TargetLeasePlacement implements TargetPlacement {
     return listed.stream()
         .map(
             t ->
-                new Target(t.id(), t.name(), blankless(t.engineId()), blankless(t.hostname())))
+                new Target(
+                    t.id(),
+                    t.name(),
+                    blankless(t.engineId()),
+                    blankless(t.hostname()),
+                    t.login() == null ? null : blankless(t.login().claude()),
+                    t.login() == null ? null : blankless(t.login().kimi()),
+                    t.login() == null ? null : t.login().checkedAt()))
         .toList();
   }
 

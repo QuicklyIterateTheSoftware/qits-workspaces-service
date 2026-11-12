@@ -3,10 +3,16 @@ package eu.wohlben.qits.workspaces.transcripthost;
 import eu.wohlben.qits.workspacedaemon.protocol.TranscriptFiles;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -111,6 +117,88 @@ public final class TranscriptStore {
         out.write(bytes);
       }
       return new Appended(true, held + bytes.length);
+    }
+  }
+
+  /**
+   * The files held for one of an agent's sessions, as {@link TranscriptFiles} addresses them (the
+   * restore of qits-2088): every sidechain, by name, then {@code main} last — so a restore that
+   * stops part way never leaves the main file, the one a resume is decided on, without them. Empty
+   * when the main file is not held: a session with no transcript is nothing to restore.
+   *
+   * @throws IllegalArgumentException a session id outside the protocol's grammar
+   */
+  public List<String> files(UUID agentId, String sessionId) throws IOException {
+    Path main = fileOf(agentId, sessionId, TranscriptFiles.MAIN);
+    if (!Files.isRegularFile(main, LinkOption.NOFOLLOW_LINKS)) {
+      return List.of();
+    }
+    List<String> files = new ArrayList<>();
+    Path subagents = main.resolveSibling(sessionId).resolve(SUBAGENTS);
+    if (Files.isDirectory(subagents, LinkOption.NOFOLLOW_LINKS)) {
+      try (DirectoryStream<Path> entries = Files.newDirectoryStream(subagents, "agent-*.jsonl")) {
+        for (Path entry : entries) {
+          String file = TranscriptFiles.sidechain(entry.getFileName().toString());
+          if (file != null && Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
+            files.add(file);
+          }
+        }
+      }
+    }
+    files.sort(null);
+    files.add(TranscriptFiles.MAIN);
+    return files;
+  }
+
+  /**
+   * What a {@link #read} found.
+   *
+   * @param data the bytes from {@code offset}, as text; never a split UTF-8 character
+   * @param next the offset after them, to read from next
+   * @param last whether they reach the end of the file
+   */
+  public record Chunk(String data, long next, boolean last) {}
+
+  /**
+   * Up to {@code maxBytes} of one held file from {@code offset}, cut back to a UTF-8 character
+   * boundary, for a restore (qits-2088). Offsets count bytes on disk, as {@link #append}'s do.
+   *
+   * @throws IllegalArgumentException an address outside the grammar, a negative offset, or a cap
+   *     too small to hold one character
+   * @throws IOException the file is not held, or could not be read
+   */
+  public Chunk read(UUID agentId, String sessionId, String file, long offset, int maxBytes)
+      throws IOException {
+    if (offset < 0) {
+      throw new IllegalArgumentException("transcript read offset is negative: " + offset);
+    }
+    if (maxBytes < 4) {
+      throw new IllegalArgumentException("a chunk must hold at least one character");
+    }
+    Path target = fileOf(agentId, sessionId, file);
+    try (FileChannel channel =
+        FileChannel.open(target, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+      long size = channel.size();
+      long from = Math.min(offset, size);
+      // One byte past the cap, to see whether the cap cuts through a character.
+      ByteBuffer buffer = ByteBuffer.allocate((int) Math.min(maxBytes + 1L, size - from));
+      while (buffer.hasRemaining() && channel.read(buffer, from + buffer.position()) >= 0) {
+        // Fill it: a short read is not the end of the file.
+      }
+      int read = buffer.position();
+      int length = Math.min(read, maxBytes);
+      boolean last = from + length >= size;
+      if (!last && read > length) {
+        // Back off to the start of the character the cap cut through: the next chunk never
+        // starts on a continuation byte. Only bytes that are not UTF-8 could exhaust the cap.
+        int cut = length;
+        while (cut > 0 && (buffer.get(cut) & 0xC0) == 0x80) {
+          cut--;
+        }
+        length = cut == 0 ? length : cut;
+      }
+      String data = new String(buffer.array(), 0, length, StandardCharsets.UTF_8);
+      return new Chunk(data, from + length, last);
     }
   }
 
