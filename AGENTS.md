@@ -1993,8 +1993,8 @@ discard never deletes a main workspace's branch (qits-780), on both placements.
   a graceful stop, `rm` (volume kept), and `run` with the provision's own arguments
   (`branchParentOf`), no new credential (the row's workspace token rides the spec), the row left
   RUNNING; a stop counted meanwhile wins and the run is not made. A row this process recreated is
-  not asked again for the same `refresh-cooldown`. A run that throws is a WARN, the row as the run
-  left it, and the pass goes on. Never `removeWorkspaceVolume`.
+  not asked again for the same `refresh-cooldown`. A run that throws marks the row FAILED (its container is
+  gone; the volume is kept for the next start), is a WARN, and the pass goes on. Never `removeWorkspaceVolume`.
 - **`targethost/LegacyRunnerClients`** gives back, at every boot, the idp clients and tokens of
   kinds `workspaces-runner` and `workspaces-runner-registration`; idempotent, a failure is a WARN.
 - **The agent scheduler** asks for a new regular workspace only while no TARGET row waits QUEUED
