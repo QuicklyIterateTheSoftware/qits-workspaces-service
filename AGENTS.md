@@ -1983,6 +1983,18 @@ discard never deletes a main workspace's branch (qits-780), on both placements.
   Never the delete or recreate path: they purge the volume. The recreated container's daemon
   dials home as after any daemon restart: its disconnect re-starts the agents on reconnect
   (`onDaemonConnection`), and the lease, still RUNNING, moves nothing on the row.
+  **The DIRECT leg** (qits-2231), in the same pass and independent of it (it runs with no
+  `TargetPlacement` at all): a DIRECT admin container is run with `privateEdge`, and qits-containers
+  makes the private edge's swarm VIP its first resolver only at that run, so a recreated edge service
+  leaves it on a dead VIP (private names then fall through to the public edge, 421). Each ACTIVE,
+  DIRECT, RUNNING row's container is asked `GET …/resolvers` (`ContainerRuntime.resolversStale`,
+  empty on unreachable, a refusal or 404, which is never stale); a stale one, idle and under
+  `betweenPasses` as above, is recreated by `WorkspaceService.recreateDirectContainerKeepingVolume`:
+  a graceful stop, `rm` (volume kept), and `run` with the provision's own arguments
+  (`branchParentOf`), no new credential (the row's workspace token rides the spec), the row left
+  RUNNING; a stop counted meanwhile wins and the run is not made. A row this process recreated is
+  not asked again for the same `refresh-cooldown`. A run that throws is a WARN, the row as the run
+  left it, and the pass goes on. Never `removeWorkspaceVolume`.
 - **`targethost/LegacyRunnerClients`** gives back, at every boot, the idp clients and tokens of
   kinds `workspaces-runner` and `workspaces-runner-registration`; idempotent, a failure is a WARN.
 - **The agent scheduler** asks for a new regular workspace only while no TARGET row waits QUEUED

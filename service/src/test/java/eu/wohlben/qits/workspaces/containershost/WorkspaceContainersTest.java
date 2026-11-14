@@ -508,6 +508,53 @@ class WorkspaceContainersTest {
     assertFalse(containers.isRunning("qits-ws-work-repo1234"));
   }
 
+  // --- resolvers (qits-2231) ----------------------------------------------------------------------
+
+  private static String resolvers(boolean stale) {
+    return "{\"onPrivateEdge\":true,\"dns\":[\"10.231.0.2\",\"127.0.0.53\"],\"expected\":[\""
+        + (stale ? "10.231.0.212" : "10.231.0.2")
+        + "\",\"127.0.0.53\"],\"stale\":"
+        + stale
+        + ",\"detail\":null}";
+  }
+
+  @Test
+  void theResolversAreOneReadAtTheWorkspacesOwnPlace() {
+    stub.fallback(200, resolvers(true));
+
+    assertEquals(Optional.of(true), adapter().resolversStale("qits-ws-work-repo1234"));
+    assertEquals("GET", stub.last().method());
+    assertEquals(
+        "/containers/api/containers/" + OWNER + "/workspace/qits-ws-work-repo1234/resolvers",
+        stub.last().path());
+  }
+
+  @Test
+  void resolversThatAreStillTodaysAreNotStale() {
+    stub.fallback(200, resolvers(false));
+
+    assertEquals(Optional.of(false), adapter().resolversStale("qits-ws-work-repo1234"));
+  }
+
+  @Test
+  void aPlaceWithNoRowHasNoResolversToSpeakOf() {
+    stub.fallback(404, "{\"code\":\"NOT_FOUND\",\"message\":\"no such place\"}");
+
+    assertEquals(Optional.empty(), adapter().resolversStale("qits-ws-work-repo1234"));
+  }
+
+  @Test
+  void anOrchestratorThatCannotBeAskedSaysNothingAboutResolvers() {
+    stub.fallback(503, "{\"code\":\"UNAVAILABLE\",\"message\":\"down\"}");
+    assertEquals(Optional.empty(), adapter().resolversStale("qits-ws-work-repo1234"));
+
+    WorkspaceContainers nobodyThere = adapter();
+    nobodyThere.containers =
+        new ContainersClient(
+            "http://127.0.0.1:1", Duration.ofSeconds(1), Duration.ofSeconds(1), Optional::empty);
+    assertEquals(Optional.empty(), nobodyThere.resolversStale("qits-ws-work-repo1234"));
+  }
+
   @Test
   void theWorkspaceListingIsOneCallMatchedOnNames() {
     // One call and not one per workspace: this backs the workspace list endpoint, which a browser

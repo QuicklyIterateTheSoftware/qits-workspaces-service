@@ -105,6 +105,9 @@ public class FakeContainerRuntime implements ContainerRuntime {
   @Override
   public String run(String repoId, String workspaceId, Long rowId, String branch, String parent) {
     String name = containerName(workspaceId, repoId);
+    if (throwOnRun.remove(name)) {
+      throw new RuntimeException("fake run failure for " + name);
+    }
     Path dir = workspaceDir(repoId, workspaceId);
     try {
       Files.createDirectories(dir.getParent());
@@ -208,6 +211,31 @@ public class FakeContainerRuntime implements ContainerRuntime {
     return byName.containsKey(container) && !stopped.contains(container);
   }
 
+  /** What {@link #resolversStale} answers per container; absent reads as "could not be learned". */
+  private final Map<String, Boolean> resolversStale = new ConcurrentHashMap<>();
+
+  /**
+   * Test hook (qits-2231): what {@link #resolversStale} answers for this container — {@code null}
+   * forgets it, so it answers empty again, as an unreachable orchestrator or a 404 does.
+   */
+  public void resolversStale(String container, Boolean stale) {
+    if (stale == null) {
+      resolversStale.remove(container);
+    } else {
+      resolversStale.put(container, stale);
+    }
+  }
+
+  /** Forget every {@link #resolversStale(String, Boolean)} answer set. */
+  public void forgetResolvers() {
+    resolversStale.clear();
+  }
+
+  @Override
+  public java.util.Optional<Boolean> resolversStale(String container) {
+    return java.util.Optional.ofNullable(resolversStale.get(container));
+  }
+
   @Override
   public void start(String repoId, String workspaceId, Long rowId, String branch, String parent) {
     String container = containerName(workspaceId, repoId);
@@ -233,6 +261,13 @@ public class FakeContainerRuntime implements ContainerRuntime {
   private final java.util.List<String> teardownCalls =
       java.util.Collections.synchronizedList(new java.util.ArrayList<>());
   private final Set<String> throwOnStop = ConcurrentHashMap.newKeySet();
+
+  private final Set<String> throwOnRun = ConcurrentHashMap.newKeySet();
+
+  /** Test hook: the next {@link #run} of this container throws instead of starting it. */
+  public void throwOnNextRun(String container) {
+    throwOnRun.add(container);
+  }
 
   /** Test hook: the next {@link #stop} call against this container throws instead of pausing it. */
   public void throwOnNextStop(String container) {

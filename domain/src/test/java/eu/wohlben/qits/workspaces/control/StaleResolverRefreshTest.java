@@ -12,9 +12,13 @@ import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import io.quarkus.arc.ClientProxy;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.enterprise.inject.Instance;
+import jakarta.enterprise.inject.literal.NamedLiteral;
+import jakarta.enterprise.inject.spi.CDI;
 import jakarta.inject.Inject;
 import java.time.Clock;
 import java.time.Duration;
@@ -34,6 +38,10 @@ import org.junit.jupiter.api.Test;
  * row whose lease reads its resolvers stale is refreshed once its slot is idle, and never when the
  * slot is busy or cannot be asked, when the lease is not stale, or when the row is not a RUNNING
  * TARGET one; a refusal is logged and the pass goes on.
+ *
+ * <p>The DIRECT leg (qits-2231) against {@link FakeContainerRuntime}: a RUNNING DIRECT row whose
+ * container reads its resolvers stale is removed and run again on its volume once idle, never when
+ * busy, not stale or unknown, not again within the cooldown — and with no target to be had at all.
  */
 @QuarkusTest
 public class StaleResolverRefreshTest {
@@ -47,6 +55,7 @@ public class StaleResolverRefreshTest {
   @Inject FakeWorkspaceDaemonProvisioner provisioner;
   @Inject FakeAgentDaemon agentDaemon;
   @Inject TestAgents agents;
+  @Inject FakeContainerRuntime containers;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -81,6 +90,7 @@ public class StaleResolverRefreshTest {
     agents.retireAll();
     agentDaemon.reset();
     rows.clear();
+    containers.forgetResolvers();
     placement.reset();
     commissioner.reset();
     provisioner.reset();
@@ -246,7 +256,153 @@ public class StaleResolverRefreshTest {
     assertEquals(List.of(), pass.refreshed());
   }
 
+  // --- the DIRECT leg (qits-2231) ----------------------------------------------------------------
+
+  @Test
+  public void anIdleDirectContainerWithStaleResolversIsRunAgainOnItsVolume() throws Exception {
+    Workspace row = runningDirectRow("direct-stale");
+    String name = containerOf(row);
+    agents.placeOn(row.repositoryId, row.id, "qits-5"); // idle: its check says not busy
+    containers.clearTeardownCalls();
+    containers.resolversStale(name, true);
+
+    StaleResolverRefresh.Pass pass = refresh.refreshStale();
+
+    assertEquals(List.of(row.id), pass.refreshed());
+    assertEquals(List.of("stop:" + name, "rm:" + name), containers.teardownCalls());
+    assertEquals(2, containers.runCount(name), "run once to start, and once again by the refresh");
+    assertTrue(containers.isRunning(name));
+    assertTrue(
+        containers.listWorkspaceVolumes().stream()
+            .anyMatch(v -> v.workspaceId().equals(row.workspaceId)),
+        "the work volume is kept");
+    assertEquals(WorkspaceRuntimeStatus.RUNNING, read(row.id).runtimeStatus);
+    assertEquals(List.of(), refreshes(), "no lease is refreshed for a DIRECT row");
+  }
+
+  @Test
+  public void aDirectRecreateWhoseRunFailsMarksTheRowFailedAndKeepsTheVolume() throws Exception {
+    Workspace row = runningDirectRow("direct-run-fails");
+    String name = containerOf(row);
+    agents.placeOn(row.repositoryId, row.id, "qits-7");
+    containers.clearTeardownCalls();
+    containers.resolversStale(name, true);
+    containers.throwOnNextRun(name);
+
+    StaleResolverRefresh.Pass pass = refresh.refreshStale();
+
+    assertEquals(List.of(row.id), pass.refused());
+    assertEquals(List.of("stop:" + name, "rm:" + name), containers.teardownCalls());
+    assertEquals(
+        WorkspaceRuntimeStatus.FAILED,
+        read(row.id).runtimeStatus,
+        "a row whose container is gone does not read RUNNING");
+    assertTrue(
+        containers.listWorkspaceVolumes().stream()
+            .anyMatch(v -> v.workspaceId().equals(row.workspaceId)),
+        "the work volume is kept");
+  }
+
+  @Test
+  public void aBusyDirectSlotIsSkippedAndNothingIsRemoved() throws Exception {
+    Workspace row = runningDirectRow("direct-busy");
+    String name = containerOf(row);
+    UUID agent = agents.placeOn(row.repositoryId, row.id, "qits-6");
+    agentDaemon.leftover(
+        agent.toString(), new AgentDaemon.CleanupCheck(true, List.of(), List.of(), true));
+    containers.clearTeardownCalls();
+    containers.resolversStale(name, true);
+
+    StaleResolverRefresh.Pass pass = refresh.refreshStale();
+
+    assertEquals(List.of(row.id), pass.busy());
+    assertEquals(List.of(), pass.refreshed());
+    assertEquals(List.of(), containers.teardownCalls(), "a busy harness is never restarted");
+    assertEquals(1, containers.runCount(name));
+  }
+
+  @Test
+  public void aDirectContainerThatIsNotStaleOrCannotSayIsLeftAlone() throws Exception {
+    Workspace fresh = runningDirectRow("direct-fresh");
+    Workspace unknown = runningDirectRow("direct-unknown");
+    containers.resolversStale(containerOf(fresh), false);
+    containers.resolversStale(containerOf(unknown), null); // unreachable, refused, or a 404
+    containers.clearTeardownCalls();
+
+    StaleResolverRefresh.Pass pass = refresh.refreshStale();
+
+    assertEquals(List.of(), pass.refreshed());
+    assertEquals(List.of(), pass.busy());
+    assertEquals(List.of(), pass.refused());
+    assertEquals(List.of(), containers.teardownCalls());
+    assertEquals(1, containers.runCount(containerOf(fresh)));
+    assertEquals(1, containers.runCount(containerOf(unknown)));
+  }
+
+  @Test
+  public void aDirectContainerStillStaleIsRunAgainOnlyAfterTheCooldown() throws Exception {
+    Instant start = Instant.parse("2026-11-14T12:00:00Z");
+    refresh.clock(Clock.fixed(start, ZoneOffset.UTC));
+    Workspace row = runningDirectRow("direct-cooldown");
+    String name = containerOf(row);
+    containers.resolversStale(name, true);
+
+    assertEquals(List.of(row.id), refresh.refreshStale().refreshed());
+    assertEquals(2, containers.runCount(name));
+
+    refresh.clock(Clock.fixed(start.plus(Duration.ofMinutes(29)), ZoneOffset.UTC));
+    assertEquals(List.of(), refresh.refreshStale().refreshed(), "within the cooldown");
+    assertEquals(2, containers.runCount(name));
+
+    refresh.clock(Clock.fixed(start.plus(Duration.ofMinutes(30)), ZoneOffset.UTC));
+    assertEquals(List.of(row.id), refresh.refreshStale().refreshed(), "the cooldown is over");
+    assertEquals(3, containers.runCount(name));
+  }
+
+  @Test
+  public void theDirectLegRunsWithNoTargetToBeHad() throws Exception {
+    Workspace row = runningDirectRow("direct-no-target");
+    String name = containerOf(row);
+    containers.resolversStale(name, true);
+    StaleResolverRefresh bean = ClientProxy.unwrap(refresh);
+    Instance<TargetPlacement> present = bean.placement;
+    bean.placement = CDI.current().select(TargetPlacement.class, NamedLiteral.of("no-target"));
+    try {
+      assertFalse(bean.placement.isResolvable());
+
+      assertEquals(List.of(row.id), refresh.refreshStale().refreshed());
+      assertEquals(2, containers.runCount(name));
+    } finally {
+      bean.placement = present;
+    }
+  }
+
+  @Test
+  public void theDirectLegRunsWhenTheLeaseListingCannotBeRead() throws Exception {
+    Workspace row = runningDirectRow("direct-no-listing");
+    containers.resolversStale(containerOf(row), true);
+    placement.unreachable(new LeaseRefused(-1, null, "qits-system could not be asked", null));
+
+    assertEquals(List.of(row.id), refresh.refreshStale().refreshed());
+  }
+
   // --- helpers -----------------------------------------------------------------------------------
+
+  /** An admin row on the platform host reading RUNNING, its container run in the fake. */
+  private Workspace runningDirectRow(String label) throws Exception {
+    Workspace created =
+        workspaceService.createWorkspace(repo(), label, "master", label, null, false, false, true);
+    rows.add(created.id);
+    Workspace row = read(created.id);
+    assertEquals(WorkspacePlacement.DIRECT, row.placement);
+    containers.run(row.repositoryId, row.workspaceId, row.id, row.branch, row.parent);
+    update(created.id, w -> w.runtimeStatus = WorkspaceRuntimeStatus.RUNNING);
+    return read(created.id);
+  }
+
+  private String containerOf(Workspace row) {
+    return containers.containerName(row.workspaceId, row.repositoryId);
+  }
 
   private String repo() throws Exception {
     String repoId = TestOrigin.create(dataDir);

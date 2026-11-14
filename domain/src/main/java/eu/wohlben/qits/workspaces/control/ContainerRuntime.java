@@ -2,6 +2,7 @@ package eu.wohlben.qits.workspaces.control;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * The per-workspace container runtime. A workspace is a branch (host-side, in the mirror and on the
@@ -142,6 +143,17 @@ public interface ContainerRuntime {
    * state, not mere presence.
    */
   boolean isRunning(String container);
+
+  /**
+   * Whether this container's DNS resolvers are stale (qits-2231): it is on the private edge, and its
+   * first resolver is no longer the edge's VIP of today. The VIP is resolved only when the
+   * container is run, so a container run before the edge service was recreated keeps the dead one
+   * — and every private name then resolves to the public edge — until it is run again.
+   *
+   * <p>Empty when it could not be learned — the orchestrator unreachable, a refusal, or no
+   * container at that place — which a caller reads as "nothing to do", never as stale.
+   */
+  Optional<Boolean> resolversStale(String container);
 
   /**
    * Brings a present-but-stopped workspace back up — the recovery for a container that died

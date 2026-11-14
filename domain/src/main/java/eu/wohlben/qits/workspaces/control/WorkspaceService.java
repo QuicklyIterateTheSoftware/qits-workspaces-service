@@ -1899,6 +1899,106 @@ public class WorkspaceService {
   private record BranchParent(String branch, String parent, String entityId) {}
 
   /**
+   * What every ensure of this row's container presents besides its identity, read off the row in
+   * one place, so a recreate that is not a start ({@link #recreateDirectContainerKeepingVolume})
+   * cannot present a spec the start would not.
+   */
+  private static BranchParent branchParentOf(Workspace wt) {
+    return new BranchParent(wt.branch, wt.parent, wt.entityId);
+  }
+
+  /** A RUNNING DIRECT row's identity, as {@link #recreateDirectContainerKeepingVolume} reads it. */
+  private record DirectRecreate(String repoId, String workspaceId, BranchParent spec) {}
+
+  /**
+   * Recreates a RUNNING DIRECT row's container on the volume it already has (qits-2231): a graceful
+   * stop, the {@link ContainerRuntime#rm} — which never takes the per-workspace volume — and a
+   * {@link ContainerRuntime#run} with exactly the arguments the row's provision presents. The fresh
+   * run is the point: qits-containers decides a {@code privateEdge} container's resolvers only at a
+   * run, so this is how a container that kept a moved edge VIP gets today's. The checkout, unpushed
+   * commits included, survives on the volume; every process in the container is restarted.
+   *
+   * <p><b>Not the recreate door, and never one of the delete paths</b>: those take the work volume,
+   * this never touches it ({@link ContainerRuntime#removeWorkspaceVolume} is not called). No
+   * credential is commissioned either: the row still holds its workspace token, and the factory
+   * reads it off the row at every ensure, so the new container presents the same one ({@link
+   * WorkspaceCredentials}). A recreate that runs does not write the row: it stays RUNNING, and its
+   * daemon dials home as after any daemon restart.
+   *
+   * <p><b>A stop wins.</b> The run is made under the row's guard and only while no stop has been
+   * counted since this began, so a stop that landed meanwhile leaves the container removed and the
+   * row the stop's; its next start provisions on the kept volume. A run that throws marks the row
+   * FAILED (with {@code WorkspaceFailed}), as any start that did not come up does, rather than leave
+   * it RUNNING with no container, and is rethrown for the caller to log.
+   *
+   * <p>Whether the slot is idle is the caller's to have asked: this restarts whatever runs in it.
+   *
+   * @return false, having touched nothing, when the row is no longer an ACTIVE, DIRECT and RUNNING
+   *     one; and false after the rm when a stop overtook it
+   */
+  public boolean recreateDirectContainerKeepingVolume(Long rowId) {
+    DirectRecreate row =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  Workspace wt = workspaceRepository.findActiveById(rowId).orElse(null);
+                  if (wt == null
+                      || wt.placement != WorkspacePlacement.DIRECT
+                      || wt.runtimeStatus != WorkspaceRuntimeStatus.RUNNING) {
+                    return null;
+                  }
+                  // The DIRECT ladder's gate (qits-780), before any qits-containers call.
+                  WorkspacePlacements.requireDirectAllowed(wt);
+                  return new DirectRecreate(wt.repositoryId, wt.workspaceId, branchParentOf(wt));
+                });
+    if (row == null) {
+      return false;
+    }
+    long epoch;
+    synchronized (guard(rowId)) {
+      epoch = stopEpoch(rowId);
+    }
+    String container = containers.containerName(row.workspaceId(), row.repoId());
+    stopBeforeRemove(container);
+    containers.rm(container);
+    synchronized (guard(rowId)) {
+      if (stopEpoch(rowId) != epoch) {
+        LOG.infof(
+            "Workspace %s was stopped while its container was recreated; it is left removed, its"
+                + " volume kept, for its next start",
+            rowId);
+        return false;
+      }
+      try {
+        containers.run(
+            row.repoId(),
+            row.workspaceId(),
+            rowId,
+            row.spec().branch(),
+            row.spec().parent(),
+            row.spec().entityId(),
+            null);
+      } catch (RuntimeException e) {
+        // The old container is gone, so the row must not keep reading RUNNING: a recreate that
+        // could not run is a FAILED row like every other start that did not come up, and its
+        // volume is still there for the next start.
+        String error = truncate(e.getMessage());
+        RuntimeMark mark =
+            QuarkusTransaction.requiringNew()
+                .call(
+                    () ->
+                        markRuntime(
+                            row.repoId(), row.workspaceId(), WorkspaceRuntimeStatus.FAILED, error));
+        if (mark != null && mark.was() != WorkspaceRuntimeStatus.FAILED) {
+          announceRuntime(mark.rowId(), row.repoId(), WorkspaceRuntimeStatus.FAILED, error);
+        }
+        throw e;
+      }
+    }
+    return true;
+  }
+
+  /**
    * Guarantees a running container for an ACTIVE workspace whose branch still exists, provisioning
    * one on demand — the container is a recreatable cache of the durable branch, so losing it is a
    * non-event. Idempotent:
@@ -2194,7 +2294,7 @@ public class WorkspaceService {
                   if (containers.isRunning(container)) {
                     return null; // already running — nothing to provision
                   }
-                  return new BranchParent(wt.branch, wt.parent, wt.entityId);
+                  return branchParentOf(wt);
                 });
     if (snapshot == null) {
       // The RUNNING stamp is written here rather than in the snapshot, so it is checked against a

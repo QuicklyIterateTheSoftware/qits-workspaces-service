@@ -278,6 +278,18 @@ public class WorkspaceRepository implements PanacheRepository<Workspace> {
     return list("leaseId is not null order by id");
   }
 
+  /**
+   * Every ACTIVE DIRECT row that reads RUNNING (qits-2231): the platform-host containers whose
+   * resolvers the stale-resolver pass asks qits-containers about.
+   */
+  public List<Workspace> findActiveDirectRunning() {
+    return list(
+        "status = ?1 and placement = ?2 and runtimeStatus = ?3 order by id",
+        WorkspaceStatus.ACTIVE,
+        WorkspacePlacement.DIRECT,
+        WorkspaceRuntimeStatus.RUNNING);
+  }
+
   /** The runtime statuses a lease-less TARGET row may not keep for long (qits-1592). */
   private static final List<WorkspaceRuntimeStatus> LIVE_WITHOUT_A_LEASE =
       List.of(WorkspaceRuntimeStatus.RUNNING, WorkspaceRuntimeStatus.PROVISIONING);

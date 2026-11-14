@@ -11,7 +11,9 @@ import org.jboss.logging.Logger;
  * qits.workspaces.target-leases.resolver-refresh-interval} (PT5M; {@code off} switches it off)
  * (qits-2091): an idle TARGET workspace whose lease reads {@code resolversStale} has its lease
  * refreshed, so its runner recreates the container on the same work volume with the node's current
- * resolvers. A pass never overlaps the one before it.
+ * resolvers; and an idle DIRECT workspace whose container still resolves through a moved private
+ * edge VIP has that container recreated on its volume (qits-2231). A pass never overlaps the one
+ * before it.
  */
 @ApplicationScoped
 public class StaleResolverSweep {

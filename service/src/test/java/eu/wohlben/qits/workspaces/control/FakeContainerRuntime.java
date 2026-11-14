@@ -196,6 +196,12 @@ public class FakeContainerRuntime implements ContainerRuntime {
     return byName.containsKey(container) && !stopped.contains(container);
   }
 
+  /** No container here ever learned its resolvers: the stale-resolver pass leaves them all alone. */
+  @Override
+  public java.util.Optional<Boolean> resolversStale(String container) {
+    return java.util.Optional.empty();
+  }
+
   @Override
   public void start(String repoId, String workspaceId, Long rowId, String branch, String parent) {
     String container = containerName(workspaceId, repoId);

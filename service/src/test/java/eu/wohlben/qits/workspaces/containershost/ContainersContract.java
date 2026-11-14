@@ -61,8 +61,14 @@ public final class ContainersContract {
   static final String RUNNING = "a running workspace container";
   static final String IMAGE_MISSING = "no workspace container, and an image the registry does not hold";
 
+  // Recorded by qits-containers for the workspace workload (golden masters 2026.1114.40637).
+  static final String EDGE_MOVED = "a running workspace container whose private edge moved";
+
   /** A slot is started, and torn down when its agents are gone (D2), by the scheduler. */
   static final Trigger RECONCILE = Trigger.schedule("AgentService.reconcile");
+
+  /** A DIRECT container's resolvers are asked about by the stale-resolver pass (qits-2231). */
+  static final Trigger STALE_RESOLVERS = Trigger.schedule("StaleResolverSweep.sweep");
 
   private static final String REPO = "repo12345678abc";
 
@@ -171,7 +177,28 @@ public final class ContainersContract {
                   "deleteContainer",
                   Request.NONE,
                   GoldenMasters.A_JSON_BODY,
-                  (url, params) -> adapter(url, params).rm(params.get("ref")))))
+                  (url, params) -> adapter(url, params).rm(params.get("ref"))),
+              // --- recorded since qits-containers' golden masters of qits-2231 ---------------
+              // The pass reads `stale` alone: true is the one answer that recreates a container.
+              ContractRow.of(
+                  STALE_RESOLVERS,
+                  EDGE_MOVED,
+                  "getContainerResolvers",
+                  Request.NONE,
+                  List.of("$.stale"),
+                  (url, params) ->
+                      assertEquals(
+                          Optional.of(true), adapter(url, params).resolversStale(params.get("ref")))),
+              // No row at the place: a 404, which resolversStale reads as "could not be learned".
+              ContractRow.of(
+                  STALE_RESOLVERS,
+                  NO_CONTAINER,
+                  "getContainerResolvers",
+                  Request.NONE,
+                  List.of(),
+                  (url, params) ->
+                      assertEquals(
+                          Optional.empty(), adapter(url, params).resolversStale(params.get("ref"))))))
           .via(ContainersClientPact.VIA);
 
   /**

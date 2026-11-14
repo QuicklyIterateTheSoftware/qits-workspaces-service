@@ -9,6 +9,7 @@ import eu.wohlben.qits.containers.client.ContainersWire.Observed;
 import eu.wohlben.qits.containers.client.ContainersWire.Policy;
 import eu.wohlben.qits.containers.client.ContainersWire.PullPolicy;
 import eu.wohlben.qits.containers.client.ContainersWire.Recreate;
+import eu.wohlben.qits.containers.client.ContainersWire.Resolvers;
 import eu.wohlben.qits.containers.client.ContainersWire.Security;
 import eu.wohlben.qits.containers.client.ContainersWire.SharedMount;
 import eu.wohlben.qits.containers.client.ContainersWire.Spec;
@@ -408,8 +409,11 @@ public class WorkspaceContainers implements ContainerRuntime {
             // no tunnel. Only qits-containers can make that true: it joins qits-private and resolves
             // the edge's VIP there and the host's own upstream resolvers at each run, and it degrades
             // to exactly today's container when either is missing. The flag is never stored or
-            // hashed there, so turning it on recreates no running workspace; one picks it up at its
-            // next create. A runner lease (RunnerWorkspaceSpecs) never carries it: that is qits-1979.
+            // hashed there, so turning it on recreates no running workspace, and the VIP is read only
+            // at a run: a container run before the edge service was recreated keeps the dead VIP.
+            // StaleResolverRefresh asks for that (resolversStale) and recreates such a container,
+            // idle and on the same volume (qits-2231). A runner lease (RunnerWorkspaceSpecs) never
+            // carries it: that is qits-1979.
             .withPrivateEdge(true);
     // EXPLICIT: a workspace lives until somebody says otherwise, only a delete ends it, and the
     // orchestrator keeps it restarted. It is also what makes a spec change recreatable rather than a
@@ -546,6 +550,27 @@ public class WorkspaceContainers implements ContainerRuntime {
   @Override
   public boolean isRunning(String container) {
     return observed(container) == Observed.RUNNING;
+  }
+
+  /**
+   * Whether the container still resolves through a private edge VIP that has moved (qits-2231): one
+   * read of qits-containers' {@code …/resolvers}, which compares the resolvers docker recorded at
+   * the run with what a {@code privateEdge} run would get now. Empty for every answer that says
+   * nothing — unreachable, a refusal, a 404 (no row names this place) — and for a body that does not
+   * bind, so the one caller reads only a definite yes as a reason to recreate.
+   */
+  @Override
+  public Optional<Boolean> resolversStale(String container) {
+    ContainersAnswer<Resolvers> answer =
+        containers.resolvers(owner, WORKLOAD, ref(container), READ_TIMEOUT);
+    if (!answer.succeeded()) {
+      if (!gone(answer)) {
+        LOG.debugf("Could not read the resolvers of %s: %s", container, answer.detail());
+      }
+      return Optional.empty();
+    }
+    Resolvers resolvers = answer.value();
+    return resolvers == null ? Optional.empty() : Optional.of(resolvers.stale());
   }
 
   /**

@@ -100,6 +100,7 @@ class OutboundCallsGuardTest {
           "list", "listWorkloadContainers",
           "stop", "stopContainer",
           "delete", "deleteContainer",
+          "resolvers", "getContainerResolvers",
           "ensureVolume", "ensureVolume",
           "deleteVolume", "deleteVolume");
 

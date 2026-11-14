@@ -18,7 +18,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1111.30449"
+            "version": "2026.1114.40637"
           }
         }
       },
@@ -97,7 +97,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1111.30449"
+            "version": "2026.1114.40637"
           }
         }
       },
@@ -167,7 +167,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1111.30449"
+            "version": "2026.1114.40637"
           }
         }
       },
@@ -336,7 +336,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1111.30449"
+            "version": "2026.1114.40637"
           }
         }
       },
@@ -502,7 +502,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1111.30449"
+            "version": "2026.1114.40637"
           }
         }
       },
@@ -562,6 +562,137 @@
         "references": {
           "qits-call": {
             "app": "qits-containers-service",
+            "operationId": "getContainerResolvers"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "StaleResolverSweep.sweep"
+          },
+          "qits-via": {
+            "artifact": "eu.wohlben.qits:qits-containers-client",
+            "repository": "qits-containers-service",
+            "version": "2026.1114.40637"
+          }
+        }
+      },
+      "description": "StaleResolverSweep.sweep: getContainerResolvers",
+      "key": "f24cda52",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a running workspace container whose private edge moved",
+          "params": {
+            "owner": "qits-workspaces",
+            "ref": "contract-1",
+            "workload": "workspace"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/containers/api/containers/${owner}/${workload}/${ref}/resolvers",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/containers/api/containers/qits-workspaces/workspace/contract-1/resolvers"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "stale": true
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.stale": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-containers-service",
+            "operationId": "getContainerResolvers"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "schedule",
+            "schedule": "StaleResolverSweep.sweep"
+          },
+          "qits-via": {
+            "artifact": "eu.wohlben.qits:qits-containers-client",
+            "repository": "qits-containers-service",
+            "version": "2026.1114.40637"
+          }
+        }
+      },
+      "description": "StaleResolverSweep.sweep: getContainerResolvers",
+      "key": "e5497585",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "no workspace container at the place",
+          "params": {
+            "owner": "qits-workspaces",
+            "ref": "contract-1",
+            "workload": "workspace"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/containers/api/containers/${owner}/${workload}/${ref}/resolvers",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/containers/api/containers/qits-workspaces/workspace/contract-1/resolvers"
+      },
+      "response": {
+        "status": 404
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-containers-service",
             "operationId": "getContainer"
           },
           "qits-trigger": {
@@ -572,7 +703,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1111.30449"
+            "version": "2026.1114.40637"
           }
         }
       },
@@ -657,7 +788,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1111.30449"
+            "version": "2026.1114.40637"
           }
         }
       },
@@ -705,7 +836,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1111.30449"
+            "version": "2026.1114.40637"
           }
         }
       },
@@ -813,7 +944,7 @@
           "qits-via": {
             "artifact": "eu.wohlben.qits:qits-containers-client",
             "repository": "qits-containers-service",
-            "version": "2026.1111.30449"
+            "version": "2026.1114.40637"
           }
         }
       },
