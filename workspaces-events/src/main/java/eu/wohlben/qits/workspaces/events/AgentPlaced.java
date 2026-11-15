@@ -13,7 +13,8 @@ import java.util.UUID;
  * {@code AgentPlaced}, {@link AgentStarted}, {@link AgentStartRefused}, {@link AgentRequeued},
  * {@link AgentYielded}, {@link AgentResumed}, {@link AgentStopped}, {@link AgentObsolete}, {@link
  * AgentCleanupDeferred}, {@link AgentRemoved} and {@link AgentHarnessExited}, with {@link
- * WorkspaceStarted}, {@link WorkspaceFailed} and {@link WorkspaceRemoved} for the slot underneath. Each is one fact, so a
+ * WorkspaceStarted}, {@link WorkspaceFailed}, {@link WorkspaceStopped} and {@link
+ * WorkspaceRemoved} for the slot underneath. Each is one fact, so a
  * subscriber that wants one fact subscribes to one name — {@code qits wait --event AgentRemoved
  * --when 'agentId=<id>'} is the shape this family exists for.
  *

@@ -14,7 +14,7 @@
     <!-- qits-workspaces' event vocabulary (qits-1236): what this service announces about its agents
          and their workspaces. `AgentPlaced` through `AgentHarnessExited` (one per fact about an
          agent row; `AgentPlaced` states the family's conventions), and `WorkspaceStarted`,
-         `WorkspaceFailed`, `WorkspaceRemoved` for the slot underneath.
+         `WorkspaceFailed`, `WorkspaceStopped`, `WorkspaceRemoved` for the slot underneath.
 
          A module of its own for qits-ci's `ci-events` reason: a vocabulary is what a consumer needs,
          and nothing else in this repository is. It depends on `qits-eventstream` and on nothing

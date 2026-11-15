@@ -31,6 +31,7 @@ import eu.wohlben.qits.workspaces.events.DeskWaitClosed;
 import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
 import eu.wohlben.qits.workspaces.events.WorkspaceRemoved;
 import eu.wohlben.qits.workspaces.events.WorkspaceStarted;
+import eu.wohlben.qits.workspaces.events.WorkspaceStopped;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.enterprise.inject.Any;
@@ -79,6 +80,7 @@ class EventWireReflectionTest {
             AgentHarnessExited.class,
             WorkspaceStarted.class,
             WorkspaceFailed.class,
+            WorkspaceStopped.class,
             WorkspaceRemoved.class,
             DeskWaitClosed.class,
             AgentWaitOpened.class,

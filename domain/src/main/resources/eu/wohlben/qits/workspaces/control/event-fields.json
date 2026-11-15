@@ -537,6 +537,10 @@
     "WorkspaceFailed": {
       "repositoryId": "scalar", "runtimeError": "scalar", "workspaceId": "scalar"
     },
+    "WorkspaceStopped": {
+      "affectedAgentIds": ["scalar"], "reason": "scalar", "repositoryId": "scalar", "stoppedBy": "scalar",
+      "workspaceId": "scalar"
+    },
     "WorkspaceRemoved": {
       "reason": "scalar", "repositoryId": "scalar", "workspaceId": "scalar"
     },

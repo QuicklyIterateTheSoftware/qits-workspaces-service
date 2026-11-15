@@ -99,6 +99,9 @@ class LifecycleEventsContractTest {
         new WorkspaceRemoved("385", REPO, WorkspaceRemoved.NO_AGENT_LEFT, AT),
         List.of("reason", "repositoryId", "workspaceId"));
     out.put(
+        new WorkspaceStopped("385", REPO, "alice", "stop-container by alice", List.of(AGENT), AT),
+        List.of("affectedAgentIds", "reason", "repositoryId", "stoppedBy", "workspaceId"));
+    out.put(
         deskWaitMatched(),
         List.of(
             "closedAt", "eventName", "label", "matchedEventId", "projectId", "state", "turn", "waitId"));
@@ -159,6 +162,7 @@ class LifecycleEventsContractTest {
             "WorkspaceStarted",
             "WorkspaceFailed",
             "WorkspaceRemoved",
+            "WorkspaceStopped",
             "DeskWaitClosed",
             "AgentWaitOpened",
             "AgentWaitChanged",

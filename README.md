@@ -246,7 +246,7 @@ The `eventstream` database is named explicitly because the derived default would
 other consumer of that library on the same postgres; `db` takes the derived `qits_workspaces`.
 
 **The event bus needs nothing else.** This service publishes the agent and workspace lifecycle
-(`AgentPlaced` … `AgentRemoved`, `WorkspaceStarted`/`Failed`/`Removed`; qits-1236, see AGENTS.md,
+(`AgentPlaced` … `AgentRemoved`, `WorkspaceStarted`/`Failed`/`Stopped`/`Removed`; qits-1236, see AGENTS.md,
 "The lifecycle events"), listens once for declared waits, and stamps the causation id on every push;
 an event the inline PUT does not deliver waits in the outbox database above. Every remaining key
 ships as a default — `qits.events.url` is the qits-net alias. Set it when the bus lives somewhere
