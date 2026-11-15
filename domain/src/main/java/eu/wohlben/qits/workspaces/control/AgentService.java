@@ -32,6 +32,7 @@ import eu.wohlben.qits.workspaces.events.AgentStarted;
 import eu.wohlben.qits.workspaces.events.AgentStopped;
 import eu.wohlben.qits.workspaces.events.AgentYielded;
 import eu.wohlben.qits.workspaces.events.WorkspaceRemoved;
+import eu.wohlben.qits.workspaces.events.WorkspaceStopped;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWaitRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
@@ -432,6 +433,16 @@ public class AgentService {
    * pass. An accepted start ends the row. In memory: a restart places it again at once.
    */
   private final Map<UUID, Requeued> requeued = new ConcurrentHashMap<>();
+
+  /**
+   * The STOPPED slots a pass asked to start for an agent with a turn to hear (qits-2265), by
+   * workspace row id, under {@link #requeued}'s backoff: the first ask is made at once, and one that
+   * left the row STOPPED (refused, or qits-system could not be asked) is not made again before
+   * {@link #REQUEUE_BACKOFF}, doubled up to {@link #REQUEUE_BACKOFF_MAX}, so a slot that cannot
+   * start is not asked every pass. Its daemon connecting, or a start accepted there, ends the row.
+   * In memory: a restart asks again at once.
+   */
+  private final Map<Long, Requeued> slotStarts = new ConcurrentHashMap<>();
 
   /**
    * The queued agents whose wait for a workspace slot was logged, so it is logged once and not every
@@ -1697,6 +1708,7 @@ public class AgentService {
    */
   public void onDaemonConnection(Long workspaceRowId) {
     started.values().removeIf(row -> Objects.equals(row, workspaceRowId));
+    slotStarts.remove(workspaceRowId);
     kick();
   }
 
@@ -2494,10 +2506,18 @@ public class AgentService {
     Workspace workspace =
         QuarkusTransaction.requiringNew()
             .call(() -> workspaceRepository.findByIdOptional(agent.workspaceId).orElse(null));
-    if (workspace == null
-        || workspace.status != WorkspaceStatus.ACTIVE
-        || !daemonLive(workspace.id)
-        || !daemon.isResolvable()) {
+    if (workspace == null || workspace.status != WorkspaceStatus.ACTIVE) {
+      return;
+    }
+    if (!daemonLive(workspace.id)) {
+      // A turn it has still to hear wants the slot up (qits-2265); with none, a yielded agent in a
+      // stopped slot leaves it stopped.
+      if (require(agent.id).pendingText != null) {
+        startStoppedSlot(agent, workspace);
+      }
+      return;
+    }
+    if (!daemon.isResolvable()) {
       return;
     }
     start(agent, workspace, daemon.get(), false);
@@ -2552,7 +2572,14 @@ public class AgentService {
         return;
       }
     }
-    if (!daemonLive(workspace.id) || !daemon.isResolvable()) {
+    if (!daemonLive(workspace.id)) {
+      // A RUNNING agent has a turn to hear or a start to make, and neither happens in a slot no
+      // daemon serves: a STOPPED one is started for it (qits-2265), where every pass used to
+      // return here and its wake was never said.
+      startStoppedSlot(agent, workspace);
+      return;
+    }
+    if (!daemon.isResolvable()) {
       return;
     }
     AgentDaemon port = daemon.get();
@@ -2643,15 +2670,7 @@ public class AgentService {
     }
     Instant now = Instant.now();
     Requeued again =
-        requeued.merge(
-            agent.id,
-            new Requeued(1, now),
-            (before, first) -> {
-              int times = before.times() + 1;
-              Duration wait = REQUEUE_BACKOFF.multipliedBy(1L << Math.min(times - 2, 10));
-              return new Requeued(
-                  times, now.plus(wait.compareTo(REQUEUE_BACKOFF_MAX) > 0 ? REQUEUE_BACKOFF_MAX : wait));
-            });
+        requeued.merge(agent.id, new Requeued(1, now), (before, first) -> again(before, now));
     String why =
         workspace.runtimeError == null || workspace.runtimeError.isBlank()
             ? "it failed to start"
@@ -2676,6 +2695,17 @@ public class AgentService {
             detail,
             now));
     recordRefusal(workspace.id, agent, detail);
+  }
+
+  /**
+   * One more in a row after {@code before}: the first repeat waits {@link #REQUEUE_BACKOFF}, each
+   * further one twice the last, up to {@link #REQUEUE_BACKOFF_MAX}.
+   */
+  private static Requeued again(Requeued before, Instant now) {
+    int times = before.times() + 1;
+    Duration wait = REQUEUE_BACKOFF.multipliedBy(1L << Math.min(times - 2, 10));
+    return new Requeued(
+        times, now.plus(wait.compareTo(REQUEUE_BACKOFF_MAX) > 0 ? REQUEUE_BACKOFF_MAX : wait));
   }
 
   /**
@@ -2727,6 +2757,7 @@ public class AgentService {
     }
     lastRefusal.remove(agent.id);
     requeued.remove(agent.id);
+    slotStarts.remove(workspace.id);
     boolean told = withTurn && answer.launched();
     AgentWorktree live =
         QuarkusTransaction.requiringNew()
@@ -3335,6 +3366,98 @@ public class AgentService {
     if (workspace.runtimeStatus == WorkspaceRuntimeStatus.STOPPED
         || workspace.runtimeStatus == WorkspaceRuntimeStatus.FAILED) {
       startQuietly(workspace.id);
+    }
+  }
+
+  /**
+   * A pass's {@link #bringUp} (qits-2265): {@code workspace} reads STOPPED with no daemon, and
+   * {@code agent} — RUNNING, or YIELDED with a turn — is to be started there. Only a STOPPED row
+   * whose lease is over is asked: a QUEUED or PROVISIONING one is starting already, a FAILED one is
+   * {@link #drive}'s requeue, and one still naming its lease is ENDING, its ENDED a pass away (a
+   * start then would wait out the ending under the pass lock). Read again, an agent a person
+   * stopped, or one the stop yielded meanwhile with nothing to hear, asks nothing. The ask is
+   * throttled per slot ({@link #slotStarts}).
+   */
+  private void startStoppedSlot(AgentWorktree agent, Workspace workspace) {
+    if (workspace.runtimeStatus != WorkspaceRuntimeStatus.STOPPED || workspace.leaseId != null) {
+      return;
+    }
+    AgentWorktree fresh = require(agent.id);
+    if (halted(fresh)
+        || !Objects.equals(fresh.workspaceId, workspace.id)
+        || !(fresh.runState == AgentRunState.RUNNING
+            || (fresh.runState == AgentRunState.YIELDED && fresh.pendingText != null))) {
+      return;
+    }
+    Instant now = Instant.now();
+    Requeued asked = slotStarts.get(workspace.id);
+    if (asked != null && asked.notBefore().isAfter(now)) {
+      return;
+    }
+    // The ask itself is the first in a row: the next waits REQUEUE_BACKOFF, and further ones more.
+    Requeued next =
+        asked == null ? new Requeued(1, now.plus(REQUEUE_BACKOFF)) : again(asked, now);
+    slotStarts.put(workspace.id, next);
+    LOG.infof(
+        "Agent %s has %s in stopped workspace %s: starting it%s",
+        agent.id,
+        fresh.pendingText != null ? "a turn to hear" : "a start to make",
+        workspace.id,
+        next.times() > 1 ? " again (ask " + next.times() + " in a row)" : "");
+    startQuietly(workspace.id);
+  }
+
+  /**
+   * A live slot's container was stopped (qits-2265): by a person's or the desk's stop-container,
+   * or by its lease ending or exiting under it. Its RUNNING agents are YIELDED — the harness went
+   * with the container — announced {@code AgentYielded}, and forgotten as started, so the turn that
+   * wakes one brings the slot up ({@link #startStoppedSlot}) and starts it afresh rather than
+   * typing into a harness that is gone. STOPPED, QUEUED and YIELDED agents are left as they are,
+   * and a stopped agent stays stopped: no pass starts it or its slot. Then {@code
+   * WorkspaceStopped}, naming every live agent the slot hosted. After the firing transaction
+   * committed.
+   */
+  void onContainerStopped(
+      @Observes(during = TransactionPhase.AFTER_SUCCESS) WorkspaceContainerStopped stopped) {
+    try {
+      List<AgentWorktree> live =
+          QuarkusTransaction.requiringNew()
+              .call(() -> agents.findLiveByWorkspace(stopped.rowId()));
+      boolean yieldedAny = false;
+      for (AgentWorktree agent : live) {
+        if (agent.runState != AgentRunState.RUNNING || !writeYield(agent.id)) {
+          continue;
+        }
+        yieldedAny = true;
+        started.remove(agent.id);
+        pendingSince.remove(agent.id);
+        LOG.infof(
+            "Agent %s yielded: workspace %s was stopped (%s)",
+            agent.id, stopped.rowId(), stopped.reason());
+        announce(
+            new AgentYielded(
+                agent.id.toString(),
+                agent.workId,
+                idOf(stopped.rowId()),
+                agent.repositoryId,
+                Instant.now()));
+      }
+      // Asked afresh: whatever backoff an earlier ask left is not this stop's.
+      slotStarts.remove(stopped.rowId());
+      announce(
+          new WorkspaceStopped(
+              idOf(stopped.rowId()),
+              stopped.repositoryId(),
+              stopped.stoppedBy(),
+              stopped.reason(),
+              live.stream().map(a -> a.id.toString()).toList(),
+              Instant.now()));
+      if (yieldedAny) {
+        changePublisher.fire(
+            stopped.repositoryId(), stopped.rowId(), WorkspaceChangeHint.Topic.AGENTS);
+      }
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "Could not yield the agents of stopped workspace %s", stopped.rowId());
     }
   }
 

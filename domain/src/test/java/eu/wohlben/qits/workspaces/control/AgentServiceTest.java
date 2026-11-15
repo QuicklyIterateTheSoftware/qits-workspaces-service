@@ -27,6 +27,8 @@ import eu.wohlben.qits.workspaces.events.AgentRemoved;
 import eu.wohlben.qits.workspaces.events.AgentRequeued;
 import eu.wohlben.qits.workspaces.events.AgentResumed;
 import eu.wohlben.qits.workspaces.events.AgentStarted;
+import eu.wohlben.qits.workspaces.events.AgentYielded;
+import eu.wohlben.qits.workspaces.events.WorkspaceStopped;
 import eu.wohlben.qits.workspaces.persistence.AgentBranchRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
@@ -82,6 +84,7 @@ public class AgentServiceTest {
   @Inject RecordingLifecycleAnnouncer announced;
   @Inject AgentWaits waits;
   @Inject FakeAgentActivityView activityView;
+  @Inject WorkspaceService workspaceService;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String originsDir;
@@ -1218,6 +1221,54 @@ public class AgentServiceTest {
   private void setRunState(String agentId, AgentRunState runState) {
     QuarkusTransaction.requiringNew()
         .run(() -> agents.findById(UUID.fromString(agentId)).runState = runState);
+  }
+
+  /**
+   * qits-2265, on a DIRECT admin slot: a stop-container yields its RUNNING agent and forgets it as
+   * started, so the turn that wakes it starts the slot again; WorkspaceStopped names who and why.
+   */
+  @Test
+  void stoppingTheContainerYieldsItsRunningAgentAndAWakeStartsTheSlotAgain() {
+    AgentService.Dispatch dispatched = dispatch("w-stopped-slot", true, null);
+    String agentId = dispatched.agent().agentId();
+    UUID id = UUID.fromString(agentId);
+    Long slot = dispatched.agent().workspaceRowId();
+    service.awaitSchedulerIdle();
+    QuarkusTransaction.requiringNew()
+        .run(() -> workspaces.findById(slot).runtimeStatus = WorkspaceRuntimeStatus.RUNNING);
+    liveness.markLive(slot);
+    try {
+      service.reconcile();
+      assertTrue(service.isStarted(id));
+
+      workspaceService.stopContainer(slot, "alice");
+      liveness.markDead(slot);
+      service.onDaemonConnection(slot);
+      service.awaitSchedulerIdle();
+
+      assertEquals(WorkspaceRuntimeStatus.STOPPED, workspace(slot).runtimeStatus);
+      assertEquals(AgentRunState.YIELDED, row(agentId).runState);
+      assertFalse(service.isStarted(id), "its harness went with the container");
+      assertEquals(1, announced.of(AgentYielded.class, e -> e.agentId().equals(agentId)).size());
+      List<WorkspaceStopped> stopped =
+          announced.of(WorkspaceStopped.class, e -> e.workspaceId().equals(slot.toString()));
+      assertEquals(1, stopped.size());
+      assertEquals("alice", stopped.get(0).stoppedBy());
+      assertEquals("stop-container by alice", stopped.get(0).reason());
+      assertEquals(List.of(agentId), stopped.get(0).affectedAgentIds());
+
+      // Nothing to hear: the slot stays stopped. Then a wait's wake: the slot is started again.
+      service.reconcile();
+      assertEquals(WorkspaceRuntimeStatus.STOPPED, workspace(slot).runtimeStatus);
+      QuarkusTransaction.requiringNew()
+          .run(() -> agents.findById(id).pendingText = "Your wait \"ci\" timed out.");
+      service.reconcile();
+      assertEquals(AgentRunState.RUNNING, row(agentId).runState);
+      assertNotEquals(
+          WorkspaceRuntimeStatus.STOPPED, workspace(slot).runtimeStatus, "started for the turn");
+    } finally {
+      liveness.markDead(slot);
+    }
   }
 
   @Test

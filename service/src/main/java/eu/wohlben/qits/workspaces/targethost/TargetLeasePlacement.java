@@ -84,8 +84,10 @@ public class TargetLeasePlacement implements TargetPlacement {
   }
 
   @Override
-  public Optional<Lease> end(UUID leaseId) {
-    return optional("end lease " + leaseId, () -> system.endLease(authorization(), leaseId));
+  public Optional<Lease> end(UUID leaseId, String reason) {
+    String said = TargetPlacement.reason(reason);
+    return optional(
+        "end lease " + leaseId, () -> system.endLease(authorization(), leaseId, said));
   }
 
   @Override

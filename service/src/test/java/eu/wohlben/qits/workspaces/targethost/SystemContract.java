@@ -101,6 +101,12 @@ public final class SystemContract {
 
   private static final String BEARER = "{authorization}";
 
+  /**
+   * The {@code ?reason=} a stop-container sends with its end (qits-2265): the verb and the caller's
+   * principal, so the lease's detail and qits-system's audit say who stopped the slot.
+   */
+  static final String STOP_REASON = TargetPlacement.reason("stop-container", "alice");
+
   public static final ContractTable TABLE =
       new ContractTable(
           GoldenMasters.SYSTEM,
@@ -140,13 +146,13 @@ public final class SystemContract {
                       STOP,
                       A_QUEUED_LEASE,
                       "endLease",
-                      Request.NONE.header("Authorization", BEARER),
+                      Request.NONE.header("Authorization", BEARER).query("reason", STOP_REASON),
                       List.of("$.id", "$.state"),
                       (url, params) ->
                           assertEquals(
                               TargetPlacement.LeaseState.ENDED,
                               placementAgainst(url, params)
-                                  .end(leaseId(params))
+                                  .end(leaseId(params), STOP_REASON)
                                   .orElseThrow()
                                   .state())),
               ContractRow.of(
@@ -173,13 +179,13 @@ public final class SystemContract {
                       STOP,
                       A_RUNNING_LEASE,
                       "endLease",
-                      Request.NONE.header("Authorization", BEARER),
+                      Request.NONE.header("Authorization", BEARER).query("reason", STOP_REASON),
                       List.of("$.id", "$.state"),
                       (url, params) ->
                           assertEquals(
                               TargetPlacement.LeaseState.ENDING,
                               placementAgainst(url, params)
-                                  .end(leaseId(params))
+                                  .end(leaseId(params), STOP_REASON)
                                   .orElseThrow()
                                   .state())),
               ContractRow.of(

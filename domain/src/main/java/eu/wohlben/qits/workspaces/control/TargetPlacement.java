@@ -24,6 +24,27 @@ public interface TargetPlacement {
   /** How long a start or a delete waits for a previous lease to finish ending. */
   Duration ENDING_DEADLINE = Duration.ofSeconds(60);
 
+  /**
+   * The longest {@code ?reason=} qits-system's end takes (its {@code LeaseController.REASON_MAX}):
+   * a longer one is a 400, so {@link #reason} cuts every reason to it.
+   */
+  int REASON_MAX = 500;
+
+  /**
+   * {@code verb}, and {@code by <principal>} when the caller is known: the reason a person's door
+   * sends with its end (qits-2265), so qits-system's lease detail and audit say who ended it.
+   */
+  static String reason(String verb, String by) {
+    return by == null || by.isBlank() ? verb : verb + " by " + by;
+  }
+
+  /** {@code reason} cut to {@link #REASON_MAX}; null stays null. */
+  static String reason(String reason) {
+    return reason == null || reason.length() <= REASON_MAX
+        ? reason
+        : reason.substring(0, REASON_MAX);
+  }
+
   /** The slot type every lease of this service is. */
   String SLOT_TYPE = "WORKSPACE";
 
@@ -190,10 +211,12 @@ public interface TargetPlacement {
   Lease create(LeaseRequest request);
 
   /**
-   * {@code DELETE /system/api/leases/{id}}: the lease, ENDING or ENDED; empty when qits-system has
-   * no such lease, which is the same outcome.
+   * {@code DELETE /system/api/leases/{id}?reason=}: the lease, ENDING or ENDED; empty when
+   * qits-system has no such lease, which is the same outcome. {@code reason} (qits-2265) is why,
+   * in a few words of this service's — it lands in the lease's {@code detail} — and every caller
+   * sends one; the implementation cuts it to {@link #REASON_MAX}.
    */
-  Optional<Lease> end(UUID leaseId);
+  Optional<Lease> end(UUID leaseId, String reason);
 
   /** {@code GET /system/api/leases/{id}}; empty when there is no such lease. */
   Optional<Lease> get(UUID leaseId);

@@ -33,6 +33,7 @@ public class TargetLeasePlacementTest {
   private HttpServer server;
   private final AtomicReference<String> sentBody = new AtomicReference<>();
   private final AtomicReference<String> sentBearer = new AtomicReference<>();
+  private final AtomicReference<java.net.URI> sentUri = new AtomicReference<>();
 
   @AfterEach
   void stop() {
@@ -48,6 +49,7 @@ public class TargetLeasePlacementTest {
         exchange -> {
           sentBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
           sentBearer.set(exchange.getRequestHeaders().getFirst("Authorization"));
+          sentUri.set(exchange.getRequestURI());
           byte[] bytes = body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8);
           exchange.getResponseHeaders().add("Content-Type", "application/json");
           exchange.sendResponseHeaders(status, bytes.length == 0 ? -1 : bytes.length);
@@ -116,12 +118,32 @@ public class TargetLeasePlacementTest {
     assertTrue(refused.getMessage().contains("not a workspace image"), refused.getMessage());
   }
 
+  /** qits-2265: an end says why, cut to what qits-system takes (a longer reason would be a 400). */
+  @Test
+  public void anEndSendsItsReasonCutToWhatQitsSystemTakes() throws Exception {
+    UUID id = UUID.randomUUID();
+    String ended = "{\"id\":\"" + id + "\",\"ownerRef\":\"17\",\"state\":\"ENDED\"}";
+    TargetLeasePlacement placement = answering(200, ended);
+
+    placement.end(id, "stop-container by alice");
+    assertEquals("/system/api/leases/" + id, sentUri.get().getPath());
+    assertEquals("reason=stop-container by alice", sentQuery());
+
+    placement.end(id, "x".repeat(TargetPlacement.REASON_MAX + 20));
+    assertEquals("reason=" + "x".repeat(TargetPlacement.REASON_MAX), sentQuery());
+  }
+
+  /** The query the stub was sent, form-decoded as qits-system reads it ({@code +} is a space). */
+  private String sentQuery() {
+    return java.net.URLDecoder.decode(sentUri.get().getRawQuery(), StandardCharsets.UTF_8);
+  }
+
   @Test
   public void aMissingLeaseIsEmptyAndAMissingVolumeIsFalse() throws Exception {
     TargetLeasePlacement placement = answering(404, "{\"message\":\"No lease\"}");
 
     assertEquals(Optional.empty(), placement.get(UUID.randomUUID()));
-    assertEquals(Optional.empty(), placement.end(UUID.randomUUID()));
+    assertEquals(Optional.empty(), placement.end(UUID.randomUUID(), "stop-container by alice"));
     assertFalse(placement.purgeWorkVolume("ws-17"));
   }
 

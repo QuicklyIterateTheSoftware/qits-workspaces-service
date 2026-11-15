@@ -80,6 +80,12 @@ public class WorkspaceService {
    */
   @Inject Event<WorkspaceResolved> workspaceResolvedEvent;
 
+  /**
+   * A live row's container was stopped by {@link #stopContainer(Long, String)} (qits-2265): its
+   * reader yields the slot's RUNNING agents and announces {@code WorkspaceStopped}.
+   */
+  @Inject Event<WorkspaceContainerStopped> containerStopped;
+
   @Inject ContainerRuntime containers;
 
   /**
@@ -2178,9 +2184,17 @@ public class WorkspaceService {
    * re-runs {@link #provisionContainer}).
    */
   public String beginRecreateContainer(Long id) {
+    return beginRecreateContainer(id, null);
+  }
+
+  /**
+   * {@link #beginRecreateContainer(Long)}, by {@code by} — the caller's principal, which a TARGET
+   * row's lease end names to qits-system (qits-2265); null when unknown.
+   */
+  public String beginRecreateContainer(Long id, String by) {
     Workspace resolved = QuarkusTransaction.requiringNew().call(() -> requireActive(id));
     if (resolved.placement == WorkspacePlacement.TARGET) {
-      return beginTargetRecreate(resolved);
+      return beginTargetRecreate(resolved, by);
     }
     WorkspacePlacements.requireDirectAllowed(resolved);
     String repoId = resolved.repositoryId;
@@ -2530,19 +2544,46 @@ public class WorkspaceService {
    * then starts the paused container again instead of joining a start that never would.
    */
   public void stopContainer(Long id) {
+    stopContainer(id, null);
+  }
+
+  /**
+   * {@link #stopContainer(Long)}, by {@code by}: the caller's principal, null when unknown. A row
+   * this stop turns STOPPED fires {@link WorkspaceContainerStopped} (qits-2265) with {@code by} and
+   * the reason — {@code stop-container by <principal>}, which a TARGET row's lease end also sends
+   * qits-system — so the slot's RUNNING agents are YIELDED, and woken they bring it up again. A row
+   * that read STOPPED already fires nothing.
+   */
+  public void stopContainer(Long id, String by) {
+    String reason = TargetPlacement.reason(STOP_VERB, by);
     // Not @Transactional any more, and only so the TARGET branch can call qits-system outside a
     // transaction: the DIRECT body below runs in the transaction it always ran in, joined or begun.
     Workspace placed = QuarkusTransaction.joiningExisting().call(() -> requireActive(id));
     if (placed.placement == WorkspacePlacement.TARGET) {
-      stopOnTarget(placed);
+      stopOnTarget(placed, by, reason);
       return;
     }
     WorkspacePlacements.requireDirectAllowed(placed);
-    QuarkusTransaction.joiningExisting().run(() -> stopDirectContainer(id));
+    QuarkusTransaction.joiningExisting()
+        .run(
+            () -> {
+              if (stopDirectContainer(id) != WorkspaceRuntimeStatus.STOPPED) {
+                // Observed after this transaction commits, immediately when there is none.
+                containerStopped.fire(
+                    new WorkspaceContainerStopped(id, placed.repositoryId, by, reason));
+              }
+            });
   }
 
-  /** {@link #stopContainer} for a DIRECT row: the method body as it was before placement. */
-  private void stopDirectContainer(Long id) {
+  /** The verb a stop-container's reason names (qits-2265). */
+  private static final String STOP_VERB = "stop-container";
+
+  /**
+   * {@link #stopContainer} for a DIRECT row: the method body as it was before placement.
+   *
+   * @return the runtime status the row had before the stop
+   */
+  private WorkspaceRuntimeStatus stopDirectContainer(Long id) {
     Workspace workspace = requireActive(id);
     String repoId = workspace.repositoryId;
     String workspaceId = workspace.workspaceId;
@@ -2559,7 +2600,9 @@ public class WorkspaceService {
     containerEvents.fireStopping(
         repoId, workspaceId, workspace.id, true, liveAgentIds(workspace.id));
     containers.stop(containers.containerName(workspaceId, repoId));
+    WorkspaceRuntimeStatus was = workspace.runtimeStatus;
     workspace.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+    return was;
   }
 
   /**
@@ -2595,10 +2638,19 @@ public class WorkspaceService {
    * best-effort). The container is removed before the volume (docker refuses an in-use volume).
    */
   public void deleteContainer(Long id) {
+    deleteContainer(id, null);
+  }
+
+  /**
+   * {@link #deleteContainer(Long)}, by {@code by} — the caller's principal, which a TARGET row's
+   * lease end names to qits-system as {@code delete-container by <principal>} (qits-2265); null
+   * when unknown.
+   */
+  public void deleteContainer(Long id, String by) {
     // Not @Transactional any more, for stopContainer's reason; the DIRECT body is unchanged.
     Workspace placed = QuarkusTransaction.joiningExisting().call(() -> requireActive(id));
     if (placed.placement == WorkspacePlacement.TARGET) {
-      deleteOnTarget(placed);
+      deleteOnTarget(placed, TargetPlacement.reason("delete-container", by));
       return;
     }
     WorkspacePlacements.requireDirectAllowed(placed);
@@ -3321,7 +3373,7 @@ public class WorkspaceService {
     }
     TargetPlacement leases = targetPlacement.get();
     // qits-system holds one live lease per owner ref: a previous one has to be over first.
-    retirePreviousLease(row, leases, "start");
+    retirePreviousLease(row, leases, "start", "retired by a new start");
     // A row a retired runner held is adopted only on the target that holds its volume: with none
     // installed yet it waits, asking for no lease and minting no token (legacyPin).
     LegacyPin legacy = legacyPin(row.id, leases);
@@ -3405,7 +3457,7 @@ public class WorkspaceService {
           row.repositoryId, row.workspaceId, lease.id());
       leaseStates.forget(row.id, process);
       leaseStates.forgetProvision(row.id, provision);
-      endQuietly(leases, lease.id(), row.id);
+      endQuietly(leases, lease.id(), row.id, "start lost the lease race");
       if (process != null) {
         process.completeNoOp(
             TargetLeaseStates.QUEUED_SEGMENT,
@@ -3532,9 +3584,11 @@ public class WorkspaceService {
    * Ends the lease {@code row} still names, if any, and waits until qits-system reports it ENDED,
    * then clears it off the row with its token. 504 {@code TARGET_TIMEOUT} when it is still ending
    * after {@link TargetPlacement#ENDING_DEADLINE}; 409 {@code TARGET_UNAVAILABLE} when qits-system
-   * cannot be asked.
+   * cannot be asked. {@code reason} is what the end tells qits-system (qits-2265). The ENDED is
+   * applied {@link TargetLeaseStates#observeRetired retired}: the verb writes the row itself.
    */
-  private void retirePreviousLease(Workspace row, TargetPlacement leases, String verb) {
+  private void retirePreviousLease(
+      Workspace row, TargetPlacement leases, String verb, String reason) {
     UUID leaseId =
         QuarkusTransaction.requiringNew()
             .call(() -> workspaceRepository.findByIdOptional(row.id).map(w -> w.leaseId).orElse(null));
@@ -3543,7 +3597,7 @@ public class WorkspaceService {
     }
     Instant deadline = Instant.now().plus(TargetPlacement.ENDING_DEADLINE);
     try {
-      Optional<TargetPlacement.Lease> now = leases.end(leaseId);
+      Optional<TargetPlacement.Lease> now = leases.end(leaseId, reason);
       while (now.isPresent() && now.get().state().live()) {
         if (Instant.now().isAfter(deadline)) {
           throw TargetRefusals.timeout(row.id, verb);
@@ -3554,7 +3608,7 @@ public class WorkspaceService {
     } catch (TargetPlacement.LeaseRefused refused) {
       throw TargetRefusals.unavailable(row.id, verb, refused.getMessage());
     }
-    leaseStates.observe(TargetLeaseStates.ended(leaseId));
+    leaseStates.observeRetired(TargetLeaseStates.ended(leaseId));
   }
 
   /**
@@ -3773,16 +3827,21 @@ public class WorkspaceService {
    * the container gone, and {@link TargetLeaseStates} then clears it off the row with its token. The
    * work volume stays. A row with no lease — a stopped one, or a row a retired runner still runs —
    * just goes STOPPED, and its token is given back.
+   *
+   * <p>{@code reason} rides the end to qits-system (qits-2265), and a row this stop turned STOPPED
+   * fires {@link WorkspaceContainerStopped} once the write committed. Its lease's ENDED then finds
+   * the row STOPPED already, so the stop is announced here and only here.
    */
-  private void stopOnTarget(Workspace row) {
+  private void stopOnTarget(Workspace row, String by, String reason) {
     UUID leaseId = row.leaseId;
+    WorkspaceRuntimeStatus[] was = new WorkspaceRuntimeStatus[1];
     if (leaseId != null) {
       if (!targetPlacement.isResolvable()) {
         throw TargetRefusals.unavailable(row.id, "stop", "no lease client is configured");
       }
       Optional<TargetPlacement.Lease> ended;
       try {
-        ended = targetPlacement.get().end(leaseId);
+        ended = targetPlacement.get().end(leaseId, reason);
       } catch (TargetPlacement.LeaseRefused refused) {
         throw TargetRefusals.unavailable(row.id, "stop", refused.getMessage());
       }
@@ -3794,6 +3853,7 @@ public class WorkspaceService {
                       .filter(wt -> leaseId.equals(wt.leaseId))
                       .ifPresent(
                           wt -> {
+                            was[0] = wt.runtimeStatus;
                             wt.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
                             wt.runtimeError = null;
                             wt.queuedAt = null;
@@ -3810,6 +3870,7 @@ public class WorkspaceService {
                       .filter(wt -> wt.leaseId == null)
                       .ifPresent(
                           wt -> {
+                            was[0] = wt.runtimeStatus;
                             wt.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
                             wt.queuedAt = null;
                           }));
@@ -3817,6 +3878,9 @@ public class WorkspaceService {
     }
     leaseStates.abandonStart(row.id, "Stopped.");
     changePublisher.runtimeChanged(row.repositoryId, row.id);
+    if (was[0] != null && was[0] != WorkspaceRuntimeStatus.STOPPED) {
+      containerStopped.fire(new WorkspaceContainerStopped(row.id, row.repositoryId, by, reason));
+    }
   }
 
   /**
@@ -3825,15 +3889,16 @@ public class WorkspaceService {
    * ws-<rowId>} is purged on its target ({@code DELETE /system/api/work-volumes/ws-<rowId>}), and
    * the row is STOPPED with no lease, no target and no adopted volume. The row stays ACTIVE, and its
    * next start gets a fresh volume on any target. The workspace token goes with the container.
+   * {@code reason} is what the lease's end tells qits-system (qits-2265).
    */
-  private void deleteOnTarget(Workspace row) {
+  private void deleteOnTarget(Workspace row, String reason) {
     if (row.leaseId != null || targetPlacement.isResolvable()) {
       if (!targetPlacement.isResolvable()) {
         throw TargetRefusals.unavailable(
             row.id, "delete its container", "no lease client is configured");
       }
       TargetPlacement leases = targetPlacement.get();
-      retirePreviousLease(row, leases, "delete its container");
+      retirePreviousLease(row, leases, "delete its container", reason);
       try {
         leases.purgeWorkVolume(TargetPlacement.workKey(row.id));
       } catch (TargetPlacement.LeaseRefused refused) {
@@ -3872,9 +3937,9 @@ public class WorkspaceService {
    * (lease ended, work volume purged, token deleted), then the start, which mints a fresh token and
    * asks for a new lease on any target.
    */
-  private String beginTargetRecreate(Workspace row) {
+  private String beginTargetRecreate(Workspace row, String by) {
     requireCleanForRecreate(row.workspaceId, row.id);
-    deleteOnTarget(row);
+    deleteOnTarget(row, TargetPlacement.reason("recreate", by));
     return beginTargetStart(QuarkusTransaction.requiringNew().call(() -> requireActive(row.id)));
   }
 
@@ -3895,7 +3960,10 @@ public class WorkspaceService {
         () -> {
           try {
             if (leaseId != null) {
-              leases.end(leaseId).filter(l -> !l.state().live()).ifPresent(leaseStates::observe);
+              leases
+                  .end(leaseId, TargetLeaseStates.RELEASED_REASON)
+                  .filter(l -> !l.state().live())
+                  .ifPresent(leaseStates::observe);
             } else {
               leases.purgeWorkVolume(TargetPlacement.workKey(rowId));
             }
@@ -3906,9 +3974,10 @@ public class WorkspaceService {
         });
   }
 
-  private static void endQuietly(TargetPlacement leases, UUID leaseId, Long rowId) {
+  private static void endQuietly(
+      TargetPlacement leases, UUID leaseId, Long rowId, String reason) {
     try {
-      leases.end(leaseId);
+      leases.end(leaseId, reason);
     } catch (RuntimeException e) {
       LOG.warnf(
           "Could not end lease %s nobody holds (workspace %s); the reconcile will: %s",

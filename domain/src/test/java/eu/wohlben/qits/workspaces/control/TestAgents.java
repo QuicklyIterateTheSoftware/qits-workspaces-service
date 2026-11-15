@@ -32,7 +32,13 @@ public class TestAgents {
    * started there, so its worktree may live on the slot and the guard asks about it (qits-1750).
    */
   public UUID placeOn(String repositoryId, Long workspaceRowId, String entityId) {
-    return write(repositoryId, workspaceRowId, entityId, workspaceRowId);
+    return write(repositoryId, workspaceRowId, entityId, workspaceRowId, AgentRunState.RUNNING);
+  }
+
+  /** {@link #placeOn}, written at {@code runState} at once, so no pass sees it RUNNING first. */
+  public UUID placeOn(
+      String repositoryId, Long workspaceRowId, String entityId, AgentRunState runState) {
+    return write(repositoryId, workspaceRowId, entityId, workspaceRowId, runState);
   }
 
   /**
@@ -40,11 +46,15 @@ public class TestAgents {
    * it is on the slot (qits-1750).
    */
   public UUID placeUnstartedOn(String repositoryId, Long workspaceRowId, String entityId) {
-    return write(repositoryId, workspaceRowId, entityId, null);
+    return write(repositoryId, workspaceRowId, entityId, null, AgentRunState.RUNNING);
   }
 
   private UUID write(
-      String repositoryId, Long workspaceRowId, String entityId, Long startedWorkspaceId) {
+      String repositoryId,
+      Long workspaceRowId,
+      String entityId,
+      Long startedWorkspaceId,
+      AgentRunState runState) {
     UUID id = UUID.randomUUID();
     QuarkusTransaction.requiringNew()
         .run(
@@ -57,7 +67,7 @@ public class TestAgents {
               row.wrapperBranch = "ticket/w-" + id;
               row.workspaceId = workspaceRowId;
               row.startedWorkspaceId = startedWorkspaceId;
-              row.runState = AgentRunState.RUNNING;
+              row.runState = runState;
               row.createdAt = Instant.now();
               row.gitRefs = "[]";
               agents.persist(row);

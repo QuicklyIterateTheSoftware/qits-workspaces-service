@@ -31,6 +31,7 @@ public class FakeTargetPlacement implements TargetPlacement {
   private final Map<UUID, LeaseRequest> requests = new ConcurrentHashMap<>();
   private final List<String> calls = Collections.synchronizedList(new ArrayList<>());
   private final List<String> purged = Collections.synchronizedList(new ArrayList<>());
+  private final List<String> endReasons = Collections.synchronizedList(new ArrayList<>());
   private volatile LeaseRefused refusal;
   private volatile LeaseRefused unreachable;
   private volatile LeaseRefused refreshRefusal;
@@ -140,6 +141,17 @@ public class FakeTargetPlacement implements TargetPlacement {
         .max(java.util.Comparator.comparing(Lease::requestedAt));
   }
 
+  /** The reasons every end of {@code leaseId} sent (qits-2265), oldest first. */
+  public List<String> endReasons(UUID leaseId) {
+    String prefix = leaseId + " ";
+    synchronized (endReasons) {
+      return endReasons.stream()
+          .filter(r -> r.startsWith(prefix))
+          .map(r -> r.substring(prefix.length()))
+          .toList();
+    }
+  }
+
   /** The work keys purged so far. */
   public List<String> purged() {
     synchronized (purged) {
@@ -164,6 +176,7 @@ public class FakeTargetPlacement implements TargetPlacement {
     requests.clear();
     calls.clear();
     purged.clear();
+    endReasons.clear();
     refusal = null;
     unreachable = null;
     refreshRefusal = null;
@@ -198,8 +211,9 @@ public class FakeTargetPlacement implements TargetPlacement {
   }
 
   @Override
-  public Optional<Lease> end(UUID leaseId) {
+  public Optional<Lease> end(UUID leaseId, String reason) {
     calls.add("end:" + leaseId);
+    endReasons.add(leaseId + " " + reason);
     failIfUnreachable();
     Lease lease = leases.get(leaseId);
     if (lease == null) {

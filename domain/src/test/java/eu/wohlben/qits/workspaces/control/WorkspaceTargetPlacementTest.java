@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import eu.wohlben.qits.workspaces.control.TargetPlacement.Lease;
 import eu.wohlben.qits.workspaces.control.TargetPlacement.LeaseState;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
+import eu.wohlben.qits.workspaces.entity.AgentRunState;
+import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.entity.LegacyPlacement;
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
@@ -19,6 +21,9 @@ import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.DomainException;
 import eu.wohlben.qits.workspaces.error.TargetRefusals;
+import eu.wohlben.qits.workspaces.events.AgentYielded;
+import eu.wohlben.qits.workspaces.events.WorkspaceStopped;
+import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.LegacyPlacementRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -61,6 +66,9 @@ public class WorkspaceTargetPlacementTest {
   @Inject FakeAgentDaemon agentDaemon;
   @Inject TestAgents agents;
   @Inject FakeWorkspaceDaemonLiveness liveness;
+  @Inject AgentService agentService;
+  @Inject AgentWorktreeRepository agentRows;
+  @Inject RecordingLifecycleAnnouncer announced;
 
   @ConfigProperty(name = "qits.test.origins-dir")
   String dataDir;
@@ -507,6 +515,8 @@ public class WorkspaceTargetPlacementTest {
     states.observe(placement.move(queued.leaseId, LeaseState.EXITED, target, 137, null));
 
     assertEquals(WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus);
+    assertEquals(
+        List.of("the container exited, so its lease ends"), placement.endReasons(queued.leaseId));
     assertTrue(commissioner.tokensDeleted().contains(queued.commissionedTokenId));
     // The end the exit asked for left it ENDING; qits-system reports it ENDED later.
     placement.move(queued.leaseId, LeaseState.ENDED, target, 137, null);
@@ -518,6 +528,10 @@ public class WorkspaceTargetPlacementTest {
     assertNotNull(restarted.leaseId);
     assertFalse(queued.leaseId.equals(restarted.leaseId), "a new lease");
     assertEquals(2, commissioner.tokensMinted().size(), "one token per lease");
+    assertEquals(
+        List.of("the container exited, so its lease ends", "retired by a new start"),
+        placement.endReasons(queued.leaseId),
+        "the start retired the lease the row still named");
   }
 
   // --- OOM kills (qits-1818) -------------------------------------------------------------------------
@@ -651,6 +665,143 @@ public class WorkspaceTargetPlacementTest {
     assertTrue(commissioner.tokensDeleted().contains(queued.commissionedTokenId));
   }
 
+  // --- a stopped slot's agents (qits-2265) ---------------------------------------------------------
+
+  /**
+   * The bug: a person's stop-container ended the slot's lease and left its agent RUNNING, so the
+   * turn a timed-out wait wrote was never said — every pass found the daemon gone and returned.
+   * Stopped, the agent is YIELDED and forgotten as started; its wake brings the slot up again.
+   */
+  @Test
+  public void aWakeIntoAStoppedSlotAsksForANewLease() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "wake", false);
+    Workspace queued = read(created.id);
+    UUID target = UUID.randomUUID();
+    states.observe(placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null));
+    awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
+    UUID agent = agents.placeOn(repoId, created.id, "qits-2265");
+    liveness.markLive(created.id);
+    agentService.reconcile();
+    assertTrue(agentService.isStarted(agent), "started in its slot");
+
+    workspaceService.stopContainer(created.id, "alice");
+    // The container goes: its daemon's socket drops, then the target reports the lease ENDED.
+    liveness.markDead(created.id);
+    agentService.onDaemonConnection(created.id);
+    states.observe(
+        placement.move(queued.leaseId, LeaseState.ENDED, target, null, "stop-container by alice"));
+    agentService.awaitSchedulerIdle();
+
+    assertEquals(WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus);
+    assertNull(read(created.id).leaseId);
+    assertEquals(List.of("stop-container by alice"), placement.endReasons(queued.leaseId));
+    assertEquals(AgentRunState.YIELDED, agentRow(agent).runState, "its slot was stopped");
+    assertFalse(agentService.isStarted(agent));
+    assertEquals(
+        1, announced.of(AgentYielded.class, e -> e.agentId().equals(agent.toString())).size());
+    List<WorkspaceStopped> stopped =
+        announced.of(WorkspaceStopped.class, e -> e.workspaceId().equals(created.id.toString()));
+    assertEquals(1, stopped.size(), "announced by the door, not again by the ENDED");
+    assertEquals("alice", stopped.get(0).stoppedBy());
+    assertEquals("stop-container by alice", stopped.get(0).reason());
+    assertEquals(List.of(agent.toString()), stopped.get(0).affectedAgentIds());
+    assertEquals(repoId, stopped.get(0).repositoryId());
+    assertEquals(1, creates(created.id), "the create's lease only: no turn, nothing brought it up");
+
+    // A wait of the agent's timed out: its wake is a pending turn, as AgentWaits writes it.
+    placement.clearCalls();
+    pending(agent, "Your wait \"ci\" timed out.");
+    agentService.reconcile();
+
+    assertEquals(AgentRunState.RUNNING, agentRow(agent).runState, "resumed for its turn");
+    assertEquals(1, creates(created.id), "the stopped slot asked for a new lease");
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, read(created.id).runtimeStatus);
+    assertEquals("Your wait \"ci\" timed out.", agentRow(agent).pendingText, "said once it runs");
+  }
+
+  /** An agent a person stopped stays STOPPED when its wait wakes it, and so does its slot. */
+  @Test
+  public void aStoppedAgentsWakeAsksForNoLease() throws Exception {
+    String repoId = repo();
+    Workspace created = stoppedTargetRow(repoId, "wake-stopped");
+    UUID agent =
+        agents.placeOn(repoId, created.id, "qits-2265-stopped", AgentRunState.STOPPED);
+    pending(agent, "Your wait \"ci\" timed out.");
+
+    agentService.reconcile();
+    agentService.reconcile();
+
+    assertEquals(0, creates(created.id), "nothing brings a stopped agent's slot up");
+    assertEquals(AgentRunState.STOPPED, agentRow(agent).runState);
+    assertEquals(WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus);
+  }
+
+  /** A start of a stopped slot that came to nothing is not asked again on the next pass. */
+  @Test
+  public void aRefusedSlotStartIsNotAskedAgainOnTheNextPass() throws Exception {
+    String repoId = repo();
+    Workspace created = stoppedTargetRow(repoId, "wake-refused");
+    placement.refuse(new TargetPlacement.LeaseRefused(409, null, "qits-system is busy", null));
+    UUID agent = agents.placeOn(repoId, created.id, "qits-2265-refused");
+    pending(agent, "Your wait \"ci\" timed out.");
+
+    agentService.reconcile();
+    assertEquals(1, creates(created.id), "the turn asked for a lease");
+    assertEquals(WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus, "refused");
+
+    agentService.reconcile();
+    agentService.reconcile();
+    assertEquals(1, creates(created.id), "the backoff holds the next asks");
+    assertEquals("Your wait \"ci\" timed out.", agentRow(agent).pendingText, "still to be said");
+  }
+
+  /** A slot with no turn for anyone stays stopped: a stop is not undone by the next pass. */
+  @Test
+  public void aStoppedSlotWithNoTurnStaysStopped() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "stop-quiet", false);
+    UUID agent = agents.placeOn(repoId, created.id, "qits-2265-quiet");
+
+    workspaceService.stopContainer(created.id, "alice");
+    agentService.reconcile();
+    agentService.reconcile();
+
+    assertEquals(AgentRunState.YIELDED, agentRow(agent).runState);
+    assertEquals(1, creates(created.id), "the create's lease only");
+    assertEquals(WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus);
+  }
+
+  /**
+   * A lease that ends under a live row — an operator ended it, or qits-system lost the target —
+   * stops the slot the same way, with no principal and the lease's detail as the reason.
+   */
+  @Test
+  public void aLeaseEndingUnderALiveRowYieldsItsAgentsAndSaysItsDetail() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "ended-live", false);
+    Workspace queued = read(created.id);
+    UUID target = UUID.randomUUID();
+    states.observe(placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null));
+    awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
+    UUID agent = agents.placeOn(repoId, created.id, "qits-2265-ended");
+    UUID stopped =
+        agents.placeOn(repoId, created.id, "qits-2265-ended-stopped", AgentRunState.STOPPED);
+
+    states.observe(
+        placement.move(queued.leaseId, LeaseState.ENDED, target, null, "ended by operator carol"));
+
+    assertEquals(WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus);
+    assertEquals(AgentRunState.YIELDED, agentRow(agent).runState);
+    assertEquals(AgentRunState.STOPPED, agentRow(stopped).runState, "a stopped agent is left alone");
+    List<WorkspaceStopped> said =
+        announced.of(WorkspaceStopped.class, e -> e.workspaceId().equals(created.id.toString()));
+    assertEquals(1, said.size());
+    assertNull(said.get(0).stoppedBy());
+    assertEquals("ended by operator carol", said.get(0).reason());
+    assertEquals(List.of(agent.toString(), stopped.toString()), said.get(0).affectedAgentIds());
+  }
+
   @Test
   public void deletingTheContainerEndsTheLeaseAndPurgesTheWorkVolume() throws Exception {
     String repoId = repo();
@@ -658,8 +809,9 @@ public class WorkspaceTargetPlacementTest {
     Workspace queued = read(created.id);
     placement.endsAtOnce();
 
-    workspaceService.deleteContainer(created.id);
+    workspaceService.deleteContainer(created.id, "bob");
 
+    assertEquals(List.of("delete-container by bob"), placement.endReasons(queued.leaseId));
     assertEquals(List.of("ws-" + created.id), placement.purged());
     Workspace row = read(created.id);
     assertEquals(WorkspaceStatus.ACTIVE, row.status);
@@ -701,9 +853,10 @@ public class WorkspaceTargetPlacementTest {
     Workspace queued = read(created.id);
     placement.endsAtOnce();
 
-    String processId = workspaceService.beginRecreateContainer(created.id);
+    String processId = workspaceService.beginRecreateContainer(created.id, "bob");
 
     assertNotNull(processId);
+    assertEquals(List.of("recreate by bob"), placement.endReasons(queued.leaseId));
     assertEquals(List.of("ws-" + created.id), placement.purged());
     Workspace row = read(created.id);
     assertEquals(WorkspaceRuntimeStatus.QUEUED, row.runtimeStatus);
@@ -728,6 +881,7 @@ public class WorkspaceTargetPlacementTest {
     assertEquals(WorkspaceStatus.ABANDONED, resolved.status);
     assertEquals(WorkspaceRuntimeStatus.STOPPED, resolved.runtimeStatus);
     assertTrue(placement.calls().contains("end:" + queued.leaseId), placement.calls().toString());
+    assertEquals(List.of("released: workspace resolved"), placement.endReasons(queued.leaseId));
     assertEquals(queued.leaseId, resolved.leaseId, "named until it is ENDED");
     assertEquals(List.of(), placement.purged(), "not while the lease is ending");
     assertEquals(List.of(), containers.teardownCalls(), "qits-containers was not asked");
@@ -923,6 +1077,7 @@ public class WorkspaceTargetPlacementTest {
     assertEquals(WorkspaceRuntimeStatus.STOPPED, row.runtimeStatus);
     assertTrue(commissioner.tokensDeleted().contains(queued.commissionedTokenId));
     assertTrue(placement.calls().contains("end:" + orphan.id()), placement.calls().toString());
+    assertEquals(List.of("orphan: no workspace row names it"), placement.endReasons(orphan.id()));
   }
 
   @Test
@@ -1181,6 +1336,15 @@ public class WorkspaceTargetPlacementTest {
           w.queuedAt = null;
         });
     return created.id;
+  }
+
+  private AgentWorktree agentRow(UUID id) {
+    return QuarkusTransaction.requiringNew().call(() -> agentRows.findById(id));
+  }
+
+  /** A turn on the agent's row, as a wait's wake or a delivery leaves it. */
+  private void pending(UUID id, String text) {
+    QuarkusTransaction.requiringNew().run(() -> agentRows.findById(id).pendingText = text);
   }
 
   private long creates(Long rowId) {

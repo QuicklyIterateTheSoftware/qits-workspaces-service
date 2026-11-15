@@ -1382,7 +1382,12 @@
           ]
         },
         "method": "DELETE",
-        "path": "/system/api/leases/00000000-0000-4000-8000-000000000002"
+        "path": "/system/api/leases/00000000-0000-4000-8000-000000000002",
+        "query": {
+          "reason": [
+            "stop-container by alice"
+          ]
+        }
       },
       "response": {
         "body": {
@@ -1484,7 +1489,12 @@
           ]
         },
         "method": "DELETE",
-        "path": "/system/api/leases/00000000-0000-4000-8000-000000000002"
+        "path": "/system/api/leases/00000000-0000-4000-8000-000000000002",
+        "query": {
+          "reason": [
+            "stop-container by alice"
+          ]
+        }
       },
       "response": {
         "body": {

@@ -12,6 +12,7 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import java.time.Instant;
@@ -65,11 +66,14 @@ public interface SystemLeases {
   LeaseView getLease(
       @HeaderParam(HttpHeaders.AUTHORIZATION) String authorization, @PathParam("id") UUID id);
 
+  /** {@code reason} (qits-2265): why, at most {@code TargetPlacement.REASON_MAX} characters. */
   @DELETE
   @Path("/leases/{id}")
   @Produces(MediaType.APPLICATION_JSON)
   LeaseView endLease(
-      @HeaderParam(HttpHeaders.AUTHORIZATION) String authorization, @PathParam("id") UUID id);
+      @HeaderParam(HttpHeaders.AUTHORIZATION) String authorization,
+      @PathParam("id") UUID id,
+      @QueryParam("reason") String reason);
 
   /** No body: the lease's generation is raised and its runner recreates the container. */
   @POST

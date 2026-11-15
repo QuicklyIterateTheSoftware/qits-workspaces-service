@@ -204,7 +204,10 @@ public class AgentWaitsTest {
     return inASlot(id, "waits-yielded-", AgentRunState.YIELDED, Instant.now().minusSeconds(3600));
   }
 
-  /** The agent put into a RUNNER slot of its own wrapper that no runner holds. */
+  /**
+   * The agent put into a RUNNER slot of its own wrapper that no runner holds: QUEUED with no lease,
+   * so no pass starts it — a STOPPED one is started for a RUNNING agent, or a turn (qits-2265).
+   */
   private Long inASlot(UUID id, String repoPrefix, AgentRunState runState, Instant waitingSince) {
     String repoId = repoPrefix + UUID.randomUUID().toString().substring(0, 8);
     Long slot =
@@ -215,7 +218,7 @@ public class AgentWaitsTest {
                   row.repositoryId = repoId;
                   row.workspaceId = "ws-" + repoId;
                   row.status = WorkspaceStatus.ACTIVE;
-                  row.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                  row.runtimeStatus = WorkspaceRuntimeStatus.QUEUED;
                   row.placement = WorkspacePlacement.TARGET;
                   workspaces.persist(row);
                   return row.id;

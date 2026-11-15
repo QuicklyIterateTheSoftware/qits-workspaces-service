@@ -1628,6 +1628,7 @@ payload's top-level fields:
 | `AgentHarnessExited` | the four, `commandId`, `status`, `exitCode`, `stoppedBy`, `remoteSession`, `remoteArchive` (qits-1779: a claude harness's Remote Control session and its last archive outcome, absent for everything else and for a daemon older than capability 14) | `stoppedBy`: `DAEMON_REMOVE`, `DAEMON_YIELD`, `KILLED`, `SELF` |
 | `WorkspaceStarted` | `workspaceId`, `repositoryId` | |
 | `WorkspaceFailed` | `workspaceId`, `repositoryId`, `runtimeError` | |
+| `WorkspaceStopped` | `workspaceId`, `repositoryId`, `stoppedBy` (the stopping caller's principal, absent for a lease that ended on its own), `reason` (the `?reason=` sent qits-system, or the lease's detail), `affectedAgentIds` (the live agents the slot hosted) — qits-2265 | |
 | `WorkspaceRemoved` | `workspaceId`, `repositoryId`, `reason` | `NO_AGENT_LEFT` |
 | `DeskWaitClosed` | `waitId`, `projectId`, `label`, `state`, `eventName`, `matchedEventId` (absent on a timeout or a break), `turn`, `closedAt` — not a lifecycle fact but a project desk's wake (qits-1618, "Declared waits") | `state`: `MATCHED`, `TIMED_OUT`, `BROKEN` (qits-1961) |
 | `AgentWaitOpened` | the four, `projectId`, `waitId`, `label`, `eventName`, `subjectKind`, `subjectRef` (absent for OTHER), `targetStates` — an agent's wait declared (epic qits-1681) | `subjectKind`: `RELEASE_REQUEST`, `CI_RUN`, `WORK_ITEM`, `COMMENTS`, `OTHER` |
@@ -1656,9 +1657,13 @@ The rules they keep:
   only from a stop that found the agent not STOPPED;
   `WorkspaceStarted`/`WorkspaceFailed` only when the runtime status changed (a RUNNING row found
   running again by an inventory, or re-stamped by the DIRECT ladder's already-running short-circuit,
-  says nothing); `AgentStartRefused` under the `lastRefusal` throttle; `AgentCleanupDeferred` under
-  the `lastSkip` throttle, which is keyed on the reason WORD, so a detail that moves under one reason
-  (the workspace's runtime status, the item's status) is neither a new log line nor a new event.
+  says nothing); `WorkspaceStopped` only from the write that turned the row STOPPED — a
+  stop-container's, or a lease's EXITED or ENDED on a live row — so the ENDED that follows a door's
+  stop finds the row STOPPED and says nothing, and delete-container, recreate and a start retiring
+  the previous lease (which write the row themselves) say nothing either; `AgentStartRefused`
+  under the `lastRefusal` throttle; `AgentCleanupDeferred` under the `lastSkip` throttle, which is
+  keyed on the reason WORD, so a detail that moves under one reason (the workspace's runtime status,
+  the item's status) is neither a new log line nor a new event.
 - **`harnessStopped` is true exactly when `AgentDaemon.remove` answered OK** for that removal.
 - **`AgentHarnessExited` is wired from the daemon's `AgentHarnessExit` frame** (capability 11):
   `WorkspaceDaemonRegistry.onMessage` dispatches it to `AgentService.onHarnessExited` on
@@ -1934,6 +1939,23 @@ discard never deletes a main workspace's branch (qits-780), on both placements.
   the detail, ENDED → STOPPED with lease and target cleared. EXITED, FAILED and ENDED delete the
   lease's token; EXITED and FAILED also end the lease, so the next start can ask for another. A row is
   found by its `lease_id`, never by the owner ref.
+- **Every lease end says why** (qits-2265): `DELETE /system/api/leases/{id}?reason=`, at most
+  `TargetPlacement.REASON_MAX` (500, qits-system's `LeaseController.REASON_MAX`), which lands in the
+  lease's detail — `stop-container by <principal>`, `delete-container by <principal>`, `recreate by
+  <principal>`, `retired by a new start`, `start lost the lease race`, `released: workspace
+  resolved`, `orphan: no workspace row names it`, and for an EXITED or FAILED lease `the container
+  exited, so its lease ends` / `the target failed the lease`.
+- **A stopped slot's agents are YIELDED** (qits-2265). A stop-container that turns a row STOPPED,
+  and a lease EXITED or ENDED under a live row, fire `WorkspaceContainerStopped`;
+  `AgentService.onContainerStopped` yields the slot's RUNNING agents (`AgentYielded`), forgets them
+  as started, and announces `WorkspaceStopped`. STOPPED, QUEUED and YIELDED agents are left alone.
+  A yielded agent with nothing to hear leaves the slot stopped; a turn (a wait's wake, a delivery)
+  resumes it, and the pass that drives a RUNNING agent in a STOPPED slot whose lease is over starts
+  the slot (`AgentService.startStoppedSlot`), at once the first time and then under the requeue
+  backoff (`REQUEUE_BACKOFF` doubling to `REQUEUE_BACKOFF_MAX`) while the row stays STOPPED, so a
+  refused start is not asked every pass. A QUEUED, PROVISIONING or still-ENDING row is left to its
+  lease. Before, such an agent stayed RUNNING and every pass returned at "no daemon", so its wake
+  was never said. A STOPPED agent is never resumed by a wake, so its slot is not started either.
 - **Stop** ends the lease and writes STOPPED; the ENDED that follows clears it. **Delete-container**
   ends it, waits for ENDED, purges `ws-<rowId>`, and clears `lease_id`, `target_id`,
   `adopted_volume` and the row's `legacy_placement` entry. **Recreate** is that, then a start. A

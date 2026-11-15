@@ -265,7 +265,7 @@ public class WorkspaceController {
       @PathParam("id") Long id) {
     desk.requireWorkspace(id);
     List<String> affected = workspaceService.liveAgentIds(id);
-    workspaceService.stopContainer(id);
+    workspaceService.stopContainer(id, principal());
     logVerb(id, "stop-container", affected);
     return workspaceService.getWorkspace(id).withAffectedAgentIds(affected);
   }
@@ -291,7 +291,7 @@ public class WorkspaceController {
       @PathParam("id") Long id) {
     desk.requireWorkspace(id);
     List<String> affected = workspaceService.liveAgentIds(id);
-    workspaceService.deleteContainer(id);
+    workspaceService.deleteContainer(id, principal());
     logVerb(id, "delete-container", affected);
     return workspaceService.getWorkspace(id).withAffectedAgentIds(affected);
   }
@@ -330,15 +330,20 @@ public class WorkspaceController {
       @PathParam("id") Long id) {
     desk.requireWorkspace(id);
     List<String> affected = workspaceService.liveAgentIds(id);
-    String technicalProcessId = workspaceService.beginRecreateContainer(id);
+    String technicalProcessId = workspaceService.beginRecreateContainer(id, principal());
     logVerb(id, "recreate-container", affected);
     return new RecreateContainerRequest.Response(
         workspaceService.getWorkspace(id), technicalProcessId, affected);
   }
 
+  /** The caller's principal, null when there is none: who a container verb names (qits-2265). */
+  private String principal() {
+    return identity.getPrincipal() == null ? null : identity.getPrincipal().getName();
+  }
+
   /** The one audit line each container verb writes (qits-1745). */
   private void logVerb(Long id, String verb, List<String> affected) {
-    String principal = identity.getPrincipal() == null ? null : identity.getPrincipal().getName();
+    String principal = principal();
     // Formatted here, so the record's message is the line itself.
     LOG.info(
         String.format(

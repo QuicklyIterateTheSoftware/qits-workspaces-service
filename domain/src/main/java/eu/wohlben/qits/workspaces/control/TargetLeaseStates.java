@@ -59,6 +59,11 @@ import org.jboss.logging.Logger;
  *       the token deleted. A resolved row's ENDED lease purges its work volume.
  * </ul>
  *
+ * <p><b>A live row turned STOPPED by its lease</b> — EXITED or ENDED while QUEUED, PROVISIONING or
+ * RUNNING — fires {@link WorkspaceContainerStopped} (qits-2265), whose reader yields the slot's
+ * RUNNING agents and announces {@code WorkspaceStopped}. A row a stop-container wrote STOPPED first
+ * is not live when its ENDED arrives, so that stop is announced once, by the door.
+ *
  * <p><b>A row is found by its lease id</b>, never by the lease's owner ref: a lease the row does not
  * name (an earlier one, or one a crash orphaned) moves nothing. A resolved row still names its lease
  * until that lease is ENDED, so the ending is seen and the volume purged.
@@ -98,6 +103,12 @@ public class TargetLeaseStates {
 
   private static final Logger LOG = Logger.getLogger(TargetLeaseStates.class);
 
+  /** What an end of a lease no row names tells qits-system (qits-2265). */
+  static final String ORPHAN_REASON = "orphan: no workspace row names it";
+
+  /** What an end of a resolved row's lease tells qits-system (qits-2265). */
+  static final String RELEASED_REASON = "released: workspace resolved";
+
   /** The segment a start waits in, and the one a launch runs in. */
   static final String QUEUED_SEGMENT = "queued";
 
@@ -135,6 +146,9 @@ public class TargetLeaseStates {
 
   /** A row's start ended other than by its container coming up (qits-626). */
   @Inject Event<WorkspaceUnqueued> unqueued;
+
+  /** A live row's lease ended or exited under it: its container is stopped (qits-2265). */
+  @Inject Event<WorkspaceContainerStopped> containerStopped;
 
   /** {@code WorkspaceStarted} and {@code WorkspaceFailed} (qits-1236). Absent: nothing announced. */
   @Inject Instance<LifecycleAnnouncer> lifecycle;
@@ -294,6 +308,20 @@ public class TargetLeaseStates {
    * is.
    */
   public Outcome observe(Lease lease) {
+    return observe(lease, true);
+  }
+
+  /**
+   * {@link #observe(Lease)} for a lease a verb ended itself and waited for — delete-container,
+   * recreate, a start retiring the previous lease (qits-2265). The row is moved as ever, but no
+   * {@link WorkspaceContainerStopped} is fired: the verb writes the row and says what it did, and a
+   * recreate's agents are to be started again in the new container, not yielded.
+   */
+  Outcome observeRetired(Lease lease) {
+    return observe(lease, false);
+  }
+
+  private Outcome observe(Lease lease, boolean stopFollows) {
     if (lease == null || lease.id() == null || lease.state() == null) {
       return Outcome.NO_ROW;
     }
@@ -318,7 +346,7 @@ public class TargetLeaseStates {
       }
       return Outcome.NO_ROW;
     }
-    after(applied, lease);
+    after(applied, lease, stopFollows);
     return applied.changed() ? Outcome.CHANGED : Outcome.UNCHANGED;
   }
 
@@ -478,7 +506,7 @@ public class TargetLeaseStates {
         Follow.NOTHING);
   }
 
-  private void after(Applied applied, Lease lease) {
+  private void after(Applied applied, Lease lease, boolean stopFollows) {
     Workspace row = applied.row();
     if (applied.changed()) {
       changePublisher.runtimeChanged(row.repositoryId, row.id);
@@ -488,7 +516,7 @@ public class TargetLeaseStates {
     }
     if (applied.endLease() && placement.isResolvable()) {
       try {
-        placement.get().end(lease.id());
+        placement.get().end(lease.id(), endReason(row, lease));
       } catch (RuntimeException e) {
         LOG.warnf(
             "Could not end lease %s of workspace %s; the reconcile asks again: %s",
@@ -533,13 +561,18 @@ public class TargetLeaseStates {
           done.finishProvision(true);
         }
       }
-      case STOPPED ->
-          abandonStart(
-              row.id,
-              lease.state() == LeaseState.EXITED
-                  ? "The container exited"
-                      + (lease.exitCode() == null ? "." : " with code " + lease.exitCode() + ".")
-                  : "The lease ended.");
+      case STOPPED -> {
+        abandonStart(
+            row.id,
+            lease.state() == LeaseState.EXITED
+                ? "The container exited"
+                    + (lease.exitCode() == null ? "." : " with code " + lease.exitCode() + ".")
+                : "The lease ended.");
+        if (stopFollows) {
+          containerStopped.fire(
+              new WorkspaceContainerStopped(row.id, row.repositoryId, null, stopReason(lease)));
+        }
+      }
       case FAILED -> {
         announceFailed(row);
         abandonStart(row.id, row.runtimeError);
@@ -711,7 +744,7 @@ public class TargetLeaseStates {
       LOG.infof(
           "Ending lease %s (owner ref %s): no workspace row names it", lease.id(), lease.ownerRef());
       try {
-        leases.end(lease.id());
+        leases.end(lease.id(), ORPHAN_REASON);
       } catch (RuntimeException e) {
         LOG.warnf("Could not end orphaned lease %s: %s", lease.id(), e.getMessage());
       }
@@ -794,6 +827,29 @@ public class TargetLeaseStates {
           "Could not purge work volume %s of resolved workspace %s: %s",
           TargetPlacement.workKey(rowId), rowId, e.getMessage());
     }
+  }
+
+  /** Why {@link #after} ends the lease, for qits-system (qits-2265). */
+  private static String endReason(Workspace row, Lease lease) {
+    if (row.status != WorkspaceStatus.ACTIVE) {
+      return RELEASED_REASON;
+    }
+    return lease.state() == LeaseState.EXITED
+        ? "the container exited, so its lease ends"
+        : "the target failed the lease";
+  }
+
+  /**
+   * What a live row's lease ending under it says as the stop's reason (qits-2265): the lease's own
+   * detail — where an operator's or this service's {@code ?reason=} lands — else what happened.
+   */
+  private static String stopReason(Lease lease) {
+    if (lease.state() == LeaseState.EXITED) {
+      return "the container exited"
+          + (lease.exitCode() == null ? "" : " with code " + lease.exitCode());
+    }
+    String detail = lease.detail();
+    return detail == null || detail.isBlank() ? "lease ended" : truncate(detail);
   }
 
   private void announceStarted(Workspace row) {
