@@ -756,6 +756,84 @@ public class WorkspaceTargetPlacementTest {
     assertEquals("Your wait \"ci\" timed out.", agentRow(agent).pendingText, "still to be said");
   }
 
+  /**
+   * The gap live verification found: the wake's restart failed — no daemon dialed home, the row
+   * FAILED and still naming its lease — and the agent's worktree is in that volume, so it waited
+   * for the slot and nothing ever started it again. A turn to hear asks for a new lease, under the
+   * same per-slot backoff, and the start retires the lease the row still named.
+   */
+  @Test
+  public void aTurnIntoASlotWhoseRestartFailedAsksForANewLeaseUnderTheBackoff() throws Exception {
+    String repoId = repo();
+    Workspace created = failedTargetRow(repoId, "wake-failed");
+    UUID failedLease = created.leaseId;
+    UUID agent = agents.placeOn(repoId, created.id, "qits-2265-failed");
+    pending(agent, "Your wait \"ci\" timed out.");
+    // The target stops the failed container when the start retires its lease.
+    placement.endsAtOnce();
+
+    agentService.reconcile();
+
+    assertEquals(1, creates(created.id), "the failed slot asked for a new lease");
+    Workspace restarted = read(created.id);
+    assertEquals(WorkspaceRuntimeStatus.QUEUED, restarted.runtimeStatus);
+    assertFalse(failedLease.equals(restarted.leaseId), "a new lease");
+    assertEquals(
+        List.of("retired by a new start"),
+        placement.endReasons(failedLease),
+        "the start retired the lease the failed row still named");
+    AgentWorktree waiting = agentRow(agent);
+    assertEquals(created.id, waiting.workspaceId, "it stays where its worktree is");
+    assertEquals("Your wait \"ci\" timed out.", waiting.pendingText, "said once it runs");
+
+    // The retry fails as well: the next passes wait out the backoff.
+    failAgain(created.id);
+    agentService.reconcile();
+    agentService.reconcile();
+    assertEquals(1, creates(created.id), "the backoff holds the next asks");
+    assertNotNull(agentRow(agent).startRefusal, "its view says why it waits");
+    assertTrue(
+        agentRow(agent).startRefusal.contains("the agent's worktree is there"),
+        agentRow(agent).startRefusal);
+
+    agentService.pastSlotStartBackoff(created.id);
+    agentService.reconcile();
+    assertEquals(2, creates(created.id), "past the backoff it is asked again");
+  }
+
+  /** A FAILED slot whose agent has nothing to hear is left as it is. */
+  @Test
+  public void aFailedSlotWithNoTurnAsksForNoLease() throws Exception {
+    String repoId = repo();
+    Workspace created = failedTargetRow(repoId, "failed-quiet");
+    UUID agent =
+        agents.placeOn(repoId, created.id, "qits-2265-failed-quiet", AgentRunState.YIELDED);
+
+    agentService.reconcile();
+    agentService.reconcile();
+
+    assertEquals(0, creates(created.id), "nothing to hear, nothing brought up");
+    assertEquals(WorkspaceRuntimeStatus.FAILED, read(created.id).runtimeStatus);
+    assertEquals(AgentRunState.YIELDED, agentRow(agent).runState);
+  }
+
+  /** A stopped agent's wake does not bring its FAILED slot up either. */
+  @Test
+  public void aStoppedAgentInAFailedSlotAsksForNoLease() throws Exception {
+    String repoId = repo();
+    Workspace created = failedTargetRow(repoId, "failed-stopped");
+    UUID agent =
+        agents.placeOn(repoId, created.id, "qits-2265-failed-stopped", AgentRunState.STOPPED);
+    pending(agent, "Your wait \"ci\" timed out.");
+
+    agentService.reconcile();
+    agentService.reconcile();
+
+    assertEquals(0, creates(created.id), "nothing brings a stopped agent's slot up");
+    assertEquals(AgentRunState.STOPPED, agentRow(agent).runState);
+    assertEquals(WorkspaceRuntimeStatus.FAILED, read(created.id).runtimeStatus);
+  }
+
   /** A slot with no turn for anyone stays stopped: a stop is not undone by the next pass. */
   @Test
   public void aStoppedSlotWithNoTurnStaysStopped() throws Exception {
@@ -1321,6 +1399,30 @@ public class WorkspaceTargetPlacementTest {
     workspaceService.stopContainer(created.id);
     placement.clearCalls();
     return read(created.id);
+  }
+
+  /**
+   * A TARGET row whose start failed as a live one does (qits-2265): its lease RUNNING on the target,
+   * no daemon ever dialed home, so the row reads FAILED and still names that lease.
+   */
+  private Workspace failedTargetRow(String repoId, String label) throws Exception {
+    Workspace created = createTargetRow(repoId, label, false);
+    Workspace queued = read(created.id);
+    states.observe(placement.move(queued.leaseId, LeaseState.RUNNING, UUID.randomUUID(), null, null));
+    awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
+    failAgain(created.id);
+    placement.clearCalls();
+    return read(created.id);
+  }
+
+  /** The row's start failed: FAILED, as the provision timeout writes it, its lease kept. */
+  private void failAgain(Long rowId) {
+    update(
+        rowId,
+        w -> {
+          w.runtimeStatus = WorkspaceRuntimeStatus.FAILED;
+          w.runtimeError = "no workspace-daemon dialed home within 30000ms";
+        });
   }
 
   /** A TARGET row reading {@code status} with no lease and no target: {@code V30}'s leftover. */

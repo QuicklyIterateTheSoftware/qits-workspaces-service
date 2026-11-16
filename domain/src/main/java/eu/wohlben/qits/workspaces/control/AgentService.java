@@ -435,12 +435,13 @@ public class AgentService {
   private final Map<UUID, Requeued> requeued = new ConcurrentHashMap<>();
 
   /**
-   * The STOPPED slots a pass asked to start for an agent with a turn to hear (qits-2265), by
-   * workspace row id, under {@link #requeued}'s backoff: the first ask is made at once, and one that
-   * left the row STOPPED (refused, or qits-system could not be asked) is not made again before
-   * {@link #REQUEUE_BACKOFF}, doubled up to {@link #REQUEUE_BACKOFF_MAX}, so a slot that cannot
-   * start is not asked every pass. Its daemon connecting, or a start accepted there, ends the row.
-   * In memory: a restart asks again at once.
+   * The STOPPED or FAILED slots a pass asked to start for an agent with a turn to hear (qits-2265),
+   * by workspace row id, under {@link #requeued}'s backoff: the first ask is made at once, and one
+   * that left the row STOPPED (refused, or qits-system could not be asked) or that failed again (no
+   * daemon dialed home) is not made again before {@link #REQUEUE_BACKOFF}, doubled up to {@link
+   * #REQUEUE_BACKOFF_MAX}, so a slot that cannot start is not asked every pass. A failure does not
+   * end the row — the wait grows across failed retries; its daemon connecting, or a start accepted
+   * there, does. In memory: a restart asks again at once.
    */
   private final Map<Long, Requeued> slotStarts = new ConcurrentHashMap<>();
 
@@ -2510,10 +2511,10 @@ public class AgentService {
       return;
     }
     if (!daemonLive(workspace.id)) {
-      // A turn it has still to hear wants the slot up (qits-2265); with none, a yielded agent in a
-      // stopped slot leaves it stopped.
+      // A turn it has still to hear wants the slot up, stopped or failed (qits-2265); with none, a
+      // yielded agent leaves its slot as it is.
       if (require(agent.id).pendingText != null) {
-        startStoppedSlot(agent, workspace);
+        startSlotForTurn(agent, workspace);
       }
       return;
     }
@@ -2561,14 +2562,16 @@ public class AgentService {
       }
       if (!daemonLive(workspace.id)) {
         // Its worktree is in that volume: moving the agent would let the empty slot be discarded
-        // with it. It waits for the workspace, which a person or a restart brings back.
+        // with it. It waits for the workspace — and, with a turn to hear, the pass starts it again
+        // under the slot's backoff (qits-2265), where it used to wait for a person.
         recordRefusal(
             workspace.id,
             agent,
             "Workspace "
                 + workspace.id
                 + " failed to start again; the agent's worktree is there, so it waits for that"
-                + " workspace.");
+                + " workspace, which is started again while the agent has a turn to hear.");
+        startSlotForTurn(agent, workspace);
         return;
       }
     }
@@ -2576,7 +2579,7 @@ public class AgentService {
       // A RUNNING agent has a turn to hear or a start to make, and neither happens in a slot no
       // daemon serves: a STOPPED one is started for it (qits-2265), where every pass used to
       // return here and its wake was never said.
-      startStoppedSlot(agent, workspace);
+      startSlotForTurn(agent, workspace);
       return;
     }
     if (!daemon.isResolvable()) {
@@ -3370,16 +3373,21 @@ public class AgentService {
   }
 
   /**
-   * A pass's {@link #bringUp} (qits-2265): {@code workspace} reads STOPPED with no daemon, and
-   * {@code agent} — RUNNING, or YIELDED with a turn — is to be started there. Only a STOPPED row
-   * whose lease is over is asked: a QUEUED or PROVISIONING one is starting already, a FAILED one is
-   * {@link #drive}'s requeue, and one still naming its lease is ENDING, its ENDED a pass away (a
-   * start then would wait out the ending under the pass lock). Read again, an agent a person
-   * stopped, or one the stop yielded meanwhile with nothing to hear, asks nothing. The ask is
-   * throttled per slot ({@link #slotStarts}).
+   * A pass's {@link #bringUp} (qits-2265): {@code workspace} has no daemon, and {@code agent} —
+   * RUNNING, or YIELDED with a turn — is to be started there. A STOPPED row whose lease is over is
+   * asked, and so is a FAILED one, lease or not: a restart that failed (no daemon dialed home) still
+   * names a lease running on the target, and the start retires it. A QUEUED, PROVISIONING or
+   * STARTING row is starting already, and a STOPPED one still naming its lease is ENDING, its ENDED
+   * a pass away (a start then would wait out the ending under the pass lock). A FAILED slot that
+   * holds none of the agent's work never gets here: {@link #drive} requeues the agent. Read again,
+   * an agent a person stopped, or one the stop yielded meanwhile with nothing to hear, asks
+   * nothing. The ask is throttled per slot ({@link #slotStarts}), its wait growing across failed
+   * retries.
    */
-  private void startStoppedSlot(AgentWorktree agent, Workspace workspace) {
-    if (workspace.runtimeStatus != WorkspaceRuntimeStatus.STOPPED || workspace.leaseId != null) {
+  private void startSlotForTurn(AgentWorktree agent, Workspace workspace) {
+    boolean stopped =
+        workspace.runtimeStatus == WorkspaceRuntimeStatus.STOPPED && workspace.leaseId == null;
+    if (!stopped && workspace.runtimeStatus != WorkspaceRuntimeStatus.FAILED) {
       return;
     }
     AgentWorktree fresh = require(agent.id);
@@ -3399,9 +3407,10 @@ public class AgentService {
         asked == null ? new Requeued(1, now.plus(REQUEUE_BACKOFF)) : again(asked, now);
     slotStarts.put(workspace.id, next);
     LOG.infof(
-        "Agent %s has %s in stopped workspace %s: starting it%s",
+        "Agent %s has %s in %s workspace %s: starting it%s",
         agent.id,
         fresh.pendingText != null ? "a turn to hear" : "a start to make",
+        stopped ? "stopped" : "failed",
         workspace.id,
         next.times() > 1 ? " again (ask " + next.times() + " in a row)" : "");
     startQuietly(workspace.id);
@@ -3411,7 +3420,7 @@ public class AgentService {
    * A live slot's container was stopped (qits-2265): by a person's or the desk's stop-container,
    * or by its lease ending or exiting under it. Its RUNNING agents are YIELDED — the harness went
    * with the container — announced {@code AgentYielded}, and forgotten as started, so the turn that
-   * wakes one brings the slot up ({@link #startStoppedSlot}) and starts it afresh rather than
+   * wakes one brings the slot up ({@link #startSlotForTurn}) and starts it afresh rather than
    * typing into a harness that is gone. STOPPED, QUEUED and YIELDED agents are left as they are,
    * and a stopped agent stays stopped: no pass starts it or its slot. Then {@code
    * WorkspaceStopped}, naming every live agent the slot hosted. After the firing transaction
@@ -3921,6 +3930,15 @@ public class AgentService {
   /** Whether this process has started the agent on its workspace's current daemon connection. */
   public boolean isStarted(UUID id) {
     return started.containsKey(id);
+  }
+
+  /**
+   * The wait {@link #slotStarts} holds for {@code workspaceRowId} is over, as if its time had
+   * passed: the next pass may ask again, and the ask counts on from the row's tally (qits-2265).
+   */
+  void pastSlotStartBackoff(Long workspaceRowId) {
+    slotStarts.computeIfPresent(
+        workspaceRowId, (id, asked) -> new Requeued(asked.times(), Instant.now().minusSeconds(1)));
   }
 
   static UUID parse(String id) {
