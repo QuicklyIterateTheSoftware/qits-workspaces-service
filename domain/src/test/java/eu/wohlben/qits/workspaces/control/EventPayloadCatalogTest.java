@@ -211,4 +211,21 @@ class EventPayloadCatalogTest {
         refused("PeerRegistered", Condition.exact("peerLabel", "x"))
             .contains("did you mean 'peerName'?"));
   }
+
+  /**
+   * qits-2235: NamedAgentStateChanged was uncatalogued, so a wait on the UI builder's state was a
+   * 400.
+   */
+  @Test
+  void namedAgentStateChangedIsChecked() {
+    admitted(
+        "NamedAgentStateChanged",
+        Condition.exact("agentName", "ui-builder"),
+        Condition.exact("state", "IDLE"));
+    admitted("NamedAgentStateChanged", Condition.exact("projectId", "p"));
+    admitted("NamedAgentStateChanged", Condition.exists("commandId"));
+    assertTrue(
+        refused("NamedAgentStateChanged", Condition.exact("name", "ui-builder"))
+            .contains("did you mean 'state'?"));
+  }
 }
