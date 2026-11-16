@@ -682,7 +682,7 @@ public class WorkspaceTargetPlacementTest {
     awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
     UUID agent = agents.placeOn(repoId, created.id, "qits-2265");
     liveness.markLive(created.id);
-    agentService.reconcile();
+    pass();
     assertTrue(agentService.isStarted(agent), "started in its slot");
 
     workspaceService.stopContainer(created.id, "alice");
@@ -712,7 +712,7 @@ public class WorkspaceTargetPlacementTest {
     // A wait of the agent's timed out: its wake is a pending turn, as AgentWaits writes it.
     placement.clearCalls();
     pending(agent, "Your wait \"ci\" timed out.");
-    agentService.reconcile();
+    pass();
 
     assertEquals(AgentRunState.RUNNING, agentRow(agent).runState, "resumed for its turn");
     assertEquals(1, creates(created.id), "the stopped slot asked for a new lease");
@@ -729,8 +729,8 @@ public class WorkspaceTargetPlacementTest {
         agents.placeOn(repoId, created.id, "qits-2265-stopped", AgentRunState.STOPPED);
     pending(agent, "Your wait \"ci\" timed out.");
 
-    agentService.reconcile();
-    agentService.reconcile();
+    pass();
+    pass();
 
     assertEquals(0, creates(created.id), "nothing brings a stopped agent's slot up");
     assertEquals(AgentRunState.STOPPED, agentRow(agent).runState);
@@ -746,12 +746,12 @@ public class WorkspaceTargetPlacementTest {
     UUID agent = agents.placeOn(repoId, created.id, "qits-2265-refused");
     pending(agent, "Your wait \"ci\" timed out.");
 
-    agentService.reconcile();
+    pass();
     assertEquals(1, creates(created.id), "the turn asked for a lease");
     assertEquals(WorkspaceRuntimeStatus.STOPPED, read(created.id).runtimeStatus, "refused");
 
-    agentService.reconcile();
-    agentService.reconcile();
+    pass();
+    pass();
     assertEquals(1, creates(created.id), "the backoff holds the next asks");
     assertEquals("Your wait \"ci\" timed out.", agentRow(agent).pendingText, "still to be said");
   }
@@ -769,10 +769,18 @@ public class WorkspaceTargetPlacementTest {
     UUID failedLease = created.leaseId;
     UUID agent = agents.placeOn(repoId, created.id, "qits-2265-failed");
     pending(agent, "Your wait \"ci\" timed out.");
-    // The target stops the failed container when the start retires its lease.
-    placement.endsAtOnce();
 
+    long began = System.nanoTime();
     agentService.reconcile();
+    long passMillis = (System.nanoTime() - began) / 1_000_000;
+    assertTrue(passMillis < 5_000, "the pass does not wait out the lease's end: " + passMillis);
+
+    // The start runs off the pass, waiting for the lease it retired; the target then reports it.
+    awaitCall("end:" + failedLease);
+    assertEquals(0, creates(created.id), "no new lease while the old one is ending");
+    placement.move(
+        failedLease, LeaseState.ENDED, placement.lease(failedLease).targetId(), null, null);
+    agentService.awaitSlotStartsIdle();
 
     assertEquals(1, creates(created.id), "the failed slot asked for a new lease");
     Workspace restarted = read(created.id);
@@ -788,8 +796,8 @@ public class WorkspaceTargetPlacementTest {
 
     // The retry fails as well: the next passes wait out the backoff.
     failAgain(created.id);
-    agentService.reconcile();
-    agentService.reconcile();
+    pass();
+    pass();
     assertEquals(1, creates(created.id), "the backoff holds the next asks");
     assertNotNull(agentRow(agent).startRefusal, "its view says why it waits");
     assertTrue(
@@ -797,7 +805,7 @@ public class WorkspaceTargetPlacementTest {
         agentRow(agent).startRefusal);
 
     agentService.pastSlotStartBackoff(created.id);
-    agentService.reconcile();
+    pass();
     assertEquals(2, creates(created.id), "past the backoff it is asked again");
   }
 
@@ -809,8 +817,8 @@ public class WorkspaceTargetPlacementTest {
     UUID agent =
         agents.placeOn(repoId, created.id, "qits-2265-failed-quiet", AgentRunState.YIELDED);
 
-    agentService.reconcile();
-    agentService.reconcile();
+    pass();
+    pass();
 
     assertEquals(0, creates(created.id), "nothing to hear, nothing brought up");
     assertEquals(WorkspaceRuntimeStatus.FAILED, read(created.id).runtimeStatus);
@@ -826,8 +834,8 @@ public class WorkspaceTargetPlacementTest {
         agents.placeOn(repoId, created.id, "qits-2265-failed-stopped", AgentRunState.STOPPED);
     pending(agent, "Your wait \"ci\" timed out.");
 
-    agentService.reconcile();
-    agentService.reconcile();
+    pass();
+    pass();
 
     assertEquals(0, creates(created.id), "nothing brings a stopped agent's slot up");
     assertEquals(AgentRunState.STOPPED, agentRow(agent).runState);
@@ -842,8 +850,8 @@ public class WorkspaceTargetPlacementTest {
     UUID agent = agents.placeOn(repoId, created.id, "qits-2265-quiet");
 
     workspaceService.stopContainer(created.id, "alice");
-    agentService.reconcile();
-    agentService.reconcile();
+    pass();
+    pass();
 
     assertEquals(AgentRunState.YIELDED, agentRow(agent).runState);
     assertEquals(1, creates(created.id), "the create's lease only");
@@ -1438,6 +1446,21 @@ public class WorkspaceTargetPlacementTest {
           w.queuedAt = null;
         });
     return created.id;
+  }
+
+  /** A scheduler pass and the slot starts it asked for, which run off the pass (qits-2265). */
+  private void pass() {
+    agentService.reconcile();
+    agentService.awaitSlotStartsIdle();
+  }
+
+  /** Until the placement port saw {@code call}, as the slot starter makes it off the pass. */
+  private void awaitCall(String call) throws InterruptedException {
+    long deadline = System.currentTimeMillis() + AWAIT_MILLIS;
+    while (!placement.calls().contains(call) && System.currentTimeMillis() < deadline) {
+      Thread.sleep(20);
+    }
+    assertTrue(placement.calls().contains(call), call + " made in time");
   }
 
   private AgentWorktree agentRow(UUID id) {

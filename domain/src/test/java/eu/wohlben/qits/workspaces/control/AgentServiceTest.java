@@ -1259,10 +1259,13 @@ public class AgentServiceTest {
 
       // Nothing to hear: the slot stays stopped. Then a wait's wake: the slot is started again.
       service.reconcile();
+      service.awaitSlotStartsIdle();
       assertEquals(WorkspaceRuntimeStatus.STOPPED, workspace(slot).runtimeStatus);
       QuarkusTransaction.requiringNew()
           .run(() -> agents.findById(id).pendingText = "Your wait \"ci\" timed out.");
       service.reconcile();
+      // The slot's start runs off the pass (qits-2265).
+      service.awaitSlotStartsIdle();
       assertEquals(AgentRunState.RUNNING, row(agentId).runState);
       assertNotEquals(
           WorkspaceRuntimeStatus.STOPPED, workspace(slot).runtimeStatus, "started for the turn");
@@ -1832,6 +1835,8 @@ public class AgentServiceTest {
     Instant first = row(startedThere.toString()).startRefusedAt;
     service.reconcile();
     assertEquals(first, row(startedThere.toString()).startRefusedAt, "said once, not every pass");
+    // The turn's start of the slot runs off the pass (qits-2265): settled before the next test.
+    service.awaitSlotStartsIdle();
   }
 
   @Test

@@ -39,6 +39,8 @@ import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspacePromptAttachmentRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspacePromptDraftRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
+import io.quarkus.arc.Arc;
+import io.quarkus.arc.ManagedContext;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -460,6 +462,20 @@ public class AgentService {
             return thread;
           });
 
+  /**
+   * The slot starts a pass asks for an agent's turn ({@link #startSlotForTurn}, qits-2265), one at
+   * a time and off the pass: a FAILED row's start retires the lease it still names and may wait
+   * {@link TargetPlacement#ENDING_DEADLINE} for it to end, which the pass must not do holding
+   * {@code passLock}.
+   */
+  private final ExecutorService slotStarter =
+      Executors.newSingleThreadExecutor(
+          runnable -> {
+            Thread thread = new Thread(runnable, "agent-slot-starter");
+            thread.setDaemon(true);
+            return thread;
+          });
+
   private final AtomicBoolean kicked = new AtomicBoolean();
 
   /**
@@ -474,6 +490,7 @@ public class AgentService {
   @PreDestroy
   void shutdown() {
     pass.shutdownNow();
+    slotStarter.shutdownNow();
   }
 
   // --- the doors ----------------------------------------------------------------------------------
@@ -1792,6 +1809,25 @@ public class AgentService {
         throw new IllegalStateException("the agent scheduler did not settle", e);
       }
     } while (kicked.get());
+  }
+
+  /**
+   * For tests: returns once every slot start a pass submitted ({@link #slotStarter}) has run
+   * (qits-2265). One thread, first in first out, so a no-op through it waits out every start
+   * submitted before it; a start may wait {@link TargetPlacement#ENDING_DEADLINE}, so this waits
+   * longer.
+   */
+  void awaitSlotStartsIdle() {
+    try {
+      slotStarter
+          .submit(() -> {})
+          .get(TargetPlacement.ENDING_DEADLINE.plusSeconds(15).toMillis(), TimeUnit.MILLISECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("interrupted waiting for the slot starts", e);
+    } catch (ExecutionException | TimeoutException e) {
+      throw new IllegalStateException("the slot starts did not settle", e);
+    }
   }
 
   /**
@@ -3413,7 +3449,21 @@ public class AgentService {
         stopped ? "stopped" : "failed",
         workspace.id,
         next.times() > 1 ? " again (ask " + next.times() + " in a row)" : "");
-    startQuietly(workspace.id);
+    // Off the pass (qits-2265): a FAILED row's start retires its lease and may wait out
+    // ENDING_DEADLINE for it, which must not hold passLock. The backoff above is already counted.
+    // A request context of its own, as a door's start has: a DIRECT row is resolved through the
+    // request-scoped session.
+    Long slot = workspace.id;
+    slotStarter.submit(
+        () -> {
+          ManagedContext request = Arc.container().requestContext();
+          request.activate();
+          try {
+            startQuietly(slot);
+          } finally {
+            request.terminate();
+          }
+        });
   }
 
   /**
