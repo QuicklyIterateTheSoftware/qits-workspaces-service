@@ -294,6 +294,14 @@ class GoldenMasterRecordingTest {
                       + "[{\"path\":\"runId\",\"op\":\"exact\",\"value\":\"{runId}\"},{\"path\":\"status\",\"op\":\"exact\",\"value\":\"TIMED_OUT\"}]"
                       + "]}}")
               .as("qits:agent"),
+          // qits-2309: a timer, a timeout and no selection — the body the CLI sends for one.
+          Interaction.write(
+                  ProviderStates.AN_AGENT_DECLARING_A_TIMER,
+                  "createAgentWait",
+                  WORKSPACES + "/agents/{agentId}/waits",
+                  201,
+                  "{\"label\":\"look at the deploy again\",\"timeout\":\"PT30M\"}")
+              .as("qits:agent"),
           Interaction.read(
                   ProviderStates.AN_AGENT_WITH_AN_OPEN_WAIT,
                   "listAgentWaits",

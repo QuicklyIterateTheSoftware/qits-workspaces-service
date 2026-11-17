@@ -1,0 +1,21 @@
+{
+  "id": "00000000-0000-4000-8000-000000000100",
+  "agentId": "00000000-0000-4000-8000-0000000000a1",
+  "label": "look at the deploy again",
+  "selection": null,
+  "state": "OPEN",
+  "createdAt": "2026-01-01T00:00:00Z",
+  "expiresAt": "2026-01-01T00:00:00Z",
+  "matchedEventId": null,
+  "closedAt": null,
+  "subjectKind": "TIMER",
+  "subjectRef": null,
+  "subjectId": null,
+  "subjectQualifiedId": null,
+  "targetStates": [],
+  "subjectState": null,
+  "subjectStateAt": null,
+  "subjectExpectedBy": null,
+  "subjectError": null,
+  "brokenReason": null
+}

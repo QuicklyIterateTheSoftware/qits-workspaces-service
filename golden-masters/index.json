@@ -1140,6 +1140,41 @@
       ]
     },
     {
+      "name": "an agent declaring a timer",
+      "slug": "an-agent-declaring-a-timer",
+      "params": {
+        "agentId": "00000000-0000-4000-8000-0000000000a1"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "createAgentWait",
+          "method": "POST",
+          "path": "/workspaces/api/agents/{agentId}/waits",
+          "body": {
+            "label": "look at the deploy again",
+            "timeout": "PT30M"
+          },
+          "callerRole": "qits:agent",
+          "status": 201,
+          "file": "an-agent-declaring-a-timer/createAgentWait.json",
+          "frozen": {
+            "ids": [
+              "$.id",
+              "$.agentId"
+            ],
+            "instants": [
+              "$.createdAt",
+              "$.expiresAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "an agent declaring a wait on a CI run",
       "slug": "an-agent-declaring-a-wait-on-a-ci-run",
       "params": {

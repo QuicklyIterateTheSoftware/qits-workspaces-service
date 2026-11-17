@@ -258,6 +258,9 @@ runtime status and its daemon's connection (`AgentPhases`); `runState` and `acti
 meanings. A requeue and a stop clear the first two; a yield keeps both, since a yielded agent keeps
 its harness. A row placed before the migration falls back to whether this process started it or its
 daemon reports it. Columns on a `CausedRow`, so no `ArchRulesTest` decision.
+**`V40__wait_timer.sql`** (qits-2309) drops `not null` from `agent_wait.selection` and
+`event_name`: a timer has neither. No backfill. Columns on a `CausedRow`, so no `ArchRulesTest`
+decision; see "Declared waits".
 **`V30__workspace_leases.sql`** (epic qits-1481, qits-1532) retires the workspace runners: it first
 copies every row with a `runner_id` into `legacy_placement(row_id, old_runner_id, engine_id,
 hostname, runner_name)` — `engine_id` and `hostname` from the runner's `capabilities ->> 'engineId'`
@@ -1501,6 +1504,17 @@ on a wait declared since; `expiry_is_ceiling` says the expiry is the ceiling:
   agent's wait, whose `author` is the agent's id — skips the wait, which stays OPEN, live and on
   the look-back alike (`AgentWaits.ownComment`). Only comments: a state event the waiter caused
   still matches. A wait from before `V36` has no subject and is held to the author check alone.
+- **A timer** (qits-2309, `V40`). A body with a `timeout` and no `selection` (absent or JSON null)
+  declares one, on both wait doors; with neither it is a 400 ("A wait needs a selection … or, for a
+  timer, a timeout"). It is a row with `selection` and `event_name` null, `subject_kind` `TIMER`,
+  no ref, `target_states` `[]`, `expiry_is_ceiling` false, and label `timer until <expiresAt>` to
+  the second when none is given. It names no event, so it never matches and is not in the
+  listener's name set; it replays no look-back, is never looked up (`findOpenDue` skips it) and
+  never breaks. The sweep closes it TIMED_OUT and wakes its holder with `Your timer "<label>" is up
+  (set <duration> ago).`; a desk's is announced as `DeskWaitClosed` TIMED_OUT with no `eventName`.
+  `AgentWaitOpened` says `subjectKind` `TIMER` and no `eventName`; `WaitView.selection` is null.
+  It counts toward the cap and the 24 h limit like any wait. Agents used to fake one with a
+  selection nothing matched.
 - **Limits.** 8 OPEN waits per agent, timeout 8 h when none is given and at most 24 h (qits-1961), label at most 200 characters (default:
   the selection in one line). The native image registers `EventSelection`, its `Condition` and `Op`
   on `AgentWaitController`.
@@ -1631,7 +1645,7 @@ payload's top-level fields:
 | `WorkspaceStopped` | `workspaceId`, `repositoryId`, `stoppedBy` (the stopping caller's principal, absent for a lease that ended on its own), `reason` (the `?reason=` sent qits-system, or the lease's detail), `affectedAgentIds` (the live agents the slot hosted) — qits-2265 | |
 | `WorkspaceRemoved` | `workspaceId`, `repositoryId`, `reason` | `NO_AGENT_LEFT` |
 | `DeskWaitClosed` | `waitId`, `projectId`, `label`, `state`, `eventName`, `matchedEventId` (absent on a timeout or a break), `turn`, `closedAt` — not a lifecycle fact but a project desk's wake (qits-1618, "Declared waits") | `state`: `MATCHED`, `TIMED_OUT`, `BROKEN` (qits-1961) |
-| `AgentWaitOpened` | the four, `projectId`, `waitId`, `label`, `eventName`, `subjectKind`, `subjectRef` (absent for OTHER), `targetStates` — an agent's wait declared (epic qits-1681) | `subjectKind`: `RELEASE_REQUEST`, `CI_RUN`, `WORK_ITEM`, `COMMENTS`, `OTHER` |
+| `AgentWaitOpened` | the four, `projectId`, `waitId`, `label`, `eventName` (absent for a timer), `subjectKind`, `subjectRef` (absent for OTHER and TIMER), `targetStates` — an agent's wait declared (epic qits-1681) | `subjectKind`: `RELEASE_REQUEST`, `CI_RUN`, `WORK_ITEM`, `COMMENTS`, `BRANCH`, `OTHER`, `TIMER` (qits-2309) |
 | `AgentWaitChanged` | the four, `projectId`, `waitId`, `subjectKind`, `subjectRef`, `subjectQualifiedId`, `subjectState`, `subjectStateAt` — an event of the wait's name moved its subject's recorded state (epic qits-1681) | |
 | `AgentWaitClosed` | the four, `projectId`, `waitId`, `state`, `matchedEventId` (a match only), `label` and `reason` (BROKEN only, qits-1961) — an agent's wait matched, broke, timed out, was cancelled, or went with its agent (epic qits-1681) | `state`: `MATCHED`, `TIMED_OUT`, `BROKEN`, `CANCELLED` |
 | `AgentActivityChanged` | the four, `projectId`, `activity`, `waitingSince` (absent once it works), `at` — the waiting flip `onActivity` relays to qits-projects, and no other frame (epic qits-1681) | `activity`: `IDLE`, `BUSY`, `WAITING`, `ENDED` |

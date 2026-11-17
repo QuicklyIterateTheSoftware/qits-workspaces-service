@@ -278,17 +278,19 @@ components:
       properties:
         label:
           type: string
+          description: "What the agent calls the wait; default: the selection in one\
+            \ line, or `timer until <expiresAt>` for a timer"
         selection:
           $ref: "#/components/schemas/EventSelection"
           type: object
         timeout:
           type: string
-          description: ISO-8601; none = the platform's ceiling of 8 hours; at most
-            24 hours (PT24H)
+          description: "ISO-8601; none = the platform's ceiling of 8 hours; at most\
+            \ 24 hours (PT24H). With no selection (left out, or null) it declares\
+            \ a timer (qits-2309): it never matches an event, and closes TIMED_OUT,\
+            \ waking its holder, when the timeout passes. A timer needs a timeout."
           examples:
           - PT2H
-      required:
-      - selection
     DeliverTurnRequest:
       type: object
       required:
@@ -789,7 +791,8 @@ components:
           $ref: "#/components/schemas/Instant"
         subjectKind:
           type: string
-          description: What the selection waits on
+          description: "What the selection waits on; TIMER for a timer (qits-2309),\
+            \ whose selection is null"
           enum:
           - RELEASE_REQUEST
           - CI_RUN
@@ -797,9 +800,11 @@ components:
           - COMMENTS
           - BRANCH
           - OTHER
+          - TIMER
         subjectRef:
           type: string
           description: The subject's id as the selection names it; null for OTHER
+            and TIMER
         subjectId:
           type: string
           description: "The subject's uuid, once resolved"
@@ -1435,6 +1440,8 @@ paths:
         - qits:agent
     post:
       summary: Declare what the agent waits on
+      description: "A selection waits for an event; no selection and a timeout is\
+        \ a timer (qits-2309), which wakes the agent when its time passes."
       operationId: createAgentWait
       parameters:
       - name: agentId
@@ -1450,14 +1457,15 @@ paths:
         required: true
       responses:
         "201":
-          description: "The wait, OPEN."
+          description: "The wait, OPEN; a timer when the body named no selection."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/WaitView"
         "400":
-          description: "An invalid selection (the matcher's reason), or a bad timeout:\
-            \ not positive, or longer than the 24-hour cap."
+          description: "Neither a selection nor a timeout, an invalid selection (the\
+            \ matcher's reason), or a bad timeout: not positive, or longer than the\
+            \ 24-hour cap."
           content:
             application/json:
               schema:
@@ -2579,6 +2587,9 @@ paths:
         - qits:desk-admin
     post:
       summary: Declare what the project's desk waits on
+      description: "A selection waits for an event; no selection and a timeout is\
+        \ a timer (qits-2309), announced as DeskWaitClosed TIMED_OUT when its time\
+        \ passes."
       operationId: createDeskWait
       parameters:
       - name: projectId
@@ -2594,14 +2605,14 @@ paths:
         required: true
       responses:
         "201":
-          description: "The wait, OPEN."
+          description: "The wait, OPEN; a timer when the body named no selection."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/WaitView"
         "400":
-          description: "An invalid selection (the matcher's reason), a bad timeout,\
-            \ or a project id that is not a UUID."
+          description: "Neither a selection nor a timeout, an invalid selection (the\
+            \ matcher's reason), a bad timeout, or a project id that is not a UUID."
           content:
             application/json:
               schema:

@@ -24,10 +24,7 @@ public record WaitView(
     String id,
     String agentId,
     String label,
-    @Schema(
-            implementation = SelectionSchema.class,
-            description = "What the wait waits for; null for a timer (qits-2309), which names no event")
-        JsonNode selection,
+    @Schema(implementation = SelectionSchema.class) JsonNode selection,
     AgentWaitState state,
     Instant createdAt,
     @Schema(
@@ -38,7 +35,9 @@ public record WaitView(
     String matchedEventId,
     Instant closedAt,
     @Schema(
-            description = "What the selection waits on; TIMER for a wait with no selection (qits-2309)",
+            description =
+                "What the selection waits on; TIMER for a timer (qits-2309), whose selection is"
+                    + " null",
             enumeration = {
               "RELEASE_REQUEST", "CI_RUN", "WORK_ITEM", "COMMENTS", "BRANCH", "OTHER", "TIMER"
             })

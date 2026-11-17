@@ -110,6 +110,8 @@ public class ProviderStates {
   public static final String AN_AGENT_WAITING_ON_A_RELEASE_REQUEST =
       "an agent declaring a wait on a release request";
   public static final String AN_AGENT_WAITING_ON_A_CI_RUN = "an agent declaring a wait on a CI run";
+  // A timer (qits-2309): a wait with a timeout and no selection, as `qits wait` declares one.
+  public static final String AN_AGENT_DECLARING_A_TIMER = "an agent declaring a timer";
   // What a project's agents need a person for (epic qits-1681): one agent per attention code and a
   // healthy one, their waits on every kind of subject.
   public static final String A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION =
@@ -280,6 +282,7 @@ public class ProviderStates {
         AN_AGENT_WITH_AN_OPEN_WAIT,
         AN_AGENT_WAITING_ON_A_RELEASE_REQUEST,
         AN_AGENT_WAITING_ON_A_CI_RUN,
+        AN_AGENT_DECLARING_A_TIMER,
         A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION,
         AN_AGENT_OVERDUE_ON_A_RELEASE_REQUEST,
         A_PROJECT_WITH_AGENTS_STARTING_UP,
@@ -323,6 +326,7 @@ public class ProviderStates {
       case AN_AGENT_WITH_AN_OPEN_WAIT -> agentWithAnOpenWait();
       case AN_AGENT_WAITING_ON_A_RELEASE_REQUEST -> agentDeclaringAWait("releaseRequestId", RELEASE_REQUEST_ID);
       case AN_AGENT_WAITING_ON_A_CI_RUN -> agentDeclaringAWait("runId", CI_RUN_ID);
+      case AN_AGENT_DECLARING_A_TIMER -> agentDeclaringAWait(null, null);
       case A_PROJECT_WITH_AGENTS_NEEDING_ATTENTION -> agentsNeedingAttention();
       case AN_AGENT_OVERDUE_ON_A_RELEASE_REQUEST -> agentOverdueOnARequest();
       case A_PROJECT_WITH_AGENTS_STARTING_UP -> agentsStartingUp();
@@ -657,7 +661,7 @@ public class ProviderStates {
   /**
    * An ACTIVE agent with no wait yet, about to declare one on what {@code param} names — a release
    * request ({@code releaseRequestId}) or a CI run ({@code runId}): the presets' create, recorded as
-   * the agent itself.
+   * the agent itself. A null {@code param} is a timer's (qits-2309), which names nothing.
    */
   private Setup agentDeclaringAWait(String param, String value) {
     List<Long> ids = new ArrayList<>();
@@ -670,7 +674,10 @@ public class ProviderStates {
             });
     Map<String, String> params = new TreeMap<>();
     params.put("agentId", AGENT_ACTIVE_ID);
-    params.put(param, value);
+    // A timer (qits-2309) names no subject, so it has no param of one.
+    if (param != null) {
+      params.put(param, value);
+    }
     return new Setup(params, List.copyOf(ids));
   }
 

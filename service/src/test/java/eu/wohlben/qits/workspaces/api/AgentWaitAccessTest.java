@@ -4,6 +4,8 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
+import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import eu.wohlben.qits.workspaces.contracts.ContractBearers;
@@ -280,6 +282,55 @@ class AgentWaitAccessTest {
         .statusCode(400)
         .body("message", containsString("is never announced for"))
         .body("message", containsString("ReleaseRequestStateChanged"));
+  }
+
+  /**
+   * qits-2309: a body with a timeout and no selection — absent or JSON null — declares a timer; with
+   * neither it is still a 400, and a timer is held to the 24-hour cap like any wait.
+   */
+  @Test
+  void noSelectionAndATimeoutIsATimer() {
+    as(subject, "qits:agent")
+        .body(Map.of("label", "look again", "timeout", "PT30M"))
+        .post(waits())
+        .then()
+        .statusCode(201)
+        .body("agentId", equalTo(agentId.toString()))
+        .body("state", equalTo("OPEN"))
+        .body("label", equalTo("look again"))
+        .body("selection", nullValue())
+        .body("subjectKind", equalTo("TIMER"))
+        .body("subjectRef", nullValue())
+        .body("targetStates", hasSize(0));
+    java.util.HashMap<String, Object> explicitNull = new java.util.HashMap<>();
+    explicitNull.put("selection", null);
+    explicitNull.put("timeout", "PT1H");
+    as(subject, "qits:agent")
+        .body(explicitNull)
+        .post(waits())
+        .then()
+        .statusCode(201)
+        .body("subjectKind", equalTo("TIMER"))
+        .body("label", startsWith("timer until "));
+    as(subject, "qits:agent").get(waits() + "?state=OPEN").then().statusCode(200).body("waits", hasSize(2));
+  }
+
+  @Test
+  void noSelectionAndNoTimeoutOrATimerOverADayIsA400() {
+    as(subject, "qits:agent")
+        .body(Map.of("label", "x"))
+        .post(waits())
+        .then()
+        .statusCode(400)
+        .body("message", containsString("A wait needs a selection"))
+        .body("message", containsString("for a timer, a timeout"));
+    as(subject, "qits:agent")
+        .body(Map.of("timeout", "PT25H"))
+        .post(waits())
+        .then()
+        .statusCode(400)
+        .body("message", containsString("24 hours"));
+    as(subject, "qits:agent").get(waits()).then().statusCode(200).body("waits", hasSize(0));
   }
 
   @Test

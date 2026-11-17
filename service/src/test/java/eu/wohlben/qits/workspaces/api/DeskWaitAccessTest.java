@@ -214,6 +214,33 @@ class DeskWaitAccessTest {
     asSystem().get(waits("not-a-project")).then().statusCode(400);
   }
 
+  /** qits-2309: the desk declares a timer as an agent does, under the same cap and the same 400s. */
+  @Test
+  void noSelectionAndATimeoutIsADeskTimer() {
+    String project = UUID.randomUUID().toString();
+    asDesk(project)
+        .body(Map.of("timeout", "PT45M"))
+        .post(waits(project))
+        .then()
+        .statusCode(201)
+        .body("agentId", nullValue())
+        .body("selection", nullValue())
+        .body("subjectKind", equalTo("TIMER"))
+        .body("label", containsString("timer until "));
+    asDesk(project)
+        .body(Map.of("label", "x"))
+        .post(waits(project))
+        .then()
+        .statusCode(400)
+        .body("message", containsString("for a timer, a timeout"));
+    asDesk(project)
+        .body(Map.of("timeout", "PT25H"))
+        .post(waits(project))
+        .then()
+        .statusCode(400)
+        .body("message", containsString("24 hours"));
+  }
+
   /** qits-1849: a path its event never carries is refused at the door, naming the closest field. */
   @Test
   void aPathTheEventNeverCarriesIsA400NamingTheClosestField() {

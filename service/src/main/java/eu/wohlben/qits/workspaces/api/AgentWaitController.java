@@ -100,18 +100,16 @@ public class AgentWaitController {
                   "What the agent calls the wait; default: the selection in one line, or"
                       + " `timer until <expiresAt>` for a timer")
           String label,
-      @Schema(
-              implementation = SelectionSchema.class,
-              description =
-                  "The event and conditions to wait for. Leave it out (or null) and give a timeout to"
-                      + " declare a timer (qits-2309): it never matches an event, and closes"
-                      + " TIMED_OUT, waking its holder, when the timeout passes.")
-          JsonNode selection,
+      // No description here: one beside the implementation would inline the schema in place of
+      // its $ref. The timer is told on the timeout, which it needs.
+      @Schema(implementation = SelectionSchema.class) JsonNode selection,
       @Schema(
               example = "PT2H",
               description =
                   "ISO-8601; none = the platform's ceiling of 8 hours; at most 24 hours (PT24H)."
-                      + " Required for a timer (no selection).")
+                      + " With no selection (left out, or null) it declares a timer (qits-2309):"
+                      + " it never matches an event, and closes TIMED_OUT, waking its holder,"
+                      + " when the timeout passes. A timer needs a timeout.")
           String timeout) {}
 
   public record WaitList(List<WaitView> waits) {}
