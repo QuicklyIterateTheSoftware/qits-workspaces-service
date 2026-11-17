@@ -13,7 +13,8 @@ import org.eclipse.microprofile.openapi.annotations.media.Schema;
  * A wait as the doors answer it, with what it waits on (epic qits-1681). The subject fields are
  * null for a wait declared before they existed (a desk's: before qits-1668); {@code subjectId}, {@code
  * subjectQualifiedId}, {@code subjectExpectedBy} and {@code subjectError} stay null until the
- * subject is looked up.
+ * subject is looked up. A timer (qits-2309) has no selection, subject kind {@code TIMER}, and is
+ * never looked up.
  *
  * <p>Here and not on the wait door since epic qits-1681: {@link AgentDto#waits} carries the agent's
  * OPEN waits in this same shape, so the listing and the wait doors answer one schema. Its selection
@@ -23,7 +24,10 @@ public record WaitView(
     String id,
     String agentId,
     String label,
-    @Schema(implementation = SelectionSchema.class) JsonNode selection,
+    @Schema(
+            implementation = SelectionSchema.class,
+            description = "What the wait waits for; null for a timer (qits-2309), which names no event")
+        JsonNode selection,
     AgentWaitState state,
     Instant createdAt,
     @Schema(
@@ -34,10 +38,12 @@ public record WaitView(
     String matchedEventId,
     Instant closedAt,
     @Schema(
-            description = "What the selection waits on",
-            enumeration = {"RELEASE_REQUEST", "CI_RUN", "WORK_ITEM", "COMMENTS", "BRANCH", "OTHER"})
+            description = "What the selection waits on; TIMER for a wait with no selection (qits-2309)",
+            enumeration = {
+              "RELEASE_REQUEST", "CI_RUN", "WORK_ITEM", "COMMENTS", "BRANCH", "OTHER", "TIMER"
+            })
         String subjectKind,
-    @Schema(description = "The subject's id as the selection names it; null for OTHER")
+    @Schema(description = "The subject's id as the selection names it; null for OTHER and TIMER")
         String subjectRef,
     @Schema(description = "The subject's uuid, once resolved") String subjectId,
     @Schema(description = "The subject's qualified id, once resolved; null for a run")
@@ -79,13 +85,20 @@ public record WaitView(
               type = SchemaType.STRING)
           Object value) {}
 
-  /** {@code wait} as the doors answer it; an unreadable selection is answered as its text. */
+  /**
+   * {@code wait} as the doors answer it; an unreadable selection is answered as its text, and a
+   * timer's none (qits-2309) as null.
+   */
   public static WaitView of(AgentWaitDto wait) {
     JsonNode selection;
-    try {
-      selection = JSON.readTree(wait.selection());
-    } catch (Exception unreadable) {
-      selection = JsonNodeFactory.instance.textNode(wait.selection());
+    if (wait.selection() == null) {
+      selection = null;
+    } else {
+      try {
+        selection = JSON.readTree(wait.selection());
+      } catch (Exception unreadable) {
+        selection = JsonNodeFactory.instance.textNode(wait.selection());
+      }
     }
     return new WaitView(
         wait.id(),

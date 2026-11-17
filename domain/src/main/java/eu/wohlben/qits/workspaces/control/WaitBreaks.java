@@ -36,8 +36,8 @@ import java.util.Set;
  * repository's row when it names one; for an {@code everywhere} wait, {@code everywhere} — and since
  * the least advanced step cannot pass a stuck row, also any row stuck for the grace; for a wait that
  * names neither, it breaks only when every row is final or stuck and none is a target. COMMENTS break
- * only on a 404, and OTHER waits never: nothing is looked up for them, and only the ceiling ends
- * them.
+ * only on a 404, and OTHER waits and timers (qits-2309) never: nothing is looked up for them, and
+ * only their expiry ends them.
  *
  * <p>The {@link Broken#reason} is the platform's one line, {@code <subject> is <state> since HH:mm
  * UTC[ in <request>][: <detail>]}: ids and states, and a request's {@code detail} only quoted.
@@ -93,7 +93,7 @@ public final class WaitBreaks {
     return switch (kind) {
       case RELEASE_REQUEST -> RELEASE_REQUEST_STUCK.contains(state);
       case BRANCH -> BRANCH_STUCK.contains(state);
-      case CI_RUN, WORK_ITEM, COMMENTS, OTHER -> false;
+      case CI_RUN, WORK_ITEM, COMMENTS, OTHER, TIMER -> false;
     };
   }
 
@@ -116,13 +116,13 @@ public final class WaitBreaks {
   }
 
   /**
-   * The provider knows no such subject (a 404): every kind with a lookup breaks; OTHER, which has
-   * none, never does.
+   * The provider knows no such subject (a 404): every kind with a lookup breaks; OTHER and a timer
+   * (qits-2309), which have none, never do.
    *
    * @param message the resolver's sentence, as stored in {@code subject_error}
    */
   public static Optional<Broken> notFound(WaitSubjects.Kind kind, String name, String message) {
-    if (kind == null || kind == WaitSubjects.Kind.OTHER) {
+    if (kind == null || kind == WaitSubjects.Kind.OTHER || kind == WaitSubjects.Kind.TIMER) {
       return Optional.empty();
     }
     String said = message == null ? "" : message.strip();

@@ -71,18 +71,19 @@ public class AgentWaitRepository implements PanacheRepositoryBase<AgentWait, UUI
   }
 
   /**
-   * OPEN waits whose subject was parsed (any kind but OTHER) and is due a lookup (qits-1961): never
-   * looked up, or last looked up before {@code resolvedBefore}. The longest unread first — by the
-   * last lookup, or by the declaration for one never resolved — at most {@code limit}: what a
-   * scheduler pass looks up again. An agent's or, since qits-1668, a desk's.
+   * OPEN waits whose subject was parsed (any kind but OTHER, and never a timer: qits-2309) and is
+   * due a lookup (qits-1961): never looked up, or last looked up before {@code resolvedBefore}. The
+   * longest unread first — by the last lookup, or by the declaration for one never resolved — at
+   * most {@code limit}: what a scheduler pass looks up again. An agent's or, since qits-1668, a
+   * desk's.
    */
   public List<AgentWait> findOpenDue(Instant resolvedBefore, int limit) {
     return find(
-            "state = ?1 and subjectKind is not null and subjectKind <> ?2"
+            "state = ?1 and subjectKind is not null and subjectKind not in ?2"
                 + " and (subjectResolvedAt is null or subjectResolvedAt < ?3)"
                 + " order by coalesce(subjectResolvedAt, createdAt), createdAt",
             AgentWaitState.OPEN,
-            "OTHER",
+            List.of("OTHER", "TIMER"),
             resolvedBefore)
         .page(0, limit)
         .list();
@@ -102,19 +103,27 @@ public class AgentWaitRepository implements PanacheRepositoryBase<AgentWait, UUI
     update("announcedAt = ?1 where id = ?2 and announcedAt is null", at, waitId);
   }
 
-  /** The OPEN waits on one event name, oldest first, locked so two deliveries cannot both close one. */
+  /**
+   * The OPEN waits on one event name, oldest first, locked so two deliveries cannot both close one.
+   * No name is no wait: a timer names none (qits-2309) and never matches.
+   */
   public List<AgentWait> findOpenByEventForUpdate(String eventName) {
+    if (eventName == null) {
+      return List.of();
+    }
     return find("eventName = ?1 and state = ?2 order by createdAt", eventName, AgentWaitState.OPEN)
         .withLock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
         .list();
   }
 
-  /** The event names some OPEN wait names: the listener's cheap narrowing. */
+  /** The event names some OPEN wait names: the listener's cheap narrowing. A timer names none (qits-2309). */
   public Set<String> openEventNames() {
     return new HashSet<>(
         getEntityManager()
             .createQuery(
-                "select distinct w.eventName from AgentWait w where w.state = :open", String.class)
+                "select distinct w.eventName from AgentWait w"
+                    + " where w.state = :open and w.eventName is not null",
+                String.class)
             .setParameter("open", AgentWaitState.OPEN)
             .getResultList());
   }

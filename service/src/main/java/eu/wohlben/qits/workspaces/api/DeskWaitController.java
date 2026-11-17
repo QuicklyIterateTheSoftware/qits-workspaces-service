@@ -38,7 +38,8 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * AgentWaitController}), {@code agentId} null; the rules are {@link AgentWaits}' — same selection,
  * timeout at most 24 hours and 8 hours when none is given (qits-1961), at most 8 OPEN waits per
  * project. A match, a break (qits-1961) or a timeout is announced as {@code DeskWaitClosed} rather
- * than written as a turn.
+ * than written as a turn. A body with a timeout and no selection is a timer (qits-2309), as on the
+ * agent door.
  *
  * <p><b>Who.</b> {@code qits:admin} and {@code qits:system} act on any project's desk. {@code
  * qits:desk-admin} (the desk's own role, qits-1622) acts only on the desk of the project its
@@ -78,11 +79,13 @@ public class DeskWaitController {
   @POST
   @APIResponse(
       responseCode = "201",
-      description = "The wait, OPEN.",
+      description = "The wait, OPEN; a timer when the body named no selection.",
       content = @Content(schema = @Schema(implementation = WaitView.class)))
   @APIResponse(
       responseCode = "400",
-      description = "An invalid selection (the matcher's reason), a bad timeout, or a project id that is not a UUID.",
+      description =
+          "Neither a selection nor a timeout, an invalid selection (the matcher's reason), a bad"
+              + " timeout, or a project id that is not a UUID.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @APIResponse(
       responseCode = "403",
@@ -92,7 +95,12 @@ public class DeskWaitController {
       responseCode = "409",
       description = "TOO_MANY_WAITS (8 are OPEN for this project's desk).",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
-  @Operation(operationId = "createDeskWait", summary = "Declare what the project's desk waits on")
+  @Operation(
+      operationId = "createDeskWait",
+      summary = "Declare what the project's desk waits on",
+      description =
+          "A selection waits for an event; no selection and a timeout is a timer (qits-2309),"
+              + " announced as DeskWaitClosed TIMED_OUT when its time passes.")
   public Response create(@PathParam("projectId") String projectId, CreateWaitRequest request) {
     UUID project = authorized(projectId);
     AgentWaitDto created =

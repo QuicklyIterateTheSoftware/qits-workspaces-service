@@ -2,6 +2,7 @@ package eu.wohlben.qits.workspaces.control;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -46,6 +47,7 @@ public class DeskWaitsTest {
   @Inject AgentWorktreeRepository agents;
   @Inject RecordingLifecycleAnnouncer announced;
   @Inject AgentService agentService;
+  @Inject FakeWaitSubjectResolver resolver;
 
   /**
    * The test's sweep, under the scheduler's pass lock (qits-2103): a background pass that closed
@@ -251,6 +253,58 @@ public class DeskWaitsTest {
         event.turn());
     assertEquals(row.closedEventId, event.eventId());
     assertNotNull(row.announcedAt);
+  }
+
+  @Test
+  void aDeskTimerIsNeverMatchedOrLookedUpAndIsAnnouncedWhenItIsUp() {
+    UUID project = UUID.randomUUID();
+    long lookedUp = resolver.askedOfKind(WaitSubjects.Kind.TIMER);
+    AgentWaitDto timer = waits.createForDesk(project, null, null, Duration.ofHours(1), "desk-subject");
+
+    assertEquals("TIMER", timer.subjectKind());
+    assertNull(timer.selection());
+    assertEquals(AgentWaits.timerLabel(timer.expiresAt()), timer.label());
+    assertTrue(timer.label().startsWith("timer until "), timer.label());
+    AgentWait row = waitRow(timer.id());
+    assertNull(row.eventName);
+    assertEquals("[]", row.targetStates);
+    assertFalse(row.expiryIsCeiling);
+
+    waits.onEvent("dt-ev-1", "DeskTestRequestFinalized", Instant.parse("2036-10-10T10:00:00Z"), "{}");
+    waits.resolveUnresolved();
+    assertEquals(AgentWaitState.OPEN, waitRow(timer.id()).state);
+    assertEquals(lookedUp, resolver.askedOfKind(WaitSubjects.Kind.TIMER));
+
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                waitRows.update(
+                    "createdAt = ?1, expiresAt = ?2 where id = ?3",
+                    Instant.now().minus(Duration.ofHours(1)).minusSeconds(1),
+                    Instant.now().minusSeconds(1),
+                    UUID.fromString(timer.id())));
+    sweep();
+
+    assertEquals(AgentWaitState.TIMED_OUT, waitRow(timer.id()).state);
+    List<DeskWaitClosed> events = closedOf(timer.id());
+    assertEquals(1, events.size());
+    DeskWaitClosed event = events.get(0);
+    assertEquals("TIMED_OUT", event.state());
+    assertNull(event.eventName());
+    assertNull(event.matchedEventId());
+    assertEquals("Your timer \"" + timer.label() + "\" is up (set 60m ago).", event.turn());
+  }
+
+  @Test
+  void aDeskTimerNeedsATimeoutAndCountsTowardTheCap() {
+    UUID project = UUID.randomUUID();
+    assertThrows(BadRequestException.class, () -> waits.createForDesk(project, "t", null, null, null));
+    assertThrows(BadRequestException.class, () -> waits.createForDesk(project, "t", null, Duration.ofHours(25), null));
+    for (int i = 0; i < AgentWaits.MAX_OPEN_PER_AGENT; i++) {
+      waits.createForDesk(project, "t" + i, null, Duration.ofMinutes(10), null);
+    }
+    assertThrows(
+        ConflictException.class, () -> waits.createForDesk(project, "one more", null, Duration.ofMinutes(10), null));
   }
 
   /**

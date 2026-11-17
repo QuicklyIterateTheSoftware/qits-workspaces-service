@@ -35,7 +35,8 @@ import org.eclipse.microprofile.rest.client.inject.RestClient;
  * </ul>
  *
  * A request's answer also carries its {@code detail} (qits-1961), which a broken wait quotes. {@link
- * WaitSubjects.Kind#OTHER} resolves to nothing.
+ * WaitSubjects.Kind#OTHER} and a timer ({@link WaitSubjects.Kind#TIMER}, qits-2309) resolve to
+ * nothing.
  *
  * Every failure is a {@link WaitSubjectResolver.Unresolvable} naming it in one sentence: a 404 is
  * "no such subject" and, since qits-1961, the {@link WaitSubjectResolver.NotFound} that breaks the
@@ -77,7 +78,7 @@ public class HttpWaitSubjectResolver implements WaitSubjectResolver {
       case WORK_ITEM, COMMENTS -> Optional.of(workItem(kind, ref));
       case CI_RUN -> Optional.of(run(ref));
       case BRANCH -> Optional.of(branch(ref, projectId));
-      case OTHER -> Optional.empty();
+      case OTHER, TIMER -> Optional.empty();
     };
   }
 

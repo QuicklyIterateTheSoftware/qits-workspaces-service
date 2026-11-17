@@ -123,6 +123,12 @@ import org.jboss.logging.Logger;
  *       changing and its closing (match, break, timeout, cancel, or its agent leaving ACTIVE) are announced
  *       as {@link AgentWaitOpened}, {@link AgentWaitChanged} and {@link AgentWaitClosed}, after the
  *       write committed. A desk's waits announce none of them.
+ *   <li><b>A timer</b> (qits-2309, {@code V40}): a wait declared with a timeout and no selection.
+ *       It names no event ({@code selection} and {@code event_name} null, subject {@link
+ *       WaitSubjects.Kind#TIMER}), so it never matches, replays no look-back, is never looked up
+ *       and never breaks; the sweep closes it TIMED_OUT when its time passes, and its turn says the
+ *       timer is up ({@link #timedOutTurn}). Agents used to fake one with a selection nothing
+ *       matched. It counts toward {@link #MAX_OPEN_PER_AGENT} like any other wait.
  * </ul>
  */
 @ApplicationScoped
@@ -251,19 +257,23 @@ public class AgentWaits {
    * get there (BROKEN, qits-1961), {@code timeout} passes, or it is cancelled. Declaring does not
    * yield the agent (W5). An event from the look-back, or a subject the lookup finds already in a
    * target state, can match it at once, so the answer may already say MATCHED (qits-1668) — or
-   * BROKEN, when the lookup finds it can never match.
+   * BROKEN, when the lookup finds it can never match. No selection and a timeout is a timer
+   * (qits-2309), which only its expiry closes.
    *
-   * @param label what the agent calls it; null = the selection's one-line description
+   * @param label what the agent calls it; null = the selection's one-line description, or {@code
+   *     timer until <expiry>} for a timer
+   * @param selection null = a timer, which needs a timeout
    * @param timeout null = the platform's ceiling, {@link #DEFAULT_TIMEOUT}
    * @throws NotFoundException no such agent
    * @throws ConflictException {@code AGENT_NOT_ACTIVE} or {@code TOO_MANY_WAITS}
-   * @throws BadRequestException a timeout that is not positive or longer than {@link #MAX_TIMEOUT}
+   * @throws BadRequestException neither a selection nor a timeout, or a timeout that is not positive
+   *     or longer than {@link #MAX_TIMEOUT}
    */
   public AgentWaitDto create(UUID agentId, String label, EventSelection selection, Duration timeout) {
-    String finalLabel = validated(label, selection, timeout);
-    UUID id = UUID.randomUUID();
     Instant declaredAt = Instant.now();
-    WaitSubjects.Subject subject = WaitSubjects.parse(selection);
+    String finalLabel = validated(label, selection, timeout, declaredAt);
+    UUID id = UUID.randomUUID();
+    WaitSubjects.Subject subject = declaredSubject(selection);
     AgentWorktree agent =
         QuarkusTransaction.requiringNew()
             .call(
@@ -292,8 +302,8 @@ public class AgentWaits {
                   // The agent waits, even when an admin declares for it (qits-1759).
                   wait.waiterSubject = row.commissionedTokenSubject;
                   wait.label = finalLabel;
-                  wait.selection = selection.toJson();
-                  wait.eventName = selection.event();
+                  wait.selection = selection == null ? null : selection.toJson();
+                  wait.eventName = eventOf(selection);
                   wait.createdAt = declaredAt;
                   wait.expiresAt = expiryOf(declaredAt, timeout);
                   wait.expiryIsCeiling = timeout == null;
@@ -305,7 +315,7 @@ public class AgentWaits {
                   row.nudgeCount = 0;
                   return row;
                 });
-    addName(selection.event());
+    addName(eventOf(selection));
     LOG.infof("Agent %s waits on %s (%s)", agentId, finalLabel, id);
     announce(
         new AgentWaitOpened(
@@ -316,12 +326,12 @@ public class AgentWaits {
             projectOf(agent.repositoryId),
             id.toString(),
             finalLabel,
-            selection.event(),
+            eventOf(selection),
             subject.kind().name(),
             subject.ref(),
             subject.targetStates(),
             declaredAt));
-    if (subject.kind() != WaitSubjects.Kind.OTHER) {
+    if (looksUp(subject.kind())) {
       resolveSubject(id);
     }
     hint(List.of(Placed.of(agent)));
@@ -335,10 +345,16 @@ public class AgentWaits {
     return get(agentId, id);
   }
 
-  /** The label a wait is stored under, once its selection and timeout are valid. */
-  private static String validated(String label, EventSelection selection, Duration timeout) {
-    if (selection == null) {
-      throw new BadRequestException("A wait needs a selection: {\"event\": …, \"when\": […]}.");
+  /**
+   * The label a wait is stored under, once its selection and timeout are valid. No selection is a
+   * timer (qits-2309), and a timer needs a timeout; it is labelled with when it is up unless it was
+   * given a label.
+   */
+  private static String validated(
+      String label, EventSelection selection, Duration timeout, Instant declaredAt) {
+    if (selection == null && timeout == null) {
+      throw new BadRequestException(
+          "A wait needs a selection: {\"event\": …, \"when\": […]}; or, for a timer, a timeout.");
     }
     if (timeout != null && (timeout.isNegative() || timeout.isZero())) {
       throw new BadRequestException("A timeout must be positive, got " + timeout + ".");
@@ -351,8 +367,33 @@ public class AgentWaits {
               + timeout
               + ". A wait on a person declares again when it lapses.");
     }
-    String named = label == null || label.isBlank() ? EventSelectionGrammar.describe(selection) : label.trim();
+    String named =
+        label != null && !label.isBlank()
+            ? label.trim()
+            : selection == null
+                ? timerLabel(expiryOf(declaredAt, timeout))
+                : EventSelectionGrammar.describe(selection);
     return bounded(named, MAX_LABEL);
+  }
+
+  /** A timer's default label (qits-2309): when it is up, to the second. */
+  static String timerLabel(Instant expiresAt) {
+    return "timer until " + expiresAt.truncatedTo(ChronoUnit.SECONDS);
+  }
+
+  /** The subject a declaration records: a timer's when there is no selection (qits-2309). */
+  private static WaitSubjects.Subject declaredSubject(EventSelection selection) {
+    return selection == null ? WaitSubjects.Subject.TIMER : WaitSubjects.parse(selection);
+  }
+
+  /** The event a selection names; null for a timer (qits-2309), which names none. */
+  private static String eventOf(EventSelection selection) {
+    return selection == null ? null : selection.event();
+  }
+
+  /** Whether a subject of {@code kind} is looked up: never OTHER, never a timer (qits-2309). */
+  static boolean looksUp(WaitSubjects.Kind kind) {
+    return kind != null && kind != WaitSubjects.Kind.OTHER && kind != WaitSubjects.Kind.TIMER;
   }
 
   /** When a wait declared at {@code declaredAt} expires: its timeout, else the ceiling (qits-1961). */
@@ -424,16 +465,19 @@ public class AgentWaits {
    * agent's is, and one already in a target state answers MATCHED (qits-1668), one that can never get
    * there BROKEN (qits-1961).
    *
+   * <p>No selection and a timeout is a timer (qits-2309), as on an agent's door: announced as {@link
+   * DeskWaitClosed} TIMED_OUT when its time passes.
+   *
    * @param waiterSubject the declaring principal; its own comments never match the wait (qits-1759)
    * @throws ConflictException {@code TOO_MANY_WAITS}
-   * @throws BadRequestException a missing selection, or a bad timeout
+   * @throws BadRequestException neither a selection nor a timeout, or a bad timeout
    */
   public AgentWaitDto createForDesk(
       UUID projectId, String label, EventSelection selection, Duration timeout, String waiterSubject) {
-    String finalLabel = validated(label, selection, timeout);
-    UUID id = UUID.randomUUID();
     Instant declaredAt = Instant.now();
-    WaitSubjects.Subject subject = WaitSubjects.parse(selection);
+    String finalLabel = validated(label, selection, timeout, declaredAt);
+    UUID id = UUID.randomUUID();
+    WaitSubjects.Subject subject = declaredSubject(selection);
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
@@ -452,8 +496,8 @@ public class AgentWaits {
               wait.deskProjectId = projectId;
               wait.waiterSubject = waiterSubject;
               wait.label = finalLabel;
-              wait.selection = selection.toJson();
-              wait.eventName = selection.event();
+              wait.selection = selection == null ? null : selection.toJson();
+              wait.eventName = eventOf(selection);
               wait.createdAt = declaredAt;
               wait.expiresAt = expiryOf(declaredAt, timeout);
               wait.expiryIsCeiling = timeout == null;
@@ -462,9 +506,9 @@ public class AgentWaits {
               wait.targetStates = targetStatesJson(subject.targetStates());
               waits.persist(wait);
             });
-    addName(selection.event());
+    addName(eventOf(selection));
     LOG.infof("The desk of project %s waits on %s (%s)", projectId, finalLabel, id);
-    if (subject.kind() != WaitSubjects.Kind.OTHER) {
+    if (looksUp(subject.kind())) {
       resolveSubject(id);
     }
     if (isOpen(id)) {
@@ -558,10 +602,14 @@ public class AgentWaits {
    * as written and, for an agent's wait, the id and qualified id {@link #resolveSubject} found) is
    * replayed: when its state is not one the selection wants, a newer event superseded the outcome
    * and nothing fires. On comments and on a selection naming no subject, only frames at or after
-   * the declaration are replayed — the gap between the wait's commit and {@link #addName}.
+   * the declaration are replayed — the gap between the wait's commit and {@link #addName}. A timer
+   * (no selection, qits-2309) names no event and replays nothing.
    */
   private void catchUp(UUID waitId, EventSelection selection, Instant declaredAt) {
-    if (lookback.isZero() || lookback.isNegative() || !recentEvents.isResolvable()) {
+    if (selection == null
+        || lookback.isZero()
+        || lookback.isNegative()
+        || !recentEvents.isResolvable()) {
       return;
     }
     String name = selection.event();
@@ -588,6 +636,8 @@ public class AgentWaits {
     return switch (subject.kind()) {
       case OTHER, COMMENTS ->
           named.stream().filter(frame -> !occurredBefore(frame.occurredAt(), declaredAt)).toList();
+      // Never reached: a timer has no selection to parse (qits-2309).
+      case TIMER -> List.of();
       case RELEASE_REQUEST, CI_RUN, WORK_ITEM, BRANCH -> {
         List<String> refs = new ArrayList<>();
         refs.add(subject.ref());
@@ -1084,10 +1134,14 @@ public class AgentWaits {
   /**
    * The turn a timed-out wait gives: its agent's wake, or the text a desk's announcement carries.
    * When the expiry was the platform's ceiling (qits-1961) rather than a timeout the waiter asked
-   * for, it says so, and what it may ask for instead.
+   * for, it says so, and what it may ask for instead. A timer (qits-2309) is not a wait that failed:
+   * its turn says only that it is up, and names no event.
    */
   static String timedOutTurn(AgentWait wait) {
     Duration after = Duration.between(wait.createdAt, wait.expiresAt);
+    if (isTimer(wait)) {
+      return "Your timer \"" + wait.label + "\" is up (set " + human(after) + " ago).";
+    }
     if (wait.expiryIsCeiling) {
       return "Your wait \""
           + wait.label
@@ -1110,6 +1164,11 @@ public class AgentWaits {
         + wait.eventName
         + " event matched it. It is closed; declare a new one if you still"
         + " need to wait.";
+  }
+
+  /** Whether {@code wait} is a timer (qits-2309): it names no event. */
+  static boolean isTimer(AgentWait wait) {
+    return wait.eventName == null || WaitSubjects.Kind.TIMER.name().equals(wait.subjectKind);
   }
 
   private static void close(AgentWait wait, AgentWaitState state, String eventId) {
@@ -1273,7 +1332,11 @@ public class AgentWaits {
     return text.length() <= max ? text : text.substring(0, max - 1) + "…";
   }
 
+  /** Add an OPEN wait's event name; a timer has none (qits-2309), and a null is never one. */
   private void addName(String name) {
+    if (name == null) {
+      return;
+    }
     synchronized (namesLock) {
       if (!openNames.contains(name)) {
         Set<String> next = new java.util.HashSet<>(openNames);
@@ -1283,10 +1346,16 @@ public class AgentWaits {
     }
   }
 
-  /** Re-read the OPEN waits' event names. Read and replace under one lock, so an add is not lost. */
+  /**
+   * Re-read the OPEN waits' event names. Read and replace under one lock, so an add is not lost. A
+   * null — a timer names no event (qits-2309) — is dropped, and {@link Set#copyOf} would refuse it.
+   */
   void refreshNames() {
     synchronized (namesLock) {
-      openNames = Set.copyOf(QuarkusTransaction.requiringNew().call(() -> waits.openEventNames()));
+      Set<String> names =
+          new java.util.HashSet<>(QuarkusTransaction.requiringNew().call(() -> waits.openEventNames()));
+      names.remove(null);
+      openNames = Set.copyOf(names);
       namesLoaded = true;
     }
   }
@@ -1340,7 +1409,7 @@ public class AgentWaits {
   private static Pending recordSubjectState(
       AgentWait wait, EventSelection selection, String name, Instant occurredAt, JsonNode payload) {
     WaitSubjects.Kind kind = WaitSubjects.kindOf(wait.subjectKind);
-    if (kind == null || kind == WaitSubjects.Kind.OTHER) {
+    if (!looksUp(kind)) {
       return null;
     }
     WaitSubjects.Subject subject = selection == null ? null : WaitSubjects.parse(selection);
@@ -1401,7 +1470,7 @@ public class AgentWaits {
    * Look up the subject of the wait {@code waitId} now, and write what was found: after its create
    * committed, and on a scheduler pass while it is OPEN (every {@link #RECHECK_EVERY} since
    * qits-1961). Called with no transaction open, so the call to the provider holds no lock. An OTHER
-   * wait or a closed one is left as it is. Never throws.
+   * wait, a timer (qits-2309) or a closed one is left as it is. Never throws.
    *
    * <p>A looked-up state that is one of the wait's target states closes it MATCHED (qits-1668), in
    * the write's transaction and on the locked row, exactly as {@link #match} closes one for an
@@ -1431,7 +1500,7 @@ public class AgentWaits {
                       return null;
                     }
                     WaitSubjects.Kind kind = WaitSubjects.kindOf(wait.subjectKind);
-                    if (kind == null || kind == WaitSubjects.Kind.OTHER || wait.subjectRef == null) {
+                    if (!looksUp(kind) || wait.subjectRef == null) {
                       return null;
                     }
                     if (wait.isDeskWait()) {
@@ -1695,7 +1764,7 @@ public class AgentWaits {
 
   /**
    * The scheduler pass's share (epic qits-1681; a re-check since qits-1961): look up again the OPEN
-   * waits on a subject this side can look up (any kind but OTHER) that were never resolved or
+   * waits on a subject this side can look up (any kind but OTHER or TIMER) that were never resolved or
    * whose last lookup is at least {@link #RECHECK_EVERY} old — the longest unread first, each at most
    * once, at most {@link #MAX_RESOLVED_PER_PASS} and for at most {@link #RESOLVE_BUDGET_PER_PASS};
    * a wait whose lookup failed is skipped until {@code qits.workspaces.waits.subject-retry-every}

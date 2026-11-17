@@ -16,7 +16,8 @@ import java.util.UUID;
 /**
  * A declared wait (qits-1153): the agent waits for an event that matches {@link #selection}, and
  * gets a turn when one arrives, when its subject can no longer get there (BROKEN, qits-1961) or when
- * {@link #expiresAt} passes. See {@code V23}.
+ * {@link #expiresAt} passes. See {@code V23}. A timer (qits-2309, {@code V40}) has no selection and
+ * no event name, and only its expiry closes it.
  *
  * <p><b>Two holders</b> (qits-1618, {@code V32}): an agent ({@link #agentId}) or a project's front
  * desk ({@link #deskProjectId}), exactly one of them. A desk wait's close is announced as {@code
@@ -67,12 +68,15 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
   @Column(nullable = false, columnDefinition = "text")
   public String label;
 
-  /** qits-eventstream's {@code EventSelection}, in its JSON form. */
-  @Column(nullable = false, columnDefinition = "text")
+  /**
+   * qits-eventstream's {@code EventSelection}, in its JSON form. Null for a timer (qits-2309, {@code
+   * V40}): a wait declared with a timeout and no selection, which only its expiry closes.
+   */
+  @Column(columnDefinition = "text")
   public String selection;
 
-  /** The selection's event name: what the listener narrows by. */
-  @Column(name = "event_name", nullable = false, length = 128)
+  /** The selection's event name: what the listener narrows by. Null for a timer (qits-2309). */
+  @Column(name = "event_name", length = 128)
   public String eventName;
 
   @Enumerated(EnumType.STRING)
@@ -127,7 +131,10 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
   // --- the subject (epic qits-1681, V33): parsed from the selection at declaration (a desk's too
   // since qits-1668)
 
-  /** {@code RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS}, {@code BRANCH} or {@code OTHER}. */
+  /**
+   * {@code RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS}, {@code BRANCH},
+   * {@code OTHER}, or {@code TIMER} for a wait with no selection (qits-2309).
+   */
   @Column(name = "subject_kind", columnDefinition = "text")
   public String subjectKind;
 

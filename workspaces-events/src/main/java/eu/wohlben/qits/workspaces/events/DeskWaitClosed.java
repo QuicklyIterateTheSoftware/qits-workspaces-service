@@ -12,7 +12,8 @@ import java.util.UUID;
  * <p>The field names are a contract with that consumer. {@code state} is {@link #MATCHED}, {@link
  * #TIMED_OUT} or {@link #BROKEN}; a cancelled wait announces nothing. A BROKEN one's {@code turn}
  * says why it broke. {@code matchedEventId} is the id of the event
- * that matched, absent on a timeout. {@code turn} is the sentence an agent's wake would carry,
+ * that matched, absent on a timeout. {@code eventName} is absent for a timer (qits-2309), a wait
+ * with no selection, which only closes TIMED_OUT. {@code turn} is the sentence an agent's wake would carry,
  * verbatim, and {@code closedAt} is the close's ISO-8601 instant (also the envelope's {@code
  * occurredAt}).
  *

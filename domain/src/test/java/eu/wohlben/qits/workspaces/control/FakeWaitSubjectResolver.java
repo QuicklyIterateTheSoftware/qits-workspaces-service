@@ -63,6 +63,11 @@ public class FakeWaitSubjectResolver implements WaitSubjectResolver {
     return asked.stream().filter(a -> a.split(" ")[1].equals(ref)).count();
   }
 
+  /** How often a subject of {@code kind} was looked up, of any ref: assert it as a delta. */
+  public long askedOfKind(WaitSubjects.Kind kind) {
+    return asked.stream().filter(a -> a.split(" ")[0].equals(kind.name())).count();
+  }
+
   /** The lookups of {@code ref}, each {@code "<kind> <ref> <projectId>"}. */
   public List<String> lookupsOf(String ref) {
     return asked.stream().filter(a -> a.split(" ")[1].equals(ref)).toList();

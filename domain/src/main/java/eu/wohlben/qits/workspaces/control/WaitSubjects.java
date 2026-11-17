@@ -43,7 +43,8 @@ import java.util.Set;
  * BRANCH wait's target path is {@code step}, but a group may instead (or additionally) name {@code
  * everywhere} with {@code exact}: both contribute to the same union, in the order their groups
  * appear, and a selection mixing the two is still BRANCH rather than OTHER. Its {@link
- * Subject#statePath} and {@link Subject#repository} say how an event is read for it, below.
+ * Subject#statePath} and {@link Subject#repository} say how an event is read for it, below. A wait
+ * with no selection is a timer (qits-2309): {@link Kind#TIMER}, which no selection parses to.
  *
  * <p><b>Reading an event</b> ({@link #stateIn}): what state an event says the subject is in, when it
  * names this subject at all. For BRANCH it is read at the path the wait targets (qits-1736), the
@@ -66,7 +67,7 @@ import java.util.Set;
  *
  * <p><b>Final states</b> ({@link #isFinal}), which {@link WaitBreaks} reads: a request is done
  * FINALIZED, WITHDRAWN or OBSOLETE; a run is done in anything but QUEUED and RUNNING; an item DONE or
- * DROPPED; a branch is done LIVE or WITHDRAWN; comments and OTHER never are.
+ * DROPPED; a branch is done LIVE or WITHDRAWN; comments, OTHER and a timer never are.
  */
 public final class WaitSubjects {
 
@@ -77,7 +78,12 @@ public final class WaitSubjects {
     WORK_ITEM,
     COMMENTS,
     BRANCH,
-    OTHER
+    OTHER,
+    /**
+     * A timer (qits-2309): a wait with no selection, closed only by its expiry. Like {@link #OTHER}
+     * it has no ref and no lookup, never breaks, and no event says its state.
+     */
+    TIMER
   }
 
   /**
@@ -102,6 +108,9 @@ public final class WaitSubjects {
     }
 
     static final Subject OTHER = new Subject(Kind.OTHER, null, List.of());
+
+    /** A timer's subject (qits-2309): no ref, no target state. */
+    public static final Subject TIMER = new Subject(Kind.TIMER, null, List.of());
   }
 
   public static final String RELEASE_REQUEST_STATE_CHANGED = "ReleaseRequestStateChanged";
@@ -291,7 +300,7 @@ public final class WaitSubjects {
     };
   }
 
-  /** Whether {@code state} is final for {@code kind}; never for COMMENTS, OTHER or a null state. */
+  /** Whether {@code state} is final for {@code kind}; never for COMMENTS, OTHER, TIMER or a null state. */
   public static boolean isFinal(Kind kind, String state) {
     if (kind == null || state == null) {
       return false;
@@ -301,7 +310,7 @@ public final class WaitSubjects {
       case CI_RUN -> !CI_RUN_ACTIVE.contains(state);
       case WORK_ITEM -> WORK_ITEM_FINAL.contains(state);
       case BRANCH -> BRANCH_FINAL.contains(state);
-      case COMMENTS, OTHER -> false;
+      case COMMENTS, OTHER, TIMER -> false;
     };
   }
 

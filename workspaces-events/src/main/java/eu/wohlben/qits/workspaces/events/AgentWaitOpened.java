@@ -12,7 +12,8 @@ import java.util.UUID;
  * {@code eventName}, and the subject the selection names ({@code subjectKind} one of {@code
  * RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS}, {@code BRANCH},
  * {@code OTHER}; {@code subjectRef} as written, absent for OTHER; {@code targetStates} the states
- * it waits for, empty when it names none). A desk's wait announces none of this.
+ * it waits for, empty when it names none). A timer (qits-2309) has no selection: {@code eventName}
+ * absent, {@code subjectKind} {@code TIMER}. A desk's wait announces none of this.
  */
 public record AgentWaitOpened(
     UUID eventId,

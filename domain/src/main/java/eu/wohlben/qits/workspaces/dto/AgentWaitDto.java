@@ -9,14 +9,15 @@ import java.util.List;
  * V33}). Every subject field is null for a wait declared before {@code V33}, and for a desk's wait
  * declared before qits-1668.
  *
- * @param selection qits-eventstream's {@code EventSelection}, in its JSON form
+ * @param selection qits-eventstream's {@code EventSelection}, in its JSON form; null for a timer
+ *     (qits-2309)
  * @param expiresAt when it times out — the platform's ceiling when it asked for no timeout
  *     (qits-1961); null only on a closed wait from before that
  * @param matchedEventId the event that matched it; null unless MATCHED
  * @param closedAt when it left OPEN; null while OPEN
  * @param subjectKind {@code RELEASE_REQUEST}, {@code CI_RUN}, {@code WORK_ITEM}, {@code COMMENTS},
- *     {@code BRANCH} or {@code OTHER}
- * @param subjectRef the value the selection names, as written; null for OTHER
+ *     {@code BRANCH}, {@code OTHER}, or {@code TIMER} for a wait with no selection (qits-2309)
+ * @param subjectRef the value the selection names, as written; null for OTHER and TIMER
  * @param subjectId the subject's uuid, once resolved
  * @param subjectQualifiedId the subject's qualified id, once resolved; null for a run
  * @param targetStates the states the selection waits for; empty when it names none

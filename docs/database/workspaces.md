@@ -43,12 +43,12 @@ erDiagram
     text closed_turn
     instant created_at "not null"
     uuid desk_project_id
-    string event_name "not null, length 128"
+    string event_name "length 128"
     instant expires_at
     boolean expiry_is_ceiling "not null"
     text label "not null"
     text matched_event_id
-    text selection "not null"
+    text selection
     enum state "not null"
     text subject_error
     instant subject_expected_by

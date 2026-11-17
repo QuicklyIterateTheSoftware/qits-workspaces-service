@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import eu.wohlben.qits.eventstream.selection.EventSelection;
 import eu.wohlben.qits.eventstream.selection.EventSelection.Condition;
 import eu.wohlben.qits.workspaces.dto.AgentWaitDto;
+import eu.wohlben.qits.workspaces.dto.WaitView;
 import eu.wohlben.qits.workspaces.entity.AgentRunState;
 import eu.wohlben.qits.workspaces.entity.AgentWait;
 import eu.wohlben.qits.workspaces.entity.AgentWaitState;
@@ -19,6 +20,7 @@ import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
+import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.ForbiddenException;
 import eu.wohlben.qits.workspaces.events.AgentActivityChanged;
@@ -985,6 +987,103 @@ public class AgentWaitsTest {
 
     assertEquals(1, waits.onEvent("t-own", "EntityTransitioned", Instant.parse("2036-10-10T10:00:00Z"), payload));
     assertEquals(AgentWaitState.MATCHED, waitRow(wait.id()).state);
+  }
+
+  // --- a timer (qits-2309) -------------------------------------------------------------------------
+
+  @Test
+  void aTimerIsAWaitWithNoSelectionThatNoEventCloses() {
+    UUID id = agent("w-timer");
+    long lookedUp = resolver.askedOfKind(WaitSubjects.Kind.TIMER);
+    AgentWaitDto timer = waits.create(id, "check the build", null, Duration.ofMinutes(30));
+
+    assertEquals(AgentWaitState.OPEN, timer.state());
+    assertEquals("TIMER", timer.subjectKind());
+    assertNull(timer.selection());
+    assertNull(timer.subjectRef());
+    assertEquals(List.of(), timer.targetStates());
+    assertEquals(Duration.ofMinutes(30), Duration.between(timer.createdAt(), timer.expiresAt()));
+    assertNull(WaitView.of(timer).selection(), "the door answers a timer's selection as null");
+    AgentWait row = waitRow(timer.id());
+    assertNull(row.selection);
+    assertNull(row.eventName);
+    assertEquals("[]", row.targetStates);
+    assertFalse(row.expiryIsCeiling, "a timer asked for its timeout");
+    assertEquals("check the build", service.get(id).waitingOn());
+
+    List<AgentWaitOpened> opened = announced.of(AgentWaitOpened.class, e -> e.waitId().equals(timer.id()));
+    assertEquals(1, opened.size());
+    assertNull(opened.get(0).eventName());
+    assertEquals("TIMER", opened.get(0).subjectKind());
+    assertNull(opened.get(0).subjectRef());
+
+    // It names no event: none is selected for it, and an event of any name leaves it OPEN.
+    waits.refreshNames();
+    assertFalse(waits.selects(null));
+    Instant later = Instant.parse("2036-10-10T10:00:00Z");
+    waits.onEvent("t-ev-1", "EntityTransitioned", later, "{\"entities\":[{\"entityId\":\"e-1\",\"status\":\"VERIFIED\"}]}");
+    waits.onEvent("t-ev-2", "BuildStatusChanged", later, "{\"runId\":\"r\",\"status\":\"FAILED\"}");
+    waits.onEvent("t-ev-3", "SCMRelease", later, "{}");
+    assertEquals(AgentWaitState.OPEN, waitRow(timer.id()).state);
+    assertNull(row(id).pendingText);
+
+    // It is never looked up, at its declaration or by a pass.
+    waits.resolveUnresolved();
+    assertEquals(lookedUp, resolver.askedOfKind(WaitSubjects.Kind.TIMER));
+    assertNull(waitRow(timer.id()).subjectResolvedAt);
+    assertNull(waitRow(timer.id()).subjectError);
+  }
+
+  @Test
+  void aTimerWithNoLabelIsLabelledWithWhenItIsUp() {
+    AgentWaitDto timer = waits.create(agent("w-timer-label"), null, null, Duration.ofHours(1));
+    assertEquals("timer until " + timer.expiresAt().truncatedTo(java.time.temporal.ChronoUnit.SECONDS), timer.label());
+    assertEquals(AgentWaits.timerLabel(timer.expiresAt()), timer.label());
+  }
+
+  @Test
+  void aTimerTimesOutThroughTheSweepAndSaysItIsUp() {
+    UUID id = agent("w-timer-up");
+    AgentWaitDto timer = waits.create(id, "look at the deploy", null, Duration.ofHours(1));
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                waitRows.update(
+                    "createdAt = ?1, expiresAt = ?2 where id = ?3",
+                    Instant.now().minus(Duration.ofHours(1)).minusSeconds(1),
+                    Instant.now().minusSeconds(1),
+                    UUID.fromString(timer.id())));
+
+    waits.sweep();
+
+    assertEquals(AgentWaitState.TIMED_OUT, waitRow(timer.id()).state);
+    String turn = row(id).pendingText;
+    assertEquals("Your timer \"look at the deploy\" is up (set 60m ago).", turn);
+    assertFalse(turn.contains("event"), turn);
+    assertFalse(turn.contains("timed out"), turn);
+    List<AgentWaitClosed> closes = announced.of(AgentWaitClosed.class, e -> e.waitId().equals(timer.id()));
+    assertEquals(1, closes.size());
+    assertEquals(AgentWaitClosed.TIMED_OUT, closes.get(0).state());
+    FakeAgentWaitingReporter.Report last =
+        reporter.reportsFor(row(id).workId).get(reporter.reportsFor(row(id).workId).size() - 1);
+    assertEquals(AgentWaits.CAUSE_TIMED_OUT, last.cause());
+  }
+
+  @Test
+  void aTimerNeedsATimeoutOfAtMostADayAndCountsTowardTheCap() {
+    UUID id = agent("w-timer-limits");
+    BadRequestException none = assertThrows(BadRequestException.class, () -> waits.create(id, "t", null, null));
+    assertTrue(none.getMessage().startsWith("A wait needs a selection"), none.getMessage());
+    assertTrue(none.getMessage().contains("for a timer, a timeout"), none.getMessage());
+    assertThrows(BadRequestException.class, () -> waits.create(id, "t", null, Duration.ofHours(25)));
+    assertThrows(BadRequestException.class, () -> waits.create(id, "t", null, Duration.ZERO));
+
+    for (int i = 0; i < AgentWaits.MAX_OPEN_PER_AGENT; i++) {
+      waits.create(id, "t" + i, null, Duration.ofMinutes(10));
+    }
+    ConflictException full =
+        assertThrows(ConflictException.class, () -> waits.create(id, "one more", null, Duration.ofMinutes(10)));
+    assertTrue(full.getMessage().contains("8 open waits"), full.getMessage());
   }
 
   @Test

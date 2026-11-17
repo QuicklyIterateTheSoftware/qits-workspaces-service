@@ -40,7 +40,8 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 /**
  * {@code /workspaces/api/agents/{agentId}/waits} — an agent's declared waits (qits-1153, W8): what
  * it waits on, and the turn it gets when that happens or the wait times out. {@link AgentWaits}
- * holds the semantics; {@code qits wait} is the caller.
+ * holds the semantics; {@code qits wait} is the caller. A body with a timeout and no selection
+ * declares a timer (qits-2309), which wakes the agent when its time passes.
  *
  * <p><b>A deliberate exception to "agents get no write doors here".</b> {@code qits:agent} (and
  * {@code qits:admin-agent}) may create, list and cancel waits, but <b>only for the agent its token
@@ -86,18 +87,31 @@ public class AgentWaitController {
   @Inject ObjectMapper json;
 
   /**
-   * @param label what the agent calls the wait; default: the selection in one line
-   * @param selection the event and conditions to wait for
+   * @param label what the agent calls the wait; default: the selection in one line, or {@code timer
+   *     until <expiry>} for a timer
+   * @param selection the event and conditions to wait for; none (absent or null) with a timeout is a
+   *     timer (qits-2309)
    * @param timeout an ISO-8601 duration ({@code PT2H}); none = the platform's ceiling of 8 hours; at
-   *     most 24 hours, else 400 (qits-1961)
+   *     most 24 hours, else 400 (qits-1961); a timer's is required
    */
   public record CreateWaitRequest(
-      String label,
-      @Schema(implementation = SelectionSchema.class, required = true) JsonNode selection,
+      @Schema(
+              description =
+                  "What the agent calls the wait; default: the selection in one line, or"
+                      + " `timer until <expiresAt>` for a timer")
+          String label,
+      @Schema(
+              implementation = SelectionSchema.class,
+              description =
+                  "The event and conditions to wait for. Leave it out (or null) and give a timeout to"
+                      + " declare a timer (qits-2309): it never matches an event, and closes"
+                      + " TIMED_OUT, waking its holder, when the timeout passes.")
+          JsonNode selection,
       @Schema(
               example = "PT2H",
               description =
-                  "ISO-8601; none = the platform's ceiling of 8 hours; at most 24 hours (PT24H)")
+                  "ISO-8601; none = the platform's ceiling of 8 hours; at most 24 hours (PT24H)."
+                      + " Required for a timer (no selection).")
           String timeout) {}
 
   public record WaitList(List<WaitView> waits) {}
@@ -105,13 +119,13 @@ public class AgentWaitController {
   @POST
   @APIResponse(
       responseCode = "201",
-      description = "The wait, OPEN.",
+      description = "The wait, OPEN; a timer when the body named no selection.",
       content = @Content(schema = @Schema(implementation = WaitView.class)))
   @APIResponse(
       responseCode = "400",
       description =
-          "An invalid selection (the matcher's reason), or a bad timeout: not positive, or longer"
-              + " than the 24-hour cap.",
+          "Neither a selection nor a timeout, an invalid selection (the matcher's reason), or a bad"
+              + " timeout: not positive, or longer than the 24-hour cap.",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
   @APIResponse(
       responseCode = "403",
@@ -126,7 +140,12 @@ public class AgentWaitController {
       description =
           "AGENT_NOT_ACTIVE (the agent is OBSOLETE or REMOVED) or TOO_MANY_WAITS (8 are OPEN).",
       content = @Content(schema = @Schema(implementation = ApiError.class)))
-  @Operation(operationId = "createAgentWait", summary = "Declare what the agent waits on")
+  @Operation(
+      operationId = "createAgentWait",
+      summary = "Declare what the agent waits on",
+      description =
+          "A selection waits for an event; no selection and a timeout is a timer (qits-2309), which"
+              + " wakes the agent when its time passes.")
   public Response create(@PathParam("agentId") String agentId, CreateWaitRequest request) {
     UUID id = authorized(agentId);
     AgentWaitDto created =
@@ -142,10 +161,13 @@ public class AgentWaitController {
    * (qits-1964). A {@code BranchDeliveryChanged} wait naming a branch the delivery ledger never
    * follows — {@code main}, {@code release/*}, {@code maintenance/*} or a tag — is likewise refused
    * ({@link UnfollowedBranches}, qits-1960), naming the request to wait on instead.
+   *
+   * <p>No selection (absent or JSON null) is null: a timer (qits-2309) when a timeout is given, and
+   * {@link AgentWaits} refuses it with a 400 when none is.
    */
   static EventSelection selectionOf(CreateWaitRequest request) {
     if (request == null || request.selection() == null || request.selection().isNull()) {
-      throw new BadRequestException("A wait needs a selection: {\"event\": …, \"when\": […]}.");
+      return null;
     }
     EventSelection selection;
     try {
