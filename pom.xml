@@ -75,12 +75,12 @@
              after the container is gone. Framework-free — vertx-core and qits-commands are its only
              compile dependencies, and nothing here imports either. -->
         <qits.coding-agents.version>2026.1113.30637</qits.coding-agents.version>
-        <qits.eventstream.version>2026.1110.232501</qits.eventstream.version>
+        <qits.eventstream.version>2026.1118.215113</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1107.191249</qits.db-core.version>
         <qits.arch-rules.version>2026.1113.14706</qits.arch-rules.version>
         <qits.auth-core.version>2026.1106.507</qits.auth-core.version>
-        <qits.containers-client.version>2026.1114.40637</qits.containers-client.version>
+        <qits.containers-client.version>2026.1119.52145</qits.containers-client.version>
         <!-- CallerServerFilter/CallerClientFilter: jandex-indexed filters that record inbound
              X-Qits-Caller as the qits.caller span attribute and stamp it on outgoing REST-client
              calls. Also published by qits-integrations-quarkus. -->
@@ -130,7 +130,7 @@
         <!-- qits-ci's golden masters (epic qits-1681): the run read a declared wait on a run makes
              (wiring/CiContract). The same rule: a qits-maintenance bump moves it. Kept apart from the
              other golden-master pins so a bump of theirs and this line never share a merge hunk. -->
-        <qits.ci-golden-masters.version>2026.1113.31502</qits.ci-golden-masters.version>
+        <qits.ci-golden-masters.version>2026.1119.60052</qits.ci-golden-masters.version>
         <!-- THE CONSUMER PACTS this provider verifies (epic qits-546): one jar per consumer, each
              carrying `pacts/<consumer>_qits-workspaces-service.json`, and
              ConsumerPactVerificationTest loads every such resource off the test classpath. Test
