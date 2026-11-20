@@ -183,7 +183,7 @@ public class WorkspaceContainerFactory {
    * (docs/issues/resolved/2026-07-21_workspace-container-unbounded-memory-host-oom.md). With the
    * cgroup limit in place the JVMs size against it automatically (container support is default-on),
    * so no per-tool {@code -Xmx} plumbing is needed. Blank/absent disables the cap; the shipped
-   * default is {@code 4g}. Optional because SmallRye treats an empty property value as "no value".
+   * default is {@code 6g}. Optional because SmallRye treats an empty property value as "no value".
    *
    * <p>Every placement's value: a TARGET workspace's lease carries it too ({@code
    * RunnerWorkspaceSpecs}, epic qits-1481). The
@@ -194,8 +194,8 @@ public class WorkspaceContainerFactory {
 
   /**
    * Memory+swap total for every workspace container ({@code --memory-swap}). Docker's semantics:
-   * the value INCLUDES the memory cap, so the shipped {@code 4g}/{@code 8g} pair is 4G of RAM plus
-   * 4G of swap — headroom that lets a workspace under momentary pressure page instead of taking an
+   * the value INCLUDES the memory cap, so the shipped {@code 6g}/{@code 8g} pair is 6G of RAM plus
+   * 2G of swap — headroom that lets a workspace under momentary pressure page instead of taking an
    * OOM kill. Blank/absent grants no swap: the adapter then sends the memory cap for both values,
    * which was this service's only shape before the key existed. Workspace containers are the ONLY
    * platform containers with swap, and this key is why it stays that way — the grant is made here,
