@@ -66,8 +66,8 @@ class WorkspaceContainerFactoryTest {
     // cases that want QITS_DOMAIN handed on set a domain themselves.
     f.domain = Optional.empty();
     f.timezone = Optional.empty();
-    // Mirrors the shipped default: a 4g memory cap with an 8g memory+swap total on every
-    // container, pids/cpus off.
+    // A 4g memory cap with an 8g memory+swap total on every container, pids/cpus off — the shape
+    // of the shipped default pair, not its current value.
     f.memoryLimit = Optional.of("4g");
     f.memorySwapLimit = Optional.of("8g");
     f.pidsLimit = Optional.empty();

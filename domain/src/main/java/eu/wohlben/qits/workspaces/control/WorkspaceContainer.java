@@ -109,7 +109,7 @@ public final class WorkspaceContainer {
 
   /**
    * The memory+swap total ({@code --memory-swap}). Docker's semantics: the value INCLUDES {@link
-   * #memory}, so {@code 4g}/{@code 8g} is 4G of RAM plus 4G of swap. Blank/null grants no swap —
+   * #memory}, so {@code 6g}/{@code 8g} is 6G of RAM plus 2G of swap. Blank/null grants no swap —
    * the adapter then sends {@link #memory} for both, the hard cap this service always had.
    */
   public WorkspaceContainer memorySwap(String limit) {

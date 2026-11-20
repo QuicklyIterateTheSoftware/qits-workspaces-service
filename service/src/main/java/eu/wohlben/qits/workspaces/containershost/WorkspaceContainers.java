@@ -393,7 +393,7 @@ public class WorkspaceContainers implements ContainerRuntime {
                 false,
                 described.memory(),
                 // The configured memory+swap total when the factory carries one (the shipped
-                // default: 4g/8g, so 4G of swap). Without one, the same value as the memory cap,
+                // default: 6g/8g, so 2G of swap). Without one, the same value as the memory cap,
                 // so the cap stays hard and the container cannot spill into host swap.
                 memorySwap(described),
                 pids(described.pidsLimit()),
