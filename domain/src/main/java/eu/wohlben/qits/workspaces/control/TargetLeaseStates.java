@@ -8,6 +8,8 @@ import eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus;
 import eu.wohlben.qits.workspaces.entity.WorkspaceStatus;
 import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
 import eu.wohlben.qits.workspaces.events.WorkspaceStarted;
+import eu.wohlben.qits.workspaces.entity.AgentWorktree;
+import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.persistence.LegacyPlacementRepository;
 import eu.wohlben.qits.workspaces.persistence.WorkspaceRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -78,6 +80,13 @@ import org.jboss.logging.Logger;
  * WorkspaceRepository.recordLease}), never here: this class only ever revises the lease it is told
  * about.
  *
+ * <p><b>A rise is told to the slot's agents</b> (qits-2362): when a live row's {@code oomKills}
+ * goes up, every agent placed in it that is not REMOVED is handed one turn ({@link #OOM_TURN})
+ * naming how many processes the kernel took — otherwise all it sees is a bare exit 137 and reads
+ * a killed build as a failed one. Said after the write committed, once per rise, never for a
+ * reading that is equal or lower, and a delivery that fails is a WARN: the lease is handled
+ * either way.
+ *
  * <p><b>RUNNING after a restart.</b> The daemon wait runs in memory. A lease this process asked for,
  * or saw waiting, is {@link #expectStart expected}: its RUNNING starts the wait. A RUNNING lease this
  * process knows nothing about whose row is still PROVISIONING is a restart that lost the wait, and
@@ -120,6 +129,15 @@ public class TargetLeaseStates {
   @Inject WorkspaceRepository workspaces;
 
   @Inject LegacyPlacementRepository legacy;
+
+  /** The agents placed in a row, told of an OOM rise (qits-2362). */
+  @Inject AgentWorktreeRepository agentRows;
+
+  /**
+   * Where an OOM rise is said (qits-2362): the machine form of the delivery door. An {@link
+   * Instance}, as {@link AgentService} reaches this class through {@link WorkspaceService}.
+   */
+  @Inject Instance<AgentService> agentService;
 
   @Inject WorkspaceChangePublisher changePublisher;
 
@@ -361,7 +379,17 @@ public class TargetLeaseStates {
       String tokenToDelete,
       boolean endLease,
       boolean purge,
-      Follow follow) {}
+      Follow follow,
+      long oomRise) {}
+
+  /**
+   * The turn an OOM rise hands the slot's agents (qits-2362): the processes taken, the target and
+   * the scope qits-system read the kill at — NODE when only the whole node's counter moved, LEASE
+   * when the container's own cgroup did.
+   */
+  static final String OOM_TURN =
+      "fyi: the OOM killer took %d process(es) in your workspace on %s (%s); a command that exited"
+          + " 137 was killed, not failed";
 
   /** What happens after the write committed. */
   private enum Follow {
@@ -387,7 +415,12 @@ public class TargetLeaseStates {
     Follow follow = Follow.NOTHING;
     // The row's own reading never goes down: a later, lower sample is not this lease's to
     // overwrite, and a fresh lease starts from null (WorkspaceRepository.recordLease).
+    long oomRise = 0;
     if (lease.oomKills() != null && (row.oomKills == null || lease.oomKills() > row.oomKills)) {
+      // Only a live row's agents can be in the middle of a command the kill ended (qits-2362).
+      if (live) {
+        oomRise = lease.oomKills() - (row.oomKills == null ? 0 : row.oomKills);
+      }
       row.oomKills = lease.oomKills();
       row.oomScope = lease.oomScope();
     }
@@ -485,7 +518,7 @@ public class TargetLeaseStates {
             || !Objects.equals(row.oomKills, oomKills)
             || row.leaseId == null
             || token != null;
-    return new Applied(row, was, changed, token, end, false, follow);
+    return new Applied(row, was, changed, token, end, false, follow, oomRise);
   }
 
   /** A resolved row's lease: ended if it is not yet, and once ENDED, its volume purged. */
@@ -494,7 +527,7 @@ public class TargetLeaseStates {
     if (lease.state() == LeaseState.ENDED) {
       row.leaseId = null;
       row.targetId = null;
-      return new Applied(row, row.runtimeStatus, true, token, false, true, Follow.NOTHING);
+      return new Applied(row, row.runtimeStatus, true, token, false, true, Follow.NOTHING, 0);
     }
     return new Applied(
         row,
@@ -503,7 +536,8 @@ public class TargetLeaseStates {
         token,
         lease.state() != LeaseState.ENDING,
         false,
-        Follow.NOTHING);
+        Follow.NOTHING,
+        0);
   }
 
   private void after(Applied applied, Lease lease, boolean stopFollows) {
@@ -525,6 +559,9 @@ public class TargetLeaseStates {
     }
     if (applied.purge() && placement.isResolvable()) {
       purgeQuietly(row.id);
+    }
+    if (applied.oomRise() > 0) {
+      tellOomRise(row, lease, applied.oomRise());
     }
     WorkspaceProcessTracker.Handle process = starts.get(row.id);
     switch (applied.follow()) {
@@ -582,6 +619,39 @@ public class TargetLeaseStates {
     if (lease.state() == LeaseState.ENDED || lease.state() == LeaseState.FAILED
         || lease.state() == LeaseState.EXITED) {
       expected.remove(lease.id());
+    }
+  }
+
+  /**
+   * Hands every agent placed in {@code row} that is not REMOVED one {@link #OOM_TURN} for a rise of
+   * {@code rise} (qits-2362). Runs after the row's write committed; the target is named by its id,
+   * the one this service holds. Never throws: a lookup or delivery that fails is one WARN, and the
+   * lease's handling goes on.
+   */
+  private void tellOomRise(Workspace row, Lease lease, long rise) {
+    if (!agentService.isResolvable()) {
+      return;
+    }
+    try {
+      List<AgentWorktree> placed =
+          QuarkusTransaction.requiringNew().call(() -> agentRows.findLiveByWorkspace(row.id));
+      if (placed.isEmpty()) {
+        return;
+      }
+      UUID target = row.targetId != null ? row.targetId : lease.targetId();
+      String text =
+          String.format(
+              OOM_TURN,
+              rise,
+              target == null ? "an unknown target" : target.toString(),
+              row.oomScope == null ? "UNKNOWN" : row.oomScope);
+      for (AgentWorktree agent : placed) {
+        agentService.get().deliver(agent.id, text, false);
+      }
+    } catch (RuntimeException e) {
+      LOG.warnf(
+          "Could not tell the agents of workspace %s that the OOM killer took %d process(es): %s",
+          row.id, rise, e.getMessage());
     }
   }
 
