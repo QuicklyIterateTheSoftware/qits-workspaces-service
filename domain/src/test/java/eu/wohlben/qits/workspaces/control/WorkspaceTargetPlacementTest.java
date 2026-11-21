@@ -617,6 +617,66 @@ public class WorkspaceTargetPlacementTest {
     assertNull(restarted.oomScope);
   }
 
+  /**
+   * A rise is said to the slot's agent once (qits-2362): the delta from null, then from the last
+   * reading; the same count again, or a lower one, says nothing more.
+   */
+  @Test
+  public void anOomKillsRiseIsToldToTheSlotsAgentOncePerRise() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "oom-tell", false);
+    Workspace queued = read(created.id);
+    UUID target = UUID.randomUUID();
+    states.observe(placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null));
+    awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
+    UUID agent = agents.placeOn(repoId, created.id, "qits-2362");
+
+    states.observe(
+        placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null, 2L, "LEASE"));
+    agentService.awaitSchedulerIdle();
+
+    String first =
+        "fyi: the OOM killer took 2 process(es) in your workspace on "
+            + target
+            + " (LEASE); a command that exited 137 was killed, not failed";
+    assertEquals(first, agentRow(agent).pendingText, "null counts as 0: a rise of 2");
+
+    states.observe(
+        placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null, 2L, "LEASE"));
+    states.observe(
+        placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null, 1L, "NODE"));
+    agentService.awaitSchedulerIdle();
+    assertEquals(first, agentRow(agent).pendingText, "the same count, then a lower one: nothing");
+
+    states.observe(
+        placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null, 5L, "NODE"));
+    agentService.awaitSchedulerIdle();
+    assertEquals(
+        first
+            + "\n\nfyi: the OOM killer took 3 process(es) in your workspace on "
+            + target
+            + " (NODE); a command that exited 137 was killed, not failed",
+        agentRow(agent).pendingText,
+        "the next rise is its own turn, by its delta");
+  }
+
+  /** A rise on a row with no agent in it tells nobody, and the lease is handled as ever. */
+  @Test
+  public void anOomKillsRiseWithNoAgentStillRecordsTheReading() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "oom-alone", false);
+    Workspace queued = read(created.id);
+    UUID target = UUID.randomUUID();
+    states.observe(placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null));
+    awaitStatus(created.id, WorkspaceRuntimeStatus.RUNNING);
+
+    assertEquals(
+        TargetLeaseStates.Outcome.CHANGED,
+        states.observe(
+            placement.move(queued.leaseId, LeaseState.RUNNING, target, null, null, 1L, "LEASE")));
+    assertEquals(1L, read(created.id).oomKills);
+  }
+
   // --- stop, delete, recreate, resolution ----------------------------------------------------------
 
   @Test
