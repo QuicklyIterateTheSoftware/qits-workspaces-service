@@ -24,6 +24,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -269,6 +274,84 @@ public class AgentWaitLookupMatchTest {
       assertTrue(closesOf(wait.id()).isEmpty());
     } finally {
       resolver.forget(request);
+    }
+  }
+
+  /**
+   * Stage the scheduler's lookup of the wait on {@code ref} against its declare's (qits-2508): the
+   * declare's lookup, once counted, starts the scheduler's call for the same wait on a second
+   * thread and gives it a bounded chance to ask too before it answers. The second thread calls
+   * {@code resolveSubject} for that one wait — what {@code resolveUnresolved} calls for each wait
+   * it selects — because a pass pages its due waits oldest first, and the module's other tests
+   * leave enough never-resolved waits behind that a new one may not be among the page.
+   */
+  private AtomicReference<Future<?>> raceTheSchedulerOn(String ref, ExecutorService scheduler) {
+    AtomicReference<Future<?>> pass = new AtomicReference<>();
+    resolver.onceOnResolve(
+        ref,
+        () -> {
+          UUID waitId =
+              QuarkusTransaction.requiringNew()
+                  .call(() -> waitRows.find("subjectRef", ref).firstResult().id);
+          Future<?> started = scheduler.submit(() -> waits.resolveSubject(waitId));
+          pass.set(started);
+          long deadline = System.nanoTime() + Duration.ofMillis(1500).toNanos();
+          while (System.nanoTime() < deadline && !started.isDone() && resolver.lookupsOf(ref).size() < 2) {
+            try {
+              Thread.sleep(10);
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              return;
+            }
+          }
+        });
+    return pass;
+  }
+
+  private static void join(AtomicReference<Future<?>> pass) throws Exception {
+    assertNotNull(pass.get(), "the declare's lookup started the scheduler's");
+    pass.get().get(30, TimeUnit.SECONDS);
+  }
+
+  @Test
+  void aDeskWaitsLookupIsNotRepeatedByAConcurrentSchedulerPass() throws Exception {
+    UUID project = UUID.randomUUID();
+    String request = "qits-x-rr-" + UUID.randomUUID();
+    resolver.answer(
+        request,
+        new WaitSubjectResolver.Resolved(UUID.randomUUID().toString(), request, "FINALIZED", Instant.now(), null));
+    ExecutorService scheduler = Executors.newSingleThreadExecutor();
+    try {
+      AtomicReference<Future<?>> pass = raceTheSchedulerOn(request, scheduler);
+      AgentWaitDto wait = waits.createForDesk(project, "rr ends", requestEnds(request), null, null);
+      join(pass);
+
+      assertEquals(AgentWaitState.MATCHED, waitRow(wait.id()).state);
+      assertEquals(1, resolver.lookupsOf(request).size(), "one lookup: " + resolver.lookupsOf(request));
+      assertEquals(1, announced.of(DeskWaitClosed.class, e -> e.waitId().equals(wait.id())).size());
+    } finally {
+      scheduler.shutdownNow();
+      resolver.forget(request);
+    }
+  }
+
+  @Test
+  void anAgentWaitsLookupIsNotRepeatedByAConcurrentSchedulerPass() throws Exception {
+    UUID id = agent();
+    String run = UUID.randomUUID().toString();
+    resolver.answer(run, new WaitSubjectResolver.Resolved(run, null, "SUCCESS", Instant.now(), null));
+    ExecutorService scheduler = Executors.newSingleThreadExecutor();
+    try {
+      AtomicReference<Future<?>> pass = raceTheSchedulerOn(run, scheduler);
+      AgentWaitDto wait = waits.create(id, "run done", runEnds(run), Duration.ofHours(1));
+      join(pass);
+
+      assertEquals(AgentWaitState.MATCHED, waitRow(wait.id()).state);
+      assertEquals(1, resolver.lookupsOf(run).size(), "one lookup: " + resolver.lookupsOf(run));
+      assertEquals(1, closesOf(wait.id()).size());
+    } finally {
+      scheduler.shutdownNow();
+      resolver.forget(run);
     }
   }
 

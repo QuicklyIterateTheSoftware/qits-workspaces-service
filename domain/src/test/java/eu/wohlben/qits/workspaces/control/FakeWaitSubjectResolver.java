@@ -12,7 +12,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * that, one it {@link #fail}s throws {@link WaitSubjectResolver.Unresolvable} (one it says is {@link
  * #notFound}, the 404's {@link WaitSubjectResolver.NotFound}, qits-1961), and every other ref
  * resolves to nothing — so being a bean for every {@code @QuarkusTest} in the module changes no other
- * test's waits. Refs are unique per test; {@link #forget} after.
+ * test's waits. A ref may carry a one-shot hook ({@link #onceOnResolve}, qits-2508) that its next
+ * lookup runs on the looking-up thread, after it is counted. Refs are unique per test; {@link
+ * #forget} after.
  */
 @ApplicationScoped
 public class FakeWaitSubjectResolver implements WaitSubjectResolver {
@@ -25,9 +27,15 @@ public class FakeWaitSubjectResolver implements WaitSubjectResolver {
 
   private final List<String> asked = new CopyOnWriteArrayList<>();
 
+  private final Map<String, Runnable> hooks = new ConcurrentHashMap<>();
+
   @Override
   public Optional<Resolved> resolve(WaitSubjects.Kind kind, String ref, String projectId) {
     asked.add(kind + " " + ref + " " + projectId);
+    Runnable hook = hooks.remove(ref);
+    if (hook != null) {
+      hook.run();
+    }
     String gone = missing.get(ref);
     if (gone != null) {
       throw new NotFound(gone);
@@ -73,7 +81,16 @@ public class FakeWaitSubjectResolver implements WaitSubjectResolver {
     return asked.stream().filter(a -> a.split(" ")[1].equals(ref)).toList();
   }
 
+  /**
+   * Run {@code hook} inside the next lookup of {@code ref}, once, after it is counted and before it
+   * answers: where a race with another caller's lookup is staged (qits-2508).
+   */
+  public void onceOnResolve(String ref, Runnable hook) {
+    hooks.put(ref, hook);
+  }
+
   public void forget(String ref) {
+    hooks.remove(ref);
     answers.remove(ref);
     failures.remove(ref);
     missing.remove(ref);

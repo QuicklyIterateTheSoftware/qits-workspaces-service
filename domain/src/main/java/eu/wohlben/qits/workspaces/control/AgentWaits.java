@@ -41,6 +41,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -106,11 +107,13 @@ import org.jboss.logging.Logger;
  *       id, state and, for a run, when it should have finished; for a branch, its deliveries
  *       (qits-1961) — and since qits-1961 the scheduler pass looks up again every OPEN wait whose
  *       last lookup is {@link #RECHECK_EVERY} old, or that never had one ({@link
- *       #resolveUnresolved}). A failure is written to {@code subject_error} and fails nothing; a
- *       state older than the one an event recorded is not written over it. A looked-up state that is
- *       one of the wait's target states closes it MATCHED at once, as an event would have
- *       (qits-1668): the event that got it there may be older than the look-back, and no event is
- *       coming any more. The wake says it was looked up, and names no event.
+ *       #resolveUnresolved}). One wait is looked up by one caller at a time, and one that waited for
+ *       another's successful lookup does not ask again (qits-2508): a declare and a scheduler pass
+ *       used to both ask for the same new wait. A failure is written to {@code subject_error} and
+ *       fails nothing; a state older than the one an event recorded is not written over it. A
+ *       looked-up state that is one of the wait's target states closes it MATCHED at once, as an
+ *       event would have (qits-1668): the event that got it there may be older than the look-back,
+ *       and no event is coming any more. The wake says it was looked up, and names no event.
  *   <li><b>A broken wait</b> (qits-1961): when the lookup did not match it, {@link WaitBreaks} asks
  *       whether the subject can still get there — final and not a target, stuck for {@link
  *       WaitBreaks#STUCK_AFTER}, unknown to its provider (a 404), or a branch the delivery ledger
@@ -213,6 +216,20 @@ public class AgentWaits {
 
   /** Waits whose last lookup failed, and when they may be asked again. */
   private final Map<UUID, Instant> retryAfter = new ConcurrentHashMap<>();
+
+  private static final int LOOKUP_LOCKS = 64;
+
+  /**
+   * One wait's lookups run one at a time (qits-2508): a wait hashes onto one of these, so its
+   * declare's lookup and a scheduler pass's never overlap. Fixed, so nothing is ever cleaned up.
+   */
+  private final ReentrantLock[] lookupLocks = newLookupLocks();
+
+  private static ReentrantLock[] newLookupLocks() {
+    ReentrantLock[] locks = new ReentrantLock[LOOKUP_LOCKS];
+    Arrays.setAll(locks, i -> new ReentrantLock());
+    return locks;
+  }
 
   /** Each repository's project, once qits-projects named it: a repository never changes project. */
   private final Map<String, String> projects = new ConcurrentHashMap<>();
@@ -1484,12 +1501,28 @@ public class AgentWaits {
    * {@code subject_error}. A branch's deliveries are read under the project as the wait reads its
    * events ({@link WaitSubjects#branchReading}).
    *
+   * <p>One wait's lookups are serialized on a JVM lock (qits-2508), and one that finds the wait
+   * successfully resolved after it was asked for leaves it as it is: a create's lookup and a
+   * scheduler pass that selected the new, never-resolved wait used to ask the provider twice. A
+   * failed lookup writes no {@code subject_resolved_at}, so it suppresses nothing.
+   *
    * @return whether the subject was resolved
    */
   boolean resolveSubject(UUID waitId) {
     if (subjectResolver == null || !subjectResolver.isResolvable()) {
       return false;
     }
+    Instant asked = micros(Instant.now());
+    ReentrantLock lock = lookupLocks[Math.floorMod(waitId.hashCode(), lookupLocks.length)];
+    lock.lock();
+    try {
+      return resolveSubjectLocked(waitId, asked);
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  private boolean resolveSubjectLocked(UUID waitId, Instant asked) {
     try {
       Lookup lookup =
           QuarkusTransaction.requiringNew()
@@ -1497,6 +1530,10 @@ public class AgentWaits {
                   () -> {
                     AgentWait wait = waits.findById(waitId);
                     if (wait == null || wait.state != AgentWaitState.OPEN) {
+                      return null;
+                    }
+                    // Another caller resolved it since this one asked (qits-2508).
+                    if (wait.subjectResolvedAt != null && !wait.subjectResolvedAt.isBefore(asked)) {
                       return null;
                     }
                     WaitSubjects.Kind kind = WaitSubjects.kindOf(wait.subjectKind);
