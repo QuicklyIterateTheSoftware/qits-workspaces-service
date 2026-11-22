@@ -52,7 +52,10 @@ public class AgentAttentionsTest {
 
   private UUID agent(String repositoryId, Consumer<AgentWorktree> shape) {
     UUID id = UUID.randomUUID();
-    // RUNNING needs a slot: a TARGET one that no lease holds, so no daemon is ever asked.
+    // RUNNING needs a slot: a TARGET one that no lease holds, so no daemon is ever asked. And one
+    // PROVISIONING, which a pass takes as starting already: a STOPPED one it starts for the agent
+    // (qits-2265), which fails at once here (no public domain), and the next pass requeues the
+    // agent — and yields every idle one of the repository for it (qits-2508).
     Long slot =
         QuarkusTransaction.requiringNew()
             .call(
@@ -61,7 +64,7 @@ public class AgentAttentionsTest {
                   ws.repositoryId = repositoryId;
                   ws.workspaceId = "ws-attention-" + id.toString().substring(0, 8);
                   ws.status = WorkspaceStatus.ACTIVE;
-                  ws.runtimeStatus = WorkspaceRuntimeStatus.STOPPED;
+                  ws.runtimeStatus = WorkspaceRuntimeStatus.PROVISIONING;
                   ws.placement = WorkspacePlacement.TARGET;
                   workspaces.persist(ws);
                   return ws.id;
@@ -164,6 +167,19 @@ public class AgentAttentionsTest {
     attentions.reevaluateAll();
     assertNull(row(id).attentionCode);
     assertEquals(1, events(id).size(), "leaving ACTIVE clears without an event");
+  }
+
+  @Test
+  void anEarlierPassLeavesTheFixtureIdleAgentAsItWas() {
+    // A pass kicked by an earlier test may run before the test's own: the fixture must come out of
+    // it as it went in, or the agent is not what the test reads (qits-2508).
+    UUID id = idleAgent(35);
+    service.reconcile();
+    service.awaitSlotStartsIdle();
+    service.reconcile();
+    AgentWorktree after = row(id);
+    assertEquals(AgentRunState.RUNNING, after.runState);
+    assertEquals("IDLE_NO_WAIT", after.attentionCode);
   }
 
   @Test

@@ -1504,15 +1504,27 @@ public class AgentWaits {
    * <p>One wait's lookups are serialized on a JVM lock (qits-2508), and one that finds the wait
    * successfully resolved after it was asked for leaves it as it is: a create's lookup and a
    * scheduler pass that selected the new, never-resolved wait used to ask the provider twice. A
-   * failed lookup writes no {@code subject_resolved_at}, so it suppresses nothing.
+   * failed lookup writes no {@code subject_resolved_at}, so it suppresses nothing. Asked now: a
+   * declare's and a direct call's moment; a pass says its own ({@link #resolveSubject(UUID,
+   * Instant)}).
    *
    * @return whether the subject was resolved
    */
   boolean resolveSubject(UUID waitId) {
+    return resolveSubject(waitId, micros(Instant.now()));
+  }
+
+  /**
+   * {@link #resolveSubject(UUID)}, asked at {@code asked}: a resolution written at or after it is
+   * news to this caller, and is not asked for again (qits-2508). A pass decides when {@code
+   * findOpenDue} selects the wait, not when it gets to it, so it passes {@link #askedAfter} of the
+   * resolution it saw there: entering after another caller's lookup committed, it would otherwise
+   * ask again.
+   */
+  boolean resolveSubject(UUID waitId, Instant asked) {
     if (subjectResolver == null || !subjectResolver.isResolvable()) {
       return false;
     }
-    Instant asked = micros(Instant.now());
     ReentrantLock lock = lookupLocks[Math.floorMod(waitId.hashCode(), lookupLocks.length)];
     lock.lock();
     try {
@@ -1816,32 +1828,41 @@ public class AgentWaits {
     }
     Instant now = Instant.now();
     retryAfter.values().removeIf(at -> !at.isAfter(now));
-    List<UUID> due;
+    // Each due wait, and what was news to this pass when it selected it (qits-2508).
+    Map<UUID, Instant> due = new LinkedHashMap<>();
     try {
-      due =
-          QuarkusTransaction.requiringNew()
-              .call(
-                  () ->
-                      waits.findOpenDue(now.minus(RECHECK_EVERY), 10 * MAX_RESOLVED_PER_PASS).stream()
-                          .map(w -> w.id)
-                          .filter(id -> !retryAfter.containsKey(id))
-                          .limit(MAX_RESOLVED_PER_PASS)
-                          .toList());
+      QuarkusTransaction.requiringNew()
+          .run(
+              () ->
+                  waits.findOpenDue(now.minus(RECHECK_EVERY), 10 * MAX_RESOLVED_PER_PASS).stream()
+                      .filter(w -> !retryAfter.containsKey(w.id))
+                      .limit(MAX_RESOLVED_PER_PASS)
+                      .forEach(w -> due.put(w.id, askedAfter(w.subjectResolvedAt))));
     } catch (RuntimeException e) {
       LOG.warnf(e, "the waits due a lookup could not be read");
       return 0;
     }
     long deadline = System.nanoTime() + RESOLVE_BUDGET_PER_PASS.toNanos();
     int resolved = 0;
-    for (UUID id : due) {
+    for (Map.Entry<UUID, Instant> wait : due.entrySet()) {
       if (System.nanoTime() > deadline) {
         break;
       }
-      if (resolveSubject(id)) {
+      if (resolveSubject(wait.getKey(), wait.getValue())) {
         resolved++;
       }
     }
     return resolved;
+  }
+
+  /**
+   * The {@code asked} of a caller that saw the wait resolved at {@code seen} (qits-2508): any later
+   * resolution is news to it, and one it never saw resolved hears of any. Exact, where the time of
+   * the selection would still let a lookup that committed just after it through: its {@code
+   * subject_resolved_at} is stamped before its commit.
+   */
+  static Instant askedAfter(Instant seen) {
+    return seen == null ? Instant.EPOCH : micros(seen).plus(1, ChronoUnit.MICROS);
   }
 
   private static Instant micros(Instant at) {

@@ -356,6 +356,41 @@ public class AgentWaitLookupMatchTest {
   }
 
   @Test
+  void aPassThatSelectedAWaitBeforeAnotherLookupCommittedDoesNotAskAgain() {
+    UUID id = agent();
+    String run = UUID.randomUUID().toString();
+    resolver.answer(run, new WaitSubjectResolver.Resolved(run, null, "RUNNING", Instant.now(), null));
+    try {
+      AgentWaitDto wait = waits.create(id, null, runEnds(run), null);
+      UUID waitId = UUID.fromString(wait.id());
+      assertEquals(1, resolver.lookupsOf(run).size());
+      backdate(waitId);
+
+      // The pass selects it (findOpenDue) and has not got to it yet…
+      Instant seen = waitRow(wait.id()).subjectResolvedAt;
+      // …when another caller looks it up and commits…
+      assertTrue(waits.resolveSubject(waitId));
+      assertEquals(2, resolver.lookupsOf(run).size());
+      // …so the pass, entering after that, does not ask again (qits-2508).
+      assertFalse(waits.resolveSubject(waitId, AgentWaits.askedAfter(seen)));
+      assertEquals(2, resolver.lookupsOf(run).size(), resolver.lookupsOf(run).toString());
+
+      // With nothing in between, the pass's lookup is a lookup.
+      backdate(waitId);
+      assertTrue(waits.resolveSubject(waitId, AgentWaits.askedAfter(waitRow(wait.id()).subjectResolvedAt)));
+      assertEquals(3, resolver.lookupsOf(run).size());
+      assertEquals(AgentWaitState.OPEN, waitRow(wait.id()).state);
+    } finally {
+      resolver.forget(run);
+    }
+  }
+
+  private void backdate(UUID waitId) {
+    QuarkusTransaction.requiringNew()
+        .run(() -> waitRows.findById(waitId).subjectResolvedAt = Instant.now().minus(Duration.ofDays(1)));
+  }
+
+  @Test
   void aDeskWaitWhoseRequestIsStillOpenStaysOpen() {
     UUID project = UUID.randomUUID();
     String request = "qits-x-rr-" + UUID.randomUUID();
