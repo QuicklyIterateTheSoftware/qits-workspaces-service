@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-/** {@link AgentPhases} (qits-2007): one test per rule, first match wins. */
+/** {@link AgentPhases} (qits-2007, qits-2515): one test per rule, first match wins. */
 class AgentPhasesTest {
 
   static final Instant QUEUED_AT = Instant.parse("2026-11-09T10:00:00Z");
@@ -21,7 +21,9 @@ class AgentPhasesTest {
   static final Instant PLACED_AT = Instant.parse("2026-11-09T10:02:00Z");
   static final Instant STARTED_AT = Instant.parse("2026-11-09T10:03:00Z");
 
-  static final Slot RUNNING_SLOT = new Slot(WorkspaceRuntimeStatus.RUNNING, null);
+  static final String LEASE_DETAIL = "no target has memory for a 6g WORKSPACE lease";
+
+  static final Slot RUNNING_SLOT = new Slot(WorkspaceRuntimeStatus.RUNNING, null, null);
 
   private static Reading running(Slot slot, boolean connected, Instant placed, Instant started) {
     return running(slot, connected, placed, started, false, null);
@@ -49,7 +51,7 @@ class AgentPhasesTest {
   @Test
   void aRemovedAgentHasNoPhaseWhateverItsRunState() {
     assertEquals(
-        new Reading(null, null),
+        new Reading(null, null, null),
         AgentPhases.of(
             AgentState.REMOVED,
             AgentRunState.RUNNING,
@@ -68,7 +70,7 @@ class AgentPhasesTest {
       names = {"YIELDED", "STOPPED"})
   void anAgentNeitherQueuedNorRunningHasNoPhase(AgentRunState runState) {
     assertEquals(
-        new Reading(null, null),
+        new Reading(null, null, null),
         AgentPhases.of(
             AgentState.ACTIVE,
             runState,
@@ -84,7 +86,7 @@ class AgentPhasesTest {
   @Test
   void anObsoleteAgentStillHasItsPhase() {
     assertEquals(
-        new Reading(AgentPhase.READY, STARTED_AT),
+        new Reading(AgentPhase.READY, STARTED_AT, null),
         AgentPhases.of(
             AgentState.OBSOLETE,
             AgentRunState.RUNNING,
@@ -100,7 +102,7 @@ class AgentPhasesTest {
   @Test
   void aQueuedAgentIsQueuedSinceItWasQueued() {
     assertEquals(
-        new Reading(AgentPhase.QUEUED, QUEUED_AT),
+        new Reading(AgentPhase.QUEUED, QUEUED_AT, null),
         AgentPhases.of(
             AgentState.ACTIVE, AgentRunState.QUEUED, QUEUED_AT, null, false, null, null, false, null));
   }
@@ -108,15 +110,15 @@ class AgentPhasesTest {
   @Test
   void anAgentOnAQueuedSlotIsQueuedSinceTheSlotWas() {
     assertEquals(
-        new Reading(AgentPhase.QUEUED, SLOT_QUEUED_AT),
-        running(new Slot(WorkspaceRuntimeStatus.QUEUED, SLOT_QUEUED_AT), false, PLACED_AT, null));
+        new Reading(AgentPhase.QUEUED, SLOT_QUEUED_AT, null),
+        running(new Slot(WorkspaceRuntimeStatus.QUEUED, SLOT_QUEUED_AT, null), false, PLACED_AT, null));
   }
 
   @Test
   void anAgentOnAQueuedSlotWithNoQueuedTimeIsQueuedSinceItWasPlaced() {
     assertEquals(
-        new Reading(AgentPhase.QUEUED, PLACED_AT),
-        running(new Slot(WorkspaceRuntimeStatus.QUEUED, null), false, PLACED_AT, null));
+        new Reading(AgentPhase.QUEUED, PLACED_AT, null),
+        running(new Slot(WorkspaceRuntimeStatus.QUEUED, null, null), false, PLACED_AT, null));
   }
 
   @ParameterizedTest
@@ -125,59 +127,114 @@ class AgentPhasesTest {
       names = {"PROVISIONING", "STOPPED", "FAILED"})
   void anAgentOnASlotThatDoesNotRunIsProvisioningSinceItWasPlaced(WorkspaceRuntimeStatus status) {
     assertEquals(
-        new Reading(AgentPhase.PROVISIONING, PLACED_AT),
-        running(new Slot(status, null), true, PLACED_AT, STARTED_AT));
+        new Reading(AgentPhase.PROVISIONING, PLACED_AT, null),
+        running(new Slot(status, null, null), true, PLACED_AT, STARTED_AT));
   }
 
   @Test
   void anAgentWhoseSlotIsGoneIsProvisioning() {
     assertEquals(
-        new Reading(AgentPhase.PROVISIONING, PLACED_AT), running(null, false, PLACED_AT, null));
+        new Reading(AgentPhase.PROVISIONING, PLACED_AT, null), running(null, false, PLACED_AT, null));
   }
 
   @Test
   void anAgentOnARunningSlotWhoseDaemonIsNotConnectedIsProvisioning() {
     assertEquals(
-        new Reading(AgentPhase.PROVISIONING, PLACED_AT),
+        new Reading(AgentPhase.PROVISIONING, PLACED_AT, null),
         running(RUNNING_SLOT, false, PLACED_AT, STARTED_AT, true, AgentActivityState.IDLE));
   }
 
   @Test
   void aPlacedAgentNotStartedYetIsStartingSinceItWasPlaced() {
     assertEquals(
-        new Reading(AgentPhase.STARTING, PLACED_AT), running(RUNNING_SLOT, true, PLACED_AT, null));
+        new Reading(AgentPhase.STARTING, PLACED_AT, null), running(RUNNING_SLOT, true, PLACED_AT, null));
   }
 
   @Test
   void aStartedAgentIsReadySinceItWasStarted() {
     assertEquals(
-        new Reading(AgentPhase.READY, STARTED_AT),
+        new Reading(AgentPhase.READY, STARTED_AT, null),
         running(RUNNING_SLOT, true, PLACED_AT, STARTED_AT, false, null));
   }
 
   @Test
   void aLegacyAgentThisProcessStartedIsReadyWithNoSince() {
     assertEquals(
-        new Reading(AgentPhase.READY, null), running(RUNNING_SLOT, true, null, null, true, null));
+        new Reading(AgentPhase.READY, null, null), running(RUNNING_SLOT, true, null, null, true, null));
   }
 
   @Test
   void aLegacyAgentWithAReportedActivityIsReadyWithNoSince() {
     assertEquals(
-        new Reading(AgentPhase.READY, null),
+        new Reading(AgentPhase.READY, null, null),
         running(RUNNING_SLOT, true, null, null, false, AgentActivityState.IDLE));
   }
 
   @Test
   void aLegacyAgentNotStartedAndSilentIsStartingWithNoSince() {
     assertEquals(
-        new Reading(AgentPhase.STARTING, null), running(RUNNING_SLOT, true, null, null, false, null));
+        new Reading(AgentPhase.STARTING, null, null), running(RUNNING_SLOT, true, null, null, false, null));
   }
 
   @Test
   void aLegacyAgentWithAStartTimeIsReadySinceThen() {
     assertEquals(
-        new Reading(AgentPhase.READY, STARTED_AT),
+        new Reading(AgentPhase.READY, STARTED_AT, null),
         running(RUNNING_SLOT, true, null, STARTED_AT, false, null));
+  }
+
+  @Test
+  void anAgentOnAQueuedSlotCarriesTheSlotsLeaseDetail() {
+    assertEquals(
+        new Reading(AgentPhase.QUEUED, SLOT_QUEUED_AT, LEASE_DETAIL),
+        running(
+            new Slot(WorkspaceRuntimeStatus.QUEUED, SLOT_QUEUED_AT, LEASE_DETAIL),
+            false,
+            PLACED_AT,
+            null));
+  }
+
+  @Test
+  void aBlankSlotErrorIsNoDetail() {
+    assertEquals(
+        new Reading(AgentPhase.QUEUED, SLOT_QUEUED_AT, null),
+        running(new Slot(WorkspaceRuntimeStatus.QUEUED, SLOT_QUEUED_AT, "  "), false, PLACED_AT, null));
+  }
+
+  @Test
+  void anAgentProvisioningOnASlotCarriesItsError() {
+    assertEquals(
+        new Reading(AgentPhase.PROVISIONING, PLACED_AT, "pulling qits/workspace"),
+        running(
+            new Slot(WorkspaceRuntimeStatus.PROVISIONING, null, "pulling qits/workspace"),
+            true,
+            PLACED_AT,
+            null));
+  }
+
+  @Test
+  void aReadyAgentCarriesNoDetailWhateverItsSlotSays() {
+    assertEquals(
+        new Reading(AgentPhase.READY, STARTED_AT, null),
+        running(
+            new Slot(WorkspaceRuntimeStatus.RUNNING, null, LEASE_DETAIL),
+            true,
+            PLACED_AT,
+            STARTED_AT));
+  }
+
+  @Test
+  void aStartingAgentCarriesNoDetailWhateverItsSlotSays() {
+    assertEquals(
+        new Reading(AgentPhase.STARTING, PLACED_AT, null),
+        running(new Slot(WorkspaceRuntimeStatus.RUNNING, null, LEASE_DETAIL), true, PLACED_AT, null));
+  }
+
+  @Test
+  void aQueuedAgentWithNoSlotCarriesNoDetail() {
+    assertEquals(
+        new Reading(AgentPhase.QUEUED, QUEUED_AT, null),
+        AgentPhases.of(
+            AgentState.ACTIVE, AgentRunState.QUEUED, QUEUED_AT, null, false, null, null, false, null));
   }
 }

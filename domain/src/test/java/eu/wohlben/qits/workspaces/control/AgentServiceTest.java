@@ -194,6 +194,7 @@ public class AgentServiceTest {
     assertNull(row.placedAt);
     assertEquals(AgentPhase.QUEUED, queued.agent().phase());
     assertEquals(row.queuedAt, queued.agent().phaseSince());
+    assertNull(queued.agent().phaseDetail(), "no slot, so no slot's reason (qits-2515)");
   }
 
   @Test
@@ -3169,6 +3170,10 @@ public class AgentServiceTest {
     assertEquals(WorkspaceRuntimeStatus.QUEUED, slot.runtimeStatus);
     assertNotNull(slot.leaseId, "its create asked for a lease");
     assertEquals(FakeTargetPlacement.WAITING, slot.runtimeError, "and shows why it waits");
+    AgentDto agent = service.get(queued);
+    assertEquals(AgentPhase.QUEUED, agent.phase(), "its slot's lease waits");
+    assertEquals(
+        FakeTargetPlacement.WAITING, agent.phaseDetail(), "and the agent says why (qits-2515)");
   }
 
   @Test

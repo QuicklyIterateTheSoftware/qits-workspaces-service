@@ -71,7 +71,8 @@
       "blockedAt": null,
       "deskAskedAt": null,
       "phase": "PROVISIONING",
-      "phaseSince": null
+      "phaseSince": null,
+      "phaseDetail": null
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000a4",
@@ -106,7 +107,8 @@
       "blockedAt": null,
       "deskAskedAt": null,
       "phase": null,
-      "phaseSince": null
+      "phaseSince": null,
+      "phaseDetail": null
     }
   ]
 }

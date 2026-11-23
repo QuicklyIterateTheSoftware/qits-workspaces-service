@@ -31,5 +31,6 @@
   "blockedAt": null,
   "deskAskedAt": null,
   "phase": null,
-  "phaseSince": null
+  "phaseSince": null,
+  "phaseDetail": null
 }

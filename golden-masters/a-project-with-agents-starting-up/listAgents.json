@@ -33,7 +33,8 @@
       "blockedAt": null,
       "deskAskedAt": null,
       "phase": "QUEUED",
-      "phaseSince": "2026-01-01T00:00:00Z"
+      "phaseSince": "2026-01-01T00:00:00Z",
+      "phaseDetail": null
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000ac",
@@ -68,7 +69,8 @@
       "blockedAt": null,
       "deskAskedAt": null,
       "phase": "PROVISIONING",
-      "phaseSince": "2026-01-01T00:00:00Z"
+      "phaseSince": "2026-01-01T00:00:00Z",
+      "phaseDetail": "pulling the workspace image"
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000ad",
@@ -103,7 +105,8 @@
       "blockedAt": null,
       "deskAskedAt": null,
       "phase": "STARTING",
-      "phaseSince": "2026-01-01T00:00:00Z"
+      "phaseSince": "2026-01-01T00:00:00Z",
+      "phaseDetail": null
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000ae",
@@ -138,7 +141,8 @@
       "blockedAt": null,
       "deskAskedAt": null,
       "phase": "READY",
-      "phaseSince": "2026-01-01T00:00:00Z"
+      "phaseSince": "2026-01-01T00:00:00Z",
+      "phaseDetail": null
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000af",
@@ -173,7 +177,8 @@
       "blockedAt": null,
       "deskAskedAt": null,
       "phase": "READY",
-      "phaseSince": "2026-01-01T00:00:00Z"
+      "phaseSince": "2026-01-01T00:00:00Z",
+      "phaseDetail": null
     }
   ]
 }

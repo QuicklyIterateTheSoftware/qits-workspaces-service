@@ -22,6 +22,12 @@ import java.time.Instant;
  *   <li>Otherwise {@link AgentPhase#READY}, since its harness was started.
  * </ol>
  *
+ * <p>A reading also carries a {@code detail} (qits-2515): why it waits in that phase. It is the
+ * slot's {@code runtimeError} — where a waiting lease's reason lands, e.g. {@code no target has
+ * memory for a 6g WORKSPACE lease} — when the phase is QUEUED because the slot is QUEUED, or
+ * PROVISIONING on a slot; null (and null for blank text) in every other case: an agent QUEUED with
+ * no slot, PROVISIONING with none, STARTING, READY, or no phase.
+ *
  * <p>An agent placed before {@code V39} has neither time. Its phase falls back to what this process
  * knows: started here, or a reported activity, reads READY (with no since); neither reads STARTING.
  * So a live agent reads READY after a deploy rather than STARTING until its next placement.
@@ -30,13 +36,21 @@ public final class AgentPhases {
 
   private AgentPhases() {}
 
-  /** A phase and since when; both null for an agent with no phase. */
-  public record Reading(AgentPhase phase, Instant since) {
-    static final Reading NONE = new Reading(null, null);
+  /**
+   * A phase, since when, and why it waits there; all null for an agent with no phase.
+   *
+   * @param detail the slot's {@code runtimeError} while it is QUEUED or provisioning; else null
+   */
+  public record Reading(AgentPhase phase, Instant since, String detail) {
+    static final Reading NONE = new Reading(null, null, null);
   }
 
-  /** The two facts of the agent's slot the rules read; null when it names none (or it is gone). */
-  public record Slot(WorkspaceRuntimeStatus runtimeStatus, Instant queuedAt) {}
+  /**
+   * The facts of the agent's slot the rules read; null when it names none (or it is gone).
+   *
+   * @param runtimeError the slot's runtime error, a waiting lease's detail among them; or null
+   */
+  public record Slot(WorkspaceRuntimeStatus runtimeStatus, Instant queuedAt, String runtimeError) {}
 
   /**
    * @param queuedAt when the agent last became QUEUED (its {@code createdAt} where it never said)
@@ -62,21 +76,27 @@ public final class AgentPhases {
       return Reading.NONE;
     }
     if (runState == AgentRunState.QUEUED) {
-      return new Reading(AgentPhase.QUEUED, queuedAt);
+      return new Reading(AgentPhase.QUEUED, queuedAt, null);
     }
     if (slot != null && slot.runtimeStatus() == WorkspaceRuntimeStatus.QUEUED) {
-      return new Reading(AgentPhase.QUEUED, slot.queuedAt() != null ? slot.queuedAt() : placedAt);
+      return new Reading(
+          AgentPhase.QUEUED, slot.queuedAt() != null ? slot.queuedAt() : placedAt, detail(slot));
     }
     if (slot == null || slot.runtimeStatus() != WorkspaceRuntimeStatus.RUNNING || !daemonConnected) {
-      return new Reading(AgentPhase.PROVISIONING, placedAt);
+      return new Reading(AgentPhase.PROVISIONING, placedAt, slot == null ? null : detail(slot));
     }
     if (startedAt != null) {
-      return new Reading(AgentPhase.READY, startedAt);
+      return new Reading(AgentPhase.READY, startedAt, null);
     }
     if (placedAt == null && (startedHere || activity != null)) {
       // Placed before V39: what this process knows of it is all there is.
-      return new Reading(AgentPhase.READY, null);
+      return new Reading(AgentPhase.READY, null, null);
     }
-    return new Reading(AgentPhase.STARTING, placedAt);
+    return new Reading(AgentPhase.STARTING, placedAt, null);
+  }
+
+  private static String detail(Slot slot) {
+    String error = slot.runtimeError();
+    return error == null || error.isBlank() ? null : error;
   }
 }
