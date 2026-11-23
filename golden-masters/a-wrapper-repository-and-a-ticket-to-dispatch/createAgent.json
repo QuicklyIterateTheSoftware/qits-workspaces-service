@@ -32,7 +32,8 @@
     "blockedAt": null,
     "deskAskedAt": null,
     "phase": "QUEUED",
-    "phaseSince": "2026-01-01T00:00:00Z"
+    "phaseSince": "2026-01-01T00:00:00Z",
+    "phaseDetail": null
   },
   "fresh": true,
   "agentLaunch": "QUEUED",

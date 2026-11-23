@@ -944,7 +944,8 @@ public class ProviderStates {
   /**
    * The project's five ACTIVE agents, one per lifecycle phase, newest first: the improvement
    * ticket's is QUEUED with no slot (a lease of this service waits already, so none is made for it);
-   * the epic's holds a slot still PROVISIONING; the bug ticket's holds a RUNNING slot whose daemon is
+   * the epic's holds a slot still PROVISIONING, its lease pulling the image (its {@code
+   * phaseDetail}, qits-2515); the bug ticket's holds a RUNNING slot whose daemon is
    * connected and has not been started there (STARTING); the feature's and the task's were started
    * in that slot and their daemon reports them IDLE and BUSY (READY). The daemon's control socket is
    * a stand-in registered with the real registry, and the two reports are frames through it, so
@@ -971,6 +972,9 @@ public class ProviderStates {
               workspaces.persist(waiting);
 
               Long provisioning = startupSlot(WorkspaceRuntimeStatus.PROVISIONING, "ws-contract-1");
+              // What its lease waits on, as the lease poll copies it (qits-2515): the agent's
+              // phaseDetail.
+              workspaces.findById(provisioning).runtimeError = "pulling the workspace image";
               ids.add(provisioning);
               Long running = startupSlot(WorkspaceRuntimeStatus.RUNNING, "ws-contract-2");
               ids.add(running);

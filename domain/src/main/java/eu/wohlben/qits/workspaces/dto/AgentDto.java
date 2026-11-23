@@ -42,6 +42,9 @@ import org.eclipse.microprofile.openapi.annotations.media.Schema;
  *     {@code runState} nor {@code activity} changes meaning with it
  * @param phaseSince since when it is in {@code phase}; null with it, and null where the time is not
  *     known (an agent placed before the phase was recorded)
+ * @param phaseDetail why it waits in that phase (qits-2515): the slot's queued lease detail, e.g.
+ *     {@code no target has memory for a 6g WORKSPACE lease}, while {@code phase} is QUEUED on a
+ *     QUEUED slot or PROVISIONING on a slot; null otherwise
  */
 public record AgentDto(
     String agentId,
@@ -76,7 +79,8 @@ public record AgentDto(
     Instant blockedAt,
     Instant deskAskedAt,
     AgentPhase phase,
-    Instant phaseSince) {
+    Instant phaseSince,
+    String phaseDetail) {
 
   /**
    * What an ACTIVE agent needs a person for (epic qits-1681).

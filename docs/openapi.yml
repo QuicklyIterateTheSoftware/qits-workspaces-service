@@ -103,6 +103,8 @@ components:
           $ref: "#/components/schemas/AgentPhase"
         phaseSince:
           $ref: "#/components/schemas/Instant"
+        phaseDetail:
+          type: string
     AgentHarness:
       type: string
       enum:

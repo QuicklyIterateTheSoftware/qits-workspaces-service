@@ -31,5 +31,6 @@
   "blockedAt": null,
   "deskAskedAt": null,
   "phase": "PROVISIONING",
-  "phaseSince": null
+  "phaseSince": null,
+  "phaseDetail": null
 }

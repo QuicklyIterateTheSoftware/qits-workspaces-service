@@ -33,7 +33,8 @@
       "blockedAt": null,
       "deskAskedAt": null,
       "phase": "QUEUED",
-      "phaseSince": null
+      "phaseSince": null,
+      "phaseDetail": null
     }
   ]
 }

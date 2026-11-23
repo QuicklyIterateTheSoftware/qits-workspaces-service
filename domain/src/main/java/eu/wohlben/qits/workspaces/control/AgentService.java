@@ -3909,7 +3909,7 @@ public class AgentService {
             () ->
                 workspaceRepository.findActiveByIds(
                     rows.stream().map(a -> a.workspaceId).filter(Objects::nonNull).toList()))
-        .forEach(w -> slots.put(w.id, new AgentPhases.Slot(w.runtimeStatus, w.queuedAt)));
+        .forEach(w -> slots.put(w.id, new AgentPhases.Slot(w.runtimeStatus, w.queuedAt, w.runtimeError)));
     Map<Long, Boolean> connected = new HashMap<>();
     slots.keySet().forEach(id -> connected.put(id, daemonLive(id)));
     return rows.stream()
@@ -3972,7 +3972,8 @@ public class AgentService {
                     a.blockedAt,
                     a.deskAskedAt,
                     phase.phase(),
-                    phase.since());
+                    phase.since(),
+                    phase.detail());
             })
         .toList();
   }
