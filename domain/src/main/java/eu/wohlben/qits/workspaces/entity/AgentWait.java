@@ -24,6 +24,12 @@ import java.util.UUID;
  * DeskWaitClosed} rather than written as a turn; {@link #closedEventId}, {@link #closedTurn} and
  * {@link #announcedAt} carry that announcement until the bus has taken it.
  *
+ * <p><b>A third holder</b> (qits-2596, {@code V41}): a project's long-running agent, known only by
+ * its bearer ({@link #projectAgentSubject} and {@link #projectAgentProjectId}), each wait held for
+ * one work item ({@link #workId}, {@link #workQualifiedId}). Its close is announced as {@code
+ * ProjectAgentWaitClosed} through {@link #closedEventId} and {@link #announcedAt}, as a desk's is,
+ * with no turn: qits-agents-service writes that.
+ *
  * <p><b>In, a {@link CausedRow}.</b> It is created on the request thread of the agent's own call
  * ({@code POST /agents/{id}/waits}), so the stamp records why the wait exists. Closing it does not
  * move the stamp; the event that matched is {@link #matchedEventId}.
@@ -55,6 +61,25 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
   /** The project whose front desk waits (qits-1618); null for an agent's wait. */
   @Column(name = "desk_project_id")
   public UUID deskProjectId;
+
+  /**
+   * The project agent that waits (qits-2596, {@code V41}): its token's principal name, e.g. {@code
+   * tok-project-agent-qits-developer}; null for an agent's or a desk's wait.
+   */
+  @Column(name = "project_agent_subject", length = 128)
+  public String projectAgentSubject;
+
+  /** The project agent's project, its token's {@code project} claim (qits-2596); null otherwise. */
+  @Column(name = "project_agent_project_id")
+  public UUID projectAgentProjectId;
+
+  /** The work item a project agent's wait is held for, its qits-projects uuid (qits-2596). */
+  @Column(name = "work_id")
+  public UUID workId;
+
+  /** That work item's qualified id as resolved at the declaration, e.g. {@code qits-123}. */
+  @Column(name = "work_qualified_id", length = 64)
+  public String workQualifiedId;
 
   /**
    * The principal that waits (qits-1759, {@code V36}): the agent's commissioned token subject, or
@@ -116,7 +141,10 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
   @Column(name = "closed_at")
   public Instant closedAt;
 
-  /** A desk wait's {@code DeskWaitClosed} id, set when it MATCHED, BROKE or TIMED_OUT; re-published as is. */
+  /**
+   * A desk wait's {@code DeskWaitClosed} id, set when it MATCHED, BROKE or TIMED_OUT, or a project
+   * agent's {@code ProjectAgentWaitClosed} id, set on every close (qits-2596); re-published as is.
+   */
   @Column(name = "closed_event_id")
   public UUID closedEventId;
 
@@ -124,7 +152,7 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
   @Column(name = "closed_turn", columnDefinition = "text")
   public String closedTurn;
 
-  /** When the bus took the {@code DeskWaitClosed}; null while it is still to be published. */
+  /** When the bus took that announcement; null while it is still to be published. */
   @Column(name = "announced_at")
   public Instant announcedAt;
 
@@ -180,5 +208,18 @@ public class AgentWait extends PanacheEntityBase implements CausedRow {
   /** Whether a project's desk holds this wait rather than an agent. */
   public boolean isDeskWait() {
     return deskProjectId != null;
+  }
+
+  /** Whether a project's long-running agent holds this wait (qits-2596). */
+  public boolean isProjectAgentWait() {
+    return projectAgentSubject != null;
+  }
+
+  /**
+   * The project a wait is read under when it has no agent row: a desk's own, or a project agent's
+   * (qits-2596). Null for an agent's wait, whose project is its repository's.
+   */
+  public UUID holderProjectId() {
+    return deskProjectId != null ? deskProjectId : projectAgentProjectId;
   }
 }

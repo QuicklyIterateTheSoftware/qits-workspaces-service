@@ -365,6 +365,16 @@ class ConsumerPactVerificationTest {
     return states.params(ProviderStates.AN_AGENT_WITH_A_PROMPT_ATTACHMENT);
   }
 
+  @State(ProviderStates.A_PROJECT_AGENT_DECLARING_A_WAIT)
+  Map<String, String> aProjectAgentDeclaringAWait() {
+    return states.params(ProviderStates.A_PROJECT_AGENT_DECLARING_A_WAIT);
+  }
+
+  @State(ProviderStates.A_PROJECT_AGENT_WITH_AN_OPEN_WAIT)
+  Map<String, String> aProjectAgentWithAnOpenWait() {
+    return states.params(ProviderStates.A_PROJECT_AGENT_WITH_AN_OPEN_WAIT);
+  }
+
   @State(ProviderStates.LEGACY_A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE)
   Map<String, String> aSlotRunningOnARunnerInService() {
     return states.params(ProviderStates.LEGACY_A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE);

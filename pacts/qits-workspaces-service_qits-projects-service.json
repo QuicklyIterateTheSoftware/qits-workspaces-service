@@ -851,6 +851,223 @@
         "references": {
           "qits-call": {
             "app": "qits-projects-service",
+            "operationId": "getWork"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "createProjectAgentWait"
+          }
+        }
+      },
+      "description": "createProjectAgentWait: getWork",
+      "key": "96df7dc6",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a bug ticket in detail",
+          "params": {
+            "bugTicketId": "00000000-0000-4000-8000-000000000001",
+            "creditNoteTicketId": "00000000-0000-4000-8000-000000000002",
+            "csvFeatureId": "00000000-0000-4000-8000-000000000003",
+            "csvTaskId": "00000000-0000-4000-8000-000000000004",
+            "epicId": "00000000-0000-4000-8000-000000000005",
+            "featureId": "00000000-0000-4000-8000-000000000006",
+            "figureAssetId": "00000000-0000-4000-8000-000000000007",
+            "figurePageId": "00000000-0000-4000-8000-000000000008",
+            "frontendRepositoryId": "00000000-0000-4000-8000-000000000009",
+            "improvementTicketId": "00000000-0000-4000-8000-00000000000a",
+            "maintenanceTicketId": "00000000-0000-4000-8000-00000000000b",
+            "pdfTaskId": "00000000-0000-4000-8000-00000000000c",
+            "previewTaskId": "00000000-0000-4000-8000-00000000000d",
+            "projectId": "00000000-0000-4000-8000-00000000000e",
+            "qualifiedId": "contract-00000001-9",
+            "serviceRepositoryId": "00000000-0000-4000-8000-00000000000f",
+            "taskId": "00000000-0000-4000-8000-000000000010",
+            "taxesEpicId": "00000000-0000-4000-8000-000000000011"
+          }
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/projects/api/work/${qualifiedId}",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/projects/api/work/contract-00000001-9"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "archetype": "TICKET",
+            "id": "00000000-0000-4000-8000-000000000001",
+            "projectId": "00000000-0000-4000-8000-00000000000e",
+            "qualifiedId": "contract-00000001-9"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.archetype": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.projectId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.qualifiedId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-projects-service",
+            "operationId": "reportWorkAgentWaiting"
+          },
+          "qits-trigger": {
+            "app": "qits-workspaces-service",
+            "kind": "operation",
+            "operationId": "createProjectAgentWait"
+          }
+        }
+      },
+      "description": "createProjectAgentWait: reportWorkAgentWaiting",
+      "key": "2620e427",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a ticket with a dispatched agent",
+          "params": {
+            "projectId": "00000000-0000-4000-8000-000000000001",
+            "qualifiedId": "contract-00000001-1",
+            "ticketId": "00000000-0000-4000-8000-000000000002"
+          }
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "at": 1234,
+            "cause": "Wait",
+            "sessionId": null,
+            "waiting": true,
+            "waitingOn": "release request 42 to end"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "path": {
+            "dataType": "RAW",
+            "expression": "/projects/api/work/${ticketId}/agent-waiting",
+            "type": "ProviderState"
+          }
+        },
+        "headers": {
+          "content-type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.at": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.cause": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.waiting": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.waitingOn": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/projects/api/work/00000000-0000-4000-8000-000000000002/agent-waiting"
+      },
+      "response": {
+        "status": 204
+      },
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "references": {
+          "qits-call": {
+            "app": "qits-projects-service",
             "operationId": "getRepository"
           },
           "qits-trigger": {

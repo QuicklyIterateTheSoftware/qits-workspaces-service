@@ -4,6 +4,8 @@ import eu.wohlben.qits.workspaces.control.AgentAttentions;
 import eu.wohlben.qits.workspaces.control.AgentService;
 import eu.wohlben.qits.workspaces.control.FakeRepositoryLookup;
 import eu.wohlben.qits.workspaces.control.FakeTargetPlacement;
+import eu.wohlben.qits.workspaces.control.FakeWorkItemLookup;
+import eu.wohlben.qits.workspaces.control.WorkItemLookup;
 import eu.wohlben.qits.workspaces.control.TargetPlacement;
 import eu.wohlben.qits.workspaces.control.WorkspaceAddressPlane;
 import eu.wohlben.qits.workspaces.control.WorkspacePromptDraftService;
@@ -164,6 +166,12 @@ public class ProviderStates {
       "a repository with workspace history";
   public static final String AN_AGENT_WITH_A_PROMPT_ATTACHMENT = "an agent with a prompt attachment";
 
+  // A project agent's waits (qits-2596), for the CLI's `qits wait --work` (qits-2598): the door
+  // recorded as the project agent's own bearer, which names the holder.
+  public static final String A_PROJECT_AGENT_DECLARING_A_WAIT =
+      "a project agent declaring a wait for a work item";
+  public static final String A_PROJECT_AGENT_WITH_AN_OPEN_WAIT = "a project agent with an open wait";
+
   // The two slot states' names before the cutover, answered as aliases and never recorded: the
   // consumers' pinned pacts were written against the golden masters that named them so, and they
   // can take the new names only once this service's golden masters carrying them are published.
@@ -251,6 +259,7 @@ public class ProviderStates {
   @Inject WorkspaceService workspaceService;
   @Inject FakeRepositoryLookup repositories;
   @Inject FakeTargetPlacement targets;
+  @Inject FakeWorkItemLookup workItems;
   @Inject TechnicalProcessRegistry technicalProcesses;
   @Inject WorkspacePromptDraftService promptDrafts;
   @Inject WorkspacePromptAttachmentRepository promptAttachments;
@@ -305,6 +314,8 @@ public class ProviderStates {
         A_PROJECT_DESK_WITH_AN_OPEN_WAIT,
         A_REPOSITORY_WITH_WORKSPACE_HISTORY,
         AN_AGENT_WITH_A_PROMPT_ATTACHMENT,
+        A_PROJECT_AGENT_DECLARING_A_WAIT,
+        A_PROJECT_AGENT_WITH_AN_OPEN_WAIT,
         LEGACY_A_SLOT_RUNNING_ON_A_RUNNER_IN_SERVICE,
         LEGACY_A_STOPPED_SLOT_ON_A_RUNNER_IN_SERVICE);
   }
@@ -351,6 +362,8 @@ public class ProviderStates {
       case A_PROJECT_DESK_WITH_AN_OPEN_WAIT -> deskWithAnOpenWait();
       case A_REPOSITORY_WITH_WORKSPACE_HISTORY -> repositoryWithWorkspaceHistory();
       case AN_AGENT_WITH_A_PROMPT_ATTACHMENT -> agentWithAPromptAttachment();
+      case A_PROJECT_AGENT_DECLARING_A_WAIT -> projectAgent(false);
+      case A_PROJECT_AGENT_WITH_AN_OPEN_WAIT -> projectAgent(true);
       default -> throw new IllegalArgumentException("No provider state named '" + state + "'");
     };
   }
@@ -385,9 +398,12 @@ public class ProviderStates {
               workspaces.delete("repositoryId = ?1", STARTUP_REPOSITORY_ID);
               // The desk's waits name no agent, so no agent's delete takes them (qits-1937).
               agentWaits.delete("deskProjectId = ?1", UUID.fromString(PROJECT_ID));
+              // A project agent's name none either (qits-2596).
+              agentWaits.delete("projectAgentSubject = ?1", PROJECT_AGENT_SUBJECT);
               workspaces.delete("repositoryId = ?1", HISTORY_REPOSITORY_ID);
             });
     targets.reset();
+    workItems.forget(PROJECT_AGENT_ITEM);
   }
 
   /** The session {@link #A_RESOLVED_SLOT_WITH_AN_ARCHIVED_SESSION} shipped for its agent. */
@@ -1738,6 +1754,76 @@ public class ProviderStates {
     params.put("projectId", PROJECT_ID);
     params.put("releaseRequestId", RELEASE_REQUEST_ID);
     params.put("waitId", DESK_WAIT_ID);
+    return new Setup(params, List.of());
+  }
+
+  // --- a project agent's waits (qits-2596) --------------------------------------------------------
+
+  /** The project agent's token subject: a commissioned token of kind project-agent. */
+  static final String PROJECT_AGENT_SUBJECT = "tok-project-agent-qits-developer";
+
+  /** Its token's {@code project} claim, as the CLI's pact (qits-2598) names it. */
+  static final String PROJECT_AGENT_PROJECT_ID = "00000000-0000-4000-8000-000000000001";
+
+  /** The ticket its waits are held for, as qits-projects would answer {@code getWork qits-123}. */
+  static final WorkItemLookup.WorkItem PROJECT_AGENT_ITEM =
+      new WorkItemLookup.WorkItem(
+          "00000000-0000-4000-8000-0000000000d2", "qits-123", "TICKET", PROJECT_AGENT_PROJECT_ID);
+
+  static final String PROJECT_AGENT_WAIT_ID = "00000000-0000-4000-8000-0000000000bb";
+
+  /** The bearer the recording sends: granted below as the project agent's token. */
+  static final String PROJECT_AGENT_BEARER = "Bearer contract-project-agent-token";
+
+  /**
+   * A project agent of {@link #PROJECT_AGENT_PROJECT_ID} and its ticket {@code qits-123}; with
+   * {@code open}, one OPEN wait on a release request held for it. The door is called with the
+   * agent's own bearer ({@code authorization}): {@code qits:agent}, {@code context_kind}
+   * project-agent and the project claim.
+   */
+  private Setup projectAgent(boolean open) {
+    bearers.grant(
+        PROJECT_AGENT_BEARER,
+        PROJECT_AGENT_SUBJECT,
+        Map.of("context_kind", "project-agent", "project", PROJECT_AGENT_PROJECT_ID),
+        "qits:agent");
+    workItems.add(PROJECT_AGENT_ITEM);
+    if (open) {
+      QuarkusTransaction.requiringNew()
+          .run(
+              () -> {
+                AgentWait wait = new AgentWait();
+                wait.id = UUID.fromString(PROJECT_AGENT_WAIT_ID);
+                wait.projectAgentSubject = PROJECT_AGENT_SUBJECT;
+                wait.projectAgentProjectId = UUID.fromString(PROJECT_AGENT_PROJECT_ID);
+                wait.workId = UUID.fromString(PROJECT_AGENT_ITEM.id());
+                wait.workQualifiedId = PROJECT_AGENT_ITEM.qualifiedId();
+                wait.waiterSubject = PROJECT_AGENT_SUBJECT;
+                wait.label = "release-request " + RELEASE_REQUEST_ID;
+                wait.selection =
+                    EventSelection.of(
+                            "ReleaseRequestStateChanged",
+                            EventSelection.Condition.exact("releaseRequestId", RELEASE_REQUEST_ID),
+                            EventSelection.Condition.exact("state", "FINALIZED"))
+                        .toJson();
+                wait.eventName = "ReleaseRequestStateChanged";
+                wait.subjectKind = "RELEASE_REQUEST";
+                wait.subjectRef = RELEASE_REQUEST_ID;
+                wait.targetStates = "[\"FINALIZED\"]";
+                wait.createdAt = Instant.now();
+                wait.expiresAt = wait.createdAt.plusSeconds(7200);
+                agentWaits.persist(wait);
+              });
+    }
+    Map<String, String> params = new TreeMap<>();
+    params.put("authorization", PROJECT_AGENT_BEARER);
+    params.put("projectId", PROJECT_AGENT_PROJECT_ID);
+    params.put("work", PROJECT_AGENT_ITEM.qualifiedId());
+    params.put("workId", PROJECT_AGENT_ITEM.id());
+    params.put("releaseRequestId", RELEASE_REQUEST_ID);
+    if (open) {
+      params.put("waitId", PROJECT_AGENT_WAIT_ID);
+    }
     return new Setup(params, List.of());
   }
 

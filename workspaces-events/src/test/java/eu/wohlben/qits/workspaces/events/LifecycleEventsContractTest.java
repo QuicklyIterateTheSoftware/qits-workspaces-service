@@ -134,6 +134,15 @@ class LifecycleEventsContractTest {
             "x-rr-1 PENDING, unchanged for 3 h 10 min", Instant.parse("2026-10-13T12:00:00Z"),
             "wait-1", AT),
         with(agentInProject, "code", "reason", "since", "waitId"));
+    // qits-2596: a project agent's wait closed, the facts qits-agents-service renders its turn from.
+    out.put(
+        new ProjectAgentWaitClosed(
+            UUID.randomUUID(), UUID.fromString(WAIT), PROJECT, "tok-project-agent-qits-developer",
+            WORK, "qits-123", "qits-123 released", ProjectAgentWaitClosed.BROKEN,
+            "ReleaseRequestStateChanged", null, "qits-qits-rr-12 is WITHDRAWN since 09:00 UTC", AT),
+        List.of(
+            "agentSubject", "eventName", "label", "projectId", "reason", "state", "waitId", "workId",
+            "workQualifiedId"));
     return out;
   }
 
@@ -168,7 +177,8 @@ class LifecycleEventsContractTest {
             "AgentWaitChanged",
             "AgentWaitClosed",
             "AgentActivityChanged",
-            "AgentAttentionChanged"),
+            "AgentAttentionChanged",
+            "ProjectAgentWaitClosed"),
         everyEvent().keySet().stream().map(e -> EventEnvelope.of(e).name()).toList());
   }
 

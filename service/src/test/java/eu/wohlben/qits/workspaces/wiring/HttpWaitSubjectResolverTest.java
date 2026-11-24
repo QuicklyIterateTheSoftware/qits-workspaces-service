@@ -102,7 +102,7 @@ class HttpWaitSubjectResolverTest {
     HttpWaitSubjectResolver resolver =
         resolver(
             (auth, project, ref) -> fail(),
-            (auth, ref) -> new ProjectsWorkItems.WorkItem("u-7", "qits-1702", "IMPLEMENTING", T0),
+            (auth, ref) -> new ProjectsWorkItems.WorkItem("u-7", "qits-1702", "IMPLEMENTING", T0, "TICKET", null),
             (auth, ref) -> fail());
     assertEquals(
         new Resolved("u-7", "qits-1702", "IMPLEMENTING", T0, null),

@@ -28,6 +28,7 @@ import eu.wohlben.qits.workspaces.events.AgentStarted;
 import eu.wohlben.qits.workspaces.events.AgentStopped;
 import eu.wohlben.qits.workspaces.events.AgentYielded;
 import eu.wohlben.qits.workspaces.events.DeskWaitClosed;
+import eu.wohlben.qits.workspaces.events.ProjectAgentWaitClosed;
 import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
 import eu.wohlben.qits.workspaces.events.WorkspaceRemoved;
 import eu.wohlben.qits.workspaces.events.WorkspaceStarted;
@@ -88,13 +89,14 @@ class EventWireReflectionTest {
             AgentWaitClosed.class,
             AgentActivityChanged.class,
             AgentAttentionChanged.class,
+            ProjectAgentWaitClosed.class,
             eu.wohlben.qits.workspaces.targethost.TargetLeaseChanged.class,
             eu.wohlben.qits.workspaces.targethost.TargetLoginChanged.class,
             EntityCommented.class,
             EventEnvelope.class,
             EventFrame.class),
         Set.of(registration.targets()),
-        "the fourteen lifecycle events and DeskWaitClosed out, qits-system's lease and sign-in events in, the PUT body, the frame — a new wire type is added"
+        "the fourteen lifecycle events, DeskWaitClosed and ProjectAgentWaitClosed out, qits-system's lease and sign-in events in, the PUT body, the frame — a new wire type is added"
             + " here");
   }
 

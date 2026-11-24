@@ -1,0 +1,41 @@
+{
+  "id": "00000000-0000-4000-8000-000000000100",
+  "agentId": null,
+  "label": "release request 00000000 to end",
+  "selection": {
+    "event": "ReleaseRequestStateChanged",
+    "when": [
+      [
+        {
+          "path": "releaseRequestId",
+          "op": "exact",
+          "value": "00000000-0000-4000-8000-0000000000c1"
+        },
+        {
+          "path": "state",
+          "op": "exact",
+          "value": "FINALIZED"
+        }
+      ]
+    ]
+  },
+  "state": "OPEN",
+  "createdAt": "2026-01-01T00:00:00Z",
+  "expiresAt": "2026-01-01T00:00:00Z",
+  "matchedEventId": null,
+  "closedAt": null,
+  "subjectKind": "RELEASE_REQUEST",
+  "subjectRef": "00000000-0000-4000-8000-0000000000c1",
+  "subjectId": null,
+  "subjectQualifiedId": null,
+  "targetStates": [
+    "FINALIZED"
+  ],
+  "subjectState": null,
+  "subjectStateAt": null,
+  "subjectExpectedBy": null,
+  "subjectError": null,
+  "brokenReason": null,
+  "work": "qits-123",
+  "workId": "00000000-0000-4000-8000-0000000000d2"
+}

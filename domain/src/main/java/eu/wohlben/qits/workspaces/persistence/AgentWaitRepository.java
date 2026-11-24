@@ -12,7 +12,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-/** The declared waits (qits-1153), an agent's or a project desk's (qits-1618). */
+/**
+ * The declared waits (qits-1153), an agent's, a project desk's (qits-1618) or a project agent's
+ * (qits-2596).
+ */
 @ApplicationScoped
 public class AgentWaitRepository implements PanacheRepositoryBase<AgentWait, UUID> {
 
@@ -61,9 +64,63 @@ public class AgentWaitRepository implements PanacheRepositoryBase<AgentWait, UUI
         .getSingleResult();
   }
 
+  // --- a project agent's (qits-2596) ---------------------------------------------------------------
+
   /**
-   * Closed desk waits whose {@code DeskWaitClosed} the bus never took, oldest first: what the sweep
-   * publishes again.
+   * A project agent's waits in its project, newest first; {@code workId} null = on every item,
+   * {@code state} null = every state.
+   */
+  public List<AgentWait> findByProjectAgent(
+      String subject, UUID projectId, UUID workId, AgentWaitState state) {
+    StringBuilder query =
+        new StringBuilder("projectAgentSubject = :subject and projectAgentProjectId = :project");
+    io.quarkus.panache.common.Parameters params =
+        io.quarkus.panache.common.Parameters.with("subject", subject).and("project", projectId);
+    if (workId != null) {
+      query.append(" and workId = :work");
+      params = params.and("work", workId);
+    }
+    if (state != null) {
+      query.append(" and state = :state");
+      params = params.and("state", state);
+    }
+    return list(query.append(" order by createdAt desc").toString(), params);
+  }
+
+  /** How many OPEN waits a project agent holds on one item: what its cap counts. */
+  public long countOpenOfProjectAgent(String subject, UUID workId) {
+    return count(
+        "projectAgentSubject = ?1 and workId = ?2 and state = ?3",
+        subject,
+        workId,
+        AgentWaitState.OPEN);
+  }
+
+  /** Every project agent's OPEN waits on one work item, oldest first: what the item waits on. */
+  public List<AgentWait> findOpenOfProjectAgentsOnItem(UUID workId) {
+    return list(
+        "projectAgentSubject is not null and workId = ?1 and state = ?2 order by createdAt",
+        workId,
+        AgentWaitState.OPEN);
+  }
+
+  /**
+   * Serialise one project agent's declarations on one item for the rest of the caller's
+   * transaction, as {@link #lockDesk} does a desk's: a project agent has no row of its own to lock
+   * while its cap is counted.
+   */
+  public void lockProjectAgent(String subject, UUID workId) {
+    long key = ((long) subject.hashCode() << 32) ^ workId.getMostSignificantBits() ^ workId.getLeastSignificantBits();
+    getEntityManager()
+        .createNativeQuery("select count(*) from (select pg_advisory_xact_lock(?1)) held")
+        .setParameter(1, key)
+        .getSingleResult();
+  }
+
+  /**
+   * Closed desk waits whose {@code DeskWaitClosed} the bus never took, and closed project-agent
+   * waits whose {@code ProjectAgentWaitClosed} it never took (qits-2596), oldest first: what the
+   * sweep publishes again.
    */
   public List<AgentWait> findUnannounced() {
     return list(

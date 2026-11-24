@@ -21,6 +21,7 @@ import eu.wohlben.qits.workspaces.events.AgentWaitChanged;
 import eu.wohlben.qits.workspaces.events.AgentWaitClosed;
 import eu.wohlben.qits.workspaces.events.AgentWaitOpened;
 import eu.wohlben.qits.workspaces.events.DeskWaitClosed;
+import eu.wohlben.qits.workspaces.events.ProjectAgentWaitClosed;
 import eu.wohlben.qits.workspaces.persistence.AgentWaitRepository;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -132,6 +133,17 @@ import org.jboss.logging.Logger;
  *       and never breaks; the sweep closes it TIMED_OUT when its time passes, and its turn says the
  *       timer is up ({@link #timedOutTurn}). Agents used to fake one with a selection nothing
  *       matched. It counts toward {@link #MAX_OPEN_PER_AGENT} like any other wait.
+ *   <li><b>A project agent's waits</b> (qits-2596, {@code V41}): the long-running agent
+ *       qits-agents-service runs for a project holds waits too, known by its bearer (principal and
+ *       {@code project} claim) and each held for one work item, at most {@link
+ *       #MAX_OPEN_PER_AGENT} OPEN per (holder, item). The same matcher, sweep, lookups and breaks
+ *       close them; where an agent's close wakes its agent and a desk's stores a turn, a project
+ *       agent's records a {@link ProjectAgentWaitClosed} id on the row in the closing transaction
+ *       and announces it once that committed — every close, CANCELLED included, re-published by the
+ *       sweep until the bus took it, exactly as a desk's. No turn is rendered here. After every
+ *       declaration and close the item's waiting state is relayed: {@code waiting: true}, cause
+ *       {@code Wait} and the OPEN project-agent waits' labels while any is left; {@code waiting:
+ *       false}, the close's cause and no label once none is.
  * </ul>
  */
 @ApplicationScoped
@@ -580,6 +592,256 @@ public class AgentWaits {
     return getForDesk(projectId, waitId);
   }
 
+  // --- a project agent's doors (qits-2596) -------------------------------------------------------
+
+  /** Where a project agent's work item is read; absent: no item can be named, and the door says so. */
+  @Inject Instance<WorkItemLookup> workItems;
+
+  /**
+   * The work item a project agent of {@code projectId} may hold a wait for: the item {@code work}
+   * names (uuid or qualified id), an EPIC or a TICKET of that project.
+   *
+   * @throws BadRequestException no {@code work}, or an item of another project, or one that is not
+   *     an EPIC or a TICKET
+   * @throws NotFoundException qits-projects knows no such item
+   * @throws IllegalStateException qits-projects could not be asked
+   */
+  public WorkItemLookup.WorkItem requireProjectAgentWork(UUID projectId, String work) {
+    if (work == null || work.isBlank()) {
+      throw new BadRequestException("a project agent's wait names its work item: work");
+    }
+    if (workItems == null || !workItems.isResolvable()) {
+      throw new IllegalStateException("No work item lookup is configured; " + work + " cannot be read.");
+    }
+    String ref = work.trim();
+    WorkItemLookup.WorkItem item =
+        workItems.get().find(ref).orElseThrow(() -> new NotFoundException("Work item not found: " + ref));
+    if (!projectId.toString().equals(item.projectId())) {
+      throw new BadRequestException(
+          "Work item " + ref + " is not of this agent's project " + projectId + ".");
+    }
+    if (!"EPIC".equals(item.archetype()) && !"TICKET".equals(item.archetype())) {
+      throw new BadRequestException(
+          "Work item "
+              + ref
+              + " is a "
+              + item.archetype()
+              + "; a project agent's wait is held for an EPIC or a TICKET.");
+    }
+    if (item.id() == null || item.qualifiedId() == null) {
+      throw new IllegalStateException("qits-projects named no id for work item " + ref + ".");
+    }
+    return item;
+  }
+
+  /**
+   * Declare a wait for a project's long-running agent (qits-2596), held for one work item.
+   * Everything an agent's declaration checks except the agent: the selection, the timeout (at most
+   * {@link #MAX_TIMEOUT}, {@link #DEFAULT_TIMEOUT} when none is given), the label, and at most {@link
+   * #MAX_OPEN_PER_AGENT} OPEN waits per (holder, item), counted under an advisory lock. The holder
+   * is the caller's bearer, which the door has checked; the item is the one {@link
+   * #requireProjectAgentWork} resolved. Its subject is looked up as an agent's is (a release request
+   * and a branch under the holder's project), so the answer may already say MATCHED or BROKEN. A
+   * timer when there is no selection (qits-2309).
+   *
+   * <p>The item is relayed as waiting on the holder's OPEN waits once the declaration committed;
+   * a lookup or look-back that closed it relays from its close instead.
+   *
+   * @param subject the holder's principal, e.g. {@code tok-project-agent-qits-developer}; its own
+   *     comments never match the wait (qits-1759)
+   * @throws ConflictException {@code TOO_MANY_WAITS}
+   * @throws BadRequestException neither a selection nor a timeout, or a bad timeout
+   */
+  public AgentWaitDto createForProjectAgent(
+      String subject,
+      UUID projectId,
+      UUID workId,
+      String workQualifiedId,
+      String label,
+      EventSelection selection,
+      Duration timeout) {
+    Instant declaredAt = Instant.now();
+    String finalLabel = validated(label, selection, timeout, declaredAt);
+    UUID id = UUID.randomUUID();
+    WaitSubjects.Subject parsed = declaredSubject(selection);
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              waits.lockProjectAgent(subject, workId);
+              if (waits.countOpenOfProjectAgent(subject, workId) >= MAX_OPEN_PER_AGENT) {
+                throw new ConflictException(
+                    "TOO_MANY_WAITS",
+                    subject
+                        + " already has "
+                        + MAX_OPEN_PER_AGENT
+                        + " open waits on "
+                        + workQualifiedId
+                        + "; cancel one first.");
+              }
+              AgentWait wait = new AgentWait();
+              wait.id = id;
+              wait.projectAgentSubject = subject;
+              wait.projectAgentProjectId = projectId;
+              wait.workId = workId;
+              wait.workQualifiedId = workQualifiedId;
+              wait.waiterSubject = subject;
+              wait.label = finalLabel;
+              wait.selection = selection == null ? null : selection.toJson();
+              wait.eventName = eventOf(selection);
+              wait.createdAt = declaredAt;
+              wait.expiresAt = expiryOf(declaredAt, timeout);
+              wait.expiryIsCeiling = timeout == null;
+              wait.subjectKind = parsed.kind().name();
+              wait.subjectRef = parsed.ref();
+              wait.targetStates = targetStatesJson(parsed.targetStates());
+              waits.persist(wait);
+            });
+    addName(eventOf(selection));
+    LOG.infof("Project agent %s waits on %s for %s (%s)", subject, finalLabel, workQualifiedId, id);
+    if (looksUp(parsed.kind())) {
+      resolveSubject(id);
+    }
+    if (isOpen(id)) {
+      relayItem(workId, CAUSE_WAIT);
+      catchUp(id, selection, declaredAt);
+    }
+    return getForProjectAgent(subject, projectId, id);
+  }
+
+  /**
+   * A project agent's waits in its project, newest first; {@code workId} null = on every item,
+   * {@code state} null = all.
+   */
+  public List<AgentWaitDto> listForProjectAgent(
+      String subject, UUID projectId, UUID workId, AgentWaitState state) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () ->
+                waits.findByProjectAgent(subject, projectId, workId, state).stream()
+                    .map(AgentWaits::view)
+                    .toList());
+  }
+
+  /** One wait of the project agent; another holder's wait is not found here. */
+  public AgentWaitDto getForProjectAgent(String subject, UUID projectId, UUID waitId) {
+    return QuarkusTransaction.requiringNew()
+        .call(
+            () -> {
+              AgentWait wait = waits.findById(waitId);
+              if (wait == null || !heldBy(wait, subject, projectId)) {
+                throw new NotFoundException("Wait not found: " + waitId);
+              }
+              return view(wait);
+            });
+  }
+
+  /**
+   * Cancel a project agent's wait. An OPEN one becomes CANCELLED, its {@link
+   * ProjectAgentWaitClosed} is announced (for the record) and its item relayed; a closed one is
+   * answered as it is (idempotent).
+   */
+  public AgentWaitDto cancelForProjectAgent(String subject, UUID projectId, UUID waitId) {
+    ProjectAgentWaitClosed closed =
+        QuarkusTransaction.requiringNew()
+            .call(
+                () -> {
+                  AgentWait wait =
+                      waits
+                          .findByIdOptional(waitId, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                          .filter(w -> heldBy(w, subject, projectId))
+                          .orElseThrow(() -> new NotFoundException("Wait not found: " + waitId));
+                  if (wait.state != AgentWaitState.OPEN) {
+                    return null;
+                  }
+                  return closeProjectAgent(wait, AgentWaitState.CANCELLED, null);
+                });
+    if (closed != null) {
+      refreshNames();
+      LOG.infof("Project agent %s cancelled its wait %s on %s", subject, waitId, closed.workQualifiedId());
+      announceProjectAgent(closed);
+      relayItem(UUID.fromString(closed.workId()), CAUSE_CANCELLED);
+    }
+    return getForProjectAgent(subject, projectId, waitId);
+  }
+
+  /** Whether {@code wait} is the project agent {@code subject}'s, in {@code projectId}. */
+  private static boolean heldBy(AgentWait wait, String subject, UUID projectId) {
+    return wait.isProjectAgentWait()
+        && wait.projectAgentSubject.equals(subject)
+        && projectId.equals(wait.projectAgentProjectId);
+  }
+
+  /**
+   * Close a project agent's wait in the caller's transaction and record what is to be announced: a
+   * fresh {@link ProjectAgentWaitClosed} id. The event is built from the row, so a re-publish from
+   * {@link #announceUnannounced} says exactly the same. No turn: qits-agents-service writes it.
+   */
+  private static ProjectAgentWaitClosed closeProjectAgent(
+      AgentWait wait, AgentWaitState state, String eventId) {
+    close(wait, state, eventId);
+    // As the column stores it, so the first publish and a re-publish read the same instant.
+    wait.closedAt = wait.closedAt.truncatedTo(ChronoUnit.MICROS);
+    wait.closedEventId = UUID.randomUUID();
+    return projectAgentClosedEvent(wait);
+  }
+
+  /** The announcement a closed project-agent wait's row records (qits-2596). */
+  static ProjectAgentWaitClosed projectAgentClosedEvent(AgentWait wait) {
+    return new ProjectAgentWaitClosed(
+        wait.closedEventId,
+        wait.id,
+        wait.projectAgentProjectId.toString(),
+        wait.projectAgentSubject,
+        wait.workId.toString(),
+        wait.workQualifiedId,
+        wait.label,
+        wait.state.name(),
+        wait.eventName,
+        wait.matchedEventId,
+        wait.state == AgentWaitState.BROKEN ? wait.brokenReason : null,
+        wait.closedAt);
+  }
+
+  /** Hand a committed project-agent close to the bus, as {@link #announceDesk} does a desk's. */
+  void announceProjectAgent(ProjectAgentWaitClosed event) {
+    announceClosed(event, event.waitId());
+  }
+
+  /**
+   * Relay a work item's project-agent waits to qits-projects (qits-2596): while any is OPEN, {@code
+   * waiting: true}, cause {@code Wait} and their labels, oldest first, joined with {@code "; "} — so
+   * the item reads "waiting on" them, which derives no block there; once none is, {@code waiting:
+   * false}, {@code cause} (the close's: {@code WaitMatched}, {@code WaitTimedOut}, {@code WaitBroken}
+   * or {@code WaitCancelled}) and no label. Not {@code Wait} then: qits-projects reads a {@code Wait}
+   * frame with no label as "waiting on a declared wait", which would outlive every wait. No session.
+   * Read after the change committed; never throws.
+   */
+  private void relayItem(UUID workId, String cause) {
+    List<String> labels;
+    try {
+      labels =
+          QuarkusTransaction.requiringNew()
+              .call(
+                  () ->
+                      waits.findOpenOfProjectAgentsOnItem(workId).stream().map(w -> w.label).toList());
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "work item %s's waits could not be read; not relayed", workId);
+      return;
+    }
+    Instant now = Instant.now();
+    if (labels.isEmpty()) {
+      relay(workId.toString(), false, cause, null, null, now);
+    } else {
+      relay(
+          workId.toString(),
+          true,
+          CAUSE_WAIT,
+          bounded(String.join("; ", labels), 4 * MAX_LABEL),
+          null,
+          now);
+    }
+  }
+
   // --- matching -----------------------------------------------------------------------------------
 
   /**
@@ -731,7 +993,8 @@ public class AgentWaits {
                 }
                 if (!wait.isDeskWait()) {
                   Pending changed = recordSubjectState(wait, selection, name, occurredAt, tree);
-                  if (changed != null) {
+                  // Only an agent's moves are announced; a project agent's has no agent row.
+                  if (changed != null && wait.agentId != null) {
                     closing.announced.add(changed);
                   }
                 }
@@ -756,6 +1019,10 @@ public class AgentWaits {
                   LOG.infof(
                       "The desk of project %s: its wait %s matched %s %s",
                       wait.deskProjectId, wait.label, name, eventId);
+                } else if (wait.isProjectAgentWait()) {
+                  LOG.infof(
+                      "Project agent %s: its wait %s on %s matched %s %s",
+                      wait.projectAgentSubject, wait.label, wait.workQualifiedId, name, eventId);
                 } else {
                   LOG.infof(
                       "Agent %s's wait %s matched %s %s", wait.agentId, wait.label, name, eventId);
@@ -773,6 +1040,7 @@ public class AgentWaits {
   private static final class Closing {
     final List<Placed> closedFor = new ArrayList<>();
     final List<DeskWaitClosed> deskClosed = new ArrayList<>();
+    final List<ProjectAgentWaitClosed> projectAgentClosed = new ArrayList<>();
     final List<Pending> announced = new ArrayList<>();
     final List<Woken> woken = new ArrayList<>();
     int closed;
@@ -788,6 +1056,10 @@ public class AgentWaits {
     closing.closed++;
     if (wait.isDeskWait()) {
       closing.deskClosed.add(closeDesk(wait, AgentWaitState.MATCHED, eventId, turn));
+      return;
+    }
+    if (wait.isProjectAgentWait()) {
+      closing.projectAgentClosed.add(closeProjectAgent(wait, AgentWaitState.MATCHED, eventId));
       return;
     }
     close(wait, AgentWaitState.MATCHED, eventId);
@@ -815,6 +1087,13 @@ public class AgentWaits {
       LOG.infof("The desk of project %s: its wait %s is broken: %s", wait.deskProjectId, wait.label, reason);
       return;
     }
+    if (wait.isProjectAgentWait()) {
+      closing.projectAgentClosed.add(closeProjectAgent(wait, AgentWaitState.BROKEN, null));
+      LOG.infof(
+          "Project agent %s: its wait %s on %s is broken: %s",
+          wait.projectAgentSubject, wait.label, wait.workQualifiedId, reason);
+      return;
+    }
     close(wait, AgentWaitState.BROKEN, null);
     closing.announced.add(
         closedEvent(wait.agentId, wait.id, AgentWaitClosed.BROKEN, null, wait.label, reason));
@@ -837,9 +1116,11 @@ public class AgentWaits {
     hint(closing.closedFor);
     announceAll(closing.announced);
     closing.deskClosed.forEach(this::announceDesk);
+    closing.projectAgentClosed.forEach(this::announceProjectAgent);
     if (closing.closed > 0) {
       refreshNames();
     }
+    relayItems(closing.projectAgentClosed);
     // After the commit, so the label read is what stays open once the matched waits closed
     // (qits-1460): an agent with a second wait still shows it.
     for (Woken w : closing.woken) {
@@ -848,7 +1129,26 @@ public class AgentWaits {
     if (!closing.woken.isEmpty()) {
       agentService.kick();
     }
-    return closing.woken.size() + closing.deskClosed.size();
+    return closing.woken.size() + closing.deskClosed.size() + closing.projectAgentClosed.size();
+  }
+
+  /** Relay each item a project-agent close touched once, with the cause of its last close there. */
+  private void relayItems(List<ProjectAgentWaitClosed> closed) {
+    Map<String, String> causes = new LinkedHashMap<>();
+    for (ProjectAgentWaitClosed c : closed) {
+      causes.put(c.workId(), causeOf(c.state()));
+    }
+    causes.forEach((workId, cause) -> relayItem(UUID.fromString(workId), cause));
+  }
+
+  /** The relay cause a close in {@code state} says (qits-2596): an agent's close says the same. */
+  private static String causeOf(String state) {
+    return switch (state) {
+      case ProjectAgentWaitClosed.MATCHED -> CAUSE_MATCHED;
+      case ProjectAgentWaitClosed.TIMED_OUT -> CAUSE_TIMED_OUT;
+      case ProjectAgentWaitClosed.BROKEN -> CAUSE_BROKEN;
+      default -> CAUSE_CANCELLED;
+    };
   }
 
   /**
@@ -861,6 +1161,7 @@ public class AgentWaits {
     Instant now = Instant.now();
     List<Placed> closedFor = new ArrayList<>();
     List<DeskWaitClosed> deskClosed = new ArrayList<>();
+    List<ProjectAgentWaitClosed> projectAgentClosed = new ArrayList<>();
     List<Pending> announced = new ArrayList<>();
     List<Woken> woken =
         QuarkusTransaction.requiringNew()
@@ -882,6 +1183,14 @@ public class AgentWaits {
                           "The desk of project %s: its wait %s timed out", wait.deskProjectId, wait.label);
                       continue;
                     }
+                    if (wait.isProjectAgentWait()) {
+                      projectAgentClosed.add(
+                          closeProjectAgent(wait, AgentWaitState.TIMED_OUT, null));
+                      LOG.infof(
+                          "Project agent %s: its wait %s on %s timed out",
+                          wait.projectAgentSubject, wait.label, wait.workQualifiedId);
+                      continue;
+                    }
                     close(wait, AgentWaitState.TIMED_OUT, null);
                     announced.add(
                         closedEvent(wait.agentId, wait.id, AgentWaitClosed.TIMED_OUT, null));
@@ -897,7 +1206,9 @@ public class AgentWaits {
     hint(closedFor);
     announceAll(announced);
     deskClosed.forEach(this::announceDesk);
+    projectAgentClosed.forEach(this::announceProjectAgent);
     refreshNames();
+    relayItems(projectAgentClosed);
     for (Woken w : woken) {
       relay(w.workId(), false, CAUSE_TIMED_OUT, waitingOn(w.agentId()), w.sessionId(), now);
     }
@@ -953,10 +1264,17 @@ public class AgentWaits {
    * Package-private so {@code DeskWaitsTest} can hand it the stale snapshot itself.
    */
   void announceDesk(DeskWaitClosed event) {
+    announceClosed(event, UUID.fromString(event.waitId()));
+  }
+
+  /**
+   * {@link #announceDesk}'s work for any close a row records the announcement of: a desk's {@link
+   * DeskWaitClosed} or a project agent's {@link ProjectAgentWaitClosed} (qits-2596).
+   */
+  private void announceClosed(QitsEvent event, UUID waitId) {
     if (lifecycle == null || !lifecycle.isResolvable()) {
       return;
     }
-    UUID waitId = UUID.fromString(event.waitId());
     if (!announcing.add(waitId)) {
       return;
     }
@@ -979,7 +1297,7 @@ public class AgentWaits {
               });
     } catch (RuntimeException e) {
       announcing.remove(waitId);
-      LOG.warnf(e, "DeskWaitClosed %s for wait %s not announced", event.eventId(), waitId);
+      LOG.warnf(e, "%s %s for wait %s not announced", event.name(), event.eventId(), waitId);
     }
   }
 
@@ -993,15 +1311,24 @@ public class AgentWaits {
     if (lifecycle == null || !lifecycle.isResolvable()) {
       return;
     }
-    List<DeskWaitClosed> owed =
+    Map<UUID, QitsEvent> owed =
         QuarkusTransaction.requiringNew()
             .call(
-                () ->
-                    waits.findUnannounced().stream()
-                        .filter(w -> !announcing.contains(w.id))
-                        .map(AgentWaits::closedEvent)
-                        .toList());
-    owed.forEach(this::announceDesk);
+                () -> {
+                  Map<UUID, QitsEvent> out = new LinkedHashMap<>();
+                  for (AgentWait w : waits.findUnannounced()) {
+                    if (announcing.contains(w.id)) {
+                      continue;
+                    }
+                    if (w.isDeskWait()) {
+                      out.put(w.id, closedEvent(w));
+                    } else if (w.isProjectAgentWait()) {
+                      out.put(w.id, projectAgentClosedEvent(w));
+                    }
+                  }
+                  return out;
+                });
+    owed.forEach((waitId, event) -> announceClosed(event, waitId));
   }
 
   // --- waiting on (W5) ----------------------------------------------------------------------------
@@ -1406,7 +1733,9 @@ public class AgentWaits {
         wait.subjectStateAt,
         wait.subjectExpectedBy,
         wait.subjectError,
-        wait.brokenReason);
+        wait.brokenReason,
+        wait.workId == null ? null : wait.workId.toString(),
+        wait.workQualifiedId);
   }
 
   // --- the subject and the announcements (epic qits-1681) ------------------------------------------
@@ -1481,7 +1810,7 @@ public class AgentWaits {
    * What a lookup needs of a wait, read before the call so no transaction spans it: the agent's
    * repository, or the desk's own project (qits-1668), whichever holds the wait.
    */
-  private record Lookup(WaitSubjects.Kind kind, String ref, String repositoryId, UUID deskProjectId) {}
+  private record Lookup(WaitSubjects.Kind kind, String ref, String repositoryId, UUID holderProjectId) {}
 
   /**
    * Look up the subject of the wait {@code waitId} now, and write what was found: after its create
@@ -1552,8 +1881,9 @@ public class AgentWaits {
                     if (!looksUp(kind) || wait.subjectRef == null) {
                       return null;
                     }
-                    if (wait.isDeskWait()) {
-                      return new Lookup(kind, wait.subjectRef, null, wait.deskProjectId);
+                    // A desk's or a project agent's (qits-2596): read under its own project.
+                    if (wait.agentId == null) {
+                      return new Lookup(kind, wait.subjectRef, null, wait.holderProjectId());
                     }
                     AgentWorktree agent = agents.findById(wait.agentId);
                     return new Lookup(kind, wait.subjectRef, agent == null ? null : agent.repositoryId, null);
@@ -1565,8 +1895,8 @@ public class AgentWaits {
       String projectId =
           lookup.kind() != WaitSubjects.Kind.RELEASE_REQUEST && lookup.kind() != WaitSubjects.Kind.BRANCH
               ? null
-              : lookup.deskProjectId() != null
-                  ? lookup.deskProjectId().toString()
+              : lookup.holderProjectId() != null
+                  ? lookup.holderProjectId().toString()
                   : projectOf(lookup.repositoryId());
       Optional<WaitSubjectResolver.Resolved> found;
       String error = null;
@@ -1632,8 +1962,9 @@ public class AgentWaits {
                                         subjectOf(w), targetStatesOf(w.targetStates), resolved.branch())
                                     : resolved;
                             Pending changed = applyResolution(w, lookup.kind(), read, now);
-                            // A desk announces none of its subject's moves (qits-1618).
-                            if (changed != null && !w.isDeskWait()) {
+                            // A desk announces none of its subject's moves (qits-1618), nor
+                            // does a project agent (qits-2596): only an agent's are.
+                            if (changed != null && w.agentId != null) {
                               closing.announced.add(changed);
                             }
                             if (reachedTarget(w, lookup.kind(), read)) {

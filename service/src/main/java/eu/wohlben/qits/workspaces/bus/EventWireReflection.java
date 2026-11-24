@@ -20,6 +20,7 @@ import eu.wohlben.qits.workspaces.events.AgentStarted;
 import eu.wohlben.qits.workspaces.events.AgentStopped;
 import eu.wohlben.qits.workspaces.events.AgentYielded;
 import eu.wohlben.qits.workspaces.events.DeskWaitClosed;
+import eu.wohlben.qits.workspaces.events.ProjectAgentWaitClosed;
 import eu.wohlben.qits.workspaces.events.WorkspaceFailed;
 import eu.wohlben.qits.workspaces.events.WorkspaceRemoved;
 import eu.wohlben.qits.workspaces.events.WorkspaceStarted;
@@ -41,8 +42,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
  * anything else. This suite cannot see it either; {@code EventWireReflectionTest} guards the
  * registration's completeness, and only the running binary proves it.
  *
- * <p><b>Why these types.</b> The fourteen lifecycle records and {@link DeskWaitClosed} (qits-1618)
- * are what {@link EventstreamLifecycleAnnouncer} publishes. {@link TargetLeaseChanged} is qits-system's, which {@code
+ * <p><b>Why these types.</b> The fourteen lifecycle records, {@link DeskWaitClosed} (qits-1618) and
+ * {@link ProjectAgentWaitClosed} (qits-2596) are what {@link EventstreamLifecycleAnnouncer} publishes. {@link TargetLeaseChanged} is qits-system's, which {@code
  * targethost/TargetLeaseEvents} receives bound to that record (epic qits-1481), as is {@link
  * TargetLoginChanged}, which {@code targethost/TargetLoginEvents} receives (qits-2088), and {@link
  * EntityCommented} is qits-projects', which {@link DeskMentionListener} binds the same way (epic
@@ -79,6 +80,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
       AgentWaitClosed.class,
       AgentActivityChanged.class,
       AgentAttentionChanged.class,
+      ProjectAgentWaitClosed.class,
       TargetLeaseChanged.class,
       TargetLoginChanged.class,
       EntityCommented.class,

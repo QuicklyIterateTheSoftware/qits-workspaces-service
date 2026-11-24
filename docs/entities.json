@@ -275,6 +275,12 @@
           "site" : "AgentWaits.view(AgentWait)"
         },
         {
+          "type" : "eu.wohlben.qits.workspaces.dto.ProjectAgentWaitView",
+          "kind" : "via",
+          "via" : "eu.wohlben.qits.workspaces.dto.AgentWaitDto",
+          "site" : "ProjectAgentWaitView.of(AgentWaitDto)"
+        },
+        {
           "type" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "via",
           "via" : "eu.wohlben.qits.workspaces.dto.AgentDto",
@@ -299,6 +305,14 @@
           "cardinality" : "single"
         },
         {
+          "operationId" : "cancelProjectAgentWait",
+          "method" : "DELETE",
+          "path" : "/project-agent/waits/{waitId}",
+          "dto" : "eu.wohlben.qits.workspaces.dto.AgentWaitDto",
+          "kind" : "body",
+          "cardinality" : "single"
+        },
+        {
           "operationId" : "createAgent",
           "method" : "POST",
           "path" : "/agents",
@@ -319,6 +333,14 @@
           "method" : "POST",
           "path" : "/desks/{projectId}/waits",
           "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
+          "kind" : "schema",
+          "cardinality" : "single"
+        },
+        {
+          "operationId" : "createProjectAgentWait",
+          "method" : "POST",
+          "path" : "/project-agent/waits",
+          "dto" : "eu.wohlben.qits.workspaces.dto.ProjectAgentWaitView",
           "kind" : "schema",
           "cardinality" : "single"
         },
@@ -391,6 +413,14 @@
           "method" : "GET",
           "path" : "/desks/{projectId}/waits",
           "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
+          "kind" : "returns",
+          "cardinality" : "collection"
+        },
+        {
+          "operationId" : "listProjectAgentWaits",
+          "method" : "GET",
+          "path" : "/project-agent/waits",
+          "dto" : "eu.wohlben.qits.workspaces.dto.ProjectAgentWaitView",
           "kind" : "returns",
           "cardinality" : "collection"
         },
@@ -551,6 +581,12 @@
           "site" : "ArchivedSessionDto.subagents()"
         },
         {
+          "type" : "eu.wohlben.qits.workspaces.dto.ProjectAgentWaitView",
+          "kind" : "via",
+          "via" : "eu.wohlben.qits.workspaces.dto.AgentWaitDto",
+          "site" : "ProjectAgentWaitView.of(AgentWaitDto)"
+        },
+        {
           "type" : "eu.wohlben.qits.workspaces.dto.WaitView",
           "kind" : "via",
           "via" : "eu.wohlben.qits.workspaces.dto.AgentDto",
@@ -587,6 +623,14 @@
           "cardinality" : "single"
         },
         {
+          "operationId" : "cancelProjectAgentWait",
+          "method" : "DELETE",
+          "path" : "/project-agent/waits/{waitId}",
+          "dto" : "eu.wohlben.qits.workspaces.dto.AgentWaitDto",
+          "kind" : "body",
+          "cardinality" : "single"
+        },
+        {
           "operationId" : "createAgent",
           "method" : "POST",
           "path" : "/agents",
@@ -607,6 +651,14 @@
           "method" : "POST",
           "path" : "/desks/{projectId}/waits",
           "dto" : "eu.wohlben.qits.workspaces.dto.WaitView",
+          "kind" : "schema",
+          "cardinality" : "single"
+        },
+        {
+          "operationId" : "createProjectAgentWait",
+          "method" : "POST",
+          "path" : "/project-agent/waits",
+          "dto" : "eu.wohlben.qits.workspaces.dto.ProjectAgentWaitView",
           "kind" : "schema",
           "cardinality" : "single"
         },
@@ -719,6 +771,14 @@
           "method" : "GET",
           "path" : "/work/workspaces",
           "dto" : "eu.wohlben.qits.workspaces.api.WorkItemWorkspacesController$WorkItemWorkspaceEntry",
+          "kind" : "returns",
+          "cardinality" : "collection"
+        },
+        {
+          "operationId" : "listProjectAgentWaits",
+          "method" : "GET",
+          "path" : "/project-agent/waits",
+          "dto" : "eu.wohlben.qits.workspaces.dto.ProjectAgentWaitView",
           "kind" : "returns",
           "cardinality" : "collection"
         },

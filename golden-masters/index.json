@@ -29,6 +29,127 @@
       ]
     },
     {
+      "name": "a project agent declaring a wait for a work item",
+      "slug": "a-project-agent-declaring-a-wait-for-a-work-item",
+      "params": {
+        "authorization": "Bearer contract-project-agent-token",
+        "projectId": "00000000-0000-4000-8000-000000000001",
+        "releaseRequestId": "00000000-0000-4000-8000-0000000000c1",
+        "work": "qits-123",
+        "workId": "00000000-0000-4000-8000-0000000000d2"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "createProjectAgentWait",
+          "method": "POST",
+          "path": "/workspaces/api/project-agent/waits",
+          "headers": {
+            "Authorization": "{authorization}"
+          },
+          "body": {
+            "label": "release request 00000000 to end",
+            "selection": {
+              "event": "ReleaseRequestStateChanged",
+              "when": [
+                [
+                  {
+                    "path": "releaseRequestId",
+                    "op": "exact",
+                    "value": "{releaseRequestId}"
+                  },
+                  {
+                    "path": "state",
+                    "op": "exact",
+                    "value": "FINALIZED"
+                  }
+                ]
+              ]
+            },
+            "timeout": "PT2H",
+            "work": "qits-123"
+          },
+          "status": 201,
+          "file": "a-project-agent-declaring-a-wait-for-a-work-item/createProjectAgentWait.json",
+          "frozen": {
+            "ids": [
+              "$.id",
+              "$.selection.when[*][*].value",
+              "$.subjectRef",
+              "$.workId"
+            ],
+            "instants": [
+              "$.createdAt",
+              "$.expiresAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "a project agent with an open wait",
+      "slug": "a-project-agent-with-an-open-wait",
+      "params": {
+        "authorization": "Bearer contract-project-agent-token",
+        "projectId": "00000000-0000-4000-8000-000000000001",
+        "releaseRequestId": "00000000-0000-4000-8000-0000000000c1",
+        "waitId": "00000000-0000-4000-8000-0000000000bb",
+        "work": "qits-123",
+        "workId": "00000000-0000-4000-8000-0000000000d2"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "cancelProjectAgentWait",
+          "method": "DELETE",
+          "path": "/workspaces/api/project-agent/waits/{waitId}",
+          "headers": {
+            "Authorization": "{authorization}"
+          },
+          "status": 204,
+          "file": null,
+          "frozen": {
+            "ids": [],
+            "instants": [],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        },
+        {
+          "operationId": "listProjectAgentWaits",
+          "method": "GET",
+          "path": "/workspaces/api/project-agent/waits",
+          "query": {
+            "work": "{work}"
+          },
+          "headers": {
+            "Authorization": "{authorization}"
+          },
+          "status": 200,
+          "file": "a-project-agent-with-an-open-wait/listProjectAgentWaits.json",
+          "frozen": {
+            "ids": [
+              "$.waits[*].id",
+              "$.waits[*].selection.when[*][*].value",
+              "$.waits[*].subjectRef",
+              "$.waits[*].workId"
+            ],
+            "instants": [
+              "$.waits[*].createdAt",
+              "$.waits[*].expiresAt"
+            ],
+            "strings": [],
+            "numbers": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
+    },
+    {
       "name": "a project desk with an open wait",
       "slug": "a-project-desk-with-an-open-wait",
       "params": {

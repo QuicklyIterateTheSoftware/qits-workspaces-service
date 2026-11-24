@@ -54,7 +54,8 @@ public class ProjectsConsumerPactTest {
                             HttpRepositoryLookupTest.lookupAgainst(mockServer.getUrl()),
                             filerAgainst(mockServer.getUrl()),
                             reporterAgainst(mockServer.getUrl()),
-                            subjectsAgainst(mockServer.getUrl())),
+                            subjectsAgainst(mockServer.getUrl()),
+                            workItemsAgainst(mockServer.getUrl())),
                         GoldenMasters.params(row.state()));
                 return null;
               });
@@ -127,6 +128,23 @@ public class ProjectsConsumerPactTest {
             .baseUri(java.net.URI.create(baseUrl))
             .build(ProjectsBranchDeliveries.class);
     return resolver;
+  }
+
+  /** The shipped {@link HttpWorkItemLookup} with the real generated client, and no bearer (qits-2596). */
+  static HttpWorkItemLookup workItemsAgainst(String baseUrl) {
+    HttpWorkItemLookup lookup = new HttpWorkItemLookup();
+    lookup.bearer =
+        new IdpProjectsBearer() {
+          @Override
+          public java.util.Optional<String> authorization() {
+            return java.util.Optional.empty();
+          }
+        };
+    lookup.workItems =
+        io.quarkus.rest.client.reactive.QuarkusRestClientBuilder.newBuilder()
+            .baseUri(java.net.URI.create(baseUrl))
+            .build(ProjectsWorkItems.class);
+    return lookup;
   }
 
   private static String describe(PactVerificationResult result) {

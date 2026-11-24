@@ -556,6 +556,11 @@
     "DeskWaitClosed": {
       "closedAt": "scalar", "eventName": "scalar", "label": "scalar", "matchedEventId": "scalar",
       "projectId": "scalar", "state": "scalar", "turn": "scalar", "waitId": "scalar"
+    },
+    "ProjectAgentWaitClosed": {
+      "agentSubject": "scalar", "eventName": "scalar", "label": "scalar", "matchedEventId": "scalar",
+      "projectId": "scalar", "reason": "scalar", "state": "scalar", "waitId": "scalar",
+      "workId": "scalar", "workQualifiedId": "scalar"
     }
   }
 }

@@ -627,6 +627,34 @@ class GoldenMasterRecordingTest {
               WORKSPACES + "/desks/{projectId}/waits/{waitId}",
               200,
               null),
+          // qits-2596: a project agent's waits, each held for a work item, called with the
+          // project agent's own bearer — it is what names the holder (`qits wait --work`).
+          Interaction.write(
+                  ProviderStates.A_PROJECT_AGENT_DECLARING_A_WAIT,
+                  "createProjectAgentWait",
+                  WORKSPACES + "/project-agent/waits",
+                  201,
+                  "{\"label\":\"release request 00000000 to end\","
+                      + "\"selection\":{\"event\":\"ReleaseRequestStateChanged\",\"when\":["
+                      + "[{\"path\":\"releaseRequestId\",\"op\":\"exact\",\"value\":\"{releaseRequestId}\"},{\"path\":\"state\",\"op\":\"exact\",\"value\":\"FINALIZED\"}]"
+                      + "]},"
+                      + "\"timeout\":\"PT2H\","
+                      + "\"work\":\"qits-123\"}")
+              .sending("Authorization", "authorization"),
+          Interaction.read(
+                  ProviderStates.A_PROJECT_AGENT_WITH_AN_OPEN_WAIT,
+                  "listProjectAgentWaits",
+                  WORKSPACES + "/project-agent/waits?work={work}",
+                  null)
+              .sending("Authorization", "authorization"),
+          Interaction.call(
+                  ProviderStates.A_PROJECT_AGENT_WITH_AN_OPEN_WAIT,
+                  "cancelProjectAgentWait",
+                  "DELETE",
+                  WORKSPACES + "/project-agent/waits/{waitId}",
+                  204,
+                  null)
+              .sending("Authorization", "authorization"),
           // The slot's remaining container buttons: the delete, and the Abandon guarded as usual.
           // The delete is recorded on the stopped slot: on the running one it waits for its lease
           // to end, and the fake qits-system holds an ended lease ENDING, so it would wait out the

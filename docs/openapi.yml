@@ -275,6 +275,33 @@ components:
           $ref: "#/components/schemas/AgentHarness"
         instruction:
           type: string
+    CreateProjectAgentWaitRequest:
+      type: object
+      properties:
+        label:
+          type: string
+          description: "What the agent calls the wait; default: the selection in one\
+            \ line, or `timer until <expiresAt>` for a timer"
+        selection:
+          $ref: "#/components/schemas/EventSelection"
+          type: object
+        timeout:
+          type: string
+          description: "ISO-8601; none = the platform's ceiling of 8 hours; at most\
+            \ 24 hours (PT24H). With no selection (left out, or null) it declares\
+            \ a timer, which closes TIMED_OUT when the timeout passes. A timer needs\
+            \ a timeout."
+          examples:
+          - PT2H
+        work:
+          type: string
+          description: "The work item the wait is held for, by qualified id or uuid:\
+            \ an EPIC or a TICKET of the caller's project. The item reads `waiting\
+            \ on <label>` while the wait is open."
+          examples:
+          - qits-123
+      required:
+      - work
     CreateWaitRequest:
       type: object
       properties:
@@ -512,6 +539,90 @@ components:
           type: string
         result:
           type: string
+    ProjectAgentWaitList:
+      type: object
+      properties:
+        waits:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectAgentWaitView"
+    ProjectAgentWaitView:
+      type: object
+      properties:
+        id:
+          type: string
+        agentId:
+          type: string
+        label:
+          type: string
+        selection:
+          $ref: "#/components/schemas/EventSelection"
+          type: object
+        state:
+          $ref: "#/components/schemas/AgentWaitState"
+        createdAt:
+          $ref: "#/components/schemas/Instant"
+        expiresAt:
+          $ref: "#/components/schemas/Instant"
+          description: "When it times out: the timeout it asked for, else the platform's\
+            \ ceiling of 8 h"
+          type: string
+        matchedEventId:
+          type: string
+        closedAt:
+          $ref: "#/components/schemas/Instant"
+        subjectKind:
+          type: string
+          description: "What the selection waits on; TIMER for a timer, whose selection\
+            \ is null"
+          enum:
+          - RELEASE_REQUEST
+          - CI_RUN
+          - WORK_ITEM
+          - COMMENTS
+          - BRANCH
+          - OTHER
+          - TIMER
+        subjectRef:
+          type: string
+          description: The subject's id as the selection names it; null for OTHER
+            and TIMER
+        subjectId:
+          type: string
+          description: "The subject's uuid, once resolved"
+        subjectQualifiedId:
+          type: string
+          description: "The subject's qualified id, once resolved; null for a run"
+        targetStates:
+          type: array
+          items:
+            type: string
+          description: The states the selection waits for; empty when it names none
+        subjectState:
+          type: string
+          description: The subject's last known state
+        subjectStateAt:
+          $ref: "#/components/schemas/Instant"
+          description: When that state was seen to begin
+          type: string
+        subjectExpectedBy:
+          $ref: "#/components/schemas/Instant"
+          description: "Runs only: when the run should have finished"
+          type: string
+        subjectError:
+          type: string
+          description: The last failure to look the subject up
+        brokenReason:
+          type: string
+          description: Why the wait is BROKEN; null in every other state
+        work:
+          type: string
+          description: "The work item the wait is held for, by its qualified id"
+          examples:
+          - qits-123
+        workId:
+          type: string
+          description: That work item's uuid
     PromptAgentRequest:
       type: object
       required:
@@ -2910,6 +3021,139 @@ paths:
         - qits:admin-agent
         - qits:desk-admin
         - qits:system
+        - qits:agent
+  /workspaces/api/project-agent/waits:
+    get:
+      summary: "The project agent's waits, on one work item or all, open or all"
+      operationId: listProjectAgentWaits
+      parameters:
+      - name: state
+        in: query
+        schema:
+          type: string
+      - name: work
+        in: query
+        schema:
+          type: string
+      responses:
+        "200":
+          description: "The caller's waits, newest first."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAgentWaitList"
+        "400":
+          description: A `state` that is neither open nor all.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: "Not a project agent: `qits:agent` with `context_kind` project-agent\
+            \ and a `project` claim."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: qits-projects knows no such work item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Project Agent Wait Controller
+      security:
+      - SecurityScheme:
+        - qits:agent
+    post:
+      summary: "Declare what the project agent waits on, for one work item"
+      description: A selection waits for an event; no selection and a timeout is a
+        timer. The close is announced as ProjectAgentWaitClosed.
+      operationId: createProjectAgentWait
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectAgentWaitRequest"
+        required: true
+      responses:
+        "201":
+          description: "The wait, OPEN (or already closed by its lookup); a timer\
+            \ when the body named no selection."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAgentWaitView"
+        "400":
+          description: "No `work`; a work item of another project, or one that is\
+            \ not an EPIC or a TICKET; neither a selection nor a timeout; an invalid\
+            \ selection; or a bad timeout."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: "Not a project agent: `qits:agent` with `context_kind` project-agent\
+            \ and a `project` claim."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: qits-projects knows no such work item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: TOO_MANY_WAITS (8 are OPEN for this agent on this work item).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Project Agent Wait Controller
+      security:
+      - SecurityScheme:
+        - qits:agent
+  /workspaces/api/project-agent/waits/{waitId}:
+    delete:
+      summary: Cancel one of the project agent's waits
+      operationId: cancelProjectAgentWait
+      parameters:
+      - name: waitId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: The wait is CANCELLED (or was closed already); ProjectAgentWaitClosed
+            CANCELLED is announced.
+        "403":
+          description: "Not a project agent: `qits:agent` with `context_kind` project-agent\
+            \ and a `project` claim."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No such wait of this project agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not Authorized
+      tags:
+      - Project Agent Wait Controller
+      security:
+      - SecurityScheme:
         - qits:agent
   /workspaces/api/work/workspaces:
     get:

@@ -261,6 +261,13 @@ daemon reports it. Columns on a `CausedRow`, so no `ArchRulesTest` decision.
 **`V40__wait_timer.sql`** (qits-2309) drops `not null` from `agent_wait.selection` and
 `event_name`: a timer has neither. No backfill. Columns on a `CausedRow`, so no `ArchRulesTest`
 decision; see "Declared waits".
+**`V41__project_agent_waits.sql`** (qits-2596) gives `agent_wait` a third holder, a project agent:
+`project_agent_subject` (its token's principal), `project_agent_project_id` (its `project` claim),
+`work_id` and `work_qualified_id` (the item the wait is held for). `ck_agent_wait_holder` is
+rewritten to "exactly one of `agent_id`, `desk_project_id`, `project_agent_subject`";
+`ck_agent_wait_project_agent` holds that such a wait names its project and its item; the partial
+index `agent_wait_project_agent_open` serves the per-item cap and relay. Columns on a `CausedRow`,
+so no `ArchRulesTest` decision; see "Declared waits".
 **`V30__workspace_leases.sql`** (epic qits-1481, qits-1532) retires the workspace runners: it first
 copies every row with a `runner_id` into `legacy_placement(row_id, old_runner_id, engine_id,
 hostname, runner_name)` — `engine_id` and `hostname` from the runner's `capabilities ->> 'engineId'`
@@ -295,7 +302,8 @@ bytes — as `Workspace.preamble`, `WorkspacePromptDraft.content` and `Workspace
 **Native SQL is postgres SQL.** `WorkspacePromptDraftRepository.upsert` is `insert … on conflict (…)
 do update` — H2's `merge into … key (…)` until the move — and `AgentWaitRepository.lockDesk` takes a
 `pg_advisory_xact_lock` keyed on the project, because a desk has no row of its own to lock while its
-cap is counted (qits-1618). Those two are the only native statements here.
+cap is counted (qits-1618); `lockProjectAgent` takes one keyed on the project agent's subject and
+work item, for the same reason (qits-2596). Those three are the only native statements here.
 
 Remember that workspace rows are **soft-deleted**. A child table in another context gets no cascade;
 publish through `WorkspaceResolved` instead, and fire it synchronously inside the resolving
@@ -1561,6 +1569,37 @@ on a wait declared since; `expiry_is_ceiling` says the expiry is the ceiling:
   when the inline PUT and the outbox write both fail, and the row is then marked all the same. A
   desk wait is never cancelled by the sweep — only a match, its timeout or the door's cancel closes
   it — and a cancel announces nothing.
+- **A project agent's waits** (qits-2596, epic qits-2520, `V41`, `ProjectAgentWaitController` at
+  `/workspaces/api/project-agent/waits`). The long-running agent qits-agents-service runs for a
+  project has no agent row; it is a caller with `qits:agent`, claim `context_kind` =
+  `project-agent` and a uuid `project` claim (`api/ProjectAgentCaller`, the one test; anyone else
+  is 403 `only a project's long-running agent holds these waits`). The holder is that bearer —
+  principal name plus project — so no path names an agent. Every wait names its work item:
+  `work` (qualified id or uuid, required; missing is 400 `a project agent's wait names its work
+  item: work`), read through qits-projects' `getWork` (`control/WorkItemLookup`,
+  `wiring/HttpWorkItemLookup`, the client the work-item lookup uses) and held only for an EPIC or
+  TICKET of the caller's project (unknown 404, else 400). The agent door's body and rules otherwise;
+  8 OPEN per (holder, item), counted under an advisory lock. `GET ?work=&state=open|all` (default
+  open), newest first; `DELETE /{id}` 204, 404 for another holder's wait. The answer is
+  `dto/ProjectAgentWaitView`: `WaitView`'s fields plus `work` (qualified id) and `workId` — a record
+  of its own, so the other doors' answers stay as pinned. The matcher, the sweep, the lookups and
+  the breaks are the others' (`AgentWaits`, nothing forked); a subject's release request or branch
+  is read under the holder's project. **A close is a fact, not a turn**: where an agent's wakes
+  its agent and a desk's stores a turn, a project agent's records a fresh `closed_event_id` on the
+  row in the closing transaction (no `closed_turn`) and, after the commit, announces
+  `ProjectAgentWaitClosed` — MATCHED, TIMED_OUT, BROKEN and CANCELLED alike — exactly through the
+  desk's machinery: marked `announced_at` once the bus took it, re-published by every sweep under
+  the same id until then. That, and not the eventstream outbox, is the "in the closing
+  transaction" record: the outbox is the eventstream jar's, on its own datasource, and cannot join
+  this one's transaction. qits-agents-service renders the turn (qits-2597). **Per-item relay**:
+  after every declaration and close, the item (`AgentWaitingReporter`, `workId` the item's uuid,
+  no session) is told `waiting: true`, cause `Wait`, `waitingOn` = every project agent's OPEN
+  labels on it, oldest first, joined by `; ` — qits-projects reads that as "waiting on <labels>",
+  and a frame with `waitingOn` derives no `AGENT_WAITING` block; once none is left, `waiting:
+  false`, the close's cause (`WaitMatched`, `WaitTimedOut`, `WaitBroken`, `WaitCancelled`) and no
+  label. Not `Wait` then: qits-projects stores a `Wait` frame with no label as "waiting on a
+  declared wait" (`AgentWaitingService.declaredWait`), which would outlive every wait. The item
+  shares its one waiting column with a workspace agent's relay, so whichever reports last wins.
 
 **Attention** (epic qits-1681; `control/AgentAttention`, pure, and `control/AgentAttentions`, the
 bean). What an ACTIVE agent needs a person for, in one code and one line, stored on the row
@@ -1645,6 +1684,7 @@ payload's top-level fields:
 | `WorkspaceStopped` | `workspaceId`, `repositoryId`, `stoppedBy` (the stopping caller's principal, absent for a lease that ended on its own), `reason` (the `?reason=` sent qits-system, or the lease's detail), `affectedAgentIds` (the live agents the slot hosted) — qits-2265 | |
 | `WorkspaceRemoved` | `workspaceId`, `repositoryId`, `reason` | `NO_AGENT_LEFT` |
 | `DeskWaitClosed` | `waitId`, `projectId`, `label`, `state`, `eventName`, `matchedEventId` (absent on a timeout or a break), `turn`, `closedAt` — not a lifecycle fact but a project desk's wake (qits-1618, "Declared waits") | `state`: `MATCHED`, `TIMED_OUT`, `BROKEN` (qits-1961) |
+| `ProjectAgentWaitClosed` | `waitId`, `projectId`, `agentSubject`, `workId`, `workQualifiedId`, `label`, `state`, `eventName` (absent for a timer), `matchedEventId` (an event's match only), `reason` (BROKEN only) — a project agent's wait closed (qits-2596); its id is fixed at the close and kept across re-publishes; qits-agents-service renders the turn | `state`: `MATCHED`, `TIMED_OUT`, `BROKEN`, `CANCELLED` |
 | `AgentWaitOpened` | the four, `projectId`, `waitId`, `label`, `eventName` (absent for a timer), `subjectKind`, `subjectRef` (absent for OTHER and TIMER), `targetStates` — an agent's wait declared (epic qits-1681) | `subjectKind`: `RELEASE_REQUEST`, `CI_RUN`, `WORK_ITEM`, `COMMENTS`, `BRANCH`, `OTHER`, `TIMER` (qits-2309) |
 | `AgentWaitChanged` | the four, `projectId`, `waitId`, `subjectKind`, `subjectRef`, `subjectQualifiedId`, `subjectState`, `subjectStateAt` — an event of the wait's name moved its subject's recorded state (epic qits-1681) | |
 | `AgentWaitClosed` | the four, `projectId`, `waitId`, `state`, `matchedEventId` (a match only), `label` and `reason` (BROKEN only, qits-1961) — an agent's wait matched, broke, timed out, was cancelled, or went with its agent (epic qits-1681) | `state`: `MATCHED`, `TIMED_OUT`, `BROKEN`, `CANCELLED` |
@@ -2068,7 +2108,9 @@ backend of one component stay apart. Pact V4. Three test classes in `service/…
   true)`, so in no document) — the last also files the ticket, `createWork` in state `a project with
   no work`, with this service's own request body. `createAgentWait` (epic qits-1681) also looks the
   wait's subject up: `getProjectReleaseRequest` in `a project with release requests in every state`
-  and `getWork` in `a bug ticket in detail`, through `HttpWaitSubjectResolver`. The class javadoc traces each one from the call
+  and `getWork` in `a bug ticket in detail`, through `HttpWaitSubjectResolver`. `createProjectAgentWait`
+  (qits-2596) reads the item with `getWork` (id, qualified id, archetype, project) and relays it with
+  `reportWorkAgentWaiting` (no `sessionId`). The class javadoc traces each one from the call
   site up; renaming an `operationId` renames a trigger in the pact.
 - `ProjectsConsumerPactTest` — a real `HttpRepositoryLookup` with the real generated REST clients
   against a pact-jvm mock server, one mock server per row. **A `@QuarkusTest`, by necessity**: the

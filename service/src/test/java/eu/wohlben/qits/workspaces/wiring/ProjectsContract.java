@@ -15,6 +15,7 @@ import eu.wohlben.qits.workspaces.control.RepositoryLookup;
 import eu.wohlben.qits.workspaces.control.WaitSubjectResolver;
 import eu.wohlben.qits.workspaces.control.WaitSubjects;
 import eu.wohlben.qits.workspaces.control.WorkFiler;
+import eu.wohlben.qits.workspaces.control.WorkItemLookup;
 import eu.wohlben.qits.workspaces.error.NotFoundException;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenMasters;
 import eu.wohlben.qits.workspaces.testing.contracts.GoldenMasters.Trigger;
@@ -59,6 +60,11 @@ import java.util.Map;
  *       consumer adds to the recorded {@code branch}, bound to the state's own project id — and the
  *       request's {@code detail} is read, which a broken wait's turn quotes. The same lookups run
  *       again on the scheduler's re-check; the trigger names the declaration, where they start.
+ *   <li>{@code createProjectAgentWait} (qits-2596) — a project agent declares a wait held for a
+ *       work item: {@code getWork} reads the item's id, qualified id, archetype and project
+ *       ({@link HttpWorkItemLookup}) before anything is written, and once the wait is committed the
+ *       item is relayed with {@code reportWorkAgentWaiting}: {@code waiting: true}, cause {@code
+ *       Wait}, the labels in {@code waitingOn} and no session.
  * </ul>
  */
 final class ProjectsContract {
@@ -112,7 +118,8 @@ final class ProjectsContract {
       RepositoryLookup lookup,
       WorkFiler filer,
       AgentWaitingReporter reporter,
-      WaitSubjectResolver subjects) {}
+      WaitSubjectResolver subjects,
+      WorkItemLookup workItems) {}
 
   /** What the consumer does with the clients for one row, asserting what that code path reads. */
   @FunctionalInterface
@@ -287,6 +294,25 @@ final class ProjectsContract {
         assertEquals(Instant.parse(item.path("updatedAt").asText()), resolved.stateAt());
       };
 
+  /** The relay of a project agent's wait (qits-2596): waiting on it, no session. */
+  private static final Call REPORT_PROJECT_AGENT =
+      (clients, params) ->
+          clients
+              .reporter()
+              .report(params.get("ticketId"), true, "Wait", "release request 42 to end", null, 1234L);
+
+  /** A project agent's work item (qits-2596): its id, qualified id, archetype and project. */
+  private static final Call LOOK_UP_ITEM =
+      (clients, params) -> {
+        WorkItemLookup.WorkItem found =
+            clients.workItems().find(params.get("qualifiedId")).orElseThrow();
+        JsonNode item = GoldenMasters.json(BUG_TICKET, GET_WORK);
+        assertEquals(item.path("id").asText(), found.id());
+        assertEquals(item.path("qualifiedId").asText(), found.qualifiedId());
+        assertEquals(item.path("archetype").asText(), found.archetype());
+        assertEquals(item.path("projectId").asText(), found.projectId());
+      };
+
   static final List<Case> CASES =
       List.of(
           new Case(
@@ -394,7 +420,27 @@ final class ProjectsContract {
                   "$.deliveries[*].runId",
                   "$.deliveries[*].changedAt"),
               RESOLVE_BRANCH,
-              Map.of("project", "{projectId}")));
+              Map.of("project", "{projectId}")),
+          // qits-2596: a project agent's wait names its work item, read before it is declared, and
+          // the item is relayed as waiting on it once it is.
+          new Case(
+              Trigger.operation("createProjectAgentWait"),
+              BUG_TICKET,
+              GET_WORK,
+              List.of("$.id", "$.qualifiedId", "$.archetype", "$.projectId"),
+              LOOK_UP_ITEM),
+          new Case(
+              Trigger.operation("createProjectAgentWait"),
+              DISPATCHED_TICKET,
+              REPORT_AGENT_WAITING,
+              new PactDslJsonBody()
+                  .booleanType("waiting", true)
+                  .stringType("cause", "Wait")
+                  .nullValue("sessionId")
+                  .integerType("at", 1234L)
+                  .stringType("waitingOn", "release request 42 to end"),
+              READS_NOTHING,
+              REPORT_PROJECT_AGENT));
 
   private ProjectsContract() {}
 

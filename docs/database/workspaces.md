@@ -48,6 +48,8 @@ erDiagram
     boolean expiry_is_ceiling "not null"
     text label "not null"
     text matched_event_id
+    uuid project_agent_project_id
+    string project_agent_subject "length 128"
     text selection
     enum state "not null"
     text subject_error
@@ -61,6 +63,8 @@ erDiagram
     instant subject_state_at
     text target_states
     text waiter_subject
+    uuid work_id
+    string work_qualified_id "length 64"
   }
   %% agent_worktree: eu.wohlben.qits.workspaces.entity.AgentWorktree (domain)
   agent_worktree {

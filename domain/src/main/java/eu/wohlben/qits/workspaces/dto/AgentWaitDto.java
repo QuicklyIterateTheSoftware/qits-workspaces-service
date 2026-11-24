@@ -26,6 +26,9 @@ import java.util.List;
  * @param subjectExpectedBy runs only: when the run should have finished
  * @param subjectError the last failure to look the subject up
  * @param brokenReason why it is BROKEN (qits-1961); null in every other state
+ * @param workId the work item a project agent's wait is held for, its uuid (qits-2596); null for
+ *     an agent's or a desk's wait
+ * @param workQualifiedId that item's qualified id (qits-2596); null likewise
  */
 public record AgentWaitDto(
     String id,
@@ -46,4 +49,6 @@ public record AgentWaitDto(
     Instant subjectStateAt,
     Instant subjectExpectedBy,
     String subjectError,
-    String brokenReason) {}
+    String brokenReason,
+    String workId,
+    String workQualifiedId) {}

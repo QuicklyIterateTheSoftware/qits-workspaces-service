@@ -46,8 +46,12 @@ public class ContractBearers implements SecurityIdentityAugmentor {
 
   static final String PLATFORM_AUDIENCE = "qits-platform";
 
-  /** What a granted bearer stands for. */
-  record Grant(String subject, Set<String> roles) {}
+  /** What a granted bearer stands for; {@code claims} beside {@code sub} and {@code aud} (qits-2596). */
+  record Grant(String subject, Set<String> roles, Map<String, String> claims) {
+    Grant(String subject, Set<String> roles) {
+      this(subject, roles, Map.of());
+    }
+  }
 
   private final Map<String, Grant> grants = new ConcurrentHashMap<>();
 
@@ -114,7 +118,7 @@ public class ContractBearers implements SecurityIdentityAugmentor {
       return Optional.empty();
     }
     QuarkusSecurityIdentity.Builder machine =
-        QuarkusSecurityIdentity.builder().setPrincipal(new Token(grant.subject()));
+        QuarkusSecurityIdentity.builder().setPrincipal(new Token(grant.subject(), grant.claims()));
     grant.roles().forEach(machine::addRole);
     return Optional.of(machine.build());
   }
@@ -122,6 +126,14 @@ public class ContractBearers implements SecurityIdentityAugmentor {
   /** A request with {@code Authorization: <authorization>} is {@code subject} holding {@code roles}. */
   public void grant(String authorization, String subject, String... roles) {
     grants.put(authorization, new Grant(subject, Set.of(roles)));
+  }
+
+  /**
+   * {@link #grant}, the token also carrying {@code claims} — a project agent's {@code context_kind}
+   * and {@code project} (qits-2596), which its door reads off the token.
+   */
+  public void grant(String authorization, String subject, Map<String, String> claims, String... roles) {
+    grants.put(authorization, new Grant(subject, Set.of(roles), Map.copyOf(claims)));
   }
 
   public void reset() {
@@ -153,13 +165,13 @@ public class ContractBearers implements SecurityIdentityAugmentor {
       return Uni.createFrom().item(identity);
     }
     QuarkusSecurityIdentity.Builder machine =
-        QuarkusSecurityIdentity.builder().setPrincipal(new Token(grant.subject()));
+        QuarkusSecurityIdentity.builder().setPrincipal(new Token(grant.subject(), grant.claims()));
     grant.roles().forEach(machine::addRole);
     return Uni.createFrom().item(machine.build());
   }
 
-  /** The JWT the edge would forward: a subject and the platform audience, nothing else. */
-  private record Token(String subject) implements JsonWebToken {
+  /** The JWT the edge would forward: a subject, the platform audience and the granted claims. */
+  private record Token(String subject, Map<String, String> claims) implements JsonWebToken {
 
     @Override
     public String getName() {
@@ -178,7 +190,10 @@ public class ContractBearers implements SecurityIdentityAugmentor {
 
     @Override
     public Set<String> getClaimNames() {
-      return Set.of("sub", "aud");
+      java.util.Set<String> names = new java.util.HashSet<>(claims.keySet());
+      names.add("sub");
+      names.add("aud");
+      return names;
     }
 
     @Override
@@ -187,7 +202,7 @@ public class ContractBearers implements SecurityIdentityAugmentor {
       return switch (claimName) {
         case "sub" -> (T) subject;
         case "aud" -> (T) Set.of(PLATFORM_AUDIENCE);
-        default -> null;
+        default -> (T) claims.get(claimName);
       };
     }
   }
