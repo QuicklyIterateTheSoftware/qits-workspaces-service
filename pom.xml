@@ -115,13 +115,13 @@
              (wiring/IdpContract); qits-containers' for the place and volume doors
              (containershost/ContainersContract); qits-workspace-daemon's for the agent-worktree
              doors DaemonAgentClient calls (daemonhost/WorkspaceDaemonContract). -->
-        <qits.idp-golden-masters.version>2026.1122.143700</qits.idp-golden-masters.version>
+        <qits.idp-golden-masters.version>2026.1123.194348</qits.idp-golden-masters.version>
         <qits.containers-golden-masters.version>2026.1114.40637</qits.containers-golden-masters.version>
         <qits.workspace-daemon-golden-masters.version>2026.1111.190934</qits.workspace-daemon-golden-masters.version>
         <!-- qits-system's golden masters (epic qits-1481): the lease, work-volume and target doors
              targethost/TargetLeasePlacement calls (targethost/SystemContract). The same rule: a
              qits-maintenance bump moves it. -->
-        <qits.system-golden-masters.version>2026.1123.24759</qits.system-golden-masters.version>
+        <qits.system-golden-masters.version>2026.1123.194748</qits.system-golden-masters.version>
         <!-- pact-jvm, test scope only: ProjectsConsumerPactTest writes this repository's consumer
              pact against qits-projects (pacts/qits-workspaces-service_qits-projects-service.json),
              and ConsumerPactVerificationTest verifies consumers' pacts against this service.
