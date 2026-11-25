@@ -109,7 +109,7 @@
              JSON. A newer recording reaches this repository the way every pin does — as a
              qits-maintenance bump on this property, gated here, where a changed answer that breaks a
              fake or the pact goes red before it ships. Do not hand-edit it to chase a release. -->
-        <qits.projects-golden-masters.version>2026.1122.200309</qits.projects-golden-masters.version>
+        <qits.projects-golden-masters.version>2026.1124.202345</qits.projects-golden-masters.version>
         <!-- The other providers' golden masters (qits-1149), the same rule: qits-idp's for the
              commission doors, the peer token mint and the tenant's discovery and keys
              (wiring/IdpContract); qits-containers' for the place and volume doors
@@ -144,7 +144,7 @@
              (qits-bootstrap-cli-rr-60). -->
         <qits.artifacts-service-pacts-qits-workspaces-service.version>2026.1024.160449</qits.artifacts-service-pacts-qits-workspaces-service.version>
         <qits.orchestrator-service-pacts-qits-workspaces-service.version>2026.1023.105608</qits.orchestrator-service-pacts-qits-workspaces-service.version>
-        <qits.platform-access-monorepo-pacts-qits-workspaces-service.version>2026.1123.125211</qits.platform-access-monorepo-pacts-qits-workspaces-service.version>
+        <qits.platform-access-monorepo-pacts-qits-workspaces-service.version>2026.1125.11635</qits.platform-access-monorepo-pacts-qits-workspaces-service.version>
         <qits.maven.repository.url>https://registry.qits.wohlben.eu/artifacts/maven/maven</qits.maven.repository.url>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
