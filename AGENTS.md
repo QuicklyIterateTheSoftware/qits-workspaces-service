@@ -1538,9 +1538,9 @@ on a wait declared since; `expiry_is_ceiling` says the expiry is the ceiling:
   nobody transcribed, was a wait that never matched. So the catalog lists every event the estate
   publishes, and a new event needs its entry before a wait can name it. This repository's events
   are pinned against their records by `EventPayloadCatalogDriftTest`; every other entry (qits-ci,
-  qits-projects, qits-githost, qits-deployments, qits-system; the resource's `_comment` names
-  them) is transcribed by hand and pinned by nothing, so a field renamed there is refused here
-  until it is transcribed. An event with several publishers (`TargetLeaseChanged`,
+  qits-projects, qits-githost, qits-deployments, qits-system, qits-agents-service; the resource's
+  `_comment` names them) is transcribed by hand and pinned by nothing, so a field renamed there is
+  refused here until it is transcribed. An event with several publishers (`TargetLeaseChanged`,
   `ReleaseRequestStateChanged`, `ApprovalRequirementChanged`, `RepositoryRenamed`) lists the union
   of their fields. The resource
   is listed in `quarkus.native.resources.includes` (`NativeImageContractTest`).

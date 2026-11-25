@@ -228,4 +228,30 @@ class EventPayloadCatalogTest {
         refused("NamedAgentStateChanged", Condition.exact("name", "ui-builder"))
             .contains("did you mean 'state'?"));
   }
+
+  /**
+   * qits-2603: ProjectAgentChanged and EntityAssigned were uncatalogued, so a wait on a project
+   * agent's state or an assignment was a 400.
+   */
+  @Test
+  void projectAgentChangedIsChecked() {
+    admitted(
+        "ProjectAgentChanged",
+        Condition.exact("agentName", "developer"),
+        Condition.exact("reportedState", "IDLE"));
+    admitted("ProjectAgentChanged", Condition.exact("generation", "2"));
+    admitted("ProjectAgentChanged", Condition.exact("projectSlug", "qits"));
+    assertTrue(
+        refused("ProjectAgentChanged", Condition.exact("name", "developer"))
+            .contains("did you mean 'agentName'?"));
+  }
+
+  @Test
+  void entityAssignedIsChecked() {
+    admitted("EntityAssigned", Condition.exact("assignee", "a"));
+    admitted("EntityAssigned", Condition.exists("previousAssignee"));
+    assertTrue(
+        refused("EntityAssigned", Condition.exact("assigned", "x"))
+            .contains("did you mean 'assignee'?"));
+  }
 }

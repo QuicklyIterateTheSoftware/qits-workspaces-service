@@ -22,6 +22,8 @@
     "On 2026-11-11 (qits-1979): qits-network-access's events (PeerRegistered, PeerRevoked) and qits-edge's",
     "PrivateEdgeAnnounced.",
     "On 2026-11-16 (qits-2235): qits-projects' NamedAgentStateChanged (bus package).",
+    "On 2026-11-25 (qits-2603): qits-agents-service's ProjectAgentChanged (service events package) and",
+    "qits-projects' EntityAssigned (bus package).",
     "An event named nowhere here is refused (qits-1964): a new event needs its entry before a wait can name it."
   ],
   "events": {
@@ -469,6 +471,31 @@
       "publicKey": "scalar",
       "tunnelAddress": "scalar",
       "tunnelCidr": "scalar"
+    },
+    "EntityAssigned": {
+      "archetype": "scalar",
+      "assignedAt": "scalar",
+      "assignee": "scalar",
+      "changedBy": "scalar",
+      "changedByName": "scalar",
+      "claimed": "scalar",
+      "entityId": "scalar",
+      "number": "scalar",
+      "previousAssignee": "scalar",
+      "projectId": "scalar",
+      "qualifiedId": "scalar",
+      "status": "scalar",
+      "title": "scalar"
+    },
+    "ProjectAgentChanged": {
+      "agentName": "scalar",
+      "changedAt": "scalar",
+      "declarationHash": "scalar",
+      "desiredState": "scalar",
+      "generation": "scalar",
+      "projectId": "scalar",
+      "projectSlug": "scalar",
+      "reportedState": "scalar"
     },
     "AgentPlaced": {
       "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar"
