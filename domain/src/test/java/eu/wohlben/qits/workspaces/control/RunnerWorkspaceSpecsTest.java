@@ -9,6 +9,7 @@ import eu.wohlben.qits.workspaces.entity.Workspace;
 import eu.wohlben.qits.workspaces.entity.WorkspacePlacement;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -249,5 +250,50 @@ class RunnerWorkspaceSpecsTest {
     assertThrows(
         IllegalStateException.class,
         () -> specs(WorkspaceContainerFactoryGoldenSpecTest.factory()).compose(row(), null));
+  }
+
+  // --- the platform CA's anchors (qits-2634) ------------------------------------------------------
+
+  private static final String PEM = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n";
+
+  /** A lease asked for while a bundle is held carries it, after QITS_DOMAIN. */
+  @Test
+  void aLeaseCarriesTheBundleHeldWhenItIsAskedFor() {
+    RunnerWorkspaceSpecs specs = specs(WorkspaceContainerFactoryGoldenSpecTest.factory());
+    specs.trustAnchors = StubInstance.<TrustAnchorSource>of(() -> Optional.of(PEM));
+
+    Map<String, String> env = specs.compose(row(), PLANE).env();
+
+    assertEquals(PEM, env.get(TrustAnchorSource.ENV));
+    List<String> keys = List.copyOf(env.keySet());
+    assertEquals(
+        keys.indexOf("QITS_DOMAIN") + 1, keys.indexOf(TrustAnchorSource.ENV), "after QITS_DOMAIN");
+  }
+
+  /**
+   * No bundle held — no source wired, one that answers empty or blank, one that throws — leaves the
+   * variable out, and the rest of the spec exactly as it was before anchors existed.
+   */
+  @Test
+  void noBundleLeavesTheVariableOutAndTheSpecAsItWas() {
+    RunnerLaunchSpec before =
+        specs(WorkspaceContainerFactoryGoldenSpecTest.factory()).compose(row(), PLANE);
+    for (jakarta.enterprise.inject.Instance<TrustAnchorSource> source :
+        List.of(
+            StubInstance.<TrustAnchorSource>empty(),
+            StubInstance.<TrustAnchorSource>of(Optional::empty),
+            StubInstance.<TrustAnchorSource>of(() -> Optional.of("  ")),
+            StubInstance.<TrustAnchorSource>of(
+                () -> {
+                  throw new IllegalStateException("unreadable");
+                }))) {
+      RunnerWorkspaceSpecs specs = specs(WorkspaceContainerFactoryGoldenSpecTest.factory());
+      specs.trustAnchors = source;
+
+      RunnerLaunchSpec spec = specs.compose(row(), PLANE);
+
+      assertFalse(spec.env().containsKey(TrustAnchorSource.ENV), spec.env().toString());
+      assertEquals(before, spec);
+    }
   }
 }

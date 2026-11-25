@@ -158,6 +158,17 @@ public class Workspace extends PanacheEntityBase implements CausedRow {
   public String commissionedToken;
 
   /**
+   * The platform CA's anchor bundle (PEM) this DIRECT row's <em>current container</em> was created
+   * with as {@code QITS_TRUST_ANCHORS} (qits-2634, {@code V42}), or null when it was created with
+   * none. Written immediately before a container is created and read back at every later ensure of
+   * it ({@code WorkspaceTrustAnchors}), so a new bundle alone never changes that container's spec —
+   * which would replace it — and reaches the workspace at its next creation instead. Public
+   * certificates, not a secret.
+   */
+  @Column(name = "container_trust_anchors", columnDefinition = "text")
+  public String containerTrustAnchors;
+
+  /**
    * Whether this row's container holds a workspace token (qits-1084), on either placement. A row
    * that holds a token reaches the platform through the edge with it, and is bound by its subject;
    * a row that does not is bound by nothing. Placement does not decide it.

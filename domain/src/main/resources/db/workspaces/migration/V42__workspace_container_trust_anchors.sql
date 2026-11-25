@@ -1,0 +1,12 @@
+-- THE ANCHOR BUNDLE A DIRECT WORKSPACE'S CONTAINER WAS CREATED WITH (qits-2634, epic qits-2524).
+--
+-- A workspace container is created with the platform CA's anchor bundle as env QITS_TRUST_ANCHORS
+-- (PEM, about 0.8 KB per certificate). A stopped DIRECT container is started by presenting its spec
+-- again with Recreate.ifChanged, so a spec built from the bundle as it is today would replace the
+-- container whenever the CA rotated. The value it was created with is therefore kept on the row and
+-- presented at every ensure; a new bundle applies at the next creation. Null: the container was
+-- created with none (no bundle was held yet, or the row predates this column — such a container is
+-- started exactly as it was created).
+--
+-- A column on workspace, an entity that is already a CausedRow: no ArchRulesTest decision.
+alter table workspace add column container_trust_anchors text;

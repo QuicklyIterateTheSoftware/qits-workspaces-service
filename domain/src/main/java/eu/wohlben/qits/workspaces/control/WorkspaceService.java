@@ -120,6 +120,12 @@ public class WorkspaceService {
   @Inject RunnerWorkspaceSpecs leaseSpecs;
 
   /**
+   * The anchor bundle a DIRECT container is created with (qits-2634): captured on the row right
+   * before each creation, read back by the factory at every later ensure of that container.
+   */
+  @Inject ContainerTrustAnchors containerTrustAnchors;
+
+  /**
    * The edge address plane a TARGET row is composed from (qits-625): built by the TARGET start
    * before it asks for a lease, so a deployment with no public domain fails the row instead.
    */
@@ -584,6 +590,9 @@ public class WorkspaceService {
     }
     Consumer<String> runLines =
         process == null ? null : line -> process.appendLine("container", line);
+    // A fresh container gets today's anchor bundle, recorded on the row so every later start of it
+    // presents the same spec (qits-2634): a CA rotation alone never replaces it.
+    containerTrustAnchors.captureForNewContainer(rowId);
     String container =
         containers.run(repoId, workspaceId, rowId, branch, parentBranch, entityId, runLines);
     if (process != null) {
@@ -1976,6 +1985,8 @@ public class WorkspaceService {
         return false;
       }
       try {
+        // A new container, so today's anchor bundle (qits-2634), as on every creation.
+        containerTrustAnchors.captureForNewContainer(rowId);
         containers.run(
             row.repoId(),
             row.workspaceId(),

@@ -136,6 +136,7 @@ erDiagram
     text commissioned_token
     string commissioned_token_id "length 64"
     string commissioned_token_subject "length 255"
+    text container_trust_anchors
     instant created_at
     text dispatch_command_id
     boolean entity_blocked

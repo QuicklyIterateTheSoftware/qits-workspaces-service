@@ -90,6 +90,11 @@
              metrics reach qits-observability at its edge host. Published by
              qits-integrations-quarkus, like qits-http-core above. -->
         <qits.telemetry-core.version>2026.1106.507</qits.telemetry-core.version>
+        <!-- qits-trust-core (epic qits-2524, qits-2634): the platform CA's anchor bundle, polled from
+             qits-certificates, which every workspace container is created with as
+             QITS_TRUST_ANCHORS. A first adoption, so no maintenance bump brought it. It links
+             qits-http-core at its own version; the qits.http-core.version pin above still decides. -->
+        <qits.trust-core.version>2026.1125.110206</qits.trust-core.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
@@ -350,6 +355,14 @@
                 <groupId>${project.groupId}</groupId>
                 <artifactId>qits-telemetry-core</artifactId>
                 <version>${qits.telemetry-core.version}</version>
+            </dependency>
+            <dependency>
+                <!-- TrustAnchors: the anchor bundle a new workspace container is created with
+                     (qits-2634). Compile scope in `service` only, behind domain's TrustAnchorSource
+                     port, so the domain module and its tests never start the poller. -->
+                <groupId>${project.groupId}</groupId>
+                <artifactId>qits-trust-core</artifactId>
+                <version>${qits.trust-core.version}</version>
             </dependency>
             <dependency>
                 <!-- The platform's database resilience: PatientPgDriver, which every postgresql

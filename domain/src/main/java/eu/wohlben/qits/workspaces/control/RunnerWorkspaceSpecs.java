@@ -2,11 +2,14 @@ package eu.wohlben.qits.workspaces.control;
 
 import eu.wohlben.qits.workspaces.entity.Workspace;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import org.jboss.logging.Logger;
 
 /**
  * Composes the {@link RunnerLaunchSpec} a TARGET workspace's lease carries (qits-851, epic
@@ -48,6 +51,13 @@ import java.util.Set;
  * version a DIRECT launch uses, the pin unless an operator overrode it — with its registry host
  * moved to {@code registry.qits.<domain>} by {@link WorkspaceAddressPlane#imageReference}, which is
  * the prefix a WORKSPACE slot admits.
+ *
+ * <p><b>The platform CA's anchors are today's bundle</b> ({@code QITS_TRUST_ANCHORS}, qits-2634),
+ * when one is held, and the variable is left out otherwise. Today's rather than a stored one, because
+ * this is composed only for a NEW lease: every start retires the row's previous lease and asks for a
+ * new one, and nothing in this service re-sends the spec of a lease it holds (no {@code PUT
+ * /leases/{id}/spec}). So a change of the bundle alone never moves a held lease's {@code specHash} and
+ * never recreates its container; it reaches the workspace at its next start.
  */
 @ApplicationScoped
 public class RunnerWorkspaceSpecs {
@@ -58,7 +68,12 @@ public class RunnerWorkspaceSpecs {
   /** The workspace image's own user: a lease never runs as root. */
   public static final String USER = "1000";
 
+  private static final Logger LOG = Logger.getLogger(RunnerWorkspaceSpecs.class);
+
   @Inject WorkspaceContainerFactory factory;
+
+  /** Today's anchor bundle; unresolvable means none, and the variable is left out. */
+  @Inject Instance<TrustAnchorSource> trustAnchors;
 
   /**
    * The lease spec for {@code row}, every address from {@code plane} ({@link
@@ -96,9 +111,25 @@ public class RunnerWorkspaceSpecs {
     // The plane's domain, which is the one the addresses above were composed from; written in the
     // place homeEnv gives it, or appended when the factory read none.
     env.put("QITS_DOMAIN", plane.domain());
+    // The platform CA's anchors, when a bundle is held: read here, at the lease's creation, and
+    // never again for this lease.
+    currentAnchors().ifPresent(pem -> env.put(TrustAnchorSource.ENV, pem));
     env.keySet().removeAll(POLICY_ENV);
     // Unmodifiable views, never Map.copyOf: the copy's iteration order is salted per JVM, and env
     // order is part of a spec.
     return new RunnerLaunchSpec(image, Collections.unmodifiableMap(env), USER, factory.limits());
+  }
+
+  /** Today's bundle, or none. A failed read costs the variable, never the lease. */
+  private Optional<String> currentAnchors() {
+    if (trustAnchors == null || !trustAnchors.isResolvable()) {
+      return Optional.empty();
+    }
+    try {
+      return trustAnchors.get().pem().filter(pem -> !pem.isBlank());
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "could not read the trust anchor bundle; the lease is asked for without it");
+      return Optional.empty();
+    }
   }
 }
