@@ -280,6 +280,14 @@ public class WorkspaceContainerFactory {
    */
   @Inject Instance<WorkspacePostures> postures;
 
+  /**
+   * The anchor bundle this workspace's current container was created with (qits-2634), written as
+   * {@code QITS_TRUST_ANCHORS}. Read off the row rather than from today's bundle, for the reason
+   * {@link WorkspaceTrustAnchors} spells out: a CA rotation alone must never change the spec of a
+   * container that exists. Absent or empty means no variable.
+   */
+  @Inject Instance<WorkspaceTrustAnchors> trustAnchors;
+
 
 
   /** The repo's project-scoped name, from an override resolver or the repository registry. */
@@ -333,6 +341,22 @@ public class WorkspaceContainerFactory {
 
 
 
+
+  /**
+   * The bundle the row's current container was created with, or none. A lookup failure costs the
+   * variable and never the container, like {@link #workspaceToken}'s.
+   */
+  private Optional<String> containerTrustAnchors(Long rowId) {
+    if (rowId == null || trustAnchors == null || !trustAnchors.isResolvable()) {
+      return Optional.empty();
+    }
+    try {
+      return trustAnchors.get().anchorsFor(rowId).filter(WorkspaceContainerFactory::present);
+    } catch (RuntimeException e) {
+      LOG.warnf(e, "could not read the trust anchors of workspace %s", rowId);
+      return Optional.empty();
+    }
+  }
 
   /**
    * The row's workspace token, or none (qits-1084). A lookup failure costs the token and never the
@@ -724,6 +748,12 @@ public class WorkspaceContainerFactory {
         mavenVolume != null && !mavenVolume.isBlank(),
         pnpmVolume != null && !pnpmVolume.isBlank(),
         container::env);
+    // The platform CA's anchors (qits-2634): the bundle THIS container was created with, read off
+    // the row, so a stopped container is started with the spec it was created with and a CA
+    // rotation alone never replaces it — the new bundle reaches the workspace at its next creation.
+    // Absent while no bundle was held when it was created: the container keeps the public trust it
+    // always had. Last in the env, so a spec without it is exactly the spec of before.
+    containerTrustAnchors(rowId).ifPresent(pem -> container.env(TrustAnchorSource.ENV, pem));
     // The per-workspace /workspace volume: the workspace's checkout, persisted across container
     // recreation instead of dying with the writable layer. The first mount populates the empty
     // volume from the image's world-writable /workspace (docker copies the image dir's contents AND

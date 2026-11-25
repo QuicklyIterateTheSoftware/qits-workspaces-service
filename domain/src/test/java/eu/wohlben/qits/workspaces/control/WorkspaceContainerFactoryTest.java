@@ -649,4 +649,52 @@ class WorkspaceContainerFactoryTest {
       assertNull(c.env().get(key), key);
     }
   }
+
+  // --- the platform CA's anchors (qits-2634) ------------------------------------------------------
+
+  private static final String PEM = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n";
+
+  /**
+   * The bundle the row's container was created with is written as QITS_TRUST_ANCHORS, last — read
+   * off the row, never from today's bundle, so the spec of an existing container cannot move with
+   * a CA rotation.
+   */
+  @Test
+  void theBundleTheContainerWasCreatedWithIsWrittenLast() {
+    WorkspaceContainerFactory f = factory();
+    f.trustAnchors = StubInstance.<WorkspaceTrustAnchors>of(rowId -> Optional.of(PEM));
+
+    WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
+
+    assertEnv(c, TrustAnchorSource.ENV, PEM);
+    List<String> keys = List.copyOf(c.env().keySet());
+    assertEquals(TrustAnchorSource.ENV, keys.get(keys.size() - 1));
+  }
+
+  /**
+   * A container created with no bundle — no lookup wired, an empty or blank answer, a lookup that
+   * throws — has no variable, and its spec is exactly the spec of before.
+   */
+  @Test
+  void noBundleMeansNoVariableAndTheSpecOfBefore() {
+    WorkspaceContainer before = factory().forWorkspace("repo12345678abc", "work", 1L, "main", null);
+    for (Instance<WorkspaceTrustAnchors> lookup :
+        List.of(
+            StubInstance.<WorkspaceTrustAnchors>empty(),
+            StubInstance.<WorkspaceTrustAnchors>of(rowId -> Optional.empty()),
+            StubInstance.<WorkspaceTrustAnchors>of(rowId -> Optional.of(" ")),
+            StubInstance.<WorkspaceTrustAnchors>of(
+                rowId -> {
+                  throw new IllegalStateException("unreadable");
+                }))) {
+      WorkspaceContainerFactory f = factory();
+      f.trustAnchors = lookup;
+
+      WorkspaceContainer c = f.forWorkspace("repo12345678abc", "work", 1L, "main", null);
+
+      assertFalse(c.env().containsKey(TrustAnchorSource.ENV), c.env().toString());
+      assertEquals(before.env(), c.env());
+    }
+  }
 }
+
