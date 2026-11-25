@@ -1,9 +1,14 @@
 package eu.wohlben.qits.workspaces.transcripthost;
 
 import eu.wohlben.qits.workspacedaemon.protocol.TranscriptFiles;
+import java.io.BufferedReader;
+import java.io.FilterInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
@@ -14,6 +19,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * The agent transcripts workspace-daemons ship over the control socket (qits-1752), kept on this
@@ -200,6 +206,119 @@ public final class TranscriptStore {
       String data = new String(buffer.array(), 0, length, StandardCharsets.UTF_8);
       return new Chunk(data, from + length, last);
     }
+  }
+
+  /**
+   * The sessions held for an agent: every {@code <sessionId>.jsonl} in its directory whose name is a
+   * session id, sorted. Empty when it shipped none.
+   */
+  public List<String> sessions(UUID agentId) throws IOException {
+    Path agentDir = agentDirectory(agentId);
+    if (!Files.isDirectory(agentDir, LinkOption.NOFOLLOW_LINKS)) {
+      return List.of();
+    }
+    List<String> sessions = new ArrayList<>();
+    try (DirectoryStream<Path> entries = Files.newDirectoryStream(agentDir, "*" + JSONL)) {
+      for (Path entry : entries) {
+        String name = entry.getFileName().toString();
+        String session = name.substring(0, name.length() - JSONL.length());
+        if (TranscriptFiles.validSessionId(session)
+            && Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
+          sessions.add(session);
+        }
+      }
+    }
+    sessions.sort(null);
+    return sessions;
+  }
+
+  /**
+   * Every complete line of one held file that <em>ends</em> in the bytes {@code [from, to)}, without
+   * its newline, in order (qits-2675: usage is read from what a chunk newly appended). A line that
+   * started before {@code from} — one long line split across chunks — is read whole from its start;
+   * a line not yet ended by a newline before {@code to} is not read at all: the chunk that ends it
+   * reads it. Streamed, so a whole file ({@code from} 0, {@code to} its size) costs one line at a
+   * time.
+   *
+   * @throws IllegalArgumentException an address outside the grammar, or a negative range
+   * @throws IOException the file is not held, or could not be read
+   */
+  public void completeLines(
+      UUID agentId, String sessionId, String file, long from, long to, Consumer<String> line)
+      throws IOException {
+    if (from < 0 || to < from) {
+      throw new IllegalArgumentException("not a transcript byte range: " + from + ".." + to);
+    }
+    Path target = fileOf(agentId, sessionId, file);
+    try (FileChannel channel =
+        FileChannel.open(target, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+      long until = Math.min(to, channel.size());
+      long end = lastNewline(channel, from, until);
+      if (end < 0) {
+        return;
+      }
+      long start = lastNewline(channel, 0, from) + 1;
+      channel.position(start);
+      InputStream bounded = bounded(Channels.newInputStream(channel), end + 1 - start);
+      try (BufferedReader reader =
+          new BufferedReader(new InputStreamReader(bounded, StandardCharsets.UTF_8))) {
+        for (String next = reader.readLine(); next != null; next = reader.readLine()) {
+          line.accept(next);
+        }
+      }
+    }
+  }
+
+  /** The position of the last {@code '\n'} in {@code [from, until)}, or -1 when there is none. */
+  private static long lastNewline(FileChannel channel, long from, long until) throws IOException {
+    ByteBuffer buffer = ByteBuffer.allocate(8192);
+    long pos = until;
+    while (pos > from) {
+      long blockStart = Math.max(from, pos - buffer.capacity());
+      buffer.clear().limit((int) (pos - blockStart));
+      while (buffer.hasRemaining()
+          && channel.read(buffer, blockStart + buffer.position()) >= 0) {
+        // Fill it: a short read is not the end of the file.
+      }
+      for (int i = buffer.position() - 1; i >= 0; i--) {
+        if (buffer.get(i) == '\n') {
+          return blockStart + i;
+        }
+      }
+      pos = blockStart;
+    }
+    return -1;
+  }
+
+  /** {@code in}, ending after {@code limit} bytes: the file may grow while it is read. */
+  private static InputStream bounded(InputStream in, long limit) {
+    return new FilterInputStream(in) {
+      private long left = limit;
+
+      @Override
+      public int read() throws IOException {
+        if (left <= 0) {
+          return -1;
+        }
+        int b = super.read();
+        if (b >= 0) {
+          left--;
+        }
+        return b;
+      }
+
+      @Override
+      public int read(byte[] b, int off, int len) throws IOException {
+        if (left <= 0) {
+          return -1;
+        }
+        int n = super.read(b, off, (int) Math.min(len, left));
+        if (n > 0) {
+          left -= n;
+        }
+        return n;
+      }
+    };
   }
 
   /** {@code <root>/<agentId>}: every session the agent's daemon shipped, in the harness's layout. */

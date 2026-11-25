@@ -268,6 +268,12 @@ rewritten to "exactly one of `agent_id`, `desk_project_id`, `project_agent_subje
 `ck_agent_wait_project_agent` holds that such a wait names its project and its item; the partial
 index `agent_wait_project_agent_open` serves the per-item cap and relay. Columns on a `CausedRow`,
 so no `ArchRulesTest` decision; see "Declared waits".
+**`V43__transcript_usage.sql`** (qits-2675) adds `transcript_usage_message` (`session_id`,
+`message_id`, `agent_id`, `recorded_at`; key `(session_id, message_id)`): the assistant messages
+already counted into `AgentUsageRecorded`. **No entity maps it** — its one writer is the native
+`insert … on conflict do nothing` in `persistence/TranscriptUsageMessageRepository` — so there is no
+`ArchRulesTest` or `EntityExposureTest` decision, and the entity diagram does not show it. See
+"Agent transcripts".
 **`V30__workspace_leases.sql`** (epic qits-1481, qits-1532) retires the workspace runners: it first
 copies every row with a `runner_id` into `legacy_placement(row_id, old_runner_id, engine_id,
 hostname, runner_name)` — `engine_id` and `hostname` from the runner's `capabilities ->> 'engineId'`
@@ -303,7 +309,8 @@ bytes — as `Workspace.preamble`, `WorkspacePromptDraft.content` and `Workspace
 do update` — H2's `merge into … key (…)` until the move — and `AgentWaitRepository.lockDesk` takes a
 `pg_advisory_xact_lock` keyed on the project, because a desk has no row of its own to lock while its
 cap is counted (qits-1618); `lockProjectAgent` takes one keyed on the project agent's subject and
-work item, for the same reason (qits-2596). Those three are the only native statements here.
+work item, for the same reason (qits-2596). `TranscriptUsageMessageRepository.claim` is `insert …
+on conflict do nothing` (qits-2675).
 
 Remember that workspace rows are **soft-deleted**. A child table in another context gets no cascade;
 publish through `WorkspaceResolved` instead, and fire it synchronously inside the resolving
@@ -1382,6 +1389,22 @@ data}`:
   belonging — and a requested id is resolved against the listing, never joined onto a path. The daemon
   ships no `agent-<id>.meta.json`, so a shipped sidechain's marker carries no `agentType`,
   `description` or `toolUseId`.
+- **The usage** (qits-2675, epic qits-2521; `transcripthost/TranscriptUsage`,
+  `TranscriptUsageRecorder`, `TranscriptUsageBackfill`). After a chunk is appended, the complete
+  lines it newly appended (`TranscriptStore.completeLines`: a line split across chunks is read whole
+  by the chunk that ends it; a refused chunk reads nothing) are read by `TranscriptUsage.of`: a
+  `"type":"assistant"` line with a `message.usage` object, `message.id`, `message.model` and the four
+  token counts (`input_tokens`, `output_tokens`, `cache_creation_input_tokens`,
+  `cache_read_input_tokens`; missing is 0), a line that does not parse skipped at DEBUG. Every line
+  of one message carries the same id and usage, so a message counts once per session: its first line
+  wins in the chunk, and it is claimed in `transcript_usage_message` (`V43`) before it is counted.
+  Each `(sessionId, model)` with a newly counted message is announced as one `AgentUsageRecorded`
+  after the claims committed, ids from the agent row, `projectId` from its repository. Main file and
+  sidechains alike. A failure to count is a WARN and never costs the append. **The backfill**: at
+  every boot, on a thread of its own (readiness never waits for it), every session held for the
+  agents created at or after `qits.workspace.usage.backfill-since` (`2026-11-25T00:00:00Z`) is read
+  the same way, one call per session; the claims make it idempotent, and it logs what it published.
+  `qits.workspace.usage.backfill.enabled` is off in `%test`.
 
 **Declared waits** (qits-1153, W1–W8; `AgentWaits`, `AgentWaitController`, `bus/AgentWaitListener`).
 An agent says which event it waits on (`agent_wait`: label, qits-eventstream `EventSelection` JSON,
@@ -1689,6 +1712,7 @@ payload's top-level fields:
 | `AgentWaitChanged` | the four, `projectId`, `waitId`, `subjectKind`, `subjectRef`, `subjectQualifiedId`, `subjectState`, `subjectStateAt` — an event of the wait's name moved its subject's recorded state (epic qits-1681) | |
 | `AgentWaitClosed` | the four, `projectId`, `waitId`, `state`, `matchedEventId` (a match only), `label` and `reason` (BROKEN only, qits-1961) — an agent's wait matched, broke, timed out, was cancelled, or went with its agent (epic qits-1681) | `state`: `MATCHED`, `TIMED_OUT`, `BROKEN`, `CANCELLED` |
 | `AgentActivityChanged` | the four, `projectId`, `activity`, `waitingSince` (absent once it works), `at` — the waiting flip `onActivity` relays to qits-projects, and no other frame (epic qits-1681) | `activity`: `IDLE`, `BUSY`, `WAITING`, `ENDED` |
+| `AgentUsageRecorded` | `agentId`, `workId`, `workspaceId` (placed in, else last started in), `projectId`, `sessionId`, `model`, `messages`, `inputTokens`, `outputTokens`, `cacheCreationTokens`, `cacheReadTokens` — the Claude usage newly counted from one transcript chunk, or one session of the boot backfill, per session and model; a message counts once per session, ever (qits-2675, "Agent transcripts"). Its `occurredAt` is the newest counted message's own time | |
 | `AgentAttentionChanged` | the four, `projectId`, `code` (absent once cleared), `reason` (this service's one line), `since`, `waitId` (codes 2 and 5) — what an ACTIVE agent needs a person for changed code or wait ("Attention"; epic qits-1681) | `code`: `WAIT_SUBJECT_PASSED`, `BLOCKED_NO_DESK`, `IDLE_NO_WAIT`, `WAIT_OVERDUE` |
 
 The rules they keep:

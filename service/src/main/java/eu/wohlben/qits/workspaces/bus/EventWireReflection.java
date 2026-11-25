@@ -10,6 +10,7 @@ import eu.wohlben.qits.workspaces.events.AgentWaitChanged;
 import eu.wohlben.qits.workspaces.events.AgentWaitClosed;
 import eu.wohlben.qits.workspaces.events.AgentActivityChanged;
 import eu.wohlben.qits.workspaces.events.AgentAttentionChanged;
+import eu.wohlben.qits.workspaces.events.AgentUsageRecorded;
 import eu.wohlben.qits.workspaces.events.AgentObsolete;
 import eu.wohlben.qits.workspaces.events.AgentPlaced;
 import eu.wohlben.qits.workspaces.events.AgentRemoved;
@@ -43,7 +44,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
  * registration's completeness, and only the running binary proves it.
  *
  * <p><b>Why these types.</b> The fourteen lifecycle records, {@link DeskWaitClosed} (qits-1618) and
- * {@link ProjectAgentWaitClosed} (qits-2596) are what {@link EventstreamLifecycleAnnouncer} publishes. {@link TargetLeaseChanged} is qits-system's, which {@code
+ * {@link ProjectAgentWaitClosed} (qits-2596) and {@link AgentUsageRecorded} (qits-2675) are what {@link EventstreamLifecycleAnnouncer} publishes. {@link TargetLeaseChanged} is qits-system's, which {@code
  * targethost/TargetLeaseEvents} receives bound to that record (epic qits-1481), as is {@link
  * TargetLoginChanged}, which {@code targethost/TargetLoginEvents} receives (qits-2088), and {@link
  * EntityCommented} is qits-projects', which {@link DeskMentionListener} binds the same way (epic
@@ -81,6 +82,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
       AgentActivityChanged.class,
       AgentAttentionChanged.class,
       ProjectAgentWaitClosed.class,
+      AgentUsageRecorded.class,
       TargetLeaseChanged.class,
       TargetLoginChanged.class,
       EntityCommented.class,

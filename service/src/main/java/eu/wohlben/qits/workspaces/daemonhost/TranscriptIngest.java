@@ -4,6 +4,7 @@ import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
 import eu.wohlben.qits.workspaces.transcripthost.ShippedClaudeTranscripts;
 import eu.wohlben.qits.workspaces.transcripthost.TranscriptStore;
+import eu.wohlben.qits.workspaces.transcripthost.TranscriptUsageRecorder;
 import eu.wohlben.qits.workspacedaemon.protocol.TranscriptChunk;
 import eu.wohlben.qits.workspacedaemon.protocol.TranscriptResync;
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -27,6 +28,12 @@ import org.jboss.logging.Logger;
  * agent's history. {@code startedWorkspaceId} counts because that is where the agent's worktree,
  * and so its harness's files, still live after it was requeued.
  *
+ * <p><b>And the usage it records</b> (qits-2675): once a chunk is appended, the complete lines it
+ * newly appended are counted by {@link TranscriptUsageRecorder} and announced as {@code
+ * AgentUsageRecorded}. A chunk the store did not append reads nothing. A failure to count is a WARN
+ * and never costs the append; the next boot's backfill counts what it missed, for the agents it
+ * covers.
+ *
  * <p>Synchronous and blocking (a query and a file append): {@link WorkspaceDaemonRegistry} calls it
  * on a thread of its own, never the socket's, in arrival order.
  */
@@ -39,6 +46,8 @@ public class TranscriptIngest {
 
   @Inject ShippedClaudeTranscripts transcripts;
 
+  @Inject TranscriptUsageRecorder usage;
+
   /**
    * Append the chunk for an agent of {@code workspaceId}, or say where the daemon should resume.
    *
@@ -46,43 +55,61 @@ public class TranscriptIngest {
    *     was appended, or dropped as not this workspace's to send
    */
   public Optional<TranscriptResync> accept(Long workspaceId, TranscriptChunk chunk) {
-    Optional<UUID> agent = agentOf(workspaceId, chunk);
-    if (agent.isEmpty()) {
+    Optional<AgentWorktree> row = agentOf(workspaceId, chunk);
+    if (row.isEmpty()) {
       return Optional.empty();
     }
+    UUID agentId = row.get().id;
     TranscriptStore.Appended appended;
     try {
       appended =
           transcripts
               .store()
-              .append(agent.get(), chunk.sessionId(), chunk.file(), chunk.offset(), chunk.data());
+              .append(agentId, chunk.sessionId(), chunk.file(), chunk.offset(), chunk.data());
     } catch (IllegalArgumentException refused) {
       LOG.warnf(
           "Dropped a transcript chunk from workspace %s for agent %s: %s",
-          workspaceId, agent.get(), refused.getMessage());
+          workspaceId, agentId, refused.getMessage());
       return Optional.empty();
     } catch (IOException e) {
       LOG.warnf(
           e,
           "Could not store a transcript chunk from workspace %s (agent %s, session %s, %s)",
           workspaceId,
-          agent.get(),
+          agentId,
           chunk.sessionId(),
           chunk.file());
       return Optional.empty();
     }
     if (appended.appended()) {
+      recordUsage(workspaceId, row.get(), chunk, appended.size());
       return Optional.empty();
     }
     LOG.debugf(
         "Transcript chunk from workspace %s for agent %s (session %s, %s) starts at %d; %d held,"
             + " resyncing",
-        workspaceId, agent.get(), chunk.sessionId(), chunk.file(), chunk.offset(), appended.size());
+        workspaceId, agentId, chunk.sessionId(), chunk.file(), chunk.offset(), appended.size());
     return Optional.of(new TranscriptResync(chunk.sessionId(), chunk.file(), appended.size()));
   }
 
+  /** The usage in what {@code chunk} appended, up to {@code size}; never throws. */
+  private void recordUsage(Long workspaceId, AgentWorktree agent, TranscriptChunk chunk, long size) {
+    try {
+      usage.recordAppended(agent, chunk.sessionId(), chunk.file(), chunk.offset(), size);
+    } catch (IOException | RuntimeException e) {
+      LOG.warnf(
+          e,
+          "Could not count the usage in a transcript chunk from workspace %s (agent %s, session %s,"
+              + " %s)",
+          workspaceId,
+          agent.id,
+          chunk.sessionId(),
+          chunk.file());
+    }
+  }
+
   /** The chunk's agent, when it is one of {@code workspaceId}'s; empty (and logged) otherwise. */
-  private Optional<UUID> agentOf(Long workspaceId, TranscriptChunk chunk) {
+  private Optional<AgentWorktree> agentOf(Long workspaceId, TranscriptChunk chunk) {
     String named = chunk.agentId();
     Optional<AgentWorktree> agent;
     if (named != null && !named.isBlank()) {
@@ -116,7 +143,7 @@ public class TranscriptIngest {
           chunk.sessionId());
       return Optional.empty();
     }
-    return Optional.of(agent.get().id);
+    return agent;
   }
 
   private static boolean belongsTo(AgentWorktree agent, Long workspaceId) {

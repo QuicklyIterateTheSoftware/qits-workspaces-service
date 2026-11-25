@@ -143,6 +143,14 @@ class LifecycleEventsContractTest {
         List.of(
             "agentSubject", "eventName", "label", "projectId", "reason", "state", "waitId", "workId",
             "workQualifiedId"));
+    // qits-2675: the usage an agent's transcript recorded, per session and model.
+    out.put(
+        new AgentUsageRecorded(
+            AGENT, WORK, "385", PROJECT, "aaaaaaaa-1111-4111-8111-000000000001", "claude-opus-5-5",
+            2, 12, 340, 0, 51234, AT),
+        List.of(
+            "agentId", "cacheCreationTokens", "cacheReadTokens", "inputTokens", "messages", "model",
+            "outputTokens", "projectId", "sessionId", "workId", "workspaceId"));
     return out;
   }
 
@@ -178,7 +186,8 @@ class LifecycleEventsContractTest {
             "AgentWaitClosed",
             "AgentActivityChanged",
             "AgentAttentionChanged",
-            "ProjectAgentWaitClosed"),
+            "ProjectAgentWaitClosed",
+            "AgentUsageRecorded"),
         everyEvent().keySet().stream().map(e -> EventEnvelope.of(e).name()).toList());
   }
 

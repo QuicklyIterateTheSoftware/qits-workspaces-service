@@ -282,4 +282,45 @@ class TranscriptStoreTest {
     assertEquals(held, whole.data());
     assertTrue(whole.last());
   }
+
+  // --- the lines a chunk completed (qits-2675) ---------------------------------------------------
+
+  private List<String> completed(String file, long from, long to) throws IOException {
+    List<String> lines = new java.util.ArrayList<>();
+    store().completeLines(AGENT, SESSION, file, from, to, lines::add);
+    return lines;
+  }
+
+  /**
+   * The lines a chunk newly ended, a line split across chunks read whole by the chunk that ends it,
+   * and nothing for a chunk that ends no line; the whole file from 0 is every complete line.
+   */
+  @Test
+  void theCompleteLinesAChunkEndedAreReadWhole() throws IOException {
+    String one = "{\"n\":1,\"text\":\"\u00e9t\u00e9\"}\n";
+    String two = "{\"n\":2,\"long\":\"" + "x".repeat(20_000) + "\"}\n";
+    String head = two.substring(0, 9000);
+    String rest = two.substring(9000);
+    String partial = "{\"n\":3";
+
+    store().append(AGENT, SESSION, "main", 0, one);
+    assertEquals(List.of(one.strip()), completed("main", 0, bytes(one)));
+
+    long afterOne = bytes(one);
+    store().append(AGENT, SESSION, "main", afterOne, head);
+    assertEquals(List.of(), completed("main", afterOne, afterOne + bytes(head)));
+
+    long afterHead = afterOne + bytes(head);
+    store().append(AGENT, SESSION, "main", afterHead, rest + partial);
+    long end = afterHead + bytes(rest + partial);
+    assertEquals(List.of(two.strip()), completed("main", afterHead, end));
+
+    // The whole file: every complete line, the unterminated tail left for the chunk that ends it.
+    assertEquals(List.of(one.strip(), two.strip()), completed("main", 0, Long.MAX_VALUE));
+
+    String sidechain = "subagents/agent-a1b2c3.jsonl";
+    store().append(AGENT, SESSION, sidechain, 0, one);
+    assertEquals(List.of(one.strip()), completed(sidechain, 0, bytes(one)));
+    assertEquals(List.of(SESSION), store().sessions(AGENT));
+  }
 }

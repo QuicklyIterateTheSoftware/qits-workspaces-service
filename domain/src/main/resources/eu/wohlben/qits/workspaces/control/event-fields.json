@@ -588,6 +588,12 @@
       "agentSubject": "scalar", "eventName": "scalar", "label": "scalar", "matchedEventId": "scalar",
       "projectId": "scalar", "reason": "scalar", "state": "scalar", "waitId": "scalar",
       "workId": "scalar", "workQualifiedId": "scalar"
+    },
+    "AgentUsageRecorded": {
+      "agentId": "scalar", "workId": "scalar", "workspaceId": "scalar",
+      "cacheCreationTokens": "scalar", "cacheReadTokens": "scalar", "inputTokens": "scalar",
+      "messages": "scalar", "model": "scalar", "outputTokens": "scalar", "projectId": "scalar",
+      "sessionId": "scalar"
     }
   }
 }
