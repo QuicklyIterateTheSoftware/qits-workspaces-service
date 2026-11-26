@@ -75,16 +75,16 @@
              after the container is gone. Framework-free — vertx-core and qits-commands are its only
              compile dependencies, and nothing here imports either. -->
         <qits.coding-agents.version>2026.1126.142114</qits.coding-agents.version>
-        <qits.eventstream.version>2026.1125.142425</qits.eventstream.version>
+        <qits.eventstream.version>2026.1126.192104</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1107.191249</qits.db-core.version>
         <qits.arch-rules.version>2026.1113.14706</qits.arch-rules.version>
-        <qits.auth-core.version>2026.1126.151431</qits.auth-core.version>
+        <qits.auth-core.version>2026.1126.172511</qits.auth-core.version>
         <qits.containers-client.version>2026.1125.163910</qits.containers-client.version>
         <!-- CallerServerFilter/CallerClientFilter: jandex-indexed filters that record inbound
              X-Qits-Caller as the qits.caller span attribute and stamp it on outgoing REST-client
              calls. Also published by qits-integrations-quarkus. -->
-        <qits.http-core.version>2026.1126.151431</qits.http-core.version>
+        <qits.http-core.version>2026.1126.172511</qits.http-core.version>
         <!-- qits-telemetry-core (epic qits-428): the three OTLP/HTTP exporters as CDI beans whose
              header supplier carries the `qits` oidc client's current bearer, so spans, logs and
              metrics reach qits-observability at its edge host. Published by
@@ -94,7 +94,7 @@
              qits-certificates, which every workspace container is created with as
              QITS_TRUST_ANCHORS. A first adoption, so no maintenance bump brought it. It links
              qits-http-core at its own version; the qits.http-core.version pin above still decides. -->
-        <qits.trust-core.version>2026.1126.151431</qits.trust-core.version>
+        <qits.trust-core.version>2026.1126.172511</qits.trust-core.version>
         <!-- The user-story framework (test scope everywhere): the whole story catalogue under
              service/src/test/.../stories/ (plus TokenValidationBootstrapIT, which owns the boot)
              is written as @UserStory methods, so `mvn verify -DskipITs=false` regenerates
