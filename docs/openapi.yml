@@ -105,6 +105,8 @@ components:
           $ref: "#/components/schemas/Instant"
         phaseDetail:
           type: string
+        slot:
+          $ref: "#/components/schemas/AgentSlot"
     AgentHarness:
       type: string
       enum:
@@ -130,6 +132,12 @@ components:
       - RUNNING
       - YIELDED
       - STOPPED
+    AgentSlot:
+      type: string
+      enum:
+      - HELD
+      - QUEUED
+      - NONE
     AgentState:
       type: string
       enum:

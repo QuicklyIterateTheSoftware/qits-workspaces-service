@@ -41,7 +41,8 @@
       "deskAskedAt": null,
       "phase": "PROVISIONING",
       "phaseSince": null,
-      "phaseDetail": null
+      "phaseDetail": null,
+      "slot": "HELD"
     }
   ]
 }

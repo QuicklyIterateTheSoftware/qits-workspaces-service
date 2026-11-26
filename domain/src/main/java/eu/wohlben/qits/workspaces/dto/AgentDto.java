@@ -45,6 +45,9 @@ import org.eclipse.microprofile.openapi.annotations.media.Schema;
  * @param phaseDetail why it waits in that phase (qits-2515): the slot's queued lease detail, e.g.
  *     {@code no target has memory for a 6g WORKSPACE lease}, while {@code phase} is QUEUED on a
  *     QUEUED slot or PROVISIONING on a slot; null otherwise
+ * @param slot whether its workspace holds its lease (qits-2573): {@code HELD}, {@code QUEUED} (no
+ *     workspace yet, or its workspace's lease waits) or {@code NONE}; see {@link AgentSlot}. What
+ *     qits-projects' delivery desk counts as running
  */
 public record AgentDto(
     String agentId,
@@ -80,7 +83,8 @@ public record AgentDto(
     Instant deskAskedAt,
     AgentPhase phase,
     Instant phaseSince,
-    String phaseDetail) {
+    String phaseDetail,
+    AgentSlot slot) {
 
   /**
    * What an ACTIVE agent needs a person for (epic qits-1681).

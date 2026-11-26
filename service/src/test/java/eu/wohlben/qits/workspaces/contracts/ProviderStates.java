@@ -617,7 +617,9 @@ public class ProviderStates {
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
-              Long slot = slot(WorkspaceRuntimeStatus.RUNNING);
+              // Under its lease (qits-2573), so the ACTIVE agent reads slot HELD: what qits-projects'
+              // delivery desk counts as running.
+              Long slot = slot(WorkspaceRuntimeStatus.RUNNING, true);
               ids.add(slot);
               agent(AGENT_REMOVED_ID, slot, AgentState.REMOVED, AgentRunState.YIELDED);
               agent(AGENT_OBSOLETE_ID, slot, AgentState.OBSOLETE, AgentRunState.YIELDED);

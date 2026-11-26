@@ -177,7 +177,9 @@ public class AgentDispatchControllerTest {
         .statusCode(200)
         .body("entries", hasSize(1))
         .body("entries[0].agent.agentId", equalTo(agentId))
-        .body("entries[0].agent.workId", equalTo(workId));
+        .body("entries[0].agent.workId", equalTo(workId))
+        // qits-2573: queued with no workspace, so its slot is not held.
+        .body("entries[0].agent.slot", equalTo("QUEUED"));
     given().get("/workspaces/api/agents/" + agentId).then().statusCode(200).body("agentId", equalTo(agentId));
     given()
         .get("/workspaces/api/agents?workId=" + workId)

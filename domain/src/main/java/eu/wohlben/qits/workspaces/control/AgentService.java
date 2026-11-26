@@ -3903,13 +3903,20 @@ public class AgentService {
     }
     // One read of every listed agent's slot, and one liveness look per slot, for the phase
     // (qits-2007).
+    // The same read says whether each slot holds its lease (qits-2573).
     Map<Long, AgentPhases.Slot> slots = new HashMap<>();
+    Map<Long, AgentSlots.Workspace> leases = new HashMap<>();
     QuarkusTransaction.requiringNew()
         .call(
             () ->
                 workspaceRepository.findActiveByIds(
                     rows.stream().map(a -> a.workspaceId).filter(Objects::nonNull).toList()))
-        .forEach(w -> slots.put(w.id, new AgentPhases.Slot(w.runtimeStatus, w.queuedAt, w.runtimeError)));
+        .forEach(
+            w -> {
+              slots.put(w.id, new AgentPhases.Slot(w.runtimeStatus, w.queuedAt, w.runtimeError));
+              leases.put(
+                  w.id, new AgentSlots.Workspace(w.placement, w.leaseId, w.targetId, w.runtimeStatus));
+            });
     Map<Long, Boolean> connected = new HashMap<>();
     slots.keySet().forEach(id -> connected.put(id, daemonLive(id)));
     return rows.stream()
@@ -3973,7 +3980,12 @@ public class AgentService {
                     a.deskAskedAt,
                     phase.phase(),
                     phase.since(),
-                    phase.detail());
+                    phase.detail(),
+                    AgentSlots.of(
+                        a.state,
+                        a.runState,
+                        a.workspaceId != null,
+                        a.workspaceId == null ? null : leases.get(a.workspaceId)));
             })
         .toList();
   }

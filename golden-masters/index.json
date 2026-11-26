@@ -2130,6 +2130,33 @@
           }
         },
         {
+          "operationId": "listAgentDispatchReferences",
+          "method": "GET",
+          "path": "/workspaces/api/agent-dispatches/references",
+          "query": {
+            "workId": "{ticketId}"
+          },
+          "status": 200,
+          "file": "an-agent-working-on-a-ticket/listAgentDispatchReferences.json",
+          "frozen": {
+            "ids": [
+              "$.entries[*].agent.agentId",
+              "$.entries[*].agent.repositoryId",
+              "$.entries[*].agent.workId",
+              "$.entries[*].agent.ticketId"
+            ],
+            "instants": [
+              "$.entries[*].agent.lastActivityAt",
+              "$.entries[*].agent.createdAt"
+            ],
+            "strings": [],
+            "numbers": [
+              "$.entries[*].agent.workspaceRowId"
+            ],
+            "listFilteredTo": null
+          }
+        },
+        {
           "operationId": "listAgents",
           "method": "GET",
           "path": "/workspaces/api/agents",

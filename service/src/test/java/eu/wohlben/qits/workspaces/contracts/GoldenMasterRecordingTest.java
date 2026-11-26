@@ -184,6 +184,13 @@ class GoldenMasterRecordingTest {
               "listAgentDispatchReferences",
               WORKSPACES + "/agent-dispatches/references?workId={bugTicketId}",
               null),
+          // qits-2573: the agent placed RUNNING in a workspace whose lease waits reads slot QUEUED,
+          // what qits-projects' delivery desk counts as waiting, not running.
+          Interaction.read(
+              ProviderStates.AN_AGENT_ON_A_TICKET,
+              "listAgentDispatchReferences",
+              WORKSPACES + "/agent-dispatches/references?workId={ticketId}",
+              null),
           // The landing app's In Progress tab: every work item an ACTIVE agent works on. Other
           // tests share the store, so the list keeps only this state's agents.
           Interaction.read(

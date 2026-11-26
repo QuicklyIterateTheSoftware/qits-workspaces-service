@@ -78,7 +78,8 @@
       "deskAskedAt": null,
       "phase": "QUEUED",
       "phaseSince": null,
-      "phaseDetail": null
+      "phaseDetail": null,
+      "slot": "QUEUED"
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000a7",
@@ -119,7 +120,8 @@
       "deskAskedAt": "2026-01-01T00:00:00Z",
       "phase": "QUEUED",
       "phaseSince": null,
-      "phaseDetail": null
+      "phaseDetail": null,
+      "slot": "QUEUED"
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000a8",
@@ -160,7 +162,8 @@
       "deskAskedAt": null,
       "phase": "QUEUED",
       "phaseSince": null,
-      "phaseDetail": null
+      "phaseDetail": null,
+      "slot": "QUEUED"
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000a9",
@@ -240,7 +243,8 @@
       "deskAskedAt": null,
       "phase": "QUEUED",
       "phaseSince": null,
-      "phaseDetail": null
+      "phaseDetail": null,
+      "slot": "QUEUED"
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000aa",
@@ -343,7 +347,8 @@
       "deskAskedAt": null,
       "phase": "QUEUED",
       "phaseSince": null,
-      "phaseDetail": null
+      "phaseDetail": null,
+      "slot": "QUEUED"
     }
   ]
 }

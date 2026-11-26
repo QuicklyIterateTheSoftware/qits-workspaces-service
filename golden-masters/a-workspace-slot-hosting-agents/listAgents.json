@@ -72,7 +72,8 @@
       "deskAskedAt": null,
       "phase": "PROVISIONING",
       "phaseSince": null,
-      "phaseDetail": null
+      "phaseDetail": null,
+      "slot": "HELD"
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000a4",
@@ -108,7 +109,8 @@
       "deskAskedAt": null,
       "phase": null,
       "phaseSince": null,
-      "phaseDetail": null
+      "phaseDetail": null,
+      "slot": "HELD"
     }
   ]
 }
