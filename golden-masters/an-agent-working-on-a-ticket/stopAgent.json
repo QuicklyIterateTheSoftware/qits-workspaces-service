@@ -32,5 +32,6 @@
   "deskAskedAt": null,
   "phase": null,
   "phaseSince": null,
-  "phaseDetail": null
+  "phaseDetail": null,
+  "slot": "QUEUED"
 }

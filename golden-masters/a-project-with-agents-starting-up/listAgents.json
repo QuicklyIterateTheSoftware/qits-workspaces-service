@@ -34,7 +34,8 @@
       "deskAskedAt": null,
       "phase": "QUEUED",
       "phaseSince": "2026-01-01T00:00:00Z",
-      "phaseDetail": null
+      "phaseDetail": null,
+      "slot": "QUEUED"
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000ac",
@@ -70,7 +71,8 @@
       "deskAskedAt": null,
       "phase": "PROVISIONING",
       "phaseSince": "2026-01-01T00:00:00Z",
-      "phaseDetail": "pulling the workspace image"
+      "phaseDetail": "pulling the workspace image",
+      "slot": "NONE"
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000ad",
@@ -106,7 +108,8 @@
       "deskAskedAt": null,
       "phase": "STARTING",
       "phaseSince": "2026-01-01T00:00:00Z",
-      "phaseDetail": null
+      "phaseDetail": null,
+      "slot": "NONE"
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000ae",
@@ -142,7 +145,8 @@
       "deskAskedAt": null,
       "phase": "READY",
       "phaseSince": "2026-01-01T00:00:00Z",
-      "phaseDetail": null
+      "phaseDetail": null,
+      "slot": "NONE"
     },
     {
       "agentId": "00000000-0000-4000-8000-0000000000af",
@@ -178,7 +182,8 @@
       "deskAskedAt": null,
       "phase": "READY",
       "phaseSince": "2026-01-01T00:00:00Z",
-      "phaseDetail": null
+      "phaseDetail": null,
+      "slot": "NONE"
     }
   ]
 }

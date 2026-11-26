@@ -42,7 +42,8 @@
         "deskAskedAt": null,
         "phase": "PROVISIONING",
         "phaseSince": null,
-        "phaseDetail": null
+        "phaseDetail": null,
+        "slot": "HELD"
       }
     },
     {
@@ -80,7 +81,8 @@
         "deskAskedAt": null,
         "phase": null,
         "phaseSince": null,
-        "phaseDetail": null
+        "phaseDetail": null,
+        "slot": "HELD"
       }
     },
     {
@@ -118,7 +120,8 @@
         "deskAskedAt": null,
         "phase": null,
         "phaseSince": null,
-        "phaseDetail": null
+        "phaseDetail": null,
+        "slot": "NONE"
       }
     }
   ]

@@ -33,7 +33,8 @@
     "deskAskedAt": null,
     "phase": "QUEUED",
     "phaseSince": "2026-01-01T00:00:00Z",
-    "phaseDetail": null
+    "phaseDetail": null,
+    "slot": "QUEUED"
   },
   "fresh": true,
   "agentLaunch": "QUEUED",

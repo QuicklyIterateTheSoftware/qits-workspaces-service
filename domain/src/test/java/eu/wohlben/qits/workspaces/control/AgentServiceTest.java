@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import eu.wohlben.qits.eventstream.selection.EventSelection;
 import eu.wohlben.qits.workspaces.dto.AgentDto;
 import eu.wohlben.qits.workspaces.dto.AgentPhase;
+import eu.wohlben.qits.workspaces.dto.AgentSlot;
 import eu.wohlben.qits.workspaces.entity.AgentRunState;
 import eu.wohlben.qits.workspaces.entity.AgentState;
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
@@ -173,6 +174,7 @@ public class AgentServiceTest {
     assertEquals(AgentService.AgentLaunch.QUEUED, first.agentLaunch());
     assertNull(first.agent().workspaceRowId(), "a lease waits already: no new workspace");
     assertEquals(AgentRunState.QUEUED, first.agent().runState());
+    assertEquals(AgentSlot.QUEUED, first.agent().slot(), "no workspace yet (qits-2573)");
     assertEquals(
         List.of("refs/heads/ticket/w-queued", "refs/heads/ticket/w-queued-*"),
         GitRefs.read(row(first.agent().agentId()).gitRefs));
@@ -230,6 +232,7 @@ public class AgentServiceTest {
       assertEquals(AgentRunState.RUNNING, starting.runState(), "runState keeps its meaning");
       assertNull(starting.activity(), "and so does activity");
       assertEquals(AgentPhase.STARTING, starting.phase());
+      assertEquals(AgentSlot.HELD, starting.slot(), "its DIRECT workspace holds it (qits-2573)");
       assertEquals(placed.placedAt, starting.phaseSince());
 
       service.reconcile();
@@ -3172,6 +3175,8 @@ public class AgentServiceTest {
     assertEquals(FakeTargetPlacement.WAITING, slot.runtimeError, "and shows why it waits");
     AgentDto agent = service.get(queued);
     assertEquals(AgentPhase.QUEUED, agent.phase(), "its slot's lease waits");
+    assertEquals(
+        AgentSlot.QUEUED, agent.slot(), "placed RUNNING, but its workspace's lease waits (qits-2573)");
     assertEquals(
         FakeTargetPlacement.WAITING, agent.phaseDetail(), "and the agent says why (qits-2515)");
   }

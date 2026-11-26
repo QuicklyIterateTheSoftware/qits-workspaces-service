@@ -1111,6 +1111,16 @@ A unique index keeps one ACTIVE agent per work item. A workspace may hold severa
 `V24` dropped the one-RUNNING-per-workspace index (qits-1212). A slot is a
 `workspace` row with **no branch**; the old work columns on `workspace` stay, unread by slots (D20).
 
+**`slot` says whether an agent's workspace holds its lease** (qits-2573), on every `AgentDto`
+(`/agent-dispatches/references` included), computed on read by `control/AgentSlots` from the same
+one workspace read the phase uses: `HELD` for a DIRECT workspace or a TARGET one with `leaseId` and
+`targetId` set and not QUEUED; `QUEUED` with no workspace yet (`runState` QUEUED) or in a workspace
+whose `runtimeStatus` is QUEUED — the first agent of a new TARGET workspace is set RUNNING at once
+while its lease still waits, so `runState` alone cannot tell; `NONE` otherwise (REMOVED, a FAILED or
+resolved workspace, a TARGET row with no lease). A YIELDED agent in a held workspace reads `HELD`.
+qits-projects' delivery desk counts `HELD` as running and `QUEUED` as waiting. Additive: a reader
+that predates it falls back to `runState` and `workspaceRowId`.
+
 **The doors write rows; one scheduler talks to the daemons.** Dispatch, delivery, entity, a person's
 create and a release's resolution write the agent row and answer at once. `AgentService.reconcile`
 makes every daemon call, one pass at a time, kicked after each door and every
