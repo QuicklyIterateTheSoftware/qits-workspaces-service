@@ -75,7 +75,7 @@
              after the container is gone. Framework-free — vertx-core and qits-commands are its only
              compile dependencies, and nothing here imports either. -->
         <qits.coding-agents.version>2026.1126.142114</qits.coding-agents.version>
-        <qits.eventstream.version>2026.1127.60632</qits.eventstream.version>
+        <qits.eventstream.version>2026.1127.170050</qits.eventstream.version>
         <!-- Both come out of qits-integrations-quarkus, so they move together. -->
         <qits.db-core.version>2026.1107.191249</qits.db-core.version>
         <qits.arch-rules.version>2026.1113.14706</qits.arch-rules.version>
