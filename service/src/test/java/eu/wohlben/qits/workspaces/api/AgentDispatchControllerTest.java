@@ -117,6 +117,46 @@ public class AgentDispatchControllerTest {
             });
   }
 
+  /**
+   * Puts {@code agentId} on a RUNNING slot of {@code repoId} it started on, active just now, so the
+   * cleanup sweep weighs it as an agent whose worktree may be there (qits-2735).
+   */
+  private void startedOnASlot(String repoId, String agentId) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              eu.wohlben.qits.workspaces.entity.Workspace row =
+                  new eu.wohlben.qits.workspaces.entity.Workspace();
+              row.repositoryId = repoId;
+              row.workspaceId = "ws-" + UUID.randomUUID().toString().substring(0, 8);
+              row.status = eu.wohlben.qits.workspaces.entity.WorkspaceStatus.ACTIVE;
+              row.runtimeStatus = eu.wohlben.qits.workspaces.entity.WorkspaceRuntimeStatus.RUNNING;
+              row.placement = eu.wohlben.qits.workspaces.entity.WorkspacePlacement.TARGET;
+              row.leaseId = UUID.randomUUID();
+              workspaceRows.persist(row);
+              workspaceRows.flush();
+              // qits-system holds its lease RUNNING too, so nothing that asks reads it as gone.
+              targets.seed(
+                  new eu.wohlben.qits.workspaces.control.TargetPlacement.Lease(
+                      row.leaseId,
+                      String.valueOf(row.id),
+                      eu.wohlben.qits.workspaces.control.TargetPlacement.LeaseState.RUNNING,
+                      UUID.randomUUID(),
+                      null,
+                      null,
+                      null,
+                      null,
+                      java.time.Instant.now()));
+              eu.wohlben.qits.workspaces.entity.AgentWorktree agent =
+                  agentRows.findById(UUID.fromString(agentId));
+              agent.workspaceId = row.id;
+              agent.startedWorkspaceId = row.id;
+              // Started: a QUEUED agent the pass would place elsewhere, and requeue unplaced.
+              agent.runState = eu.wohlben.qits.workspaces.entity.AgentRunState.RUNNING;
+              agent.lastActivityAt = java.time.Instant.now();
+            });
+  }
+
   private static final String API = "/workspaces/api/agent-dispatches";
 
   private String repository() {
@@ -329,6 +369,9 @@ public class AgentDispatchControllerTest {
             .then()
             .extract()
             .path("agent.agentId");
+    // On a slot it started on, and working a moment ago: the pass the resolution kicks then holds
+    // it OBSOLETE rather than removing it. Never started, it would be removed at once (qits-2735).
+    startedOnASlot(repoId, agentId);
     // Closed first: a release of an open item's branch leaves its agent ACTIVE (qits-1605).
     given()
         .contentType(ContentType.JSON)
