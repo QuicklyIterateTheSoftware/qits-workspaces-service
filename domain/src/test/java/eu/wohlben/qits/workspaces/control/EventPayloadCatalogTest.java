@@ -254,4 +254,31 @@ class EventPayloadCatalogTest {
         refused("EntityAssigned", Condition.exact("assigned", "x"))
             .contains("did you mean 'assignee'?"));
   }
+
+  /**
+   * qits-2707: ErrorIssueOpened and ErrorIssueRegressed (qits-observability) were uncatalogued, so
+   * a wait on a new or regressed error issue was a 400.
+   */
+  @Test
+  void errorIssueOpenedIsChecked() {
+    admitted("ErrorIssueOpened", Condition.exact("serviceName", "qits-edge"));
+    admitted("ErrorIssueOpened", Condition.exists("fingerprint"), Condition.exists("traceId"));
+    assertTrue(
+        refused("ErrorIssueOpened", Condition.exact("service", "qits-edge"))
+            .contains("did you mean 'serviceName'?"));
+    refused("ErrorIssueOpened", Condition.exists("dismissedAt"));
+  }
+
+  @Test
+  void errorIssueRegressedIsChecked() {
+    admitted(
+        "ErrorIssueRegressed",
+        Condition.exact("serviceName", "qits-edge"),
+        Condition.exact("regressions", "2"));
+    admitted("ErrorIssueRegressed", Condition.exists("dismissedAt"));
+    admitted("ErrorIssueRegressed", Condition.exact("occurrences", "10"));
+    assertTrue(
+        refused("ErrorIssueRegressed", Condition.exact("regression", "2"))
+            .contains("did you mean 'regressions'?"));
+  }
 }

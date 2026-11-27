@@ -24,6 +24,7 @@
     "On 2026-11-16 (qits-2235): qits-projects' NamedAgentStateChanged (bus package).",
     "On 2026-11-25 (qits-2603): qits-agents-service's ProjectAgentChanged (service events package) and",
     "qits-projects' EntityAssigned (bus package).",
+    "On 2026-11-27 (qits-2707): qits-observability's telemetry events (ErrorIssueOpened, ErrorIssueRegressed).",
     "An event named nowhere here is refused (qits-1964): a new event needs its entry before a wait can name it."
   ],
   "events": {
@@ -496,6 +497,27 @@
       "projectId": "scalar",
       "projectSlug": "scalar",
       "reportedState": "scalar"
+    },
+    "ErrorIssueOpened": {
+      "exceptionType": "scalar",
+      "fingerprint": "scalar",
+      "location": "scalar",
+      "message": "scalar",
+      "serviceName": "scalar",
+      "serviceVersion": "scalar",
+      "traceId": "scalar"
+    },
+    "ErrorIssueRegressed": {
+      "dismissedAt": "scalar",
+      "exceptionType": "scalar",
+      "fingerprint": "scalar",
+      "location": "scalar",
+      "message": "scalar",
+      "occurrences": "scalar",
+      "regressions": "scalar",
+      "serviceName": "scalar",
+      "serviceVersion": "scalar",
+      "traceId": "scalar"
     },
     "AgentPlaced": {
       "agentId": "scalar", "repositoryId": "scalar", "workId": "scalar", "workspaceId": "scalar"
