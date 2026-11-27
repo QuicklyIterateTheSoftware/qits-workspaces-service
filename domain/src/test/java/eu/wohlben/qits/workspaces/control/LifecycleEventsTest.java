@@ -296,13 +296,17 @@ public class LifecycleEventsTest {
     assertEquals("its item is IMPLEMENTED, not closed", deferred.get(0).detail());
     assertNull(deferred.get(0).workspaceId(), "never placed: no workspace");
 
-    // Closed now, but it worked a moment ago: a new reason, a second event.
+    // Closed now, placed on a slot it started on, but it worked a moment ago: a new reason, a
+    // second event. (Never placed, it would go at once: where it is comes first, qits-2735.)
+    Long slot = slot(WorkspaceStatus.ACTIVE, WorkspaceRuntimeStatus.RUNNING, false);
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
               AgentWorktree row = agents.findById(id);
               row.entityStatus = "VERIFIED";
               row.lastActivityAt = Instant.now();
+              row.workspaceId = slot;
+              row.startedWorkspaceId = slot;
             });
     service.cleanUp();
 

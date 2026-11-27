@@ -11,6 +11,7 @@ import eu.wohlben.qits.workspaces.control.TargetPlacement.Lease;
 import eu.wohlben.qits.workspaces.control.TargetPlacement.LeaseState;
 import eu.wohlben.qits.workspaces.dto.WorkspaceDto;
 import eu.wohlben.qits.workspaces.entity.AgentRunState;
+import eu.wohlben.qits.workspaces.entity.AgentState;
 import eu.wohlben.qits.workspaces.entity.AgentWorktree;
 import eu.wohlben.qits.workspaces.entity.LegacyPlacement;
 import eu.wohlben.qits.workspaces.entity.Workspace;
@@ -21,6 +22,8 @@ import eu.wohlben.qits.workspaces.error.BadRequestException;
 import eu.wohlben.qits.workspaces.error.ConflictException;
 import eu.wohlben.qits.workspaces.error.DomainException;
 import eu.wohlben.qits.workspaces.error.TargetRefusals;
+import eu.wohlben.qits.workspaces.events.AgentCleanupDeferred;
+import eu.wohlben.qits.workspaces.events.AgentRemoved;
 import eu.wohlben.qits.workspaces.events.AgentYielded;
 import eu.wohlben.qits.workspaces.events.WorkspaceStopped;
 import eu.wohlben.qits.workspaces.persistence.AgentWorktreeRepository;
@@ -867,6 +870,173 @@ public class WorkspaceTargetPlacementTest {
     agentService.pastSlotStartBackoff(created.id);
     pass();
     assertEquals(2, creates(created.id), "past the backoff it is asked again");
+  }
+
+  // --- a closed item's agent releases its slot whatever the slot's state (qits-2735) -------------
+
+  /**
+   * Slot 8504: an agent dispatched, dropped 26 s later and stopped, never started, its instruction
+   * still pending, on a slot whose start FAILED. TURN_PENDING held it for 18 days, and with it the
+   * slot. Nothing of it is on the slot, so it goes at once, and the empty slot after it.
+   */
+  @Test
+  public void aNeverStartedStoppedAgentWithAPendingTurnLeavesItsFailedSlotAndTheSlotGoes()
+      throws Exception {
+    String repoId = repo();
+    Workspace created = failedTargetRow(repoId, "never-started");
+    asSlot(created.id);
+    UUID agent = agents.placeUnstartedOn(repoId, created.id, "qits-9001");
+    obsolete(agent, "DROPPED", AgentRunState.STOPPED, Instant.now());
+    pending(agent, "go");
+
+    agentService.cleanUp();
+
+    AgentWorktree removed = agentRow(agent);
+    assertEquals(AgentState.REMOVED, removed.state);
+    assertNull(removed.pendingText, "the instruction for a closed item goes with it");
+    AgentRemoved event = removedEvent(agent);
+    assertEquals(AgentRemoved.OBSOLETE_NEVER_STARTED, event.reason());
+    assertTrue(event.detail().contains("workspace " + created.id), event.detail());
+    assertEquals(0, creates(created.id), "a slot that holds nothing of it is not brought up");
+
+    agentService.removeEmptyWorkspaces();
+    assertEquals(WorkspaceStatus.ABANDONED, read(created.id).status, "the slot is released");
+  }
+
+  /** Agent 2559805c after the desk's discard: its slot is gone, its pending turn holds nothing. */
+  @Test
+  public void anAgentWhoseSlotIsGoneIsRemovedDespiteAPendingTurnAndRecentActivity()
+      throws Exception {
+    String repoId = repo();
+    Workspace created = failedTargetRow(repoId, "slot-gone");
+    UUID agent = agents.placeOn(repoId, created.id, "qits-9002", AgentRunState.YIELDED);
+    obsolete(agent, "DROPPED", AgentRunState.YIELDED, Instant.now());
+    pending(agent, "go");
+    QuarkusTransaction.requiringNew()
+        .run(() -> agentRows.findById(agent).lastActivityAt = Instant.now());
+    update(created.id, w -> w.status = WorkspaceStatus.ABANDONED);
+
+    agentService.cleanUp();
+
+    assertEquals(AgentState.REMOVED, agentRow(agent).state);
+    assertEquals(AgentRemoved.OBSOLETE_WORKSPACE_GONE, removedEvent(agent).reason());
+  }
+
+  /**
+   * An agent started on a slot that then FAILED may have its worktree in that volume: the slot is
+   * started for the cleanup check under the per-slot backoff, and once the grace has passed with the
+   * slot still FAILED the agent is removed unchecked, naming where its work was, and the slot goes.
+   */
+  @Test
+  public void aStartedAgentsFailedSlotIsRetriedThenReleasedAfterTheGrace() throws Exception {
+    String repoId = repo();
+    Workspace created = failedTargetRow(repoId, "failed-grace");
+    asSlot(created.id);
+    UUID failedLease = created.leaseId;
+    UUID agent = agents.placeOn(repoId, created.id, "qits-9003", AgentRunState.YIELDED);
+    obsolete(agent, "DONE", AgentRunState.YIELDED, Instant.now());
+    String branch = agentRow(agent).wrapperBranch;
+
+    agentService.cleanUp();
+
+    assertEquals(AgentState.OBSOLETE, agentRow(agent).state, "within the grace it waits");
+    List<AgentCleanupDeferred> deferred =
+        announced.of(AgentCleanupDeferred.class, e -> e.agentId().equals(agent.toString()));
+    assertEquals(1, deferred.size(), deferred.toString());
+    assertEquals(AgentCleanupDeferred.SLOT_FAILED, deferred.get(0).reason());
+    assertNamesWhereItsWorkIs(deferred.get(0).detail(), created.id, agent, "qits-9003", branch);
+    // The start runs off the pass and retires the lease the FAILED row still names.
+    awaitCall("end:" + failedLease);
+    placement.move(
+        failedLease, LeaseState.ENDED, placement.lease(failedLease).targetId(), null, null);
+    agentService.awaitSlotStartsIdle();
+    assertEquals(1, creates(created.id), "the FAILED slot was started for the check");
+
+    // It fails again: the backoff holds the next ask, and the agent still waits.
+    failAgain(created.id);
+    agentService.cleanUp();
+    agentService.awaitSlotStartsIdle();
+    assertEquals(1, creates(created.id), "the backoff holds the next ask");
+    assertEquals(AgentState.OBSOLETE, agentRow(agent).state);
+
+    // Past the grace, still FAILED: removed without its check, and the slot is released.
+    QuarkusTransaction.requiringNew()
+        .run(
+            () ->
+                agentRows.findById(agent).obsoleteAt =
+                    Instant.now().minus(Duration.ofHours(25)));
+    agentService.cleanUp();
+
+    assertEquals(AgentState.REMOVED, agentRow(agent).state);
+    AgentRemoved event = removedEvent(agent);
+    assertEquals(AgentRemoved.FAILED_SLOT_UNCHECKED, event.reason());
+    assertFalse(event.harnessStopped());
+    assertNamesWhereItsWorkIs(event.detail(), created.id, agent, "qits-9003", branch);
+    assertTrue(event.detail().contains("no workspace-daemon dialed home"), event.detail());
+
+    agentService.removeEmptyWorkspaces();
+    assertEquals(WorkspaceStatus.ABANDONED, read(created.id).status, "the slot is released");
+  }
+
+  /** A stopped agent cannot hear the cleanup prompt: its leftover work is left for a person. */
+  @Test
+  public void aStoppedAgentWithLeftoverWorkIsNotPromptedButLeftVisibly() throws Exception {
+    String repoId = repo();
+    Workspace created = createTargetRow(repoId, "stopped-leftover", false);
+    UUID agent = agents.placeOn(repoId, created.id, "qits-9004", AgentRunState.STOPPED);
+    obsolete(agent, "DROPPED", AgentRunState.STOPPED, Instant.now());
+    agentDaemon.leftover(
+        agent.toString(), new AgentDaemon.CleanupCheck(false, List.of("wrapper"), List.of()));
+    liveness.markLive(created.id);
+
+    agentService.cleanUp();
+
+    AgentWorktree left = agentRow(agent);
+    assertEquals(AgentState.OBSOLETE, left.state, "leftover work is never deleted");
+    assertNull(left.pendingText, "no prompt it would never hear");
+    assertNull(left.cleanupPromptedAt);
+    List<AgentCleanupDeferred> deferred =
+        announced.of(AgentCleanupDeferred.class, e -> e.agentId().equals(agent.toString()));
+    assertEquals(1, deferred.size(), deferred.toString());
+    assertEquals(AgentCleanupDeferred.LEFTOVER_WORK_STOPPED, deferred.get(0).reason());
+    String detail = deferred.get(0).detail();
+    assertTrue(detail.contains("uncommitted changes in wrapper"), detail);
+    assertTrue(detail.contains("item qits-9004"), detail);
+    assertEquals(WorkspaceStatus.ACTIVE, read(created.id).status, "its slot stays for the person");
+  }
+
+  /** The row is a slot (qits-1152): it names no branch of its own, as the agents' slots do. */
+  private void asSlot(Long rowId) {
+    update(rowId, w -> w.branch = null);
+  }
+
+  /** The agent is OBSOLETE, its item at {@code status}, idle for an hour. */
+  private void obsolete(UUID id, String status, AgentRunState runState, Instant obsoleteAt) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AgentWorktree row = agentRows.findById(id);
+              row.state = AgentState.OBSOLETE;
+              row.obsoleteAt = obsoleteAt;
+              row.entityStatus = status;
+              row.runState = runState;
+              row.lastActivityAt = Instant.now().minus(Duration.ofHours(1));
+            });
+  }
+
+  private AgentRemoved removedEvent(UUID agent) {
+    List<AgentRemoved> removed =
+        announced.of(AgentRemoved.class, e -> e.agentId().equals(agent.toString()));
+    assertEquals(1, removed.size(), removed.toString());
+    return removed.get(0);
+  }
+
+  private static void assertNamesWhereItsWorkIs(
+      String detail, Long slot, UUID agent, String item, String branch) {
+    for (String part :
+        List.of("slot " + slot, "agent " + agent, "item " + item, "branch " + branch)) {
+      assertTrue(detail.contains(part), part + " in: " + detail);
+    }
   }
 
   /** A FAILED slot whose agent has nothing to hear is left as it is. */

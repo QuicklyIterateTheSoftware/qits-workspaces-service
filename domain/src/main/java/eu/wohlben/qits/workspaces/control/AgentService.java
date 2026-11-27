@@ -140,7 +140,13 @@ import org.jboss.logging.Logger;
  *   <li><b>Clean up</b> (D4, D5, D7): an OBSOLETE agent whose work item is closed (VERIFIED,
  *       DONE or DROPPED) and that has been idle for {@code qits.workspace.agent.cleanup-idle} is
  *       removed if its worktrees are clean and pushed; otherwise it is handed the cleanup prompt
- *       instead.
+ *       instead. Whatever its slot's state (qits-2735): one never placed, whose slot is gone, or
+ *       that never started on its slot is removed first, before any pending turn or activity is
+ *       weighed; a STOPPED agent's pending turn holds nothing, and one with leftover work is left
+ *       for a person rather than prompted; a FAILED slot that may hold its worktree is started
+ *       under the per-slot backoff, and past {@code
+ *       qits.workspace.agent.failed-slot-cleanup-after} the agent is removed unchecked so the slot
+ *       is released.
  *   <li><b>Remove empty workspaces</b> (D2).
  * </ol>
  */
@@ -372,6 +378,14 @@ public class AgentService {
   @ConfigProperty(name = "qits.workspace.agent.cleanup-idle", defaultValue = "PT30S")
   Duration cleanupIdle;
 
+  /**
+   * How long an OBSOLETE agent started on a FAILED slot waits for the slot to come back for its
+   * cleanup check (qits-2735), counted from when it went OBSOLETE; after that it is removed
+   * unchecked and the slot released. The row stores no time of failure, only its error.
+   */
+  @ConfigProperty(name = "qits.workspace.agent.failed-slot-cleanup-after", defaultValue = "PT24H")
+  Duration failedSlotCleanupAfter;
+
   /** How long a delivered turn waits for a busy agent's turn to end before it is said anyway. */
   @ConfigProperty(name = "qits.workspace.agent-dispatch.launch-window-ms", defaultValue = "900000")
   long turnWindowMs;
@@ -418,6 +432,12 @@ public class AgentService {
    * not every pass (qits-1233). An agent leaves it when it is REMOVED.
    */
   private final Map<UUID, String> lastSkip = new ConcurrentHashMap<>();
+
+  /**
+   * The last failure logged per empty slot {@link #removeEmptyWorkspaces} could not discard, so it
+   * is logged at WARN once per slot and message (qits-2735). A slot leaves it once removed.
+   */
+  private final Map<Long, String> lastSlotRemovalFailure = new ConcurrentHashMap<>();
 
   /** The first wait before an agent whose workspace failed again is placed again (qits-1233). */
   static final Duration REQUEUE_BACKOFF = Duration.ofMinutes(1);
@@ -3178,19 +3198,9 @@ public class AgentService {
           false);
       return;
     }
-    if (agent.lastActivityAt != null && agent.lastActivityAt.isAfter(idleBefore)) {
-      skip(agent, AgentCleanupDeferred.RECENTLY_ACTIVE, "it was active within " + cleanupIdle, false);
-      return;
-    }
-    if (agent.pendingText != null) {
-      skip(agent, AgentCleanupDeferred.TURN_PENDING, "a turn is still to be said to it", false);
-      return;
-    }
-    if (activity.isResolvable()
-        && activity.get().activityOf(agent.id.toString()).orElse(null) == AgentActivityState.BUSY) {
-      skip(agent, AgentCleanupDeferred.HARNESS_BUSY, "its harness is busy with a turn", false);
-      return;
-    }
+    // Where the agent is comes first (qits-2735): a closed item's agent with no slot, or whose slot
+    // is gone, has no harness and no worktree left to protect, so neither a pending turn nor its
+    // last activity holds it.
     if (agent.workspaceId == null) {
       markRemoved(
           agent.id, AgentRemoved.OBSOLETE_NEVER_PLACED, false, "obsolete, and never placed");
@@ -3207,7 +3217,31 @@ public class AgentService {
           "obsolete, and its workspace is gone");
       return;
     }
+    if (!AgentWorktreeGuard.mayHoldWorktree(agent, workspace.id)) {
+      // Never started on its slot (qits-2735): no worktree of it is there, whatever the slot's
+      // state, and the instruction it was dispatched with is for a closed item.
+      removeNeverStarted(agent, workspace);
+      return;
+    }
+    if (agent.lastActivityAt != null && agent.lastActivityAt.isAfter(idleBefore)) {
+      skip(agent, AgentCleanupDeferred.RECENTLY_ACTIVE, "it was active within " + cleanupIdle, false);
+      return;
+    }
+    if (agent.pendingText != null && agent.runState != AgentRunState.STOPPED) {
+      // A STOPPED agent never hears its pending turn (qits-2735): it is no reason to wait.
+      skip(agent, AgentCleanupDeferred.TURN_PENDING, "a turn is still to be said to it", false);
+      return;
+    }
+    if (activity.isResolvable()
+        && activity.get().activityOf(agent.id.toString()).orElse(null) == AgentActivityState.BUSY) {
+      skip(agent, AgentCleanupDeferred.HARNESS_BUSY, "its harness is busy with a turn", false);
+      return;
+    }
     if (!daemonLive(workspace.id)) {
+      if (workspace.runtimeStatus == WorkspaceRuntimeStatus.FAILED) {
+        cleanUpOnFailedSlot(agent, workspace);
+        return;
+      }
       if (workspace.runtimeStatus == WorkspaceRuntimeStatus.STOPPED) {
         // The check needs the daemon: start the workspace to clean it up.
         startQuietly(workspace.id);
@@ -3288,6 +3322,20 @@ public class AgentService {
         return;
       }
     }
+    if (agent.runState == AgentRunState.STOPPED) {
+      // Stopped by a person (qits-2735): the prompt would wait on its row unheard for good. Left,
+      // visibly, for whoever stopped it to restart or discard.
+      skip(
+          agent,
+          AgentCleanupDeferred.LEFTOVER_WORK_STOPPED,
+          "it holds leftover work and is stopped, so it cannot be prompted: "
+              + describe(check)
+              + " ("
+              + whereItsWorkIs(agent, workspace.id)
+              + ")",
+          false);
+      return;
+    }
     // Leftover work: handed back to the agent, never deleted (D5). Prompted again only once the
     // agent has worked since the last prompt, so an agent that cannot fix it is not nagged.
     boolean promptAgain =
@@ -3348,6 +3396,87 @@ public class AgentService {
             Instant.now()));
   }
 
+  /**
+   * A closed item's OBSOLETE agent that never started on its slot (qits-2735): no worktree of it
+   * is there, so it is removed whatever the slot's state — FAILED, STOPPED or RUNNING — and its
+   * pending text goes with it. A live daemon is asked to forget it too, best-effort, in case a
+   * start it answered never reached the row; nothing else is asked of a slot that may be down.
+   */
+  private void removeNeverStarted(AgentWorktree agent, Workspace workspace) {
+    boolean stopped = false;
+    if (daemonLive(workspace.id) && daemon.isResolvable()) {
+      try {
+        stopped =
+            daemon.get().remove(workspace.id, agent.id.toString(), false) == AgentDaemon.Outcome.OK;
+      } catch (RuntimeException e) {
+        LOG.debugf(
+            e, "Could not ask workspace %s's daemon to forget agent %s", workspace.id, agent.id);
+      }
+    }
+    markRemoved(
+        agent.id,
+        AgentRemoved.OBSOLETE_NEVER_STARTED,
+        stopped,
+        "obsolete, and never started on workspace "
+            + workspace.id
+            + " ("
+            + workspace.runtimeStatus
+            + ")");
+  }
+
+  /**
+   * A closed item's OBSOLETE agent, started on a slot that is FAILED with no daemon (qits-2735):
+   * its worktree may be in that slot's volume, so the slot is started under {@link #slotStarts}'
+   * backoff for the cleanup check to run, and the agent is deferred as {@link
+   * AgentCleanupDeferred#SLOT_FAILED}. Once {@link #failedSlotCleanupAfter} has passed since it
+   * went OBSOLETE and the slot is still FAILED, it is removed without the check ({@link
+   * AgentRemoved#FAILED_SLOT_UNCHECKED}), so the slot is released: a WARN and the event name the
+   * slot, the agent, its item and its branch, for anything never pushed to be recovered by hand.
+   */
+  private void cleanUpOnFailedSlot(AgentWorktree agent, Workspace workspace) {
+    Instant since = agent.obsoleteAt != null ? agent.obsoleteAt : agent.createdAt;
+    Instant giveUpAt = (since == null ? Instant.now() : since).plus(failedSlotCleanupAfter);
+    String where = whereItsWorkIs(agent, workspace.id);
+    if (!Instant.now().isBefore(giveUpAt)) {
+      String detail =
+          "obsolete, and workspace "
+              + workspace.id
+              + " stayed FAILED ("
+              + workspace.runtimeError
+              + ") for "
+              + failedSlotCleanupAfter
+              + ": removed without its cleanup check, so anything it never pushed is lost with the"
+              + " slot's volume ("
+              + where
+              + ")";
+      LOG.warnf("Agent %s removed unchecked: %s", agent.id, detail);
+      markRemoved(agent.id, AgentRemoved.FAILED_SLOT_UNCHECKED, false, detail);
+      return;
+    }
+    startFailedSlotForCleanup(workspace.id);
+    skip(
+        agent,
+        AgentCleanupDeferred.SLOT_FAILED,
+        "workspace "
+            + workspace.id
+            + " is FAILED ("
+            + workspace.runtimeError
+            + "): it is started for the cleanup check, and the agent is removed unchecked at "
+            + giveUpAt
+            + " if it is still FAILED ("
+            + where
+            + ")",
+        true);
+  }
+
+  /** Where an OBSOLETE agent's unpushed work would be, for a person to recover it by hand. */
+  private static String whereItsWorkIs(AgentWorktree agent, Long slot) {
+    String item =
+        agent.entityId != null && !agent.entityId.isBlank() ? agent.entityId : agent.workId;
+    return "slot " + slot + ", agent " + agent.id + ", item " + item + ", branch "
+        + agent.wrapperBranch;
+  }
+
   /** Step 6: a slot workspace with no live agent goes (D2), container, volume and credential. */
   void removeEmptyWorkspaces() {
     synchronized (passLock) {
@@ -3378,12 +3507,20 @@ public class AgentService {
         try {
           // A @Transactional method: it has committed once it returns.
           workspaces.discardWorkspace(id, "Removed: its last agent was removed (qits-1152, D2).", true);
+          lastSlotRemovalFailure.remove(id);
           LOG.infof("Workspace %s removed: no agent left in it", id);
           announce(
               new WorkspaceRemoved(
                   idOf(id), slot.repositoryId, WorkspaceRemoved.NO_AGENT_LEFT, Instant.now()));
         } catch (RuntimeException e) {
-          LOG.warnf(e, "Could not remove empty workspace %s", id);
+          // Once per slot and message (qits-2735): a discard that keeps failing stays visible
+          // without a stack trace every pass.
+          String why = String.valueOf(e.getMessage());
+          if (!Objects.equals(lastSlotRemovalFailure.put(id, why), why)) {
+            LOG.warnf(e, "Could not remove empty workspace %s", id);
+          } else {
+            LOG.debugf("Still could not remove empty workspace %s: %s", id, why);
+          }
         }
       }
     }
@@ -3453,7 +3590,11 @@ public class AgentService {
     // ENDING_DEADLINE for it, which must not hold passLock. The backoff above is already counted.
     // A request context of its own, as a door's start has: a DIRECT row is resolved through the
     // request-scoped session.
-    Long slot = workspace.id;
+    submitSlotStart(workspace.id);
+  }
+
+  /** {@link #startQuietly} off the pass, in a request context of its own (qits-2265). */
+  private void submitSlotStart(Long slot) {
     slotStarter.submit(
         () -> {
           ManagedContext request = Arc.container().requestContext();
@@ -3464,6 +3605,24 @@ public class AgentService {
             request.terminate();
           }
         });
+  }
+
+  /**
+   * The cleanup sweep's start of a FAILED slot that may hold an OBSOLETE agent's worktree
+   * (qits-2735), so its cleanup check can run: off the pass, as {@link #startSlotForTurn}'s, and
+   * under the same per-slot backoff ({@link #slotStarts}), so a slot that keeps failing is asked
+   * with a growing wait and never every pass. True when a start was asked this time.
+   */
+  private boolean startFailedSlotForCleanup(Long slot) {
+    Instant now = Instant.now();
+    Requeued asked = slotStarts.get(slot);
+    if (asked != null && asked.notBefore().isAfter(now)) {
+      return false;
+    }
+    slotStarts.put(
+        slot, asked == null ? new Requeued(1, now.plus(REQUEUE_BACKOFF)) : again(asked, now));
+    submitSlotStart(slot);
+    return true;
   }
 
   /**

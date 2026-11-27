@@ -15,7 +15,8 @@ import java.util.UUID;
  * <ul>
  *   <li>{@link #ITEM_NOT_CLOSED} — the work item is not VERIFIED, DONE or DROPPED.
  *   <li>{@link #RECENTLY_ACTIVE} — the agent worked within the idle window.
- *   <li>{@link #TURN_PENDING} — a turn is still to be said to it.
+ *   <li>{@link #TURN_PENDING} — a turn is still to be said to it. Never for a STOPPED agent, which
+ *       would not hear it (qits-2735).
  *   <li>{@link #HARNESS_BUSY} — its harness is busy with a turn.
  *   <li>{@link #DAEMON_NOT_CONNECTED} — its workspace's daemon is not connected; a STOPPED workspace
  *       is started so the check can run.
@@ -28,6 +29,12 @@ import java.util.UUID;
  *       not worked since.
  *   <li>{@link #IN_RELEASE} — its work is on the git host, in a release that has not reached the
  *       default branch yet (qits-1688). Nothing is asked of the agent.
+ *   <li>{@link #SLOT_FAILED} — its workspace is FAILED with no daemon, and may hold its worktree:
+ *       the workspace is started for the check, and the agent is removed unchecked if it is still
+ *       FAILED once {@code qits.workspace.agent.failed-slot-cleanup-after} has passed (qits-2735).
+ *       {@code detail} names the slot, the agent, its item and its branch.
+ *   <li>{@link #LEFTOVER_WORK_STOPPED} — it holds leftover work and a person stopped it, so the
+ *       cleanup prompt would never be heard; left for that person (qits-2735).
  * </ul>
  *
  * <p>{@code detail} is the sentence the service logs. Everything else is {@link AgentPlaced}'s.
@@ -75,6 +82,12 @@ public record AgentCleanupDeferred(
 
   /** Work in a release that has not reached the default branch yet (qits-1688). */
   public static final String IN_RELEASE = "IN_RELEASE";
+
+  /** Its workspace is FAILED and may hold its worktree (qits-2735). */
+  public static final String SLOT_FAILED = "SLOT_FAILED";
+
+  /** Leftover work on a STOPPED agent, which cannot be prompted (qits-2735). */
+  public static final String LEFTOVER_WORK_STOPPED = "LEFTOVER_WORK_STOPPED";
 
   public AgentCleanupDeferred {
     if (eventId == null) {
