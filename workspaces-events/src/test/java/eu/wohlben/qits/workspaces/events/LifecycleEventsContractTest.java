@@ -355,6 +355,8 @@ class LifecycleEventsContractTest {
         List.of(
             "OBSOLETE_NEVER_PLACED",
             "OBSOLETE_WORKSPACE_GONE",
+            "OBSOLETE_NEVER_STARTED",
+            "FAILED_SLOT_UNCHECKED",
             "UNKNOWN_TO_DAEMON",
             "RELEASED_IDLE_CLEAN",
             "DROPPED_IDLE_CLEAN",
@@ -362,6 +364,8 @@ class LifecycleEventsContractTest {
         List.of(
             AgentRemoved.OBSOLETE_NEVER_PLACED,
             AgentRemoved.OBSOLETE_WORKSPACE_GONE,
+            AgentRemoved.OBSOLETE_NEVER_STARTED,
+            AgentRemoved.FAILED_SLOT_UNCHECKED,
             AgentRemoved.UNKNOWN_TO_DAEMON,
             AgentRemoved.RELEASED_IDLE_CLEAN,
             AgentRemoved.DROPPED_IDLE_CLEAN,

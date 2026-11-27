@@ -8,11 +8,17 @@ import java.util.UUID;
  * An agent is REMOVED: the row stays as history, its credential and prompt draft are gone. The last
  * event about an agent, announced once — only by the write that flipped the row.
  *
- * <p><b>{@code reason} is one of six words</b>, a plain {@code String} on the wire:
+ * <p><b>{@code reason} is one of eight words</b>, a plain {@code String} on the wire:
  *
  * <ul>
  *   <li>{@link #OBSOLETE_NEVER_PLACED} — obsolete and closed, and it never had a workspace.
  *   <li>{@link #OBSOLETE_WORKSPACE_GONE} — obsolete and closed, and its workspace is gone.
+ *   <li>{@link #OBSOLETE_NEVER_STARTED} — obsolete and closed, and never started on its workspace,
+ *       so no worktree of it was there, whatever the workspace's state (qits-2735).
+ *   <li>{@link #FAILED_SLOT_UNCHECKED} — obsolete and closed, started on a workspace that stayed
+ *       FAILED past {@code qits.workspace.agent.failed-slot-cleanup-after}: removed without its
+ *       cleanup check, so its slot is released. {@code detail} names the slot, the agent, its item
+ *       and its branch, for anything it never pushed to be recovered by hand (qits-2735).
  *   <li>{@link #UNKNOWN_TO_DAEMON} — its daemon no longer knows it: a removal whose answer never
  *       arrived, or a daemon that lost it.
  *   <li>{@link #RELEASED_IDLE_CLEAN} — released, closed, idle, and its worktrees clean and pushed.
@@ -48,6 +54,12 @@ public record AgentRemoved(
 
   /** Obsolete, closed, and its workspace is gone. */
   public static final String OBSOLETE_WORKSPACE_GONE = "OBSOLETE_WORKSPACE_GONE";
+
+  /** Obsolete, closed, and never started on its workspace (qits-2735). */
+  public static final String OBSOLETE_NEVER_STARTED = "OBSOLETE_NEVER_STARTED";
+
+  /** Obsolete, closed, its workspace FAILED past the grace: removed unchecked (qits-2735). */
+  public static final String FAILED_SLOT_UNCHECKED = "FAILED_SLOT_UNCHECKED";
 
   /** Its daemon no longer knows it. */
   public static final String UNKNOWN_TO_DAEMON = "UNKNOWN_TO_DAEMON";
