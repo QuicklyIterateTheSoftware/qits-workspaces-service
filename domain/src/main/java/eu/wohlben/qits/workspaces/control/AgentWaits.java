@@ -345,7 +345,7 @@ public class AgentWaits {
                   return row;
                 });
     addName(eventOf(selection));
-    LOG.infof("Agent %s waits on %s (%s)", agentId, finalLabel, id);
+    LOG.infof("%s waits on %s (%s)", WaitHolder.agent(agentId), finalLabel, id);
     announce(
         new AgentWaitOpened(
             agent.id.toString(),
@@ -472,7 +472,7 @@ public class AgentWaits {
                 });
     if (closed) {
       refreshNames();
-      LOG.infof("Agent %s's wait %s was cancelled", agentId, waitId);
+      LOG.infof("%s cancelled its wait %s", WaitHolder.agent(agentId), waitId);
       announceAll(List.of(closedEvent(agentId, waitId, AgentWaitClosed.CANCELLED, null)));
       AgentWorktree agent = QuarkusTransaction.requiringNew().call(() -> agents.findById(agentId));
       if (agent != null) {
@@ -536,7 +536,7 @@ public class AgentWaits {
               waits.persist(wait);
             });
     addName(eventOf(selection));
-    LOG.infof("The desk of project %s waits on %s (%s)", projectId, finalLabel, id);
+    LOG.infof("%s waits on %s (%s)", WaitHolder.desk(projectId), finalLabel, id);
     if (looksUp(subject.kind())) {
       resolveSubject(id);
     }
@@ -587,7 +587,7 @@ public class AgentWaits {
                 });
     if (closed) {
       refreshNames();
-      LOG.infof("The desk of project %s cancelled its wait %s", projectId, waitId);
+      LOG.infof("%s cancelled its wait %s", WaitHolder.desk(projectId), waitId);
     }
     return getForDesk(projectId, waitId);
   }
@@ -697,7 +697,8 @@ public class AgentWaits {
               waits.persist(wait);
             });
     addName(eventOf(selection));
-    LOG.infof("Project agent %s waits on %s for %s (%s)", subject, finalLabel, workQualifiedId, id);
+    LOG.infof(
+        "%s waits on %s (%s)", WaitHolder.projectAgent(subject, workQualifiedId), finalLabel, id);
     if (looksUp(parsed.kind())) {
       resolveSubject(id);
     }
@@ -757,7 +758,10 @@ public class AgentWaits {
                 });
     if (closed != null) {
       refreshNames();
-      LOG.infof("Project agent %s cancelled its wait %s on %s", subject, waitId, closed.workQualifiedId());
+      LOG.infof(
+          "%s cancelled its wait %s",
+          WaitHolder.projectAgent(subject, closed.workQualifiedId()),
+          waitId);
       announceProjectAgent(closed);
       relayItem(UUID.fromString(closed.workId()), CAUSE_CANCELLED);
     }
@@ -1015,18 +1019,8 @@ public class AgentWaits {
                   continue;
                 }
                 closeMatched(wait, eventId, matchedTurn(wait.label, selection, eventId, occurredAt, tree), closing);
-                if (wait.isDeskWait()) {
-                  LOG.infof(
-                      "The desk of project %s: its wait %s matched %s %s",
-                      wait.deskProjectId, wait.label, name, eventId);
-                } else if (wait.isProjectAgentWait()) {
-                  LOG.infof(
-                      "Project agent %s: its wait %s on %s matched %s %s",
-                      wait.projectAgentSubject, wait.label, wait.workQualifiedId, name, eventId);
-                } else {
-                  LOG.infof(
-                      "Agent %s's wait %s matched %s %s", wait.agentId, wait.label, name, eventId);
-                }
+                LOG.infof(
+                    "%s: its wait %s matched %s %s", WaitHolder.of(wait), wait.label, name, eventId);
               }
             });
     return afterMatched(closing);
@@ -1084,14 +1078,12 @@ public class AgentWaits {
     wait.brokenReason = reason;
     if (wait.isDeskWait()) {
       closing.deskClosed.add(closeDesk(wait, AgentWaitState.BROKEN, null, turn));
-      LOG.infof("The desk of project %s: its wait %s is broken: %s", wait.deskProjectId, wait.label, reason);
+      logBroken(wait, reason);
       return;
     }
     if (wait.isProjectAgentWait()) {
       closing.projectAgentClosed.add(closeProjectAgent(wait, AgentWaitState.BROKEN, null));
-      LOG.infof(
-          "Project agent %s: its wait %s on %s is broken: %s",
-          wait.projectAgentSubject, wait.label, wait.workQualifiedId, reason);
+      logBroken(wait, reason);
       return;
     }
     close(wait, AgentWaitState.BROKEN, null);
@@ -1102,7 +1094,11 @@ public class AgentWaits {
     if (agent != null) {
       closing.woken.add(new Woken(agent.id, agent.workId, agent.sessionId, CAUSE_BROKEN));
     }
-    LOG.infof("Agent %s's wait %s is broken: %s", wait.agentId, wait.label, reason);
+    logBroken(wait, reason);
+  }
+
+  private static void logBroken(AgentWait wait, String reason) {
+    LOG.infof("%s: its wait %s is broken: %s", WaitHolder.of(wait), wait.label, reason);
   }
 
   /**
@@ -1151,6 +1147,10 @@ public class AgentWaits {
     };
   }
 
+  private static void logTimedOut(AgentWait wait) {
+    LOG.infof("%s: its wait %s timed out", WaitHolder.of(wait), wait.label);
+  }
+
   /**
    * One sweep: time out OPEN waits past their expiry (each wakes its agent, or announces a desk's
    * close), cancel the OPEN waits of agents that are no longer ACTIVE (no wake; a desk wait is never
@@ -1173,22 +1173,21 @@ public class AgentWaits {
                     announced.add(
                         closedEvent(wait.agentId, wait.id, AgentWaitClosed.CANCELLED, null));
                     closedFor.add(placedOf(wait.agentId));
-                    LOG.infof("Agent %s is no longer active: its wait %s is cancelled", wait.agentId, wait.label);
+                    LOG.infof(
+                        "%s is no longer active: its wait %s is cancelled",
+                        WaitHolder.of(wait), wait.label);
                   }
                   for (AgentWait wait : waits.findExpiredForUpdate(now)) {
                     if (wait.isDeskWait()) {
                       deskClosed.add(
                           closeDesk(wait, AgentWaitState.TIMED_OUT, null, timedOutTurn(wait)));
-                      LOG.infof(
-                          "The desk of project %s: its wait %s timed out", wait.deskProjectId, wait.label);
+                      logTimedOut(wait);
                       continue;
                     }
                     if (wait.isProjectAgentWait()) {
                       projectAgentClosed.add(
                           closeProjectAgent(wait, AgentWaitState.TIMED_OUT, null));
-                      LOG.infof(
-                          "Project agent %s: its wait %s on %s timed out",
-                          wait.projectAgentSubject, wait.label, wait.workQualifiedId);
+                      logTimedOut(wait);
                       continue;
                     }
                     close(wait, AgentWaitState.TIMED_OUT, null);
@@ -1199,7 +1198,7 @@ public class AgentWaits {
                     if (agent != null) {
                       out.add(new Woken(agent.id, agent.workId, agent.sessionId, CAUSE_TIMED_OUT));
                     }
-                    LOG.infof("Agent %s's wait %s timed out", wait.agentId, wait.label);
+                    logTimedOut(wait);
                   }
                   return out;
                 });
@@ -1752,7 +1751,7 @@ public class AgentWaits {
    * ignores another's events. An unreadable (null) selection reads a branch's {@code step}, as
    * before.
    */
-  private static Pending recordSubjectState(
+  static Pending recordSubjectState(
       AgentWait wait, EventSelection selection, String name, Instant occurredAt, JsonNode payload) {
     WaitSubjects.Kind kind = WaitSubjects.kindOf(wait.subjectKind);
     if (!looksUp(kind)) {
@@ -1775,7 +1774,9 @@ public class AgentWaits {
     }
     wait.subjectState = state.get();
     wait.subjectStateAt = at;
-    LOG.infof("Agent %s's wait %s: its subject %s is %s", wait.agentId, wait.label, wait.subjectRef, wait.subjectState);
+    LOG.infof(
+        "%s: its wait %s: its subject %s is %s",
+        WaitHolder.of(wait), wait.label, wait.subjectRef, wait.subjectState);
     return changedEvent(wait, kind);
   }
 
@@ -2016,7 +2017,9 @@ public class AgentWaits {
     }
     wait.subjectState = resolved.state();
     wait.subjectStateAt = at;
-    LOG.infof("Agent %s's wait %s: its subject %s is %s (looked up)", wait.agentId, wait.label, wait.subjectRef, wait.subjectState);
+    LOG.infof(
+        "%s: its wait %s: its subject %s is %s (looked up)",
+        WaitHolder.of(wait), wait.label, wait.subjectRef, wait.subjectState);
     return changedEvent(wait, kind);
   }
 
